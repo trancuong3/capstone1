@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+:root {
+  --ra-color-primary: #147d87;
+  --ra-color-primary-hover: #0e6d76;
+  --ra-color-ink: #213c42;
+  --ra-color-muted: #526970;
+  --ra-color-canvas: #f6faf8;
+  --ra-color-cream: #fff8eb;
+  --ra-color-sky: #ddf3f5;
+  --ra-color-white: #ffffff;
+  --ra-color-border: #d5e3de;
+  --ra-color-green: #e5f2dc;
+  --ra-color-orange: #fbe5cb;
+  --ra-color-green-ink: #3b6a46;
+  --ra-color-purple: #eae3f7;
+  --ra-color-purple-ink: #665185;
+  --ra-color-danger: #8f3039;
+  --ra-color-danger-surface: #fdebec;
+  --ra-color-warning: #765b12;
+  --ra-color-warning-surface: #fff3c4;
+  --ra-color-desk: #dce8e4;
+  --ra-color-highlight: #ffd968;
+  --ra-gap-4: 4px;
+  --ra-gap-8: 8px;
+  --ra-gap-12: 12px;
+  --ra-gap-16: 16px;
+  --ra-gap-24: 24px;
+  --ra-gap-32: 32px;
+  --ra-radius-16: 16px;
+  --ra-radius-24: 24px;
+  --ra-font-size-heading: 32px;
+  --ra-font-size-body: 20px;
+  --ra-font-size-label: 16px;
+  --ra-line-height-copy: 1.4;
+}
+
+@theme inline {
+  --spacing: var(--ra-gap-4);
+  --breakpoint-sm: 48rem;
+  --font-sans: "Nunito Variable", "Nunito", ui-rounded, system-ui, sans-serif;
+  --text-heading: var(--ra-font-size-heading);
+  --text-heading--line-height: var(--ra-line-height-copy);
+  --text-body: var(--ra-font-size-body);
+  --text-body--line-height: var(--ra-line-height-copy);
+  --text-button: var(--ra-font-size-body);
+  --text-button--line-height: var(--ra-line-height-copy);
+  --text-label: var(--ra-font-size-label);
+  --text-label--line-height: var(--ra-line-height-copy);
+  --color-primary: var(--ra-color-primary);
+  --color-primary-hover: var(--ra-color-primary-hover);
+  --color-ink: var(--ra-color-ink);
+  --color-muted: var(--ra-color-muted);
+  --color-canvas: var(--ra-color-canvas);
+  --color-cream: var(--ra-color-cream);
+  --color-sky: var(--ra-color-sky);
+  --color-border: var(--ra-color-border);
+  --color-success-surface: var(--ra-color-green);
+  --color-book-orange: var(--ra-color-orange);
+  --color-success-ink: var(--ra-color-green-ink);
+  --color-purple: var(--ra-color-purple);
+  --color-purple-ink: var(--ra-color-purple-ink);
+  --color-danger: var(--ra-color-danger);
+  --color-danger-surface: var(--ra-color-danger-surface);
+  --color-warning: var(--ra-color-warning);
+  --color-warning-surface: var(--ra-color-warning-surface);
+  --color-desk: var(--ra-color-desk);
+  --color-highlight: var(--ra-color-highlight);
+  --radius-control: var(--ra-radius-16);
+  --radius-card: var(--ra-radius-24);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--ra-color-canvas);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--ra-color-canvas);
+  color: var(--ra-color-ink);
+  font-family: "Nunito Variable", "Nunito", ui-rounded, system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--ra-color-primary);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--ra-color-sky);
+  color: var(--ra-color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
