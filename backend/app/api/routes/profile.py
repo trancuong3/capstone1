@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from typing import List
-from pydantic import UUID4
+from uuid import UUID
 
 from app.api.deps import get_db
 from app.models import Profile, ChildProfile
@@ -29,8 +29,9 @@ async def create_profile(profile_in: ProfileCreate, db: AsyncSession = Depends(g
     new_profile = Profile(**profile_in.model_dump())
     db.add(new_profile)
     await db.commit()
-    await db.refresh(new_profile)
-    return new_profile
+    query = select(Profile).where(Profile.Id == new_profile.Id).options(selectinload(Profile.children))
+    result = await db.execute(query)
+    return result.scalar_one()
 
 # ==========================================
 # CÁC API CHO CÁC BÉ

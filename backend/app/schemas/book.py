@@ -1,7 +1,7 @@
-# file: backend/app/schemas/book.py
-from pydantic import BaseModel, UUID4, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from uuid import UUID
 
 # --- BOOK ---
 class BookBase(BaseModel):
@@ -12,14 +12,13 @@ class BookBase(BaseModel):
     LifecycleStatus: str = Field(..., example="ACTIVE")
 
 class BookCreate(BookBase):
-    CreatedBy: Optional[UUID4] = None
+    CreatedBy: Optional[UUID] = None
 
 class BookResponse(BookBase):
-    Id: UUID4
-    CreatedBy: Optional[UUID4]
+    Id: UUID
+    CreatedBy: Optional[UUID]
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- BOOK PAGE ---
 class BookPageBase(BaseModel):
@@ -32,16 +31,15 @@ class BookPageBase(BaseModel):
     LifecycleStatus: str = Field(..., example="ACTIVE")
 
 class BookPageCreate(BookPageBase):
-    BookId: UUID4
-    CurrentVerifiedRevisionId: Optional[UUID4] = None
+    BookId: UUID
+    CurrentVerifiedRevisionId: Optional[UUID] = None
 
 class BookPageResponse(BookPageBase):
-    Id: UUID4
-    BookId: UUID4
-    CurrentVerifiedRevisionId: Optional[UUID4]
+    Id: UUID
+    BookId: UUID
+    CurrentVerifiedRevisionId: Optional[UUID]
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- PAGE REVISION ---
 class PageRevisionBase(BaseModel):
@@ -52,18 +50,17 @@ class PageRevisionBase(BaseModel):
     ProcessingMeta: Dict[str, Any] = Field(default_factory=dict)
 
 class PageRevisionCreate(PageRevisionBase):
-    PageId: UUID4
-    VerifiedBy: Optional[UUID4] = None
+    PageId: UUID
+    VerifiedBy: Optional[UUID] = None
     VerifiedAt: Optional[datetime] = None
 
 class PageRevisionResponse(PageRevisionBase):
-    Id: UUID4
-    PageId: UUID4
-    VerifiedBy: Optional[UUID4]
+    Id: UUID
+    PageId: UUID
+    VerifiedBy: Optional[UUID]
     VerifiedAt: Optional[datetime]
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- PAGE REVISION WORD ---
 class PageRevisionWordBase(BaseModel):
@@ -75,10 +72,9 @@ class PageRevisionWordBase(BaseModel):
     OCRConfidence: Optional[float] = Field(None, ge=0, le=1)
 
 class PageRevisionWordCreate(PageRevisionWordBase):
-    PageRevisionId: UUID4
+    PageRevisionId: UUID
 
 class PageRevisionWordResponse(PageRevisionWordBase):
-    Id: UUID4
-    PageRevisionId: UUID4
-    class Config:
-        from_attributes = True
+    Id: UUID
+    PageRevisionId: UUID
+    model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,7 @@
-# file: backend/app/schemas/comprehension.py
-from pydantic import BaseModel, UUID4, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from uuid import UUID
 
 # --- COMPREHENSION QUESTION ---
 class ComprehensionQuestionBase(BaseModel):
@@ -13,18 +13,17 @@ class ComprehensionQuestionBase(BaseModel):
     Difficulty: str
 
 class ComprehensionQuestionCreate(ComprehensionQuestionBase):
-    SessionId: UUID4
-    PageId: UUID4
-    PageRevisionId: UUID4
+    SessionId: UUID
+    PageId: UUID
+    PageRevisionId: UUID
 
 class ComprehensionQuestionResponse(ComprehensionQuestionBase):
-    Id: UUID4
-    SessionId: UUID4
-    PageId: UUID4
-    PageRevisionId: UUID4
+    Id: UUID
+    SessionId: UUID
+    PageId: UUID
+    PageRevisionId: UUID
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- COMPREHENSION ANSWER ---
 class ComprehensionAnswerBase(BaseModel):
@@ -33,11 +32,10 @@ class ComprehensionAnswerBase(BaseModel):
     Score: Optional[float] = None
 
 class ComprehensionAnswerCreate(ComprehensionAnswerBase):
-    QuestionId: UUID4
+    QuestionId: UUID
 
 class ComprehensionAnswerResponse(ComprehensionAnswerBase):
-    Id: UUID4
-    QuestionId: UUID4
+    Id: UUID
+    QuestionId: UUID
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

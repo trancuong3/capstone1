@@ -1,7 +1,7 @@
-# file: backend/app/schemas/reading.py
-from pydantic import BaseModel, UUID4, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
+from uuid import UUID
 
 # --- READING SESSION ---
 class ReadingSessionBase(BaseModel):
@@ -10,22 +10,21 @@ class ReadingSessionBase(BaseModel):
     ClientMeta: Dict[str, Any] = Field(default_factory=dict)
 
 class ReadingSessionCreate(ReadingSessionBase):
-    ChildId: UUID4
-    BookId: UUID4
-    SelectedPageId: Optional[UUID4] = None
-    SelectedPageRevisionId: Optional[UUID4] = None
+    ChildId: UUID
+    BookId: UUID
+    SelectedPageId: Optional[UUID] = None
+    SelectedPageRevisionId: Optional[UUID] = None
     EndedAt: Optional[datetime] = None
 
 class ReadingSessionResponse(ReadingSessionBase):
-    Id: UUID4
-    ChildId: UUID4
-    BookId: UUID4
-    SelectedPageId: Optional[UUID4]
-    SelectedPageRevisionId: Optional[UUID4]
+    Id: UUID
+    ChildId: UUID
+    BookId: UUID
+    SelectedPageId: Optional[UUID]
+    SelectedPageRevisionId: Optional[UUID]
     StartedAt: datetime
     EndedAt: Optional[datetime]
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- READING EVENT ---
 class ReadingEventBase(BaseModel):
@@ -37,20 +36,19 @@ class ReadingEventBase(BaseModel):
     Metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class ReadingEventCreate(ReadingEventBase):
-    SessionId: UUID4
-    PageId: UUID4
-    PageRevisionId: UUID4
-    WordId: Optional[UUID4] = None
+    SessionId: UUID
+    PageId: UUID
+    PageRevisionId: UUID
+    WordId: Optional[UUID] = None
 
 class ReadingEventResponse(ReadingEventBase):
-    Id: UUID4
-    SessionId: UUID4
-    PageId: UUID4
-    PageRevisionId: UUID4
-    WordId: Optional[UUID4]
+    Id: UUID
+    SessionId: UUID
+    PageId: UUID
+    PageRevisionId: UUID
+    WordId: Optional[UUID]
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- FLUENCY ASSESSMENT ---
 class FluencyAssessmentBase(BaseModel):
@@ -60,11 +58,10 @@ class FluencyAssessmentBase(BaseModel):
     ModelVersion: str
 
 class FluencyAssessmentCreate(FluencyAssessmentBase):
-    SessionId: UUID4
+    SessionId: UUID
 
 class FluencyAssessmentResponse(FluencyAssessmentBase):
-    Id: UUID4
-    SessionId: UUID4
+    Id: UUID
+    SessionId: UUID
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
-from pydantic import UUID4
+from uuid import UUID
 
 from app.api.deps import get_db
 from app.models import Book, BookPage
@@ -26,7 +26,7 @@ async def create_book(book_in: BookCreate, db: AsyncSession = Depends(get_db)):
     return new_book
 
 @router.get("/{book_id}/pages", response_model=List[BookPageResponse])
-async def get_book_pages(book_id: UUID4, db: AsyncSession = Depends(get_db)):
+async def get_book_pages(book_id: UUID, db: AsyncSession = Depends(get_db)):
     """Lấy danh sách các trang của một quyển sách cụ thể"""
     query = select(BookPage).where(BookPage.BookId == book_id).order_by(BookPage.PageNumber)
     result = await db.execute(query)

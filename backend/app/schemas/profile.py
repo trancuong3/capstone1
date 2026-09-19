@@ -1,7 +1,7 @@
-# file: backend/app/schemas/profile.py
-from pydantic import BaseModel, UUID4, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from uuid import UUID
 
 # ==========================================
 # 1. SCHEMAS CHO HỒ SƠ BÉ (CHILD PROFILE)
@@ -13,14 +13,12 @@ class ChildProfileBase(BaseModel):
     Settings: Dict[str, Any] = Field(default_factory=dict)
 
 class ChildProfileCreate(ChildProfileBase):
-    ParentId: UUID4
+    ParentId: UUID
 
 class ChildProfileResponse(ChildProfileBase):
-    Id: UUID4
-    ParentId: UUID4
+    Id: UUID
+    ParentId: UUID
     CreatedAt: datetime
-
-    # Chuẩn mới nhất của Pydantic v2 để đọc dữ liệu từ SQLAlchemy Model
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -36,8 +34,7 @@ class ProfileCreate(ProfileBase):
     pass 
 
 class ProfileResponse(ProfileBase):
-    Id: UUID4
+    Id: UUID
     CreatedAt: datetime
     children: List[ChildProfileResponse] = Field(default_factory=list)
-
     model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,7 @@
-# file: backend/app/schemas/system.py
-from pydantic import BaseModel, UUID4, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime, date
+from uuid import UUID
 
 # --- PROGRESS REPORT ---
 class ProgressReportBase(BaseModel):
@@ -10,14 +10,13 @@ class ProgressReportBase(BaseModel):
     Summary: Dict[str, Any]
 
 class ProgressReportCreate(ProgressReportBase):
-    ChildId: UUID4
+    ChildId: UUID
 
 class ProgressReportResponse(ProgressReportBase):
-    Id: UUID4
-    ChildId: UUID4
+    Id: UUID
+    ChildId: UUID
     GeneratedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- CONSENT RECORD ---
 class ConsentRecordBase(BaseModel):
@@ -27,15 +26,14 @@ class ConsentRecordBase(BaseModel):
     RevokedAt: Optional[datetime] = None
 
 class ConsentRecordCreate(ConsentRecordBase):
-    ParentId: UUID4
-    ChildId: UUID4
+    ParentId: UUID
+    ChildId: UUID
 
 class ConsentRecordResponse(ConsentRecordBase):
-    Id: UUID4
-    ParentId: UUID4
-    ChildId: UUID4
-    class Config:
-        from_attributes = True
+    Id: UUID
+    ParentId: UUID
+    ChildId: UUID
+    model_config = ConfigDict(from_attributes=True)
 
 # --- AUDIT LOG ---
 class AuditLogBase(BaseModel):
@@ -45,13 +43,12 @@ class AuditLogBase(BaseModel):
     Metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class AuditLogCreate(AuditLogBase):
-    ActorId: UUID4
-    ResourceId: UUID4
+    ActorId: UUID
+    ResourceId: UUID
 
 class AuditLogResponse(AuditLogBase):
-    Id: UUID4
-    ActorId: UUID4
-    ResourceId: UUID4
+    Id: UUID
+    ActorId: UUID
+    ResourceId: UUID
     CreatedAt: datetime
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

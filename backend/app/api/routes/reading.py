@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
-from pydantic import UUID4
+from uuid import UUID
 
 from app.api.deps import get_db
 from app.models import ReadingSession, ReadingEvent, FluencyAssessment
