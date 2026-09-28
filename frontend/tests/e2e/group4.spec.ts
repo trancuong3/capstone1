@@ -165,6 +165,7 @@ test.describe("Group 4 responsive reading session mock", () => {
 
       if (state === "reading" || state === "ready") {
         await page.screenshot({
+          caret: "initial",
           fullPage: true,
           path: testInfo.outputPath(`group4-${state}.png`),
         });

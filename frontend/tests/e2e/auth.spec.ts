@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 const visualRoutes = [
-  { name: "login", path: "/login", heading: "Đăng nhập" },
+  { name: "login", path: "/login?state=default", heading: "Đăng nhập" },
   {
     name: "register",
-    path: "/register",
+    path: "/register?state=default",
     heading: /Đăng ký|Tạo tài khoản cho ba mẹ/,
   },
   {
@@ -36,6 +36,7 @@ test.describe("Group 1 authentication UI", () => {
       expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth);
 
       await page.screenshot({
+        caret: "initial",
         fullPage: true,
         path: testInfo.outputPath(`${route.name}.png`),
       });
@@ -43,7 +44,7 @@ test.describe("Group 1 authentication UI", () => {
   }
 
   test("login validates the password field", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("/login?state=default");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 
     await expect(
@@ -52,10 +53,10 @@ test.describe("Group 1 authentication UI", () => {
   });
 
   test("login links to parent registration", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("/login?state=default");
     await page.getByRole("link", { name: /Đăng ký/ }).click();
 
-    await expect(page).toHaveURL(/\/register$/);
+    await expect(page).toHaveURL(/\/register\?state=default$/);
     await expect(
       page.getByRole("heading", {
         name: /Đăng ký|Tạo tài khoản cho ba mẹ/,
@@ -66,7 +67,7 @@ test.describe("Group 1 authentication UI", () => {
   test("registration continues to the first child profile", async ({
     page,
   }) => {
-    await page.goto("/register");
+    await page.goto("/register?state=default");
     await page.getByLabel("Họ và tên ba mẹ").fill("Nguyễn Minh Anh");
     await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhau123");
@@ -91,7 +92,8 @@ test.describe("Group 1 authentication UI", () => {
   test("forgot-password completes without account enumeration", async ({
     page,
   }) => {
-    await page.goto("/forgot-password");
+    await page.goto("/forgot-password?state=default");
+    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByRole("button", { name: "Gửi hướng dẫn" }).click();
 
     await expect(
@@ -101,14 +103,16 @@ test.describe("Group 1 authentication UI", () => {
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: "Về đăng nhập" }),
-    ).toHaveAttribute("href", "/login");
+    ).toHaveAttribute("href", "/login?state=default");
   });
 
   test("forgot-password continues through reset success and login", async ({
     page,
   }) => {
-    await page.goto("/login");
+    await page.goto("/login?state=default");
     await page.getByRole("link", { name: "Quên mật khẩu?" }).click();
+    await expect(page).toHaveURL(/\/forgot-password\?state=default$/);
+    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByRole("button", { name: "Gửi hướng dẫn" }).click();
 
     await expect(
@@ -116,7 +120,7 @@ test.describe("Group 1 authentication UI", () => {
     ).toBeVisible();
 
     // The mock represents opening the provider-owned link from the email.
-    await page.goto("/reset-password");
+    await page.goto("/reset-password?state=default");
     await page
       .getByRole("textbox", { name: "Mật khẩu mới", exact: true })
       .fill("matkhaumoi123");
@@ -127,6 +131,8 @@ test.describe("Group 1 authentication UI", () => {
       page.getByRole("heading", { name: "Đã đổi mật khẩu" }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Đăng nhập" }).click();
+    await expect(page).toHaveURL(/\/login\?state=default$/);
+    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhaumoi123");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 

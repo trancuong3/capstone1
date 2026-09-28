@@ -9,8 +9,10 @@ import { z } from "zod";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { AuthServiceError } from "@/lib/api/auth-service";
 import type { AuthMockScenario } from "@/types/auth";
 
 const resetPasswordSchema = z
@@ -26,15 +28,18 @@ const resetPasswordSchema = z
 type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
 
 interface ResetPasswordFormProps {
+  onRecoveryFailure: (reason: "invalid-token" | "expired-token") => void;
   onSuccess: () => void;
   scenario: AuthMockScenario;
 }
 
 export function ResetPasswordForm({
+  onRecoveryFailure,
   onSuccess,
   scenario,
 }: ResetPasswordFormProps) {
   const authService = useAuthService();
+  const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const [hasError, setHasError] = useState(scenario === "safe-error");
   const {
@@ -52,7 +57,19 @@ export function ResetPasswordForm({
     try {
       await authService.resetPassword({ newPassword: values.newPassword });
       onSuccess();
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthServiceError) {
+        if (error.reason === "invalid-recovery-context") {
+          onRecoveryFailure("invalid-token");
+          return;
+        }
+
+        if (error.reason === "expired-recovery-context") {
+          onRecoveryFailure("expired-token");
+          return;
+        }
+      }
+
       setHasError(true);
     }
   });
@@ -84,13 +101,22 @@ export function ResetPasswordForm({
         type="password"
         {...register("confirmPassword")}
       />
-      <Button disabled={!isHydrated} isLoading={isSubmitting} type="submit">
+      <Button
+        disabled={
+          !isHydrated || authRuntime.status === "initializing" || isSubmitting
+        }
+        isLoading={isSubmitting}
+        type="submit"
+      >
         {isSubmitting ? "Đang lưu…" : "Lưu mật khẩu mới"}
         {!isSubmitting ? (
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink href="/login" variant="quiet">
+      <ButtonLink
+        href={authRuntime.mode === "mock" ? "/login?state=default" : "/login"}
+        variant="quiet"
+      >
         <ArrowLeft aria-hidden="true" className="size-5" />
         Về đăng nhập
       </ButtonLink>

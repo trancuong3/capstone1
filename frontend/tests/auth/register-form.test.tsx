@@ -7,21 +7,27 @@ import {
   AuthServiceProvider,
 } from "@/components/auth/auth-service-provider";
 import { RegisterForm } from "@/components/auth/register-form";
-import type { AuthService } from "@/lib/api/auth-service";
+import { RegisterScreen } from "@/components/auth/register-screen";
+import { createMockAuthService } from "@/lib/mock/mock-auth-service";
 import type { AuthMockScenario } from "@/types/auth";
 
-const { pushMock } = vi.hoisted(() => ({
-  pushMock: vi.fn(),
+const { confirmationMock, refreshMock, replaceMock } = vi.hoisted(() => ({
+  confirmationMock: vi.fn(),
+  refreshMock: vi.fn(),
+  replaceMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ refresh: refreshMock, replace: replaceMock }),
 }));
 
 function renderRegisterForm(scenario: AuthMockScenario = "default") {
   return render(
-    <AuthServiceProvider scenario={scenario}>
-      <RegisterForm scenario={scenario} />
+    <AuthServiceProvider mode="mock" scenario={scenario}>
+      <RegisterForm
+        onEmailConfirmationRequired={confirmationMock}
+        scenario={scenario}
+      />
     </AuthServiceProvider>,
   );
 }
@@ -37,7 +43,9 @@ async function fillValidRegistration(user: ReturnType<typeof userEvent.setup>) {
 
 describe("RegisterForm", () => {
   beforeEach(() => {
-    pushMock.mockClear();
+    confirmationMock.mockClear();
+    refreshMock.mockClear();
+    replaceMock.mockClear();
   });
 
   it("shows field-level validation for all three registration fields", async () => {
@@ -67,25 +75,78 @@ describe("RegisterForm", () => {
     await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
 
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith("/children/new?from=register");
+      expect(replaceMock).toHaveBeenCalledWith("/children/new?from=register");
     });
+    expect(refreshMock).toHaveBeenCalledOnce();
   });
 
-  it.each(["email-used", "safe-error"] as const)(
-    "uses the same safe message for the %s scenario",
-    async (scenario) => {
-      const user = userEvent.setup();
-      renderRegisterForm(scenario);
-      await fillValidRegistration(user);
+  it("uses a safe message for a provider failure", async () => {
+    const user = userEvent.setup();
+    renderRegisterForm("safe-error");
+    await fillValidRegistration(user);
 
-      await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Chưa thể tạo tài khoản lúc này. Ba mẹ vui lòng thử lại sau.",
-      );
-      expect(pushMock).not.toHaveBeenCalled();
-    },
-  );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Chưa thể tạo tài khoản lúc này. Ba mẹ vui lòng thử lại sau.",
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the neutral confirmation outcome for an existing email", async () => {
+    const user = userEvent.setup();
+    renderRegisterForm("email-used");
+    await fillValidRegistration(user);
+
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
+
+    await waitFor(() => expect(confirmationMock).toHaveBeenCalledOnce());
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a non-enumerating check-email screen", async () => {
+    const user = userEvent.setup();
+    render(
+      <AuthServiceProvider mode="mock" scenario="email-used">
+        <RegisterScreen scenario="email-used" />
+      </AuthServiceProvider>,
+    );
+    await fillValidRegistration(user);
+
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Kiểm tra email nhé" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "không xác nhận một email đã có tài khoản hay chưa",
+    );
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a new account has no parent profile role", async () => {
+    const service = createMockAuthService("default");
+    vi.spyOn(service, "getCurrentRole").mockResolvedValue(null);
+    const signOut = vi.spyOn(service, "signOut");
+    const user = userEvent.setup();
+    render(
+      <AuthServiceContext.Provider value={service}>
+        <RegisterForm
+          onEmailConfirmationRequired={confirmationMock}
+          scenario="default"
+        />
+      </AuthServiceContext.Provider>,
+    );
+    await fillValidRegistration(user);
+
+    await user.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Chưa thể tạo tài khoản lúc này",
+    );
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
 
   it("supports a safe provider validation-error scenario", async () => {
     const user = userEvent.setup();
@@ -100,17 +161,17 @@ describe("RegisterForm", () => {
   });
 
   it("disables submission while the request is pending", async () => {
-    const registerParent = vi.fn(() => new Promise<void>(() => undefined));
-    const pendingService: AuthService = {
-      registerParent,
-      requestPasswordReset: async () => undefined,
-      resetPassword: async () => undefined,
-      signIn: async () => undefined,
-    };
+    const pendingService = createMockAuthService("default");
+    const registerParent = vi
+      .spyOn(pendingService, "registerParent")
+      .mockImplementation(() => new Promise(() => undefined));
     const user = userEvent.setup();
     render(
       <AuthServiceContext.Provider value={pendingService}>
-        <RegisterForm scenario="default" />
+        <RegisterForm
+          onEmailConfirmationRequired={confirmationMock}
+          scenario="default"
+        />
       </AuthServiceContext.Provider>,
     );
     await fillValidRegistration(user);
@@ -128,6 +189,6 @@ describe("RegisterForm", () => {
 
     expect(
       screen.getByRole("link", { name: "Đã có tài khoản? Đăng nhập" }),
-    ).toHaveAttribute("href", "/login");
+    ).toHaveAttribute("href", "/login?state=default");
   });
 });

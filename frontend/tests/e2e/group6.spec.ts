@@ -1,12 +1,16 @@
 import { expect, test } from "@playwright/test";
 
+import { authFixtureHeaders } from "./auth-fixture";
+
+test.use({ extraHTTPHeaders: authFixtureHeaders("admin") });
+
 const bookPath = "/admin/books/82000000-0000-4000-8000-000000000001";
 const ocrPath = `${bookPath}/pages/83000000-0000-4000-8000-000000000001`;
 
 test("admin login reaches the book catalog and logout returns safely", async ({
   page,
 }) => {
-  await page.goto("/admin/login");
+  await page.goto("/admin/login?state=default");
   await page.getByLabel("Mật khẩu").fill("matkhau123");
   await page.getByRole("button", { name: "Đăng nhập" }).click();
   await expect(page).toHaveURL(/\/admin\/books$/);

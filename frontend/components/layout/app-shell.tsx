@@ -4,14 +4,16 @@ import {
   BarChart3,
   History,
   LayoutDashboard,
+  LogOut,
   UserRound,
   UsersRound,
   Volume2,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, type ReactNode } from "react";
 
+import { useAuthService } from "@/hooks/use-auth-service";
 import { cn } from "@/lib/utils/cn";
 
 interface AppShellProps {
@@ -52,11 +54,32 @@ const navigationItems = [
 ] as const;
 
 export function AppShell({ children }: AppShellProps) {
+  const authService = useAuthService();
   const pathname = usePathname();
+  const router = useRouter();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [hasSignOutError, setHasSignOutError] = useState(false);
   const isChildOnboarding = pathname === "/children/new";
   const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
   const isReadingRoute = pathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;
+
+  async function handleSignOut() {
+    if (isSigningOut) return;
+
+    setHasSignOutError(false);
+    setIsSigningOut(true);
+
+    try {
+      await authService.signOut();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setHasSignOutError(true);
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   return (
     <div className="min-h-dvh bg-canvas">
@@ -116,9 +139,28 @@ export function AppShell({ children }: AppShellProps) {
                   </Link>
                 );
               })}
+              <button
+                className="flex min-h-14 min-w-0 items-center justify-center gap-1 rounded-control bg-white px-1 text-center text-[13px] font-bold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55 sm:h-14 sm:min-w-28 sm:gap-2 sm:px-3 sm:text-label lg:min-w-32"
+                disabled={isSigningOut}
+                onClick={handleSignOut}
+                type="button"
+              >
+                <LogOut aria-hidden="true" className="size-5 shrink-0" />
+                <span className="whitespace-nowrap">
+                  {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
+                </span>
+              </button>
             </div>
           ) : null}
         </nav>
+        {hasSignOutError ? (
+          <p
+            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-bold text-danger"
+            role="alert"
+          >
+            Chưa thể đăng xuất lúc này. Ba mẹ vui lòng thử lại.
+          </p>
+        ) : null}
       </header>
 
       <main

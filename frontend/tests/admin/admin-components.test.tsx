@@ -12,6 +12,7 @@ const { navigationMock, signOutMock } = vi.hoisted(() => ({
   navigationMock: {
     pathname: "/admin/books",
     push: vi.fn(),
+    refresh: vi.fn(),
     replace: vi.fn(),
   },
   signOutMock: vi.fn<() => Promise<void>>(async () => undefined),
@@ -21,6 +22,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
   useRouter: () => ({
     push: navigationMock.push,
+    refresh: navigationMock.refresh,
     replace: navigationMock.replace,
   }),
 }));
@@ -56,6 +58,7 @@ describe("admin components", () => {
   beforeEach(() => {
     navigationMock.pathname = "/admin/books";
     navigationMock.push.mockClear();
+    navigationMock.refresh.mockClear();
     navigationMock.replace.mockClear();
     signOutMock.mockReset();
     signOutMock.mockResolvedValue(undefined);
@@ -104,6 +107,25 @@ describe("admin components", () => {
     await waitFor(() =>
       expect(navigationMock.replace).toHaveBeenCalledWith("/admin/login"),
     );
+    expect(navigationMock.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the protected route visible when admin sign-out fails", async () => {
+    const user = userEvent.setup();
+    signOutMock.mockRejectedValueOnce(new Error("provider unavailable"));
+    withServices(
+      <AdminLayout>
+        <p>Nội dung quản trị</p>
+      </AdminLayout>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Chưa thể đăng xuất lúc này",
+    );
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+    expect(navigationMock.refresh).not.toHaveBeenCalled();
   });
 
   it("rejects an inverted grade range in the book form", async () => {

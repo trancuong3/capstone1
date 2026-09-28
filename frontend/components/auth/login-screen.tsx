@@ -4,10 +4,14 @@ import { LoginForm } from "@/components/auth/login-form";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface LoginScreenProps {
+  isAuthCallback?: boolean;
   scenario: AuthMockScenario;
 }
 
-export function LoginScreen({ scenario }: LoginScreenProps) {
+export function LoginScreen({
+  isAuthCallback = false,
+  scenario,
+}: LoginScreenProps) {
   if (scenario === "loading") {
     return <AuthLoadingState />;
   }
@@ -26,7 +30,7 @@ export function LoginScreen({ scenario }: LoginScreenProps) {
             </span>
           </p>
         </div>
-        <LoginForm scenario={scenario} />
+        <LoginForm isAuthCallback={isAuthCallback} scenario={scenario} />
       </Card>
     </AuthShell>
   );

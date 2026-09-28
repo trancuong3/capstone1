@@ -95,6 +95,7 @@ test.describe("Group 5 parent history and reports", () => {
       expect(size.scrollWidth).toBeLessThanOrEqual(size.clientWidth);
       if (route.startsWith("/reports?")) {
         await page.screenshot({
+          caret: "initial",
           fullPage: true,
           path: testInfo.outputPath("group5-report-visual.png"),
         });
