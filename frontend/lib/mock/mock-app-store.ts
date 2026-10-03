@@ -1,10 +1,10 @@
 import type { ChildProfileDTO } from "@/types/child";
 import type { ParentProfileDTO, UUID } from "@/types/profile";
 
-export const MOCK_CURRENT_PARENT_ID = "11111111-1111-4111-8111-111111111111";
-export const MOCK_OTHER_PARENT_ID = "22222222-2222-4222-8222-222222222222";
-export const MOCK_CURRENT_CHILD_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-export const MOCK_SECOND_CHILD_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+export const MOCK_CURRENT_PARENT_ID = "11111111-1111-1111-1111-111111111111";
+export const MOCK_OTHER_PARENT_ID = "11111111-1111-1111-1111-222222222222";
+export const MOCK_CURRENT_CHILD_ID = "aaaaaaaa-aaaa-aaaa-aaaa-111111111111";
+export const MOCK_SECOND_CHILD_ID = "aaaaaaaa-aaaa-aaaa-aaaa-222222222222";
 export const MOCK_FOREIGN_CHILD_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 export interface MockAppStore {

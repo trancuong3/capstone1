@@ -11,6 +11,9 @@ import type { AppMockScenario } from "@/types/ui-state";
 
 const MOCK_DELAY_MS = 350;
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 function waitForMock(): Promise<void> {
   if (process.env.NODE_ENV === "test") {
     return Promise.resolve();
@@ -26,7 +29,10 @@ function waitForever<T>(): Promise<T> {
 }
 
 function cloneChild(child: ChildProfileDTO): ChildProfileDTO {
-  return { ...child, settings: { ...child.settings } };
+  return {
+    ...child,
+    settings: { ...child.settings },
+  };
 }
 
 function notFoundError(): ServiceError {
@@ -69,20 +75,15 @@ function validatePatch(request: ChildProfilePatchDTO): void {
   }
 }
 
-function getOwnedChild(store: MockAppStore, childId: string): ChildProfileDTO {
-  const child = store.children.get(childId);
-
-  if (!child || child.parent_id !== store.currentParentId) {
-    throw notFoundError();
-  }
-
-  return child;
-}
-
-function createChildId(store: MockAppStore): string {
-  const suffix = String(store.nextChildSequence).padStart(12, "0");
-  store.nextChildSequence += 1;
-  return `dddddddd-dddd-4ddd-8ddd-${suffix}`;
+function mapChild(data: any): ChildProfileDTO {
+  return {
+    id: data.id ?? data.Id,
+    parent_id: data.parent_id ?? data.ParentId,
+    alias: data.alias ?? data.Alias,
+    grade: data.grade ?? data.Grade,
+    settings: data.settings ?? data.Settings ?? {},
+    created_at: data.created_at ?? data.CreatedAt,
+  };
 }
 
 export function createMockChildService(
@@ -105,9 +106,45 @@ export function createMockChildService(
         return [];
       }
 
-      return [...store.children.values()]
-        .filter((child) => child.parent_id === store.currentParentId)
-        .map(cloneChild);
+      try {
+        const response = await fetch(
+          `${API_URL}/profiles/children?parent_id=${encodeURIComponent(
+            store.currentParentId,
+          )}`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw notFoundError();
+          }
+
+          const errorData = await response.json().catch(() => null);
+
+          if (response.status === 422) {
+            throw validationError();
+          }
+
+          throw new Error(
+            errorData?.detail ?? "Không thể lấy danh sách hồ sơ bé.",
+          );
+        }
+
+        const data = await response.json();
+
+        return data.map(mapChild).map(cloneChild);
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          throw error;
+        }
+
+        throw error;
+      }
     },
 
     async create(request): Promise<ChildProfileDTO> {
@@ -123,17 +160,49 @@ export function createMockChildService(
 
       validateCreate(request);
 
-      const child: ChildProfileDTO = {
-        id: createChildId(store),
-        parent_id: store.currentParentId,
-        alias: request.alias.trim(),
-        grade: request.grade,
-        settings: { ...(request.settings ?? {}) },
-        created_at: new Date().toISOString(),
-      };
+      try {
+        const response = await fetch(
+          `${API_URL}/profiles/children`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              ParentId: store.currentParentId,
+              Alias: request.alias.trim(),
+              Grade: request.grade,
+              Settings: request.settings ?? {},
+            }),
+          },
+        );
 
-      store.children.set(child.id, child);
-      return cloneChild(child);
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw notFoundError();
+          }
+
+          if (response.status === 422) {
+            throw validationError();
+          }
+
+          const errorData = await response.json().catch(() => null);
+
+          throw new Error(
+            errorData?.detail ?? "Không thể tạo hồ sơ bé.",
+          );
+        }
+
+        const data = await response.json();
+
+        return cloneChild(mapChild(data));
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          throw error;
+        }
+
+        throw error;
+      }
     },
 
     async get(childId): Promise<ChildProfileDTO> {
@@ -151,7 +220,39 @@ export function createMockChildService(
         throw notFoundError();
       }
 
-      return cloneChild(getOwnedChild(store, childId));
+      try {
+        const response = await fetch(
+          `${API_URL}/profiles/children/${childId}`,
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw notFoundError();
+          }
+
+          const errorData = await response.json().catch(() => null);
+
+          throw new Error(
+            errorData?.detail ?? "Không thể lấy hồ sơ bé.",
+          );
+        }
+
+        const data = await response.json();
+
+        return cloneChild(mapChild(data));
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          throw error;
+        }
+
+        throw error;
+      }
     },
 
     async update(childId, request): Promise<ChildProfileDTO> {
@@ -169,22 +270,50 @@ export function createMockChildService(
         throw notFoundError();
       }
 
-      const current = getOwnedChild(store, childId);
       validatePatch(request);
 
-      const updated: ChildProfileDTO = {
-        ...current,
-        alias:
-          request.alias === undefined ? current.alias : request.alias.trim(),
-        grade: request.grade ?? current.grade,
-        settings:
-          request.settings === undefined
-            ? current.settings
-            : { ...request.settings },
-      };
+      try {
+        const response = await fetch(
+          `${API_URL}/profiles/children/${childId}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              alias: request.alias,
+              grade: request.grade,
+              settings: request.settings,
+            }),
+          },
+        );
 
-      store.children.set(updated.id, updated);
-      return cloneChild(updated);
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw notFoundError();
+          }
+
+          if (response.status === 422) {
+            throw validationError();
+          }
+
+          const errorData = await response.json().catch(() => null);
+
+          throw new Error(
+            errorData?.detail ?? "Không thể cập nhật hồ sơ bé.",
+          );
+        }
+
+        const data = await response.json();
+
+        return cloneChild(mapChild(data));
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          throw error;
+        }
+
+        throw error;
+      }
     },
   };
 }
