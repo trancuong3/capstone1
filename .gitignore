@@ -46,3 +46,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+
+#Test files
+tests/
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
