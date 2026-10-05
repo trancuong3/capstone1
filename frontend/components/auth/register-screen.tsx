@@ -1,7 +1,15 @@
+"use client";
+
+import { ArrowRight } from "lucide-react";
+import { useState } from "react";
+
 import { AuthShell } from "@/components/auth/auth-shell";
 import { RegisterForm } from "@/components/auth/register-form";
+import { ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
+import { StatusMessage } from "@/components/common/status-message";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface RegisterScreenProps {
@@ -28,8 +36,42 @@ function RegisterLoadingState() {
 }
 
 export function RegisterScreen({ scenario }: RegisterScreenProps) {
+  const authRuntime = useAuthRuntime();
+  const [requiresEmailConfirmation, setRequiresEmailConfirmation] =
+    useState(false);
+
   if (scenario === "loading") {
     return <RegisterLoadingState />;
+  }
+
+  if (requiresEmailConfirmation) {
+    return (
+      <AuthShell>
+        <Card tone="success">
+          <div>
+            <h1 className="text-heading font-extrabold text-success-ink">
+              Kiểm tra email nhé
+            </h1>
+            <p className="mt-4 text-body text-muted sm:mt-6">
+              Nếu yêu cầu đăng ký hợp lệ, ba mẹ sẽ nhận được liên kết xác nhận.
+              Hãy kiểm tra cả thư rác trước khi đăng nhập.
+            </p>
+          </div>
+          <StatusMessage tone="success">
+            Vì lý do bảo mật, thông báo này không xác nhận một email đã có tài
+            khoản hay chưa.
+          </StatusMessage>
+          <ButtonLink
+            href={
+              authRuntime.mode === "mock" ? "/login?state=default" : "/login"
+            }
+          >
+            Về đăng nhập
+            <ArrowRight aria-hidden="true" className="size-5" />
+          </ButtonLink>
+        </Card>
+      </AuthShell>
+    );
   }
 
   return (
@@ -49,7 +91,10 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
             </span>
           </p>
         </div>
-        <RegisterForm scenario={scenario} />
+        <RegisterForm
+          onEmailConfirmationRequired={() => setRequiresEmailConfirmation(true)}
+          scenario={scenario}
+        />
       </Card>
     </AuthShell>
   );

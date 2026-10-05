@@ -18,17 +18,20 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [hasSignOutError, setHasSignOutError] = useState(false);
 
   async function handleSignOut() {
     if (isSigningOut) return;
 
+    setHasSignOutError(false);
     setIsSigningOut(true);
     try {
       await auth.signOut();
-    } catch {
-      // The local session must still leave the protected UI on sign-out failure.
-    } finally {
       router.replace("/admin/login");
+      router.refresh();
+    } catch {
+      setHasSignOutError(true);
+    } finally {
       setIsSigningOut(false);
     }
   }
@@ -75,6 +78,14 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </header>
+      {hasSignOutError ? (
+        <p
+          className="mx-auto mt-4 w-full max-w-[1376px] px-4 font-bold text-danger sm:px-8"
+          role="alert"
+        >
+          Chưa thể đăng xuất lúc này. Vui lòng thử lại.
+        </p>
+      ) : null}
       <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-8 sm:py-10">
         {children}
       </main>

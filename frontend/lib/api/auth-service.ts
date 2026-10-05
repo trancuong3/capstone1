@@ -1,12 +1,16 @@
 import type {
+  AuthSessionSnapshot,
+  AuthStateChangeListener,
+  AuthUserSnapshot,
+  CurrentUserRole,
   LoginRequest,
   ParentRegistrationInput,
+  ParentRegistrationResult,
   PasswordRecoveryRequest,
   PasswordResetRequest,
 } from "@/types/auth";
 
 export type AuthFailureReason =
-  | "email-already-used"
   | "registration-validation"
   | "invalid-credentials"
   | "invalid-recovery-context"
@@ -24,8 +28,16 @@ export class AuthServiceError extends Error {
 }
 
 export interface AuthService {
-  registerParent(input: ParentRegistrationInput): Promise<void>;
-  signIn(request: LoginRequest): Promise<void>;
+  initialize(): Promise<void>;
+  registerParent(
+    input: ParentRegistrationInput,
+  ): Promise<ParentRegistrationResult>;
+  signIn(request: LoginRequest): Promise<AuthSessionSnapshot>;
   requestPasswordReset(request: PasswordRecoveryRequest): Promise<void>;
   resetPassword(request: PasswordResetRequest): Promise<void>;
+  getSession(): Promise<AuthSessionSnapshot | null>;
+  getCurrentUser(): Promise<AuthUserSnapshot | null>;
+  getCurrentRole(): Promise<CurrentUserRole>;
+  signOut(): Promise<void>;
+  onAuthStateChange(listener: AuthStateChangeListener): () => void;
 }

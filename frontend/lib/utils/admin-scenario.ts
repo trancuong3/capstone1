@@ -31,3 +31,19 @@ export function parseAdminScenario(
     ? (candidate as AdminMockScenario)
     : "default";
 }
+
+export interface AdminAuthRuntimeConfig {
+  mode: "mock" | "supabase";
+  scenario: AdminMockScenario;
+}
+
+export function resolveAdminAuthRuntime(
+  value: string | string[] | undefined,
+  nodeEnvironment = process.env.NODE_ENV,
+): AdminAuthRuntimeConfig {
+  if (value === undefined || nodeEnvironment === "production") {
+    return { mode: "supabase", scenario: "default" };
+  }
+
+  return { mode: "mock", scenario: parseAdminScenario(value) };
+}

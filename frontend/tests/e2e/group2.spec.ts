@@ -59,6 +59,7 @@ test.describe("Group 2 parent and child profile UI", () => {
       expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth);
 
       await page.screenshot({
+        caret: "initial",
         fullPage: true,
         path: testInfo.outputPath(`${route.name}.png`),
       });
@@ -68,7 +69,7 @@ test.describe("Group 2 parent and child profile UI", () => {
   test("registration creates the first child profile and reaches book selection", async ({
     page,
   }) => {
-    await page.goto("/login");
+    await page.goto("/login?state=default");
     await page.getByRole("link", { name: /Đăng ký/ }).click();
 
     await page.getByLabel("Họ và tên ba mẹ").fill("Nguyễn Minh Anh");

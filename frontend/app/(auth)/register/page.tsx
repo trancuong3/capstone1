@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { AuthServiceProvider } from "@/components/auth/auth-service-provider";
 import { RegisterScreen } from "@/components/auth/register-screen";
-import { parseAuthScenario } from "@/lib/utils/auth-scenario";
+import { resolveAuthRuntime } from "@/lib/utils/auth-scenario";
 
 export const metadata: Metadata = {
   title: "Đăng ký",
@@ -15,10 +15,10 @@ interface RegisterPageProps {
 export default async function RegisterPage({
   searchParams,
 }: RegisterPageProps) {
-  const scenario = parseAuthScenario((await searchParams).state);
+  const { mode, scenario } = resolveAuthRuntime((await searchParams).state);
 
   return (
-    <AuthServiceProvider scenario={scenario}>
+    <AuthServiceProvider mode={mode} scenario={scenario}>
       <RegisterScreen scenario={scenario} />
     </AuthServiceProvider>
   );

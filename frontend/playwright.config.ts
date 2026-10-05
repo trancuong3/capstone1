@@ -1,4 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { defineConfig } from "@playwright/test";
+
+import { createPlaywrightAuthFixtureHeaders } from "./lib/auth/playwright-auth-fixture";
+
+const authFixtureToken =
+  process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN ?? randomBytes(32).toString("hex");
+process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN = authFixtureToken;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -7,12 +14,22 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:3000",
+    extraHTTPHeaders: createPlaywrightAuthFixtureHeaders(
+      "parent",
+      authFixtureToken,
+    ),
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run start -- --hostname 127.0.0.1",
+    command: "npm run dev -- --hostname 127.0.0.1",
+    env: {
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+      NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+      PLAYWRIGHT_AUTH_FIXTURES: "1",
+      PLAYWRIGHT_AUTH_FIXTURE_TOKEN: authFixtureToken,
+    },
     url: "http://127.0.0.1:3000",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   workers: 2,

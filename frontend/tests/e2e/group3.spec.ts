@@ -120,6 +120,7 @@ test.describe("Group 3 verified book catalog UI", () => {
         dimensions.clientWidth,
       );
       await page.screenshot({
+        caret: "initial",
         fullPage: true,
         path: testInfo.outputPath("group3-visual.png"),
       });

@@ -1,7 +1,26 @@
 import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
-import type { AuthMockScenario } from "@/types/auth";
+import type {
+  AuthMockScenario,
+  AuthSessionSnapshot,
+  AuthStateChangeListener,
+  AuthStateEvent,
+} from "@/types/auth";
 
 const MOCK_DELAY_MS = 450;
+
+function createMockAuthSession(
+  email = "minhanh@example.com",
+  displayName = "Nguyen Minh Anh",
+): AuthSessionSnapshot {
+  return {
+    expires_at: null,
+    user: {
+      display_name: displayName,
+      email,
+      id: "10000000-0000-4000-8000-000000000001",
+    },
+  };
+}
 
 function waitForMock(): Promise<void> {
   if (process.env.NODE_ENV === "test") {
@@ -12,15 +31,30 @@ function waitForMock(): Promise<void> {
 }
 
 export function createMockAuthService(scenario: AuthMockScenario): AuthService {
+  let currentSession: AuthSessionSnapshot | null = null;
+  const listeners = new Set<AuthStateChangeListener>();
+
+  const updateSession = (
+    event: AuthStateEvent,
+    session: AuthSessionSnapshot | null,
+  ) => {
+    currentSession = session;
+    listeners.forEach((listener) => listener(event, currentSession));
+  };
+
   return {
-    async registerParent(): Promise<void> {
+    async initialize() {
+      return Promise.resolve();
+    },
+
+    async registerParent(input) {
       await waitForMock();
 
       if (scenario === "email-used") {
-        throw new AuthServiceError(
-          "email-already-used",
-          "The mock email address is already registered.",
-        );
+        return {
+          status: "email-confirmation-required",
+          session: null,
+        };
       }
 
       if (scenario === "validation-error") {
@@ -36,9 +70,16 @@ export function createMockAuthService(scenario: AuthMockScenario): AuthService {
           "The mock registration provider is unavailable.",
         );
       }
+
+      const session = createMockAuthSession(input.email, input.displayName);
+      updateSession("SIGNED_IN", session);
+      return {
+        status: "authenticated",
+        session,
+      };
     },
 
-    async signIn(): Promise<void> {
+    async signIn(request) {
       await waitForMock();
 
       if (scenario === "invalid-credentials") {
@@ -54,6 +95,10 @@ export function createMockAuthService(scenario: AuthMockScenario): AuthService {
           "The mock auth provider is unavailable.",
         );
       }
+
+      const session = createMockAuthSession(request.email);
+      updateSession("SIGNED_IN", session);
+      return session;
     },
 
     async requestPasswordReset(): Promise<void> {
@@ -90,6 +135,35 @@ export function createMockAuthService(scenario: AuthMockScenario): AuthService {
           "The mock reset provider is unavailable.",
         );
       }
+
+      updateSession("SIGNED_OUT", null);
+    },
+
+    async getSession() {
+      return currentSession;
+    },
+
+    async getCurrentUser() {
+      return currentSession?.user ?? null;
+    },
+
+    async getCurrentRole() {
+      return currentSession ? "parent" : null;
+    },
+
+    async signOut() {
+      currentSession = null;
+      await waitForMock();
+      updateSession("SIGNED_OUT", null);
+    },
+
+    onAuthStateChange(listener) {
+      listeners.add(listener);
+      listener("INITIAL_SESSION", currentSession);
+
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }

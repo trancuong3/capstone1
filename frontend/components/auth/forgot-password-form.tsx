@@ -9,6 +9,7 @@ import { z } from "zod";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
 import type { PasswordRecoveryRequest } from "@/types/auth";
@@ -31,6 +32,7 @@ export function ForgotPasswordForm({
   onSubmitted,
 }: ForgotPasswordFormProps) {
   const authService = useAuthService();
+  const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const [hasError, setHasError] = useState(hasInitialError);
   const {
@@ -38,7 +40,7 @@ export function ForgotPasswordForm({
     handleSubmit,
     register,
   } = useForm<PasswordRecoveryRequest>({
-    defaultValues: { email: "minhanh@example.com" },
+    defaultValues: { email: "" },
     resolver: zodResolver(forgotPasswordSchema),
   });
 
@@ -71,13 +73,22 @@ export function ForgotPasswordForm({
         type="email"
         {...register("email")}
       />
-      <Button disabled={!isHydrated} isLoading={isSubmitting} type="submit">
+      <Button
+        disabled={
+          !isHydrated || authRuntime.status === "initializing" || isSubmitting
+        }
+        isLoading={isSubmitting}
+        type="submit"
+      >
         {isSubmitting ? "Đang gửi…" : "Gửi hướng dẫn"}
         {!isSubmitting ? (
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink href="/login" variant="quiet">
+      <ButtonLink
+        href={authRuntime.mode === "mock" ? "/login?state=default" : "/login"}
+        variant="quiet"
+      >
         <ArrowLeft aria-hidden="true" className="size-5" />
         Về đăng nhập
       </ButtonLink>

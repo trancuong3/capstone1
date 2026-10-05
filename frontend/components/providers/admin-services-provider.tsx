@@ -16,6 +16,7 @@ import { createMockAuditService } from "@/lib/mock/mock-audit-service";
 import { createMockHealthService } from "@/lib/mock/mock-health-service";
 import { createMockOcrReviewService } from "@/lib/mock/mock-ocr-review-service";
 import { createMockRevisionService } from "@/lib/mock/mock-revision-service";
+import { createSupabaseAdminAuthService } from "@/lib/supabase/admin-auth-service";
 import type { AdminMockScenario } from "@/types/admin";
 
 export interface AdminServices {
@@ -31,9 +32,11 @@ export interface AdminServices {
 export const AdminServicesContext = createContext<AdminServices | null>(null);
 
 export function AdminServicesProvider({
+  authMode = "mock",
   children,
   scenario = "default",
 }: {
+  authMode?: "mock" | "supabase";
   children: ReactNode;
   scenario?: AdminMockScenario;
 }) {
@@ -42,7 +45,10 @@ export function AdminServicesProvider({
     throw new Error("AdminServicesProvider requires AdminStoreProvider");
   const services = useMemo<AdminServices>(
     () => ({
-      auth: createMockAdminAuthService(scenario),
+      auth:
+        authMode === "supabase"
+          ? createSupabaseAdminAuthService()
+          : createMockAdminAuthService(scenario),
       books: createMockAdminBookService(store, scenario),
       pages: createMockAdminPageService(store, scenario),
       ocr: createMockOcrReviewService(store, scenario),
@@ -50,7 +56,7 @@ export function AdminServicesProvider({
       audit: createMockAuditService(store, scenario),
       health: createMockHealthService(scenario),
     }),
-    [scenario, store],
+    [authMode, scenario, store],
   );
   return (
     <AdminServicesContext.Provider value={services}>
