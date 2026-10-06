@@ -8,11 +8,11 @@ from uuid import UUID
 from app.api.deps import get_db
 from app.models import Profile, ChildProfile
 from app.schemas import (
-    ProfileResponse, 
+    ProfileResponse,
     ProfileCreate,
-    ChildProfileResponse, 
-    ChildProfileCreate, 
-    ChildProfileUpdate, 
+    ChildProfileResponse,
+    ChildProfileCreate,
+    ChildProfileUpdate,
     ProfileUpdate
 )
 router = APIRouter()
@@ -86,7 +86,7 @@ async def update_child(
     # Update dữ liệu
     child.Alias = data.alias
     child.Grade = data.grade
-    
+
 
     # Lưu database
     await db.commit()
@@ -247,5 +247,3 @@ async def delete_profile(
     return {
         "message": "Profile deleted"
     }
-
-

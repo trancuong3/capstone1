@@ -10,11 +10,15 @@ describe("ForgotPasswordScreen", () => {
     const user = userEvent.setup();
 
     const { container } = render(
-      <AuthServiceProvider scenario="default">
+      <AuthServiceProvider mode="mock" scenario="default">
         <ForgotPasswordScreen scenario="default" />
       </AuthServiceProvider>,
     );
 
+    await user.type(
+      screen.getByLabelText("Email của ba mẹ"),
+      "minhanh@example.com",
+    );
     await user.click(screen.getByRole("button", { name: "Gửi hướng dẫn" }));
 
     expect(
@@ -26,7 +30,7 @@ describe("ForgotPasswordScreen", () => {
     expect(screen.queryByText("minhanh@example.com")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Về đăng nhập" })).toHaveAttribute(
       "href",
-      "/login",
+      "/login?state=default",
     );
     expect(
       container.querySelector('a[href^="mailto:"]'),
@@ -35,7 +39,7 @@ describe("ForgotPasswordScreen", () => {
 
   it("renders a safe provider error", () => {
     render(
-      <AuthServiceProvider scenario="safe-error">
+      <AuthServiceProvider mode="mock" scenario="safe-error">
         <ForgotPasswordScreen scenario="safe-error" />
       </AuthServiceProvider>,
     );

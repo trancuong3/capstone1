@@ -29,7 +29,7 @@ export function AdminLoginScreen({
   scenario: AdminMockScenario;
 }) {
   const { auth } = useAdminServices();
-  const router = useRouter();
+  const { refresh, replace } = useRouter();
   const [notice, setNotice] = useState<string | null>(
     scenario === "unauthenticated"
       ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
@@ -49,7 +49,8 @@ export function AdminLoginScreen({
     setNotice(null);
     try {
       await auth.signIn(values);
-      router.push("/admin/books");
+      replace("/admin/books");
+      refresh();
     } catch (error) {
       setNotice(
         isAdminAuthError(error) && error.reason === "forbidden"
@@ -98,7 +99,7 @@ export function AdminLoginScreen({
           </Button>
         </form>
         <p className="text-center text-sm text-muted">
-          Bản trình diễn frontend sử dụng dịch vụ xác thực mock.
+          Chỉ tài khoản có quyền quản trị mới có thể truy cập khu vực này.
         </p>
       </Card>
     </main>

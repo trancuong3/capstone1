@@ -2,7 +2,7 @@
 
 ReadAlong Vision là giao diện web hỗ trợ ba mẹ chọn sách, tạo hồ sơ cho bé và theo dõi một buổi đọc tương tác. Repository hiện chứa bản frontend responsive dành cho máy tính, máy tính bảng và điện thoại.
 
-Phiên bản này là **frontend demo dùng dữ liệu mock**. Bạn có thể chạy toàn bộ giao diện mà không cần backend, database, tài khoản Supabase hay file `.env`.
+Auth phụ huynh và Admin đã dùng **Supabase Auth thật** khi truy cập bình thường. Các route riêng tư được bảo vệ phía server bằng session đã xác minh và `profiles.role`; những khu vực dữ liệu nghiệp vụ khác vẫn dùng typed mock services. Muốn chạy Auth thật cần cấu hình `.env.local`.
 
 ## Trạng thái dự án
 
@@ -31,8 +31,11 @@ Sau khi clone repository, mở PowerShell hoặc Terminal tại thư mục dự 
 cd readalong-vision
 cd frontend
 npm ci
+Copy-Item .env.example .env.local
 npm run dev
 ```
+
+Điền hai biến public trong `.env.local` bằng Project URL và publishable key từ Supabase. Không dùng secret key, service-role key hoặc database URL ở frontend.
 
 Sau đó mở [http://localhost:3000](http://localhost:3000). Route `/` sẽ chuyển đến `/login`.
 
@@ -43,20 +46,22 @@ npm ci
 npm run dev
 ```
 
-Dữ liệu đăng nhập minh họa:
+Để chạy fixture Auth cục bộ, mở `/login?state=default` trong development. Dữ liệu đăng nhập minh họa:
 
 - Phụ huynh: `minhanh@example.com` / `matkhau123`
 - Admin: `admin@example.com` / `matkhau123`
 
-Đây là tài khoản và mật khẩu giả chỉ dùng cho demo cục bộ. Chúng không mở được tài khoản hoặc hệ thống thật.
+Đây là tài khoản và mật khẩu giả chỉ dùng cho mock state. `/login` không có query `state` dùng tài khoản Supabase thật.
+
+Mock Auth chỉ kiểm thử trạng thái của form phía client; nó không tạo Supabase cookie và không mở khóa route được bảo vệ. Muốn vào `/dashboard` hoặc khu vực Admin khi chạy thủ công, hãy dùng tài khoản Supabase thật có role phù hợp. Playwright dùng một fixture server-only riêng, chỉ bật trong tiến trình test và bị vô hiệu hóa ở production.
 
 ### Lộ trình xem nhanh
 
-1. Mở `/login` và đăng nhập bằng tài khoản phụ huynh mock.
+1. Mở `/login` và đăng nhập bằng tài khoản phụ huynh Supabase thật.
 2. Tại `/dashboard`, chọn Bé An rồi mở thư viện sách.
 3. Chọn “Chú Mèo Nhỏ”, xem trước trang và bắt đầu buổi đọc.
 4. Mở `/reports` hoặc `/sessions` để xem dữ liệu báo cáo mẫu.
-5. Mở `/admin/login` để xem luồng quản trị nội dung mock.
+5. Mở `/admin/login` bằng tài khoản Supabase có `profiles.role = admin`; dùng query `state` chỉ khi cần xem trạng thái form mock.
 
 Để dừng development server, quay lại Terminal và nhấn `Ctrl+C`.
 
@@ -67,8 +72,10 @@ frontend/
 ├── app/                  # Next.js routes và layouts
 ├── components/           # Screen và UI component dùng chung
 ├── hooks/                # Hook truy cập typed services
+├── lib/auth/             # Route policy và authorization phía server
 ├── lib/api/              # Service interfaces và error contract
 ├── lib/mock/             # Mock adapters, store và fixture
+├── lib/supabase/         # Browser/server/proxy adapters cho Supabase Auth
 ├── lib/utils/            # Mapper, parser và UI rules
 ├── public/               # Asset tĩnh xuất từ Figma
 ├── tests/                # Unit, component và Playwright tests
@@ -113,7 +120,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Sessions | `/sessions/[sessionId]`                | Chi tiết lịch sử gắn revision                              |
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
 | Reports  | `/reports/difficult-words`             | Từ khó trong cửa sổ 90 ngày                                |
-| Admin    | `/admin/login`                         | Đăng nhập Admin mock                                       |
+| Admin    | `/admin/login`                         | Đăng nhập Admin bằng Supabase và kiểm tra role             |
 | Admin    | `/admin/books`                         | Danh mục, tìm kiếm và lọc vận hành                         |
 | Admin    | `/admin/books/new`                     | Tạo sách                                                   |
 | Admin    | `/admin/books/[bookId]`                | Chi tiết sách, upload trang, lifecycle                     |
@@ -121,9 +128,13 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Admin    | `/admin/audit-logs`                    | Nhật ký kiểm toán an toàn                                  |
 | Admin    | `/admin/health`                        | Trạng thái vận hành mô phỏng                               |
 
+Các route Parent yêu cầu `profiles.role = parent`; các route `/admin/**` (trừ `/admin/login`) yêu cầu `profiles.role = admin`. Người chưa đăng nhập được chuyển đến trang đăng nhập tương ứng, còn tài khoản sai role được đưa về khu vực hợp lệ của mình. Role chỉ được đọc từ bảng `profiles`, không tin `user_metadata.role` hoặc query parameter.
+
+`proxy.ts` dùng `supabase.auth.getClaims()` để xác minh/làm mới session và chuyển cookie mới cho cả Server Components lẫn trình duyệt. Authorization an toàn vẫn được kiểm tra lại phía server gần route bằng `profiles.role`.
+
 ## Demo UI state
 
-Query `state` chỉ chọn fixture giao diện cục bộ; không phải API/error code mới và không thay đổi contract đóng băng.
+Query `state` chỉ chọn fixture giao diện cục bộ khi chạy development/test; production luôn bỏ qua query này và dùng Supabase thật. Đây không phải API/error code mới và không thay đổi contract đóng băng.
 
 ### Auth
 
@@ -241,16 +252,15 @@ Các viewport nghiệm thu mục tiêu: `1440`, `1024`, `768` và `390` px.
 
 ## Ranh giới frontend/backend
 
-Chưa triển khai hoặc kết nối thật:
+Đã kết nối Supabase Auth cho đăng ký, đăng nhập, recovery, refresh cookie phía server và phân quyền route Parent/Admin. Chưa triển khai hoặc kết nối thật:
 
-- FastAPI, Supabase Auth/PostgreSQL/Storage, RLS và database persistence
-- Session/cookie auth enforcement; đăng nhập/đăng xuất hiện chỉ là UI mock
+- FastAPI, PostgreSQL/Storage persistence cho các module nghiệp vụ
+- Di chuyển profile legacy để validate khóa ngoại Auth
 - HTTP API, WebSocket, reading-session token và realtime server
 - Camera, microphone, MediaDevices, ghi/stream audio/video
 - OpenCV, OCR/Tesseract, page matching thực, STT, TTS hoặc provider AI
 - Alignment/scoring, reading-event inference, Tutor/comprehension engine thật
 - Upload/storage, operational health và audit backend thật
-- Email recovery/reset delivery thật
 
 Camera/page preview, reconnect, OCR, upload progress, TTS help, comprehension, reports và lifecycle đều là trình diễn xác định bằng typed mock. Không tự động phát âm thanh. Expected answer không được đưa vào payload/UI trước khi trả lời; revision VERIFIED giữ bất biến và reprocess tạo revision mới trong mock store.
 
@@ -261,7 +271,7 @@ Khi tích hợp backend, giữ nguyên component và thay implementation tại c
 - Không commit `.env`, access token, API key, cookie, private key hoặc dữ liệu người dùng thật.
 - Chỉ đưa biến môi trường không bí mật và bắt buộc cho trình duyệt vào `NEXT_PUBLIC_*`.
 - Nếu sau này cần biến môi trường, commit `.env.example` chỉ chứa tên biến và giá trị minh họa.
-- Tài khoản, UUID, session token và báo cáo hiện tại đều là fixture mock.
+- Tài khoản, UUID và dữ liệu báo cáo trong tài liệu/test là fixture; phiên Supabase thật chỉ tồn tại cục bộ trong trình duyệt và không được lưu vào repository.
 - Nếu một secret từng bị commit, phải thu hồi/rotate secret; xóa dòng khỏi commit mới là chưa đủ.
 
 ## Cách cộng tác

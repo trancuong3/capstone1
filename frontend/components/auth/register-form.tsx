@@ -10,6 +10,7 @@ import { z } from "zod";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { AuthServiceError } from "@/lib/api/auth-service";
@@ -31,11 +32,16 @@ const registrationValidationError =
   "Thông tin đăng ký chưa hợp lệ. Ba mẹ vui lòng kiểm tra và thử lại.";
 
 interface RegisterFormProps {
+  onEmailConfirmationRequired: () => void;
   scenario: AuthMockScenario;
 }
 
-export function RegisterForm({ scenario }: RegisterFormProps) {
+export function RegisterForm({
+  onEmailConfirmationRequired,
+  scenario,
+}: RegisterFormProps) {
   const authService = useAuthService();
+  const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(() => {
@@ -43,7 +49,7 @@ export function RegisterForm({ scenario }: RegisterFormProps) {
       return registrationValidationError;
     }
 
-    if (scenario === "email-used" || scenario === "safe-error") {
+    if (scenario === "safe-error") {
       return safeRegistrationError;
     }
 
@@ -64,11 +70,33 @@ export function RegisterForm({ scenario }: RegisterFormProps) {
 
   const onSubmit = handleSubmit(async (values) => {
     setErrorMessage(null);
+    let hasAuthenticated = false;
 
     try {
-      await authService.registerParent(values);
-      router.push("/children/new?from=register");
+      const result = await authService.registerParent(values);
+
+      if (result.status === "email-confirmation-required") {
+        onEmailConfirmationRequired();
+        return;
+      }
+
+      hasAuthenticated = true;
+      const role = await authService.getCurrentRole();
+      if (role !== "parent") {
+        throw new Error("A new parent account has no parent profile role.");
+      }
+
+      router.replace("/children/new?from=register");
+      router.refresh();
     } catch (error) {
+      if (hasAuthenticated) {
+        try {
+          await authService.signOut();
+        } catch {
+          // Preserve the original safe registration failure on cleanup errors.
+        }
+      }
+
       if (
         error instanceof AuthServiceError &&
         error.reason === "registration-validation"
@@ -114,7 +142,9 @@ export function RegisterForm({ scenario }: RegisterFormProps) {
         {...register("password")}
       />
       <Button
-        disabled={!isHydrated || isSubmitting}
+        disabled={
+          !isHydrated || authRuntime.status === "initializing" || isSubmitting
+        }
         isLoading={isSubmitting}
         type="submit"
       >
@@ -123,7 +153,10 @@ export function RegisterForm({ scenario }: RegisterFormProps) {
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink href="/login" variant="secondary">
+      <ButtonLink
+        href={authRuntime.mode === "mock" ? "/login?state=default" : "/login"}
+        variant="secondary"
+      >
         Đã có tài khoản? Đăng nhập
       </ButtonLink>
     </form>

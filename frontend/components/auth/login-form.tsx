@@ -3,13 +3,14 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { AuthServiceError } from "@/lib/api/auth-service";
@@ -25,15 +26,20 @@ const loginSchema = z.object({
 });
 
 interface LoginFormProps {
+  isAuthCallback?: boolean;
   scenario: AuthMockScenario;
 }
 
 type Notice = { tone: "error"; message: string } | null;
 
-export function LoginForm({ scenario }: LoginFormProps) {
+export function LoginForm({
+  isAuthCallback = false,
+  scenario,
+}: LoginFormProps) {
   const authService = useAuthService();
+  const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
-  const router = useRouter();
+  const { refresh, replace } = useRouter();
   const [notice, setNotice] = useState<Notice>(() => {
     if (scenario === "invalid-credentials") {
       return {
@@ -57,19 +63,87 @@ export function LoginForm({ scenario }: LoginFormProps) {
     register,
   } = useForm<LoginRequest>({
     defaultValues: {
-      email: "minhanh@example.com",
+      email: "",
       password: "",
     },
     resolver: zodResolver(loginSchema),
   });
+  const isCompletingCallback =
+    isAuthCallback &&
+    authRuntime.mode === "supabase" &&
+    authRuntime.status === "ready" &&
+    Boolean(authRuntime.session) &&
+    notice === null &&
+    !isSubmitting;
+  const authMockSuffix = authRuntime.mode === "mock" ? "?state=default" : "";
+
+  const clearSessionQuietly = useCallback(async () => {
+    try {
+      await authService.signOut();
+    } catch {
+      // Preserve the original safe failure if local cleanup also fails.
+    }
+  }, [authService]);
+
+  const routeAuthenticatedUser = useCallback(async () => {
+    const role = await authService.getCurrentRole();
+    if (!role) {
+      throw new Error("The signed-in account has no application role.");
+    }
+
+    replace(role === "admin" ? "/admin/books" : "/dashboard");
+    refresh();
+  }, [authService, refresh, replace]);
+
+  useEffect(() => {
+    if (
+      !isAuthCallback ||
+      authRuntime.mode !== "supabase" ||
+      authRuntime.status !== "ready" ||
+      !authRuntime.session ||
+      isSubmitting
+    ) {
+      return;
+    }
+
+    let isActive = true;
+
+    void routeAuthenticatedUser().catch(async () => {
+      if (isActive) {
+        setNotice({
+          tone: "error",
+          message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        });
+      }
+      await clearSessionQuietly();
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    authRuntime.mode,
+    authRuntime.session,
+    authRuntime.status,
+    clearSessionQuietly,
+    isAuthCallback,
+    isSubmitting,
+    routeAuthenticatedUser,
+  ]);
 
   const onSubmit = handleSubmit(async (values) => {
     setNotice(null);
+    let hasAuthenticated = false;
 
     try {
       await authService.signIn(values);
-      router.push("/dashboard");
+      hasAuthenticated = true;
+      await routeAuthenticatedUser();
     } catch (error) {
+      if (hasAuthenticated) {
+        await clearSessionQuietly();
+      }
+
       if (
         error instanceof AuthServiceError &&
         error.reason === "invalid-credentials"
@@ -113,19 +187,24 @@ export function LoginForm({ scenario }: LoginFormProps) {
         {...register("password")}
       />
       <Button
-        disabled={!isHydrated || isSubmitting}
-        isLoading={isSubmitting}
+        disabled={
+          !isHydrated ||
+          authRuntime.status === "initializing" ||
+          isSubmitting ||
+          isCompletingCallback
+        }
+        isLoading={isSubmitting || isCompletingCallback}
         type="submit"
       >
-        {isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
-        {!isSubmitting ? (
+        {isSubmitting || isCompletingCallback ? "Đang đăng nhập…" : "Đăng nhập"}
+        {!isSubmitting && !isCompletingCallback ? (
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink href="/forgot-password" variant="quiet">
+      <ButtonLink href={`/forgot-password${authMockSuffix}`} variant="quiet">
         Quên mật khẩu?
       </ButtonLink>
-      <ButtonLink href="/register" variant="secondary">
+      <ButtonLink href={`/register${authMockSuffix}`} variant="secondary">
         <span className="sm:hidden">Đăng ký tài khoản</span>
         <span className="hidden sm:inline">Chưa có tài khoản? Đăng ký</span>
       </ButtonLink>

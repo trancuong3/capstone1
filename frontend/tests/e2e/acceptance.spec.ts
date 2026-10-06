@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { authFixtureHeaders } from "./auth-fixture";
+
 const childId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const parentBookId = "20000000-0000-4000-8000-000000000001";
 const adminBookId = "82000000-0000-4000-8000-000000000001";
@@ -7,9 +9,9 @@ const adminPageId = "83000000-0000-4000-8000-000000000001";
 
 const routes = [
   { name: "root-redirect", path: "/" },
-  { name: "login", path: "/login" },
-  { name: "register", path: "/register" },
-  { name: "forgot-password", path: "/forgot-password" },
+  { name: "login", path: "/login?state=default" },
+  { name: "register", path: "/register?state=default" },
+  { name: "forgot-password", path: "/forgot-password?state=default" },
   { name: "reset-password", path: "/reset-password?state=success" },
   { name: "dashboard", path: "/dashboard" },
   { name: "profile", path: "/profile" },
@@ -56,6 +58,8 @@ test.describe("Frontend acceptance route matrix", () => {
     test(`all routes are usable at ${viewport.label}px`, async ({
       page,
     }, testInfo) => {
+      test.setTimeout(120_000);
+
       test.skip(
         testInfo.project.name !== "desktop-chromium",
         "The matrix sets all four required viewport widths itself.",
@@ -64,6 +68,14 @@ test.describe("Frontend acceptance route matrix", () => {
       await page.setViewportSize(viewport);
 
       for (const route of routes) {
+        await page.setExtraHTTPHeaders(
+          authFixtureHeaders(
+            route.path.startsWith("/admin/") &&
+              !route.path.startsWith("/admin/login")
+              ? "admin"
+              : "parent",
+          ),
+        );
         const consoleErrors: string[] = [];
         const pageErrors: string[] = [];
         const onConsole = (message: { type(): string; text(): string }) => {
@@ -81,6 +93,10 @@ test.describe("Frontend acceptance route matrix", () => {
           response?.status(),
           `${route.path} returned an unexpected HTTP status`,
         ).toBeLessThan(400);
+        expect(
+          new URL(page.url()).pathname,
+          `${route.path} unexpectedly rendered a different route`,
+        ).toBe(route.path === "/" ? "/login" : route.path.split("?")[0]);
         await expect(
           page.locator("h1").first(),
           `${route.path} has no visible page heading`,
@@ -124,6 +140,7 @@ test.describe("Frontend acceptance route matrix", () => {
 
         if (viewport.width === 1440 || viewport.width === 390) {
           await page.screenshot({
+            caret: "initial",
             fullPage: true,
             path: testInfo.outputPath(`${route.name}-${viewport.label}.png`),
           });

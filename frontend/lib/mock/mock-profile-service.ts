@@ -6,7 +6,10 @@ import type { AppMockScenario } from "@/types/ui-state";
 
 const MOCK_DELAY_MS = 350;
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL =
+  process.env.NODE_ENV === "test"
+    ? undefined
+    : process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
 function waitForMock(): Promise<void> {
   if (process.env.NODE_ENV === "test") {
@@ -20,6 +23,26 @@ function waitForMock(): Promise<void> {
 
 function waitForever<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
+}
+
+function cloneProfile(profile: ParentProfileDTO): ParentProfileDTO {
+  return { ...profile };
+}
+
+function getOwnedProfile(store: MockAppStore): ParentProfileDTO {
+  const profile = store.profiles.get(store.currentParentId);
+
+  if (!profile) {
+    throw new ServiceError({
+      code: "RESOURCE_NOT_FOUND",
+      message: "Không tìm thấy hồ sơ ba mẹ.",
+      status: 404,
+      request_id: "mock-profile-not-found",
+      retryable: false,
+    });
+  }
+
+  return profile;
 }
 
 export function createMockProfileService(
@@ -36,6 +59,10 @@ export function createMockProfileService(
 
       if (scenario === "error") {
         throw new Error("The mock profile service is unavailable.");
+      }
+
+      if (!API_URL) {
+        return cloneProfile(getOwnedProfile(store));
       }
 
       try {
@@ -59,8 +86,7 @@ export function createMockProfileService(
               errorData?.detail ??
               "Không thể lấy thông tin hồ sơ ba mẹ.",
             status: response.status,
-            request_id:
-              errorData?.request_id ?? "profile-get-error",
+            request_id: errorData?.request_id ?? "profile-get-error",
             retryable: response.status >= 500,
           });
         }
@@ -99,6 +125,17 @@ export function createMockProfileService(
         throw new Error("The mock profile service is unavailable.");
       }
 
+      if (!API_URL) {
+        const current = getOwnedProfile(store);
+        const updated: ParentProfileDTO = {
+          ...current,
+          display_name: request.display_name,
+        };
+
+        store.profiles.set(updated.id, updated);
+        return cloneProfile(updated);
+      }
+
       try {
         const response = await fetch(
           `${API_URL}/profiles/${store.currentParentId}`,
@@ -123,8 +160,7 @@ export function createMockProfileService(
               errorData?.detail ??
               "Không thể cập nhật hồ sơ ba mẹ.",
             status: response.status,
-            request_id:
-              errorData?.request_id ?? "profile-update-error",
+            request_id: errorData?.request_id ?? "profile-update-error",
             retryable: response.status >= 500,
           });
         }

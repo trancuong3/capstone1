@@ -38,7 +38,7 @@ class ProfileCreate(ProfileBase):
 
 # Dùng cho PUT (Cập nhật toàn bộ hồ sơ )
 class ProfileUpdate(ProfileBase):
-    displayname: str 
+    displayname: str
 
 
 

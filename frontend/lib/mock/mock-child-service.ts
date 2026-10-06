@@ -12,7 +12,9 @@ import type { AppMockScenario } from "@/types/ui-state";
 const MOCK_DELAY_MS = 350;
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  process.env.NODE_ENV === "test"
+    ? undefined
+    : process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
 
 function waitForMock(): Promise<void> {
   if (process.env.NODE_ENV === "test") {
@@ -75,14 +77,56 @@ function validatePatch(request: ChildProfilePatchDTO): void {
   }
 }
 
-function mapChild(data: any): ChildProfileDTO {
+function getOwnedChild(store: MockAppStore, childId: string): ChildProfileDTO {
+  const child = store.children.get(childId);
+
+  if (!child || child.parent_id !== store.currentParentId) {
+    throw notFoundError();
+  }
+
+  return child;
+}
+
+function createChildId(store: MockAppStore): string {
+  const suffix = String(store.nextChildSequence).padStart(12, "0");
+  store.nextChildSequence += 1;
+  return `dddddddd-dddd-4ddd-8ddd-${suffix}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mapChild(data: unknown): ChildProfileDTO {
+  if (!isRecord(data)) {
+    throw new Error("Phản hồi hồ sơ bé không hợp lệ.");
+  }
+
+  const id = data.id ?? data.Id;
+  const parentId = data.parent_id ?? data.ParentId;
+  const alias = data.alias ?? data.Alias;
+  const grade = data.grade ?? data.Grade;
+  const settings = data.settings ?? data.Settings ?? {};
+  const createdAt = data.created_at ?? data.CreatedAt;
+
+  if (
+    typeof id !== "string" ||
+    typeof parentId !== "string" ||
+    typeof alias !== "string" ||
+    typeof grade !== "number" ||
+    !isRecord(settings) ||
+    typeof createdAt !== "string"
+  ) {
+    throw new Error("Phản hồi hồ sơ bé không hợp lệ.");
+  }
+
   return {
-    id: data.id ?? data.Id,
-    parent_id: data.parent_id ?? data.ParentId,
-    alias: data.alias ?? data.Alias,
-    grade: data.grade ?? data.Grade,
-    settings: data.settings ?? data.Settings ?? {},
-    created_at: data.created_at ?? data.CreatedAt,
+    id,
+    parent_id: parentId,
+    alias,
+    grade,
+    settings,
+    created_at: createdAt,
   };
 }
 
@@ -104,6 +148,12 @@ export function createMockChildService(
 
       if (scenario === "empty") {
         return [];
+      }
+
+      if (!API_URL) {
+        return [...store.children.values()]
+          .filter((child) => child.parent_id === store.currentParentId)
+          .map(cloneChild);
       }
 
       try {
@@ -160,22 +210,33 @@ export function createMockChildService(
 
       validateCreate(request);
 
+      if (!API_URL) {
+        const child: ChildProfileDTO = {
+          id: createChildId(store),
+          parent_id: store.currentParentId,
+          alias: request.alias.trim(),
+          grade: request.grade,
+          settings: { ...(request.settings ?? {}) },
+          created_at: new Date().toISOString(),
+        };
+
+        store.children.set(child.id, child);
+        return cloneChild(child);
+      }
+
       try {
-        const response = await fetch(
-          `${API_URL}/profiles/children`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              ParentId: store.currentParentId,
-              Alias: request.alias.trim(),
-              Grade: request.grade,
-              Settings: request.settings ?? {},
-            }),
+        const response = await fetch(`${API_URL}/profiles/children`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-        );
+          body: JSON.stringify({
+            ParentId: store.currentParentId,
+            Alias: request.alias.trim(),
+            Grade: request.grade,
+            Settings: request.settings ?? {},
+          }),
+        });
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -188,9 +249,7 @@ export function createMockChildService(
 
           const errorData = await response.json().catch(() => null);
 
-          throw new Error(
-            errorData?.detail ?? "Không thể tạo hồ sơ bé.",
-          );
+          throw new Error(errorData?.detail ?? "Không thể tạo hồ sơ bé.");
         }
 
         const data = await response.json();
@@ -220,6 +279,10 @@ export function createMockChildService(
         throw notFoundError();
       }
 
+      if (!API_URL) {
+        return cloneChild(getOwnedChild(store, childId));
+      }
+
       try {
         const response = await fetch(
           `${API_URL}/profiles/children/${childId}`,
@@ -238,9 +301,7 @@ export function createMockChildService(
 
           const errorData = await response.json().catch(() => null);
 
-          throw new Error(
-            errorData?.detail ?? "Không thể lấy hồ sơ bé.",
-          );
+          throw new Error(errorData?.detail ?? "Không thể lấy hồ sơ bé.");
         }
 
         const data = await response.json();
@@ -272,6 +333,23 @@ export function createMockChildService(
 
       validatePatch(request);
 
+      if (!API_URL) {
+        const current = getOwnedChild(store, childId);
+        const updated: ChildProfileDTO = {
+          ...current,
+          alias:
+            request.alias === undefined ? current.alias : request.alias.trim(),
+          grade: request.grade ?? current.grade,
+          settings:
+            request.settings === undefined
+              ? current.settings
+              : { ...request.settings },
+        };
+
+        store.children.set(updated.id, updated);
+        return cloneChild(updated);
+      }
+
       try {
         const response = await fetch(
           `${API_URL}/profiles/children/${childId}`,
@@ -299,9 +377,7 @@ export function createMockChildService(
 
           const errorData = await response.json().catch(() => null);
 
-          throw new Error(
-            errorData?.detail ?? "Không thể cập nhật hồ sơ bé.",
-          );
+          throw new Error(errorData?.detail ?? "Không thể cập nhật hồ sơ bé.");
         }
 
         const data = await response.json();
