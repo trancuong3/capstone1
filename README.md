@@ -1,16 +1,16 @@
 # ReadAlong Vision
 
-ReadAlong Vision là dự án hỗ trợ ba mẹ đồng hành cùng bé trong quá trình đọc sách. Repository hiện chứa giao diện web responsive được xây dựng bằng Next.js và TypeScript.
+ReadAlong Vision là dự án hỗ trợ ba mẹ đồng hành cùng bé trong quá trình đọc sách. Repository hiện chứa frontend responsive bằng Next.js/TypeScript và backend bước đầu bằng FastAPI.
 
-> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Các khu vực dữ liệu nghiệp vụ còn lại vẫn dùng typed mock services; backend, AI và xử lý media chưa được kết nối thật.
+> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. AI và xử lý media chưa được kết nối thật.
 
 ## Bắt đầu nhanh
 
 ### 1. Clone repository
 
 ```powershell
-git clone https://github.com/linhjunior205/readalong-vision.git
-cd readalong-vision
+git clone https://github.com/trancuong3/capstone1.git
+cd capstone1
 ```
 
 Vì repository đang ở chế độ private, tài khoản GitHub của bạn phải được chủ repository mời làm collaborator.
@@ -25,6 +25,8 @@ npm run dev
 ```
 
 Điền `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` vào `.env.local`. Không đưa service-role key hoặc database password vào frontend.
+
+`NEXT_PUBLIC_API_URL` là tùy chọn. Để trống biến này thì Profile/Child tiếp tục dùng typed mock; chỉ đặt, ví dụ `http://localhost:8000`, khi cần thử FastAPI cục bộ.
 
 Mở http://localhost:3000 trong trình duyệt.
 
@@ -58,6 +60,7 @@ Route Parent và Admin được bảo vệ phía server. Ứng dụng xác minh 
 ```text
 readalong-vision/
 ├── .github/              # Mẫu pull request và thiết lập GitHub
+├── backend/              # FastAPI, SQLAlchemy models và API nghiệp vụ
 ├── frontend/             # Ứng dụng Next.js
 │   ├── app/              # Routes và layouts
 │   ├── components/       # Screens và UI components
@@ -85,6 +88,17 @@ Blueprint và Coding Handoff là tài liệu bàn giao nằm ngoài repository. 
 Migration Auth phụ huynh được lưu tại `supabase/migrations/20260928144208_phase4_auth_profiles.sql`. Migration tạo signup trigger, role mặc định `parent`, quyền theo cột và RLS policy cho `profiles`.
 
 Khóa ngoại `profiles.id → auth.users.id` đang ở trạng thái `NOT VALID` có chủ ý vì database còn các profile legacy được `childprofiles` tham chiếu nhưng chưa có bản ghi `auth.users` tương ứng. Database team phải di chuyển hoặc loại bỏ dữ liệu legacy trước khi chạy `VALIDATE CONSTRAINT`; không xóa các profile này riêng lẻ.
+
+## Backend Profile API
+
+FastAPI hiện có các endpoint CRUD bước đầu cho hồ sơ phụ huynh và hồ sơ bé:
+
+- `GET/POST /profiles`
+- `GET/PUT/DELETE /profiles/{profile_id}`
+- `GET/POST /profiles/children`
+- `GET/PUT/DELETE /profiles/children/{child_id}`
+
+Frontend mặc định vẫn dùng mock services cho dữ liệu Profile/Child. Khi `NEXT_PUBLIC_API_URL` được cấu hình, adapter có thể gọi các endpoint FastAPI này. Các endpoint chưa xác minh Supabase access token, role và quyền sở hữu hồ sơ, nên chưa được xem là API đã bảo vệ hoàn chỉnh.
 
 ## Kiểm tra trước khi mở pull request
 
@@ -124,7 +138,7 @@ Xem quy trình đầy đủ trong [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Phạm vi chưa triển khai
 
-- Backend API cho dữ liệu nghiệp vụ; route guard phía server và cookie refresh proxy đã được triển khai cho luồng Auth.
+- Hoàn thiện, bảo vệ và kết nối backend API dữ liệu nghiệp vụ; Profile CRUD mới ở mức khởi đầu. Route guard phía server và cookie refresh proxy đã được triển khai cho luồng Auth frontend.
 - Hoàn tất di chuyển profile legacy và validate khóa ngoại Auth; storage và các bảng nghiệp vụ thật vẫn chưa được tích hợp vào frontend.
 - Camera/microphone processing và realtime WebSocket.
 - OCR, page matching, STT, TTS, scoring và AI thật.

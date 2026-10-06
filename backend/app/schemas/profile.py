@@ -21,6 +21,9 @@ class ChildProfileResponse(ChildProfileBase):
     CreatedAt: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class ChildProfileUpdate(BaseModel):
+    alias: str
+    grade: int
 
 # ==========================================
 # 2. SCHEMAS CHO PHỤ HUYNH (PROFILE)
@@ -32,6 +35,14 @@ class ProfileBase(BaseModel):
 
 class ProfileCreate(ProfileBase):
     pass 
+
+# Dùng cho PUT (Cập nhật toàn bộ hồ sơ )
+class ProfileUpdate(ProfileBase):
+    displayname: str
+
+
+
+
 
 class ProfileResponse(ProfileBase):
     Id: UUID

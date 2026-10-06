@@ -2,7 +2,8 @@
 
 from .profile import (
     ProfileCreate, ProfileResponse, 
-    ChildProfileCreate, ChildProfileResponse
+    ChildProfileCreate, ChildProfileResponse,
+    ChildProfileUpdate, ProfileUpdate
 )
 from .book import (
     BookCreate, BookResponse,
