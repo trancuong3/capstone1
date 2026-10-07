@@ -1,8 +1,11 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useMemo,
+  type ReactNode,
+} from "react";
 
-import { AppStoreContext } from "@/components/providers/app-store-provider";
 import type { BookService } from "@/lib/api/book-service";
 import type { ChildService } from "@/lib/api/child-service";
 import type { ComprehensionService } from "@/lib/api/comprehension-service";
@@ -15,18 +18,9 @@ import type { ReadingService } from "@/lib/api/reading-service";
 import type { ReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
 import type { SessionService } from "@/lib/api/session-service";
 import type { TutorService } from "@/lib/api/tutor-service";
-import { createMockBookService } from "@/lib/mock/mock-book-service";
-import { createMockChildService } from "@/lib/mock/mock-child-service";
-import { createMockComprehensionService } from "@/lib/mock/mock-comprehension-service";
-import { createMockDevicePermissionService } from "@/lib/mock/mock-device-permission-service";
-import { createMockDifficultWordService } from "@/lib/mock/mock-difficult-word-service";
-import { createMockPageMatchService } from "@/lib/mock/mock-page-match-service";
-import { createMockProfileService } from "@/lib/mock/mock-profile-service";
-import { createMockReportService } from "@/lib/mock/mock-report-service";
-import { createMockReadingService } from "@/lib/mock/mock-reading-service";
-import { createMockReadingSocketAdapter } from "@/lib/mock/mock-reading-socket-adapter";
-import { createMockSessionService } from "@/lib/mock/mock-session-service";
-import { createMockTutorService } from "@/lib/mock/mock-tutor-service";
+
+import { createChildService } from "@/lib/api/child-service";
+
 import type { AppMockScenario } from "@/types/ui-state";
 import type { Group5DemoState } from "@/types/reports";
 
@@ -45,61 +39,120 @@ export interface AppServices {
   tutorService: TutorService;
 }
 
-export const AppServicesContext = createContext<AppServices | null>(null);
+export const AppServicesContext =
+  createContext<AppServices | null>(null);
 
 interface AppServicesProviderProps {
-  bookScenario?: AppMockScenario;
   children: ReactNode;
+
+  /*
+   * Giữ lại các props này để tương thích
+   * với các page hiện tại của project.
+   *
+   * Chúng không được dùng để tạo Mock.
+   */
+  bookScenario?: AppMockScenario;
   difficultWordScenario?: Group5DemoState;
   reportScenario?: Group5DemoState;
-  scenario: AppMockScenario;
+  scenario?: AppMockScenario;
   sessionScenario?: Group5DemoState;
 }
 
+function createUnavailableService<T>(
+  serviceName: string,
+): T {
+  return new Proxy(
+    {},
+    {
+      get() {
+        return () => {
+          throw new Error(
+            `${serviceName} is not implemented yet.`,
+          );
+        };
+      },
+    },
+  ) as T;
+}
+
 export function AppServicesProvider({
-  bookScenario,
   children,
-  difficultWordScenario = "default",
-  reportScenario = "default",
-  scenario,
-  sessionScenario = "default",
 }: AppServicesProviderProps) {
-  const store = useContext(AppStoreContext);
+  const services = useMemo<AppServices>(
+    () => ({
+      /*
+       * ==========================================
+       * CHILD PROFILE - REAL SERVICE
+       * ==========================================
+       */
+      childService: createChildService(),
 
-  if (!store) {
-    throw new Error(
-      "AppServicesProvider must be used inside AppStoreProvider.",
-    );
-  }
+      /*
+       * ==========================================
+       * CÁC SERVICE KHÁC
+       * ==========================================
+       *
+       * Không dùng Mock.
+       * Chưa có implementation thật trong phạm vi
+       * Child Profile.
+       */
+      bookService:
+        createUnavailableService<BookService>(
+          "BookService",
+        ),
 
-  const services = useMemo<AppServices>(() => {
-    const bookService = createMockBookService(bookScenario ?? scenario);
+      comprehensionService:
+        createUnavailableService<ComprehensionService>(
+          "ComprehensionService",
+        ),
 
-    return {
-      bookService,
-      childService: createMockChildService(store, scenario),
-      comprehensionService: createMockComprehensionService(),
-      devicePermissionService: createMockDevicePermissionService(),
-      difficultWordService: createMockDifficultWordService(
-        store,
-        difficultWordScenario,
-      ),
-      pageMatchService: createMockPageMatchService(),
-      profileService: createMockProfileService(store, scenario),
-      reportService: createMockReportService(store, reportScenario),
-      readingService: createMockReadingService(store, bookService),
-      readingSocketAdapter: createMockReadingSocketAdapter(),
-      sessionService: createMockSessionService(store, sessionScenario),
-      tutorService: createMockTutorService(),
-    };
-  }, [
-    bookScenario,
-    difficultWordScenario,
-    reportScenario,
-    scenario,
-    sessionScenario,
-    store,
-  ]);
+      devicePermissionService:
+        createUnavailableService<DevicePermissionService>(
+          "DevicePermissionService",
+        ),
+
+      difficultWordService:
+        createUnavailableService<DifficultWordService>(
+          "DifficultWordService",
+        ),
+
+      pageMatchService:
+        createUnavailableService<PageMatchService>(
+          "PageMatchService",
+        ),
+
+      profileService:
+        createUnavailableService<ProfileService>(
+          "ProfileService",
+        ),
+
+      reportService:
+        createUnavailableService<ReportService>(
+          "ReportService",
+        ),
+
+      readingService:
+        createUnavailableService<ReadingService>(
+          "ReadingService",
+        ),
+
+      readingSocketAdapter:
+        createUnavailableService<ReadingSocketAdapter>(
+          "ReadingSocketAdapter",
+        ),
+
+      sessionService:
+        createUnavailableService<SessionService>(
+          "SessionService",
+        ),
+
+      tutorService:
+        createUnavailableService<TutorService>(
+          "TutorService",
+        ),
+    }),
+    [],
+  );
 
   return (
     <AppServicesContext.Provider value={services}>

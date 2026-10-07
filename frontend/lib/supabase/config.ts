@@ -3,7 +3,10 @@ export interface SupabasePublicConfig {
   publishableKey: string;
 }
 
-function requireEnvironmentValue(name: string, value: string | undefined) {
+function requireEnvironmentValue(
+  name: string,
+  value: string | undefined,
+): string {
   const normalizedValue = value?.trim();
 
   if (!normalizedValue) {
@@ -24,4 +27,11 @@ export function getSupabasePublicConfig(): SupabasePublicConfig {
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     ),
   };
+}
+
+export function getApiBaseUrl(): string {
+  return requireEnvironmentValue(
+    "NEXT_PUBLIC_API_URL",
+    process.env.NEXT_PUBLIC_API_URL,
+  ).replace(/\/+$/, "");
 }

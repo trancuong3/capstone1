@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowLeft, BookOpenText, RefreshCw, UserRoundX } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpenText,
+  RefreshCw,
+  Trash2,
+  UserRoundX,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -8,18 +14,33 @@ import { ChildProfileForm } from "@/components/children/child-profile-form";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
 import { ServiceError } from "@/lib/api/service-error";
-import type { ChildProfileCreateDTO, ChildProfileDTO } from "@/types/child";
+import type {
+  ChildProfileCreateDTO,
+  ChildProfileDTO,
+} from "@/types/child";
 
 type ChildLoadState =
-  | { status: "create-ready" }
-  | { status: "loading" }
-  | { status: "ready"; child: ChildProfileDTO }
-  | { status: "not-found" }
-  | { status: "error" };
+  | {
+      status: "create-ready";
+    }
+  | {
+      status: "loading";
+    }
+  | {
+      status: "ready";
+      child: ChildProfileDTO;
+    }
+  | {
+      status: "not-found";
+    }
+  | {
+      status: "error";
+    };
 
 interface ChildProfileScreenProps {
   childId?: string;
@@ -36,30 +57,63 @@ export function ChildProfileScreen({
 }: ChildProfileScreenProps) {
   const childService = useChildService();
   const router = useRouter();
+
   const [requestKey, setRequestKey] = useState(0);
-  const [loadState, setLoadState] = useState<ChildLoadState>(() =>
-    mode === "create" ? { status: "create-ready" } : { status: "loading" },
-  );
+
+  const [loadState, setLoadState] =
+    useState<ChildLoadState>(
+      mode === "create"
+        ? {
+            status: "create-ready",
+          }
+        : {
+            status: "loading",
+          },
+    );
+
   const [saveNotice, setSaveNotice] = useState<
     "created" | "updated" | "error" | null
-  >(hasCreatedNotice ? "created" : null);
+  >(
+    hasCreatedNotice
+      ? "created"
+      : null,
+  );
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] =
+    useState(false);
+
+  const [isDeleting, setIsDeleting] =
+    useState(false);
+
+  const [deleteError, setDeleteError] =
+    useState(false);
 
   useEffect(() => {
     if (mode === "create" || !childId) {
       return;
     }
 
-    let isActive = true;
     const requestedChildId = childId;
 
+    let isActive = true;
+
     async function loadChild() {
-      setLoadState({ status: "loading" });
+      setLoadState({
+        status: "loading",
+      });
 
       try {
-        const child = await childService.get(requestedChildId);
-        if (isActive) {
-          setLoadState({ status: "ready", child });
+        const child =
+          await childService.get(requestedChildId);
+
+        if (!isActive) {
+          return;
         }
+
+        setLoadState({
+          status: "ready",
+          child,
+        });
       } catch (error) {
         if (!isActive) {
           return;
@@ -69,31 +123,56 @@ export function ChildProfileScreen({
           error instanceof ServiceError &&
           error.code === "RESOURCE_NOT_FOUND"
         ) {
-          setLoadState({ status: "not-found" });
+          setLoadState({
+            status: "not-found",
+          });
+
           return;
         }
 
-        setLoadState({ status: "error" });
+        setLoadState({
+          status: "error",
+        });
       }
     }
 
     void loadChild();
+
     return () => {
       isActive = false;
     };
-  }, [childId, childService, mode, requestKey]);
+  }, [
+    childId,
+    childService,
+    mode,
+    requestKey,
+  ]);
 
-  async function handleSubmit(values: ChildProfileCreateDTO) {
+  async function handleSubmit(
+    values: ChildProfileCreateDTO,
+  ) {
     setSaveNotice(null);
+    setDeleteError(false);
 
     try {
       if (mode === "create") {
-        const child = await childService.create(values);
+        const child =
+          await childService.create(values);
+
         if (fromRegistration) {
-          router.push(`/books?childId=${encodeURIComponent(child.id)}`);
+          router.push(
+            `/books?childId=${encodeURIComponent(
+              child.id,
+            )}`,
+          );
         } else {
-          router.push(`/children/${encodeURIComponent(child.id)}?created=1`);
+          router.push(
+            `/children/${encodeURIComponent(
+              child.id,
+            )}?created=1`,
+          );
         }
+
         return;
       }
 
@@ -102,15 +181,30 @@ export function ChildProfileScreen({
         return;
       }
 
-      const child = await childService.update(childId, values);
-      setLoadState({ status: "ready", child });
+      const child =
+        await childService.update(
+          childId,
+          {
+            alias: values.alias,
+            grade: values.grade,
+          },
+        );
+
+      setLoadState({
+        status: "ready",
+        child,
+      });
+
       setSaveNotice("updated");
     } catch (error) {
       if (
         error instanceof ServiceError &&
         error.code === "RESOURCE_NOT_FOUND"
       ) {
-        setLoadState({ status: "not-found" });
+        setLoadState({
+          status: "not-found",
+        });
+
         return;
       }
 
@@ -118,13 +212,57 @@ export function ChildProfileScreen({
     }
   }
 
+  async function handleDelete() {
+    if (
+      !childId ||
+      loadState.status !== "ready"
+    ) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError(false);
+
+    try {
+      await childService.delete(childId);
+
+      setIsDeleteModalOpen(false);
+
+      router.replace("/children");
+    } catch (error) {
+      setIsDeleting(false);
+
+      if (
+        error instanceof ServiceError &&
+        error.code === "RESOURCE_NOT_FOUND"
+      ) {
+        setIsDeleteModalOpen(false);
+
+        setLoadState({
+          status: "not-found",
+        });
+
+        return;
+      }
+
+      setDeleteError(true);
+    }
+  }
+
   if (loadState.status === "loading") {
     return (
       <section className="mx-auto w-full max-w-[640px]">
-        <Card aria-busy="true" aria-label="Đang tải hồ sơ bé">
-          <span className="sr-only" role="status">
+        <Card
+          aria-busy="true"
+          aria-label="Đang tải hồ sơ bé"
+        >
+          <span
+            className="sr-only"
+            role="status"
+          >
             Đang tải…
           </span>
+
           <Skeleton className="h-11 w-3/5" />
           <Skeleton className="h-7 w-4/5" />
           <Skeleton className="h-24 w-full" />
@@ -146,13 +284,19 @@ export function ChildProfileScreen({
               href="/children"
               variant="secondary"
             >
-              <ArrowLeft aria-hidden="true" className="size-5" />
+              <ArrowLeft
+                aria-hidden="true"
+                className="size-5"
+              />
               Về danh sách hồ sơ
             </ButtonLink>
           }
           description="Hồ sơ này không tồn tại hoặc không thuộc tài khoản hiện tại."
           icon={
-            <UserRoundX aria-hidden="true" className="size-10 text-primary" />
+            <UserRoundX
+              aria-hidden="true"
+              className="size-10 text-primary"
+            />
           }
           title="Không tìm thấy hồ sơ bé"
         />
@@ -163,82 +307,201 @@ export function ChildProfileScreen({
   if (loadState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-        <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
+        <StatusMessage
+          title="Chưa tải được hồ sơ bé"
+          tone="error"
+        >
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
+
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
-          onClick={() => setRequestKey((key) => key + 1)}
+          onClick={() =>
+            setRequestKey(
+              (key) => key + 1,
+            )
+          }
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
+          <RefreshCw
+            aria-hidden="true"
+            className="size-5"
+          />
           Thử lại
         </Button>
       </section>
     );
   }
 
-  const child = loadState.status === "ready" ? loadState.child : null;
-  const title = fromRegistration
-    ? "Tài khoản đã sẵn sàng"
-    : mode === "create"
-      ? "Tạo hồ sơ bé"
-      : `Hồ sơ của ${child?.alias ?? "bé"}`;
-  const description = fromRegistration
-    ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
-    : mode === "create"
-      ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
-      : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
+  const child =
+    loadState.status === "ready"
+      ? loadState.child
+      : null;
+
+  const title =
+    fromRegistration
+      ? "Tài khoản đã sẵn sàng"
+      : mode === "create"
+        ? "Tạo hồ sơ bé"
+        : `Hồ sơ của ${child?.alias ?? "bé"}`;
+
+  const description =
+    fromRegistration
+      ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
+      : mode === "create"
+        ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
+        : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
 
   return (
-    <section className="mx-auto w-full max-w-[640px]">
-      <Card>
-        <div>
-          <h1 className="text-heading font-extrabold text-ink">{title}</h1>
-          <p className="mt-4 text-body text-muted sm:mt-6">{description}</p>
-        </div>
-        {saveNotice === "created" ? (
-          <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
-        ) : null}
-        {saveNotice === "updated" ? (
-          <StatusMessage tone="success">
-            Thay đổi của hồ sơ bé đã được lưu.
-          </StatusMessage>
-        ) : null}
-        {saveNotice === "error" ? (
-          <StatusMessage tone="error">
-            Chưa thể lưu hồ sơ. Ba mẹ vui lòng thử lại sau.
-          </StatusMessage>
-        ) : null}
-        <ChildProfileForm
-          defaultValues={
-            mode === "edit" && child
-              ? {
-                  alias: child.alias,
-                  grade: child.grade,
+    <>
+      <section className="mx-auto w-full max-w-[640px]">
+        <Card>
+          <div>
+            <h1 className="text-heading font-extrabold text-ink">
+              {title}
+            </h1>
+
+            <p className="mt-4 text-body text-muted sm:mt-6">
+              {description}
+            </p>
+          </div>
+
+          {saveNotice === "created" ? (
+            <StatusMessage tone="success">
+              Hồ sơ bé đã được tạo.
+            </StatusMessage>
+          ) : null}
+
+          {saveNotice === "updated" ? (
+            <StatusMessage tone="success">
+              Thay đổi của hồ sơ bé đã được lưu.
+            </StatusMessage>
+          ) : null}
+
+          {saveNotice === "error" ? (
+            <StatusMessage tone="error">
+              Chưa thể lưu hồ sơ. Ba mẹ vui lòng thử lại sau.
+            </StatusMessage>
+          ) : null}
+
+          {deleteError ? (
+            <StatusMessage tone="error">
+              Chưa thể xóa hồ sơ. Ba mẹ vui lòng thử lại sau.
+            </StatusMessage>
+          ) : null}
+
+          <ChildProfileForm
+            defaultValues={
+              mode === "edit" && child
+                ? {
+                    alias: child.alias,
+                    grade: child.grade,
+                  }
+                : undefined
+            }
+            mode={mode}
+            onSubmit={handleSubmit}
+            submitLabel={
+              fromRegistration
+                ? "Lưu và chọn sách"
+                : undefined
+            }
+          />
+
+          {mode === "edit" && child ? (
+            <>
+              <ButtonLink
+                href={`/books?childId=${encodeURIComponent(
+                  child.id,
+                )}`}
+                variant="secondary"
+              >
+                <BookOpenText
+                  aria-hidden="true"
+                  className="size-5"
+                />
+                Chọn sách cho {child.alias}
+              </ButtonLink>
+
+              <Button
+                onClick={() => {
+                  setDeleteError(false);
+                  setIsDeleteModalOpen(true);
+                }}
+                variant="quiet"
+              >
+                <Trash2
+                  aria-hidden="true"
+                  className="size-5"
+                />
+                Xóa hồ sơ bé
+              </Button>
+            </>
+          ) : null}
+
+          {!fromRegistration ? (
+            <ButtonLink
+              href="/children"
+              variant="quiet"
+            >
+              <ArrowLeft
+                aria-hidden="true"
+                className="size-5"
+              />
+              Về danh sách hồ sơ
+            </ButtonLink>
+          ) : null}
+        </Card>
+      </section>
+
+      {child ? (
+        <Modal
+          isOpen={isDeleteModalOpen}
+          onClose={() => {
+            if (!isDeleting) {
+              setIsDeleteModalOpen(false);
+            }
+          }}
+          title="Xóa hồ sơ bé?"
+        >
+          <div className="flex flex-col gap-6">
+            <p className="text-body text-ink">
+              Bạn có chắc muốn xóa hồ sơ của{" "}
+              <strong>{child.alias}</strong>?
+              <br />
+              Thao tác này không thể hoàn tác.
+            </p>
+
+            {deleteError ? (
+              <StatusMessage tone="error">
+                Chưa thể xóa hồ sơ. Ba mẹ vui lòng thử lại sau.
+              </StatusMessage>
+            ) : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                disabled={isDeleting}
+                onClick={() =>
+                  setIsDeleteModalOpen(false)
                 }
-              : undefined
-          }
-          mode={mode}
-          onSubmit={handleSubmit}
-          submitLabel={fromRegistration ? "Lưu và chọn sách" : undefined}
-        />
-        {mode === "edit" && child ? (
-          <ButtonLink
-            href={`/books?childId=${encodeURIComponent(child.id)}`}
-            variant="secondary"
-          >
-            <BookOpenText aria-hidden="true" className="size-5" />
-            Chọn sách cho {child.alias}
-          </ButtonLink>
-        ) : null}
-        {!fromRegistration ? (
-          <ButtonLink href="/children" variant="quiet">
-            <ArrowLeft aria-hidden="true" className="size-5" />
-            Về danh sách hồ sơ
-          </ButtonLink>
-        ) : null}
-      </Card>
-    </section>
+                variant="secondary"
+              >
+                Hủy
+              </Button>
+
+              <Button
+                isLoading={isDeleting}
+                onClick={() =>
+                  void handleDelete()
+                }
+                variant="primary"
+              >
+                Xóa hồ sơ
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </>
   );
 }

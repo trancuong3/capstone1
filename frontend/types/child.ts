@@ -18,9 +18,8 @@ export interface ChildProfileCreateDTO {
 }
 
 export interface ChildProfilePatchDTO {
-  alias?: string;
-  grade?: number;
-  settings?: Record<string, unknown>;
+  alias: string;
+  grade: number;
 }
 
 export function isChildGrade(value: number): boolean {
