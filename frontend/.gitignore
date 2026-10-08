@@ -25,3 +25,11 @@ Desktop.ini
 *.swp
 *.swo
 *~
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Keep example environment files
+!.env.example
+!**/.env.example

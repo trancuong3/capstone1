@@ -1,27 +1,47 @@
 # file: backend/app/schemas/__init__.py
 
 from .profile import (
-    ProfileCreate, ProfileResponse, 
-    ChildProfileCreate, ChildProfileResponse,
-    ChildProfileUpdate, ProfileUpdate
+    ProfileCreate,
+    ProfileResponse,
+    ParentProfileResponse,
+    ChildProfileCreate,
+    ChildProfileResponse,
+    ChildProfileUpdate,
+    ProfileUpdate,
 )
+
 from .book import (
-    BookCreate, BookResponse,
-    BookPageCreate, BookPageResponse,
-    PageRevisionCreate, PageRevisionResponse,
-    PageRevisionWordCreate, PageRevisionWordResponse
+    BookCreate,
+    BookResponse,
+    BookPageCreate,
+    BookPageResponse,
+    PageRevisionCreate,
+    PageRevisionResponse,
+    PageRevisionWordCreate,
+    PageRevisionWordResponse,
 )
+
 from .reading import (
-    ReadingSessionCreate, ReadingSessionResponse,
-    ReadingEventCreate, ReadingEventResponse,
-    FluencyAssessmentCreate, FluencyAssessmentResponse
+    ReadingSessionCreate,
+    ReadingSessionResponse,
+    ReadingEventCreate,
+    ReadingEventResponse,
+    FluencyAssessmentCreate,
+    FluencyAssessmentResponse,
 )
+
 from .comprehension import (
-    ComprehensionQuestionCreate, ComprehensionQuestionResponse,
-    ComprehensionAnswerCreate, ComprehensionAnswerResponse
+    ComprehensionQuestionCreate,
+    ComprehensionQuestionResponse,
+    ComprehensionAnswerCreate,
+    ComprehensionAnswerResponse,
 )
+
 from .system import (
-    ProgressReportCreate, ProgressReportResponse,
-    ConsentRecordCreate, ConsentRecordResponse,
-    AuditLogCreate, AuditLogResponse
+    ProgressReportCreate,
+    ProgressReportResponse,
+    ConsentRecordCreate,
+    ConsentRecordResponse,
+    AuditLogCreate,
+    AuditLogResponse,
 )

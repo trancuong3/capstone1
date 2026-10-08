@@ -1,27 +1,24 @@
 "use client";
 
-import { createContext, useState, type ReactNode } from "react";
-
 import {
-  createMockAppStore,
-  type MockAppStore,
-} from "@/lib/mock/mock-app-store";
+  createContext,
+  type ReactNode,
+} from "react";
 
-export const AppStoreContext = createContext<MockAppStore | null>(null);
+export type AppStore = Record<string, never>;
+
+export const AppStoreContext =
+  createContext<AppStore | null>(null);
 
 interface AppStoreProviderProps {
   children: ReactNode;
-  initialStore?: MockAppStore;
 }
 
 export function AppStoreProvider({
   children,
-  initialStore,
 }: AppStoreProviderProps) {
-  const [store] = useState(() => initialStore ?? createMockAppStore());
-
   return (
-    <AppStoreContext.Provider value={store}>
+    <AppStoreContext.Provider value={null}>
       {children}
     </AppStoreContext.Provider>
   );

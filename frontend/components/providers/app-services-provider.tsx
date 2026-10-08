@@ -20,6 +20,7 @@ import type { SessionService } from "@/lib/api/session-service";
 import type { TutorService } from "@/lib/api/tutor-service";
 
 import { createChildService } from "@/lib/api/child-service";
+import { createProfileService } from "@/lib/api/profile-service";
 
 import type { AppMockScenario } from "@/types/ui-state";
 import type { Group5DemoState } from "@/types/reports";
@@ -80,21 +81,22 @@ export function AppServicesProvider({
 }: AppServicesProviderProps) {
   const services = useMemo<AppServices>(
     () => ({
-      /*
-       * ==========================================
+      /* ==========================================
        * CHILD PROFILE - REAL SERVICE
-       * ==========================================
-       */
+       * ========================================== */
       childService: createChildService(),
 
-      /*
-       * ==========================================
+      /* ==========================================
+       * PARENT PROFILE - REAL SERVICE
+       * ========================================== */
+      profileService: createProfileService(),
+
+      /* ==========================================
        * CÁC SERVICE KHÁC
        * ==========================================
        *
-       * Không dùng Mock.
-       * Chưa có implementation thật trong phạm vi
-       * Child Profile.
+       * Chưa triển khai trong phạm vi Dashboard
+       * hiện tại nên vẫn giữ unavailable service.
        */
       bookService:
         createUnavailableService<BookService>(
@@ -119,11 +121,6 @@ export function AppServicesProvider({
       pageMatchService:
         createUnavailableService<PageMatchService>(
           "PageMatchService",
-        ),
-
-      profileService:
-        createUnavailableService<ProfileService>(
-          "ProfileService",
         ),
 
       reportService:

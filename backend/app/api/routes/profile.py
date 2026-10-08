@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -10,29 +10,35 @@ from app.models import Profile, ChildProfile
 from app.schemas import (
     ProfileResponse,
     ProfileCreate,
+    ParentProfileResponse,
     ChildProfileResponse,
     ChildProfileCreate,
     ChildProfileUpdate,
     ProfileUpdate,
 )
 
-
-# ==========================================
-# CHILD PROFILE ERRORS
-# ==========================================
+# =========================================================
+# ERRORS
+# =========================================================
 
 class ChildProfileNotFoundError(Exception):
     """
     Child profile không tồn tại hoặc không thuộc
     parent hiện tại.
     """
-
     pass
 
 
-# ==========================================
+class ProfileNotFoundError(Exception):
+    """
+    Parent profile không tồn tại.
+    """
+    pass
+
+
+# =========================================================
 # CHILD PROFILE REPOSITORY
-# ==========================================
+# =========================================================
 
 class ChildProfileRepository:
     """
@@ -45,14 +51,7 @@ class ChildProfileRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def list_by_parent(
-        self,
-        parent_id: UUID,
-    ):
-        """
-        Lấy tất cả child profile thuộc parent.
-        """
-
+    async def list_by_parent(self, parent_id: UUID):
         result = await self.db.execute(
             select(ChildProfile)
             .where(
@@ -70,11 +69,6 @@ class ChildProfileRepository:
         child_id: UUID,
         parent_id: UUID,
     ):
-        """
-        Lấy một child profile đồng thời kiểm tra ownership
-        thông qua child_id + parent_id.
-        """
-
         result = await self.db.execute(
             select(ChildProfile)
             .where(
@@ -89,10 +83,6 @@ class ChildProfileRepository:
         self,
         child: ChildProfile,
     ):
-        """
-        INSERT child profile vào Database.
-        """
-
         self.db.add(child)
 
         await self.db.commit()
@@ -104,10 +94,6 @@ class ChildProfileRepository:
         self,
         child: ChildProfile,
     ):
-        """
-        Lưu thay đổi Child Profile.
-        """
-
         await self.db.commit()
         await self.db.refresh(child)
 
@@ -117,23 +103,20 @@ class ChildProfileRepository:
         self,
         child: ChildProfile,
     ):
-        """
-        Xóa Child Profile khỏi Database.
-        """
-
         await self.db.delete(child)
+
         await self.db.commit()
 
 
-# ==========================================
+# =========================================================
 # CHILD PROFILE SERVICE
-# ==========================================
+# =========================================================
 
 class ChildProfileService:
     """
     Service xử lý business logic cho Child Profile.
 
-    Service không thao tác Database trực tiếp.
+    Service không truy cập Database trực tiếp.
     """
 
     def __init__(
@@ -146,10 +129,6 @@ class ChildProfileService:
         self,
         parent_id: UUID,
     ):
-        """
-        Lấy danh sách child của parent hiện tại.
-        """
-
         return await self.repository.list_by_parent(
             parent_id
         )
@@ -159,13 +138,6 @@ class ChildProfileService:
         parent_id: UUID,
         child_in: ChildProfileCreate,
     ):
-        """
-        Tạo Child Profile.
-
-        parent_id được lấy từ authenticated user,
-        không lấy từ request body.
-        """
-
         child = ChildProfile(
             ParentId=parent_id,
             Alias=child_in.alias,
@@ -173,17 +145,15 @@ class ChildProfileService:
             Settings=child_in.settings,
         )
 
-        return await self.repository.create(child)
+        return await self.repository.create(
+            child
+        )
 
     async def get_child(
         self,
         child_id: UUID,
         parent_id: UUID,
     ):
-        """
-        Lấy Child Profile thuộc parent hiện tại.
-        """
-
         child = await self.repository.get_by_id_and_parent(
             child_id,
             parent_id,
@@ -200,10 +170,6 @@ class ChildProfileService:
         parent_id: UUID,
         data: ChildProfileUpdate,
     ):
-        """
-        Update alias và grade của Child Profile.
-        """
-
         child = await self.repository.get_by_id_and_parent(
             child_id,
             parent_id,
@@ -215,17 +181,15 @@ class ChildProfileService:
         child.Alias = data.alias
         child.Grade = data.grade
 
-        return await self.repository.update(child)
+        return await self.repository.update(
+            child
+        )
 
     async def delete_child(
         self,
         child_id: UUID,
         parent_id: UUID,
     ):
-        """
-        Delete Child Profile thuộc parent hiện tại.
-        """
-
         child = await self.repository.get_by_id_and_parent(
             child_id,
             parent_id,
@@ -234,19 +198,84 @@ class ChildProfileService:
         if child is None:
             raise ChildProfileNotFoundError()
 
-        await self.repository.delete(child)
+        await self.repository.delete(
+            child
+        )
 
 
-# ==========================================
+# =========================================================
+# PARENT PROFILE REPOSITORY
+# =========================================================
+
+class ProfileRepository:
+    """
+    Repository chịu trách nhiệm truy cập Database
+    cho Parent Profile.
+
+    Không chứa business logic.
+    """
+
+    def __init__(
+        self,
+        db: AsyncSession,
+    ):
+        self.db = db
+
+    async def get_by_id(
+        self,
+        profile_id: UUID,
+    ):
+        result = await self.db.execute(
+            select(Profile)
+            .where(
+                Profile.Id == profile_id
+            )
+        )
+
+        return result.scalar_one_or_none()
+
+
+# =========================================================
+# PARENT PROFILE SERVICE
+# =========================================================
+
+class ProfileService:
+    """
+    Service xử lý business logic cho Parent Profile.
+
+    Service không truy cập Database trực tiếp.
+    """
+
+    def __init__(
+        self,
+        repository: ProfileRepository,
+    ):
+        self.repository = repository
+
+    async def get_current_profile(
+        self,
+        parent_id: UUID,
+    ):
+        profile = await self.repository.get_by_id(
+            parent_id
+        )
+
+        if profile is None:
+            raise ProfileNotFoundError()
+
+        return profile
+
+
+# =========================================================
 # ROUTER
-# ==========================================
+# =========================================================
 
 router = APIRouter()
 
 
-# ==========================================
-# CÁC API CHO CÁC BÉ
-# ==========================================
+# =========================================================
+# CHILD PROFILE APIs
+# =========================================================
 
 @router.get(
     "/children",
@@ -259,8 +288,7 @@ async def get_all_children(
     ),
 ):
     """
-    Lấy danh sách Child Profile của
-    authenticated parent.
+    Lấy danh sách tất cả child của parent hiện tại.
     """
 
     repository = ChildProfileRepository(db)
@@ -274,6 +302,7 @@ async def get_all_children(
 @router.post(
     "/children",
     response_model=ChildProfileResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_child(
     child_in: ChildProfileCreate,
@@ -284,8 +313,6 @@ async def create_child(
 ):
     """
     Tạo Child Profile cho authenticated parent.
-
-    parent_id không được lấy từ request body.
     """
 
     repository = ChildProfileRepository(db)
@@ -309,10 +336,7 @@ async def get_child(
     ),
 ):
     """
-    Lấy Child Profile.
-
-    Chỉ cho phép truy cập Child Profile
-    thuộc authenticated parent.
+    Lấy một Child Profile thuộc parent hiện tại.
     """
 
     repository = ChildProfileRepository(db)
@@ -340,17 +364,14 @@ async def get_child(
 )
 async def update_child(
     child_id: UUID,
-    data: ChildProfileUpdate,
+    child_in: ChildProfileUpdate,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
         get_current_parent_id
     ),
 ):
     """
-    Cập nhật Child Profile.
-
-    Chỉ cho phép sửa Child Profile
-    thuộc authenticated parent.
+    Cập nhật Child Profile thuộc parent hiện tại.
     """
 
     repository = ChildProfileRepository(db)
@@ -360,7 +381,7 @@ async def update_child(
         return await service.update_child(
             child_id,
             current_parent_id,
-            data,
+            child_in,
         )
 
     except ChildProfileNotFoundError:
@@ -385,10 +406,7 @@ async def delete_child(
     ),
 ):
     """
-    Xóa Child Profile.
-
-    Chỉ cho phép xóa Child Profile
-    thuộc authenticated parent.
+    Xóa Child Profile thuộc parent hiện tại.
     """
 
     repository = ChildProfileRepository(db)
@@ -409,14 +427,55 @@ async def delete_child(
             },
         )
 
-    return Response(
-        status_code=status.HTTP_204_NO_CONTENT
+
+# =========================================================
+# PARENT PROFILE APIs
+# =========================================================
+
+
+@router.get(
+    "/me",
+    response_model=ParentProfileResponse,
+)
+async def get_current_profile(
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(
+        get_current_parent_id
+    ),
+):
+    """
+    Lấy Parent Profile của authenticated parent.
+
+    parent_id được lấy từ Supabase access token,
+    không lấy từ Frontend request.
+    """
+
+    repository = ProfileRepository(db)
+    service = ProfileService(repository)
+
+    try:
+        profile = await service.get_current_profile(
+            current_parent_id
+        )
+
+    except ProfileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Profile not found",
+            },
+        )
+
+    return ParentProfileResponse.model_validate(
+        profile,
+        from_attributes=True,
     )
 
 
-# ==========================================
-# CÁC API CHO PHỤ HUYNH
-# ==========================================
+# =========================================================
+# GET ALL PROFILES
+# =========================================================
 
 @router.get(
     "/",
@@ -426,8 +485,9 @@ async def get_profiles(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Lấy danh sách tất cả Phụ huynh
-    kèm theo hồ sơ các bé.
+    Lấy tất cả Parent Profiles.
+
+    API này giữ nguyên từ implementation hiện tại.
     """
 
     query = (
@@ -439,8 +499,17 @@ async def get_profiles(
 
     result = await db.execute(query)
 
-    return result.scalars().unique().all()
+    return (
+        result
+        .scalars()
+        .unique()
+        .all()
+    )
 
+
+# =========================================================
+# CREATE PROFILE
+# =========================================================
 
 @router.post(
     "/",
@@ -451,7 +520,9 @@ async def create_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Tạo mới một hồ sơ Phụ huynh.
+    Tạo Parent Profile.
+
+    API này giữ nguyên implementation hiện tại.
     """
 
     new_profile = Profile(
@@ -477,9 +548,9 @@ async def create_profile(
     return result.scalar_one()
 
 
-# ==========================================
+# =========================================================
 # GET PROFILE BY ID
-# ==========================================
+# =========================================================
 
 @router.get(
     "/{profile_id}",
@@ -490,7 +561,9 @@ async def get_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Lấy Hồ sơ phụ huynh theo ID.
+    Lấy Profile theo ID.
+
+    Route /me phải được khai báo phía trên route này.
     """
 
     query = (
@@ -516,9 +589,9 @@ async def get_profile(
     return profile
 
 
-# ==========================================
+# =========================================================
 # UPDATE PROFILE
-# ==========================================
+# =========================================================
 
 @router.put(
     "/{profile_id}",
@@ -530,7 +603,7 @@ async def update_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Cập nhật Hồ sơ phụ huynh.
+    Cập nhật Parent Profile.
     """
 
     result = await db.execute(
@@ -548,7 +621,7 @@ async def update_profile(
             detail="Profile not found",
         )
 
-    profile.DisplayName = profile_in.DisplayName
+    profile.DisplayName = profile_in.displayname
 
     await db.commit()
 
@@ -567,19 +640,19 @@ async def update_profile(
     return profile
 
 
-# ==========================================
+# =========================================================
 # DELETE PROFILE
-# ==========================================
+# =========================================================
 
 @router.delete(
-    "/{profile_id}"
+    "/{profile_id}",
 )
 async def delete_profile(
-    profile_id: str,
+    profile_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Xóa Hồ sơ phụ huynh.
+    Xóa Parent Profile.
     """
 
     result = await db.execute(
@@ -598,6 +671,7 @@ async def delete_profile(
         )
 
     await db.delete(profile)
+
     await db.commit()
 
     return {
