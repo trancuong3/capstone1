@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReportServices } from "@/hooks/use-report-services";
+import { isServiceError } from "@/lib/api/service-error";
 import type { DifficultWordDTO } from "@/types/reports";
 
 interface DifficultWordItemProps {
@@ -28,8 +29,12 @@ export function DifficultWordItem({ childId, word }: DifficultWordItemProps) {
         word.normalized_word,
       );
       setMessage(result.message);
-    } catch {
-      setMessage("Chưa thể mở phần luyện từ. Ba mẹ vui lòng thử lại.");
+    } catch (error) {
+      setMessage(
+        isServiceError(error) && error.status === 501
+          ? "Chức năng luyện từ chưa sẵn sàng. Chưa phát âm thanh hoặc thêm bằng chứng."
+          : "Chưa thể mở phần luyện từ. Ba mẹ vui lòng thử lại.",
+      );
     } finally {
       setIsPracticing(false);
     }
@@ -69,8 +74,7 @@ export function DifficultWordItem({ childId, word }: DifficultWordItemProps) {
       </div>
       {message ? (
         <StatusMessage className="mt-5" title="Gợi ý luyện tập">
-          {message} Đây là mô phỏng chữ, không phát TTS thật và không thêm bằng
-          chứng.
+          {message}
         </StatusMessage>
       ) : null}
     </article>

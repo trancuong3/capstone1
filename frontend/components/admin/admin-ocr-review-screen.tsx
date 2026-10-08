@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft, RotateCcw } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,41 +12,15 @@ import {
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
-import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
-import { canAdminReprocessRevision } from "@/lib/utils/admin-revision";
 import type {
   AdminBookDTO,
   AdminPageImageUI,
   AdminPageRevisionDetailDTO,
   AdminRevisionSummaryUI,
-  AdminRevisionWordDTO,
 } from "@/types/admin";
-
-function wordsFromText(
-  text: string,
-  existing: readonly AdminRevisionWordDTO[],
-): readonly AdminRevisionWordDTO[] {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word, index) => ({
-      word_index: index,
-      line_index: 0,
-      text: word,
-      normalized_text: word.normalize("NFC").toLocaleLowerCase("vi"),
-      bbox: existing[index]?.bbox ?? [
-        0.08 + (index % 5) * 0.17,
-        0.2 + Math.floor(index / 5) * 0.08,
-        0.14,
-        0.06,
-      ],
-      ocr_confidence: existing[index]?.ocr_confidence ?? null,
-    }));
-}
 
 export function AdminOcrReviewScreen({
   bookId,
@@ -62,18 +36,10 @@ export function AdminOcrReviewScreen({
     readonly AdminRevisionSummaryUI[] | null
   >(null);
   const [detail, setDetail] = useState<AdminPageRevisionDetailDTO | null>(null);
-  const [text, setText] = useState("");
-  const [error, setError] = useState<"not-found" | "safe" | null>(null);
-  const [notice, setNotice] = useState<{
-    tone: "success" | "error" | "info";
-    message: string;
-  } | null>(null);
-  const [busy, setBusy] = useState<"save" | "verify" | "reprocess" | null>(
-    null,
-  );
-  const [dialog, setDialog] = useState<
-    "verify" | "reprocess" | "lifecycle" | null
+  const [error, setError] = useState<
+    "not-found" | "unavailable" | "safe" | null
   >(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
@@ -91,6 +57,12 @@ export function AdminOcrReviewScreen({
     if (!mountedRef.current) return;
     const requestId = ++requestIdRef.current;
     setError(null);
+    setBook(null);
+    setImage(null);
+    setHistory(null);
+    setDetail(null);
+    setNotice(null);
+    revisionChoiceRequestIdRef.current += 1;
     try {
       const [nextBook, bookPages] = await Promise.all([
         books.get(bookId),
@@ -108,20 +80,24 @@ export function AdminOcrReviewScreen({
         revisions.list(pageId),
       ]);
       const active = nextHistory[0];
-      if (!active) throw new Error("No revision");
+      if (!active) {
+        if (requestId === requestIdRef.current) setError("unavailable");
+        return;
+      }
       const nextDetail = await ocr.getRevision(pageId, active.page_revision_id);
       if (requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);
       setHistory(nextHistory);
       setDetail(nextDetail);
-      setText(nextDetail.draft_text ?? "");
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
       setError(
         isServiceError(cause) && cause.code === "RESOURCE_NOT_FOUND"
           ? "not-found"
-          : "safe",
+          : isServiceError(cause) && [501, 503].includes(cause.status)
+            ? "unavailable"
+            : "safe",
       );
     }
   }, [bookId, books, ocr, pageId, pages, revisions]);
@@ -142,7 +118,6 @@ export function AdminOcrReviewScreen({
       )
         return;
       setDetail(selected);
-      setText(selected.draft_text ?? "");
       setNotice(null);
     } catch {
       if (
@@ -150,139 +125,7 @@ export function AdminOcrReviewScreen({
         requestId !== revisionChoiceRequestIdRef.current
       )
         return;
-      setNotice({ tone: "error", message: "Không thể tải revision đã chọn." });
-    }
-  }
-  async function saveDraft() {
-    if (!detail || busy) return;
-    setBusy("save");
-    setNotice(null);
-    try {
-      const updated = await ocr.saveDraft(
-        pageId,
-        detail.page_revision_id,
-        text,
-        wordsFromText(text, detail.words),
-      );
-      if (!mountedRef.current) return;
-      setDetail(updated);
-      setNotice({ tone: "success", message: "Đã lưu bản nháp OCR." });
-    } catch {
-      if (!mountedRef.current) return;
-      setNotice({
-        tone: "error",
-        message: "Không thể lưu bản nháp. Kiểm tra nội dung và thử lại.",
-      });
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }
-  async function verify() {
-    if (!detail || busy) return;
-    setBusy("verify");
-    try {
-      const verified = await revisions.verify(pageId, {
-        page_revision_id: detail.page_revision_id,
-        corrected_text: text,
-        words: wordsFromText(text, detail.words),
-      });
-      if (!mountedRef.current) return;
-      const nextHistory = await revisions.list(pageId);
-      if (!mountedRef.current) return;
-      setDetail(verified);
-      setHistory(nextHistory);
-      setNotice({
-        tone: "success",
-        message: `Đã xác minh R${verified.revision_no}. Revision này đã bất biến.`,
-      });
-    } catch {
-      if (!mountedRef.current) return;
-      setNotice({
-        tone: "error",
-        message: "Không thể xác minh revision ở trạng thái hiện tại.",
-      });
-    } finally {
-      if (mountedRef.current) {
-        setBusy(null);
-        setDialog(null);
-      }
-    }
-  }
-  async function reprocess() {
-    if (
-      busy ||
-      !detail ||
-      !history ||
-      !canAdminReprocessRevision(detail, history)
-    ) {
-      return;
-    }
-    setBusy("reprocess");
-    try {
-      const review = await revisions.reprocess(pageId, (status) => {
-        if (!mountedRef.current) return;
-        setNotice({
-          tone: "info",
-          message: `R${status.revision_no}: ${status.verification_status}`,
-        });
-      });
-      if (!mountedRef.current) return;
-      const nextHistory = await revisions.list(pageId);
-      if (!mountedRef.current) return;
-      setDetail(review);
-      setText(review.draft_text ?? "");
-      setHistory(nextHistory);
-      setNotice({
-        tone: "success",
-        message: `Đã tạo R${review.revision_no} ở trạng thái NEEDS_REVIEW. Revision cũ vẫn được giữ nguyên.`,
-      });
-    } catch {
-      if (!mountedRef.current) return;
-      setNotice({
-        tone: "error",
-        message: "Không thể chạy lại OCR từ trạng thái revision hiện tại.",
-      });
-    } finally {
-      if (mountedRef.current) {
-        setBusy(null);
-        setDialog(null);
-      }
-    }
-  }
-  async function togglePageLifecycle() {
-    if (!detail) return;
-    try {
-      const status =
-        detail.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
-      await pages.updateStatus(pageId, { status });
-      if (!mountedRef.current) return;
-      setDetail({ ...detail, lifecycle_status: status });
-      setNotice({
-        tone: "success",
-        message: "Đã cập nhật vòng đời trang; lịch sử revision không thay đổi.",
-      });
-    } catch {
-      if (!mountedRef.current) return;
-      setNotice({
-        tone: "error",
-        message: "Không thể cập nhật vòng đời trang.",
-      });
-    } finally {
-      if (mountedRef.current) setDialog(null);
-    }
-  }
-  async function reloadProcessing() {
-    setNotice({ tone: "info", message: "Đang tải lại trạng thái OCR…" });
-    try {
-      await pages.reload(pageId);
-      if (!mountedRef.current) return;
-      await load();
-    } catch {
-      if (!mountedRef.current) return;
-      setNotice({
-        tone: "error",
-        message: "Không thể tải lại trạng thái OCR.",
-      });
+      setNotice("Không thể tải revision đã chọn.");
     }
   }
   if (error)
@@ -290,39 +133,44 @@ export function AdminOcrReviewScreen({
       <EmptyState
         headingLevel={1}
         title={
-          error === "not-found" ? "Không tìm thấy trang" : "Không thể tải OCR"
+          error === "not-found"
+            ? "Không tìm thấy trang"
+            : error === "unavailable"
+              ? "Dữ liệu OCR đang chờ bổ sung"
+              : "Không thể tải OCR"
         }
         description={
           error === "not-found"
             ? "Trang không thuộc sách hoặc dữ liệu quản trị hiện tại."
-            : "Vui lòng thử lại sau."
+            : error === "unavailable"
+              ? "Ảnh, số revision hoặc bounding box chưa đáp ứng contract hiện tại. Không sử dụng dữ liệu mẫu thay thế."
+              : "Vui lòng thử lại sau."
         }
         action={
-          <Link
-            className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-            href={`/admin/books/${bookId}`}
-          >
-            Quay lại sách
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={() => void load()} variant="secondary">
+              Thử lại
+            </Button>
+            <Link
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              href={`/admin/books/${bookId}`}
+            >
+              Quay lại sách
+            </Link>
+          </div>
         }
       />
     );
   if (!book || !image || !history || !detail)
     return <AdminLoading label="Đang tải ảnh và revision…" />;
-  const editable = detail.verification_status === "NEEDS_REVIEW";
-  const canReprocess = canAdminReprocessRevision(detail, history);
   return (
     <>
       <AdminPageHeader
         eyebrow={`${book.title} · Trang ${image.page_number}`}
         title={`Kiểm tra OCR · R${detail.revision_no}`}
-        description="Đối chiếu ảnh gốc, sửa văn bản và xác minh đúng revision đang chọn."
+        description="Xem ảnh, văn bản và revision từ database. Chỉnh sửa, xác minh và chạy OCR chưa sẵn sàng."
         actions={
-          <Button
-            className="sm:w-auto"
-            onClick={() => setDialog("lifecycle")}
-            variant="quiet"
-          >
+          <Button disabled className="sm:w-auto" variant="quiet">
             {detail.lifecycle_status === "ACTIVE"
               ? "Ngừng trang"
               : "Kích hoạt trang"}
@@ -336,8 +184,8 @@ export function AdminOcrReviewScreen({
         <ArrowLeft aria-hidden className="size-5" /> Chi tiết sách
       </Link>
       {notice ? (
-        <StatusMessage className="mb-6" tone={notice.tone}>
-          {notice.message}
+        <StatusMessage className="mb-6" tone="error">
+          {notice}
         </StatusMessage>
       ) : null}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,.95fr)]">
@@ -353,6 +201,7 @@ export function AdminOcrReviewScreen({
               fill
               sizes="(max-width:1280px) 100vw, 55vw"
               src={image.preview_url}
+              unoptimized
             />
             <div
               aria-label={`Bounding box từ OCR: ${detail.words.length} vùng từ đã nhận dạng`}
@@ -375,7 +224,7 @@ export function AdminOcrReviewScreen({
             </div>
           </div>
           <p className="text-sm text-muted">
-            {image.width} × {image.height} px · dữ liệu ảnh mock
+            {image.width} × {image.height} px · ảnh từ API
           </p>
         </Card>
         <div className="grid content-start gap-6">
@@ -390,19 +239,13 @@ export function AdminOcrReviewScreen({
             <textarea
               aria-describedby="ocr-help"
               className="min-h-64 rounded-control border border-border bg-white p-4 text-body outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
-              disabled={!editable || busy !== null}
+              disabled
               id="ocr-text"
-              onChange={(event) => setText(event.target.value)}
-              value={text}
+              value={detail.draft_text ?? ""}
             />
             <p className="text-sm text-muted" id="ocr-help">
-              {editable
-                ? "Thứ tự từ sẽ được chuẩn hóa theo nội dung khi lưu/xác minh."
-                : detail.verification_status === "VERIFIED"
-                  ? canReprocess
-                    ? "Revision đã xác minh là bất biến. Dùng Chạy lại OCR để tạo revision mới."
-                    : "Đây là revision lịch sử. Chỉ revision VERIFIED hiện hành mới nhất có thể chạy lại OCR."
-                  : "Chờ xử lý OCR hoàn tất trước khi chỉnh sửa."}
+              Chế độ chỉ đọc: hiển thị văn bản đã lưu, không chạy OCR hoặc tạo
+              bounding box giả.
             </p>
             {detail.words.length ? (
               <div
@@ -423,47 +266,12 @@ export function AdminOcrReviewScreen({
               </div>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-              {editable ? (
-                <>
-                  <Button
-                    disabled={busy !== null || !text.trim()}
-                    isLoading={busy === "save"}
-                    onClick={() => void saveDraft()}
-                    variant="secondary"
-                  >
-                    <Save aria-hidden className="size-5" /> Lưu nháp
-                  </Button>
-                  <Button
-                    disabled={busy !== null || !text.trim()}
-                    onClick={() => setDialog("verify")}
-                  >
-                    <CheckCircle2 aria-hidden className="size-5" /> Xác minh
-                  </Button>
-                </>
-              ) : detail.verification_status === "VERIFIED" ? (
-                canReprocess ? (
-                  <Button
-                    className="sm:col-span-2"
-                    disabled={busy !== null}
-                    onClick={() => setDialog("reprocess")}
-                    variant="secondary"
-                  >
-                    <RotateCcw aria-hidden className="size-5" /> Chạy lại OCR
-                  </Button>
-                ) : (
-                  <p className="text-sm font-bold text-muted sm:col-span-2">
-                    Chọn revision VERIFIED hiện hành mới nhất để chạy lại OCR.
-                  </p>
-                )
-              ) : (
-                <Button
-                  className="sm:col-span-2"
-                  onClick={() => void reloadProcessing()}
-                  variant="secondary"
-                >
-                  Tải lại trạng thái
-                </Button>
-              )}
+              <Button disabled variant="secondary">
+                <RotateCcw aria-hidden className="size-5" /> Chạy lại OCR
+              </Button>
+              <Button onClick={() => void load()} variant="secondary">
+                Tải lại trạng thái
+              </Button>
             </div>
           </Card>
           <Card className="bg-cream">
@@ -495,65 +303,6 @@ export function AdminOcrReviewScreen({
           </Card>
         </div>
       </div>
-      <ConfirmDialog
-        isOpen={dialog === "verify"}
-        title="Xác minh revision này?"
-        body="Nội dung và danh sách từ sẽ trở thành bất biến; con trỏ revision hiện hành chuyển sang revision này."
-        confirm="Xác minh"
-        busy={busy === "verify"}
-        onCancel={() => setDialog(null)}
-        onConfirm={() => void verify()}
-      />
-      <ConfirmDialog
-        isOpen={dialog === "reprocess"}
-        title="Tạo revision OCR mới?"
-        body={`Hệ thống sẽ giữ nguyên R${detail.revision_no} và thêm revision kế tiếp qua PROCESSING → NEEDS_REVIEW.`}
-        confirm="Chạy lại OCR"
-        busy={busy === "reprocess"}
-        onCancel={() => setDialog(null)}
-        onConfirm={() => void reprocess()}
-      />
-      <ConfirmDialog
-        isOpen={dialog === "lifecycle"}
-        title="Đổi vòng đời trang?"
-        body="Thao tác không xóa trang hoặc lịch sử revision."
-        confirm="Xác nhận"
-        busy={false}
-        onCancel={() => setDialog(null)}
-        onConfirm={() => void togglePageLifecycle()}
-      />
     </>
-  );
-}
-
-function ConfirmDialog({
-  isOpen,
-  title,
-  body,
-  confirm,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  isOpen: boolean;
-  title: string;
-  body: string;
-  confirm: string;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal isOpen={isOpen} onClose={onCancel} title={title}>
-      <p className="text-body text-muted">{body}</p>
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <Button disabled={busy} isLoading={busy} onClick={onConfirm}>
-          {confirm}
-        </Button>
-        <Button disabled={busy} onClick={onCancel} variant="quiet">
-          Hủy
-        </Button>
-      </div>
-    </Modal>
   );
 }

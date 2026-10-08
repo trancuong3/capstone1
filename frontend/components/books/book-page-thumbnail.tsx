@@ -28,15 +28,13 @@ export function BookPageThumbnail({
       type="button"
     >
       <span className="relative h-[107px] w-40 overflow-hidden rounded-lg bg-cream shadow-sm">
-        <span className="absolute left-2 top-2 z-10 text-[5px] font-bold text-ink">
-          Một buổi sáng yên bình
-        </span>
         <Image
-          alt=""
+          alt={`Ảnh xem trước trang ${page.page_number}`}
           className="object-contain px-6 py-4"
           fill
           sizes="160px"
           src={page.preview_url}
+          unoptimized
         />
         <span className="absolute bottom-2 left-2 right-2 z-10 text-[5px] font-bold text-ink">
           Trang sách đã được xác minh

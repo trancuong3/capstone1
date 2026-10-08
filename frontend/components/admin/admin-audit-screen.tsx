@@ -17,9 +17,14 @@ export function AdminAuditScreen() {
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
   const [error, setError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const appendRequestRef = useRef(false);
   const requestIdRef = useRef(0);
   const load = useCallback(
     async (nextCursor?: string, append = false) => {
+      if (append && appendRequestRef.current) return;
+      appendRequestRef.current = append;
+      setLoadingMore(append);
       const requestId = ++requestIdRef.current;
       setError(false);
       if (!append) setItems(null);
@@ -32,13 +37,27 @@ export function AdminAuditScreen() {
         });
         if (requestId !== requestIdRef.current) return;
         setItems((current) =>
-          append ? [...(current ?? []), ...page.items] : page.items,
+          append
+            ? Array.from(
+                new Map(
+                  [...(current ?? []), ...page.items].map((item) => [
+                    item.id,
+                    item,
+                  ]),
+                ).values(),
+              )
+            : page.items,
         );
         setCursor(page.next_cursor);
       } catch {
         if (requestId !== requestIdRef.current) return;
         setError(true);
-        setItems([]);
+        if (!append) setItems([]);
+      } finally {
+        if (requestId === requestIdRef.current) {
+          appendRequestRef.current = false;
+          setLoadingMore(false);
+        }
       }
     },
     [action, audit, resource],
@@ -55,7 +74,7 @@ export function AdminAuditScreen() {
       <AdminPageHeader
         eyebrow="Operational review"
         title="Nhật ký kiểm toán"
-        description="Dữ liệu mock đã loại trừ âm thanh, video, bí mật và token."
+        description="Nhật ký từ database. Backend không trả về metadata JSON thô để tránh lộ dữ liệu nhạy cảm."
       />
       <Card className="mb-6 bg-white">
         <div className="grid gap-4 md:grid-cols-2">
@@ -78,7 +97,12 @@ export function AdminAuditScreen() {
           Không thể tải nhật ký.{" "}
           <button
             className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
-            onClick={() => void load()}
+            onClick={() =>
+              void load(
+                items.length ? (cursor ?? undefined) : undefined,
+                items.length > 0,
+              )
+            }
             type="button"
           >
             Thử lại
@@ -87,7 +111,7 @@ export function AdminAuditScreen() {
       ) : items.length === 0 ? (
         <EmptyState
           title="Chưa có sự kiện phù hợp"
-          description="Thử bỏ bộ lọc để xem toàn bộ nhật ký mock."
+          description="Thử bỏ bộ lọc để xem nhật ký đã lưu trong database."
         />
       ) : (
         <>
@@ -135,6 +159,8 @@ export function AdminAuditScreen() {
           {cursor ? (
             <Button
               className="mt-6 sm:w-auto"
+              disabled={loadingMore}
+              isLoading={loadingMore}
               onClick={() => void load(cursor, true)}
               variant="secondary"
             >

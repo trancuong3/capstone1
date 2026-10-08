@@ -3,8 +3,6 @@
 import { ArrowLeft, FileSearch, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AdminBookForm } from "@/components/admin/admin-book-form";
-import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import {
   AdminLoading,
   AdminPageHeader,
@@ -13,7 +11,6 @@ import {
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
-import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
@@ -26,19 +23,30 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     null,
   );
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
-  const [edit, setEdit] = useState(false);
-  const [confirmStatus, setConfirmStatus] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [statusBusy, setStatusBusy] = useState(false);
+  const [pagesUnavailable, setPagesUnavailable] = useState(false);
   const requestIdRef = useRef(0);
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setError(null);
+    setBook(null);
+    setItems(null);
+    setPagesUnavailable(false);
     try {
-      const [nextBook, nextPages] = await Promise.all([
-        books.get(bookId),
-        pages.list(bookId),
-      ]);
+      const nextBook = await books.get(bookId);
+      if (requestId !== requestIdRef.current) return;
+      setBook(nextBook);
+      let nextPages: readonly AdminPageListItemUI[];
+      try {
+        nextPages = await pages.list(bookId);
+      } catch (cause) {
+        if (isServiceError(cause) && [501, 503].includes(cause.status)) {
+          if (requestId !== requestIdRef.current) return;
+          setPagesUnavailable(true);
+          setItems([]);
+          return;
+        }
+        throw cause;
+      }
       if (requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setItems(nextPages);
@@ -73,54 +81,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             : "Vui lòng thử lại sau."
         }
         action={
-          <Link
-            className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-            href="/admin/books"
-          >
-            Quay lại kho sách
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={() => void load()} variant="secondary">
+              Thử lại
+            </Button>
+            <Link
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              href="/admin/books"
+            >
+              Quay lại kho sách
+            </Link>
+          </div>
         }
       />
     );
   if (!book) return null;
-  const nextPage =
-    Math.max(0, ...(items ?? []).map((item) => item.page_number)) + 1;
-  async function toggleStatus() {
-    if (!book) return;
-    setStatusBusy(true);
-    try {
-      const updated = await books.updateStatus(book.id, {
-        status: book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE",
-      });
-      setBook(updated);
-      setNotice("Đã cập nhật vòng đời sách.");
-    } catch {
-      setNotice(
-        "Không thể kích hoạt: sách cần ít nhất một trang ACTIVE có revision VERIFIED hiện hành.",
-      );
-    } finally {
-      setStatusBusy(false);
-      setConfirmStatus(false);
-    }
-  }
-  async function reloadPages() {
-    if (!items) return;
-    setItems(null);
-    try {
-      await Promise.all(
-        items
-          .filter(
-            (item) => item.processing.verification_status === "PROCESSING",
-          )
-          .map((item) => pages.reload(item.processing.page_id)),
-      );
-      await load();
-      setNotice("Đã tải lại trạng thái xử lý trang.");
-    } catch {
-      setNotice("Không thể tải lại trạng thái trang lúc này.");
-      await load();
-    }
-  }
   return (
     <>
       <AdminPageHeader
@@ -129,16 +104,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         description={`${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
         actions={
           <>
-            <Button
-              className="sm:w-auto"
-              onClick={() => setEdit((value) => !value)}
-              variant="secondary"
-            >
-              {edit ? "Đóng chỉnh sửa" : "Sửa thông tin"}
+            <Button disabled className="sm:w-auto" variant="secondary">
+              Sửa thông tin
             </Button>
             <Button
+              disabled
               className="sm:w-auto"
-              onClick={() => setConfirmStatus(true)}
               variant={book.lifecycle_status === "ACTIVE" ? "quiet" : "primary"}
             >
               {book.lifecycle_status === "ACTIVE"
@@ -158,38 +129,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         <AdminStatusBadge status={book.lifecycle_status} />
         <span className="text-sm text-muted">ID: {book.id}</span>
       </div>
-      {notice ? (
-        <StatusMessage
-          className="mb-6"
-          tone={notice.startsWith("Đã") ? "success" : "warning"}
-        >
-          {notice}
-        </StatusMessage>
-      ) : null}
-      {edit ? (
-        <Card className="mb-6 bg-white">
-          <h2 className="text-2xl font-black">Chỉnh sửa metadata</h2>
-          <AdminBookForm
-            initial={{
-              title: book.title,
-              author: book.author,
-              min_grade: book.min_grade,
-              max_grade: book.max_grade,
-            }}
-            onSubmit={async (value) => {
-              const updated = await books.update(book.id, value);
-              setBook(updated);
-              setEdit(false);
-              setNotice("Đã lưu thông tin sách.");
-            }}
-          />
-        </Card>
-      ) : null}
-      <AdminPageUploader
-        bookId={book.id}
-        nextPageNumber={nextPage}
-        onUploaded={() => void load()}
-      />
+      <StatusMessage tone="info">
+        Đang xem dữ liệu thật ở chế độ chỉ đọc. Tạo, sửa, tải ảnh và đổi trạng
+        thái chưa sẵn sàng.
+      </StatusMessage>
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-2xl font-black" id="pages-title">
@@ -197,7 +140,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           </h2>
           <button
             className="flex min-h-12 items-center gap-2 rounded-control px-3 font-bold text-primary-hover hover:bg-sky"
-            onClick={() => void reloadPages()}
+            onClick={() => void load()}
+            disabled={items === null}
             type="button"
           >
             <RefreshCw aria-hidden className="size-5" /> Tải lại
@@ -205,10 +149,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         </div>
         {!items ? (
           <AdminLoading />
+        ) : pagesUnavailable ? (
+          <StatusMessage tone="info" title="Dữ liệu trang đang chờ bổ sung">
+            Metadata sách đã tải được, nhưng revision hoặc ảnh chưa đáp ứng
+            contract hiện tại.
+          </StatusMessage>
         ) : items.length === 0 ? (
           <EmptyState
             title="Sách chưa có trang"
-            description="Tải ảnh trang đầu tiên để tạo revision R1."
+            description="Database chưa có trang nào cho sách này."
           />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -242,39 +191,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           </div>
         )}
       </section>
-      <Modal
-        isOpen={confirmStatus}
-        onClose={() => setConfirmStatus(false)}
-        title={
-          book.lifecycle_status === "ACTIVE"
-            ? "Ngừng phát hành sách?"
-            : "Kích hoạt sách?"
-        }
-      >
-        <p className="text-body text-muted">
-          {book.lifecycle_status === "ACTIVE"
-            ? "Sách RETIRED sẽ không xuất hiện trong lượt chấm điểm mới; dữ liệu lịch sử vẫn được giữ nguyên."
-            : "Chỉ sách có trang ACTIVE và revision VERIFIED hiện hành mới đủ điều kiện."}
-        </p>
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Button
-            disabled={statusBusy}
-            isLoading={statusBusy}
-            onClick={() => void toggleStatus()}
-          >
-            {book.lifecycle_status === "ACTIVE"
-              ? "Xác nhận ngừng"
-              : "Xác nhận kích hoạt"}
-          </Button>
-          <Button
-            disabled={statusBusy}
-            onClick={() => setConfirmStatus(false)}
-            variant="quiet"
-          >
-            Hủy
-          </Button>
-        </div>
-      </Modal>
     </>
   );
 }

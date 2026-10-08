@@ -49,6 +49,7 @@ export function BookLibraryScreen({
     let isActive = true;
 
     async function loadChild() {
+      setChildState({ status: "loading" });
       try {
         const child = requestedChildId
           ? await childService.get(requestedChildId)
@@ -71,7 +72,7 @@ export function BookLibraryScreen({
     return () => {
       isActive = false;
     };
-  }, [childService, requestedChildId]);
+  }, [childService, requestedChildId, requestKey]);
 
   useEffect(() => {
     if (childState.status !== "ready") {
@@ -84,19 +85,22 @@ export function BookLibraryScreen({
       setCatalogState({ status: "loading" });
 
       try {
-        const [books, allBooks] = await Promise.all([
-          bookService.list({
-            grade: selectedGrade ?? undefined,
-            search,
-          }),
-          bookService.list(),
-        ]);
+        const books = await bookService.list({
+          grade: selectedGrade ?? undefined,
+          search,
+        });
+        // A second request is only needed to distinguish an empty catalog
+        // from an empty filtered result. Never substitute sample books.
+        const hasFilters = selectedGrade !== null || search.trim().length > 0;
+        const hasCatalog =
+          books.length > 0 ||
+          (hasFilters && (await bookService.list()).length > 0);
 
         if (isActive) {
           setCatalogState({
             status: "ready",
             books,
-            hasCatalog: allBooks.length > 0,
+            hasCatalog,
           });
         }
       } catch {
@@ -118,9 +122,20 @@ export function BookLibraryScreen({
       <BookChildHeader child={child} />
 
       {childState.status === "error" ? (
-        <StatusMessage title="Không thể chọn hồ sơ bé" tone="error">
-          Hồ sơ này không tồn tại hoặc không thuộc tài khoản hiện tại.
-        </StatusMessage>
+        <div className="flex flex-col gap-4">
+          <StatusMessage title="Không thể chọn hồ sơ bé" tone="error">
+            Chưa tải được hồ sơ. Hồ sơ có thể không tồn tại hoặc không thuộc tài
+            khoản hiện tại.
+          </StatusMessage>
+          <Button
+            className="sm:w-auto sm:self-start sm:px-8"
+            onClick={() => setRequestKey((key) => key + 1)}
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className="size-5" />
+            Thử lại
+          </Button>
+        </div>
       ) : null}
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:gap-6">
@@ -180,7 +195,7 @@ export function BookLibraryScreen({
           </div>
         </fieldset>
 
-        {catalogState.status === "loading" ? (
+        {childState.status !== "error" && catalogState.status === "loading" ? (
           <div
             aria-busy="true"
             aria-label="Đang tải thư viện sách"
@@ -198,7 +213,7 @@ export function BookLibraryScreen({
           </div>
         ) : null}
 
-        {catalogState.status === "error" ? (
+        {childState.status === "ready" && catalogState.status === "error" ? (
           <div className="flex flex-col gap-4">
             <StatusMessage title="Chưa tải được thư viện sách" tone="error">
               Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
@@ -214,7 +229,8 @@ export function BookLibraryScreen({
           </div>
         ) : null}
 
-        {catalogState.status === "ready" &&
+        {childState.status === "ready" &&
+        catalogState.status === "ready" &&
         catalogState.books.length === 0 &&
         !catalogState.hasCatalog ? (
           <EmptyState
@@ -229,7 +245,8 @@ export function BookLibraryScreen({
           />
         ) : null}
 
-        {catalogState.status === "ready" &&
+        {childState.status === "ready" &&
+        catalogState.status === "ready" &&
         catalogState.books.length === 0 &&
         catalogState.hasCatalog ? (
           <EmptyState
@@ -253,7 +270,9 @@ export function BookLibraryScreen({
           />
         ) : null}
 
-        {catalogState.status === "ready" && catalogState.books.length > 0 ? (
+        {childState.status === "ready" &&
+        catalogState.status === "ready" &&
+        catalogState.books.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {catalogState.books.map((book) => (
               <BookCard book={book} childId={child?.id} key={book.id} />

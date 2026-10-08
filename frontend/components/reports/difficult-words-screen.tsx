@@ -30,6 +30,7 @@ type WordsState =
     }
   | { readonly status: "no-children" }
   | { readonly status: "not-found" }
+  | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
 export function DifficultWordsScreen({
@@ -68,7 +69,10 @@ export function DifficultWordsScreen({
             status:
               isServiceError(error) && error.status === 404
                 ? "not-found"
-                : "error",
+                : isServiceError(error) &&
+                    (error.status === 501 || error.status === 503)
+                  ? "unavailable"
+                  : "error",
           });
       }
     }
@@ -100,6 +104,32 @@ export function DifficultWordsScreen({
         icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
         title="Chưa có hồ sơ bé"
       />
+    );
+  if (state.status === "unavailable")
+    return (
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <h1 className="text-heading font-extrabold text-ink">
+          Dữ liệu đang chờ bổ sung
+        </h1>
+        <StatusMessage tone="info">
+          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
+          liệu mẫu thay thế.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start sm:px-8"
+          onClick={() => setRequestKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+        </Button>
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/children"
+          variant="secondary"
+        >
+          Quản lý hồ sơ bé
+        </ButtonLink>
+      </section>
     );
   if (state.status === "not-found")
     return (
@@ -137,7 +167,7 @@ export function DifficultWordsScreen({
             Báo cáo
           </ButtonLink>
         }
-        description="Tổng hợp 90 ngày lịch từ sự kiện CONFIRMED gắn đúng revision và từ tham chiếu."
+        description="Bằng chứng từ báo cáo đã lưu cho kỳ 90 ngày; chỉ hiển thị dữ liệu của hồ sơ đang chọn."
         eyebrow="Cùng luyện mỗi ngày"
         title={`Từ cần luyện của ${state.child.alias}`}
       />
@@ -147,9 +177,9 @@ export function DifficultWordsScreen({
           selectedChildId={state.child.id}
         />
       </div>
-      <StatusMessage title="Cách tính an toàn">
-        Bỏ sót × 3, lặp từ × 2, dừng lâu × 1, đọc mẫu × 2; chỉ hiển thị từ đạt
-        điểm 3. Lần thử phát lại không làm tăng bằng chứng.
+      <StatusMessage title="Nguồn dữ liệu">
+        Số đếm và điểm bằng chứng lấy từ báo cáo đã lưu. Trang này không tự sinh
+        bằng chứng hoặc thực hiện phát âm thanh.
       </StatusMessage>
       {state.words.length === 0 ? (
         <EmptyState
@@ -160,7 +190,7 @@ export function DifficultWordsScreen({
               Tiếp tục đọc sách
             </ButtonLink>
           }
-          description="Chưa có từ nào đạt đủ ngưỡng bằng chứng trong 90 ngày."
+          description="Báo cáo đã lưu chưa ghi nhận từ cần luyện trong kỳ đang chọn."
           icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
           title="Chưa có từ cần luyện"
         />
