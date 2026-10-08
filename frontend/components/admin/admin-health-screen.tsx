@@ -43,9 +43,10 @@ export function AdminHealthScreen() {
       <AdminPageHeader
         eyebrow="Operational review"
         title="Tình trạng vận hành"
-        description="Màn hình frontend mock; không thăm dò dịch vụ backend thật."
+        description="Backend kiểm tra API và kết nối database thật. Chưa kiểm tra Auth, OCR, STT hoặc TTS."
         actions={
           <Button
+            disabled={!snapshot && !error}
             className="sm:w-auto"
             onClick={() => void load()}
             variant="secondary"
@@ -66,7 +67,7 @@ export function AdminHealthScreen() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-bold text-muted">
-                  Trạng thái tổng thể
+                  Trạng thái các dịch vụ đã kiểm tra
                 </p>
                 <h2 className="text-2xl font-black">ReadAlong Vision</h2>
               </div>

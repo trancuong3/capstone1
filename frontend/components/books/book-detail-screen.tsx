@@ -26,6 +26,7 @@ type DetailState =
       book: BookDetailDTO;
       child: ChildProfileDTO | null;
       pages: BookPagePreviewDTO[];
+      previewUnavailable: boolean;
     }
   | { status: "not-found" }
   | { status: "unavailable" }
@@ -70,16 +71,28 @@ export function BookDetailScreen({
       setStartState("idle");
 
       try {
-        const [book, pages, child] = await Promise.all([
+        const [book, child] = await Promise.all([
           bookService.get(bookId),
-          bookService.listPages(bookId),
           requestedChildId
             ? childService.get(requestedChildId)
             : childService.list().then((children) => children[0] ?? null),
         ]);
 
+        let pages: BookPagePreviewDTO[] = [];
+        let previewUnavailable = false;
+        try {
+          pages = await bookService.listPages(bookId);
+          previewUnavailable = pages.length === 0;
+        } catch (error) {
+          if (isServiceError(error) && error.status === 503) {
+            previewUnavailable = true;
+          } else {
+            throw error;
+          }
+        }
+
         if (isActive) {
-          setState({ status: "ready", book, child, pages });
+          setState({ status: "ready", book, child, pages, previewUnavailable });
           setSelectedPage(pages[0] ?? null);
         }
       } catch (error) {
@@ -215,7 +228,7 @@ export function BookDetailScreen({
     );
   }
 
-  const { book, child, pages } = state;
+  const { book, child, pages, previewUnavailable } = state;
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -263,6 +276,22 @@ export function BookDetailScreen({
           </Button>
 
           <div className="order-5 sm:order-none">
+            {previewUnavailable ? (
+              <div className="mb-4 flex flex-col gap-3">
+                <StatusMessage title="Ảnh xem trước chưa sẵn sàng" tone="info">
+                  Ảnh trang sách sẽ hiển thị khi được bổ sung. Thông tin sách ở
+                  trên lấy từ dữ liệu hiện có.
+                </StatusMessage>
+                <Button
+                  className="sm:w-auto sm:self-start"
+                  onClick={() => setRequestKey((key) => key + 1)}
+                  variant="secondary"
+                >
+                  <RefreshCw aria-hidden="true" className="size-5" />
+                  Thử tải ảnh lại
+                </Button>
+              </div>
+            ) : null}
             <p className="mb-4 hidden text-label font-bold text-ink sm:block">
               Chọn trang bé muốn đọc
             </p>

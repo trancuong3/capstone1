@@ -2,21 +2,17 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { Card } from "@/components/common/card";
-import { useAdminServices } from "@/hooks/use-admin-services";
+import { StatusMessage } from "@/components/common/status-message";
 
 export function AdminNewBookScreen() {
-  const { books } = useAdminServices();
-  const router = useRouter();
   return (
     <>
       <AdminPageHeader
         eyebrow="Kho sách"
         title="Tạo sách mới"
-        description="Tạo metadata trước, sau đó tải ảnh trang để bắt đầu OCR."
+        description="Tạo sách chưa sẵn sàng. Phase hiện tại chỉ hỗ trợ đọc dữ liệu thật từ API."
       />
       <Link
         className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -25,13 +21,10 @@ export function AdminNewBookScreen() {
         <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
       </Link>
       <Card className="max-w-3xl bg-white">
-        <AdminBookForm
-          submitLabel="Tạo sách"
-          onSubmit={async (value) => {
-            const book = await books.create(value);
-            router.push(`/admin/books/${book.id}`);
-          }}
-        />
+        <StatusMessage tone="info">
+          API tạo sách chưa được triển khai trong phạm vi này. Chưa thể tạo sách
+          hoặc tải ảnh để chạy OCR.
+        </StatusMessage>
       </Card>
     </>
   );

@@ -36,6 +36,7 @@ type ReportState =
     }
   | { readonly status: "no-children" }
   | { readonly status: "not-found" }
+  | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
 function signed(value: number | null, suffix = ""): string {
@@ -79,7 +80,10 @@ export function ProgressReportScreen({
             status:
               isServiceError(error) && error.status === 404
                 ? "not-found"
-                : "error",
+                : isServiceError(error) &&
+                    (error.status === 501 || error.status === 503)
+                  ? "unavailable"
+                  : "error",
           });
       }
     }
@@ -114,6 +118,32 @@ export function ProgressReportScreen({
         icon={<BarChart3 aria-hidden="true" className="size-10 text-primary" />}
         title="Chưa có dữ liệu báo cáo"
       />
+    );
+  if (state.status === "unavailable")
+    return (
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <h1 className="text-heading font-extrabold text-ink">
+          Dữ liệu đang chờ bổ sung
+        </h1>
+        <StatusMessage tone="info">
+          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
+          liệu mẫu thay thế.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start sm:px-8"
+          onClick={() => setRequestKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+        </Button>
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/children"
+          variant="secondary"
+        >
+          Quản lý hồ sơ bé
+        </ButtonLink>
+      </section>
     );
   if (state.status === "not-found")
     return (
@@ -243,7 +273,7 @@ export function ProgressReportScreen({
               Từ cần luyện nổi bật
             </h2>
             <p className="mt-1 text-label text-muted">
-              Bằng chứng 90 ngày, điểm tối thiểu 3.
+              Bằng chứng từ báo cáo đã lưu của kỳ đang hiển thị.
             </p>
           </div>
           <ButtonLink
@@ -268,7 +298,7 @@ export function ProgressReportScreen({
           </ul>
         ) : (
           <p className="mt-5 text-body text-muted">
-            Chưa có từ đạt đủ ngưỡng bằng chứng.
+            Báo cáo này chưa ghi nhận từ cần luyện.
           </p>
         )}
       </section>

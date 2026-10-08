@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -8,7 +8,6 @@ import {
   AdminPageHeader,
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
-import { ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { SelectField } from "@/components/common/select-field";
@@ -71,12 +70,10 @@ export function AdminBooksScreen() {
         eyebrow="Quản trị nội dung"
         title="Kho sách"
         description="Theo dõi vòng đời sách và trạng thái OCR của từng trang."
-        actions={
-          <ButtonLink className="sm:w-auto" href="/admin/books/new">
-            <Plus aria-hidden className="size-5" /> Thêm sách
-          </ButtonLink>
-        }
       />
+      <StatusMessage className="mb-6" tone="info">
+        Dữ liệu đọc từ API và database. Tạo hoặc chỉnh sửa sách chưa sẵn sàng.
+      </StatusMessage>
       <Card className="mb-6 bg-white">
         <div className="grid gap-4 lg:grid-cols-[1fr_240px_240px]">
           <div className="relative">
@@ -149,7 +146,7 @@ export function AdminBooksScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          description="Điều chỉnh bộ lọc hoặc tạo sách mới."
+          description="Điều chỉnh bộ lọc hoặc kiểm tra dữ liệu sách trong database."
           title="Không tìm thấy sách"
         />
       ) : (

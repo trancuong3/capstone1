@@ -25,6 +25,7 @@ type DetailState =
       readonly book: BookDetailDTO;
     }
   | { readonly status: "not-found" }
+  | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
 export function SessionDetailScreen({
@@ -32,7 +33,7 @@ export function SessionDetailScreen({
 }: {
   readonly sessionId: string;
 }) {
-  const { bookService, childService, sessionService } = useReportServices();
+  const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
 
@@ -44,8 +45,10 @@ export function SessionDetailScreen({
         const detail = await sessionService.get(sessionId);
         const [child, book] = await Promise.all([
           childService.get(detail.child_id),
-          bookService.get(detail.book_id),
+          sessionService.getBook(sessionId),
         ]);
+        if (book.id !== detail.book_id)
+          throw new Error("Invalid historical book response");
         if (active) setState({ status: "ready", detail, child, book });
       } catch (error) {
         if (active)
@@ -53,7 +56,10 @@ export function SessionDetailScreen({
             status:
               isServiceError(error) && error.status === 404
                 ? "not-found"
-                : "error",
+                : isServiceError(error) &&
+                    (error.status === 501 || error.status === 503)
+                  ? "unavailable"
+                  : "error",
           });
       }
     }
@@ -61,7 +67,7 @@ export function SessionDetailScreen({
     return () => {
       active = false;
     };
-  }, [bookService, childService, requestKey, sessionId, sessionService]);
+  }, [childService, requestKey, sessionId, sessionService]);
 
   if (state.status === "loading")
     return (
@@ -72,6 +78,32 @@ export function SessionDetailScreen({
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-72 rounded-card" />
+      </section>
+    );
+  if (state.status === "unavailable")
+    return (
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <h1 className="text-heading font-extrabold text-ink">
+          Dữ liệu đang chờ bổ sung
+        </h1>
+        <StatusMessage tone="info">
+          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
+          liệu mẫu thay thế.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start sm:px-8"
+          onClick={() => setRequestKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+        </Button>
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/children"
+          variant="secondary"
+        >
+          Quản lý hồ sơ bé
+        </ButtonLink>
       </section>
     );
   if (state.status === "not-found")
@@ -173,14 +205,17 @@ export function SessionDetailScreen({
               Revision đã dùng trong buổi đọc
             </h2>
             <p className="mt-1 text-label text-muted">
-              Giữ nguyên bản lịch sử, không thay bằng revision hiện tại của
-              trang.
+              ID đã chọn trong phiên và ID tham chiếu ghi nhận trong sự kiện;
+              không thay bằng revision hiện tại của trang.
             </p>
           </div>
         </div>
         <dl className="grid gap-4 text-label sm:grid-cols-2">
           <div>
             <dt className="font-extrabold text-ink">Đã chọn</dt>
+            {detail.selected_page_revision_ids.length === 0 ? (
+              <dd className="mt-1 text-muted">Chưa ghi nhận</dd>
+            ) : null}
             {detail.selected_page_revision_ids.map((id) => (
               <dd className="mt-1 break-all text-muted" key={id}>
                 <code>{id}</code>
@@ -189,6 +224,9 @@ export function SessionDetailScreen({
           </div>
           <div>
             <dt className="font-extrabold text-ink">Tham chiếu</dt>
+            {detail.reference_page_revision_ids.length === 0 ? (
+              <dd className="mt-1 text-muted">Chưa ghi nhận</dd>
+            ) : null}
             {detail.reference_page_revision_ids.map((id) => (
               <dd className="mt-1 break-all text-muted" key={id}>
                 <code>{id}</code>

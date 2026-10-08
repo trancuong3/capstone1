@@ -1,17 +1,12 @@
 "use client";
 
-import { createContext, useState, type ReactNode } from "react";
-import {
-  createMockAdminStore,
-  type MockAdminStore,
-} from "@/lib/mock/mock-admin-store";
+import { createContext, type ReactNode } from "react";
 
-export const AdminStoreContext = createContext<MockAdminStore | null>(null);
+export const AdminStoreContext = createContext<null>(null);
 
 export function AdminStoreProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(createMockAdminStore);
   return (
-    <AdminStoreContext.Provider value={store}>
+    <AdminStoreContext.Provider value={null}>
       {children}
     </AdminStoreContext.Provider>
   );

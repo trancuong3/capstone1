@@ -27,6 +27,7 @@ type ScreenState =
     }
   | { readonly status: "no-children" }
   | { readonly status: "not-found" }
+  | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
 interface SessionHistoryScreenProps {
@@ -38,7 +39,9 @@ export function SessionHistoryScreen({
   page,
   requestedChildId,
 }: SessionHistoryScreenProps) {
-  const { bookService, childService, sessionService } = useReportServices();
+  const { childService, sessionService } = useReportServices();
+  const currentPage =
+    Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ScreenState>({ status: "loading" });
 
@@ -55,20 +58,18 @@ export function SessionHistoryScreen({
         const child = requestedChildId
           ? await childService.get(requestedChildId)
           : children[0];
-        const [history, books] = await Promise.all([
-          sessionService.list(child.id, {
-            cursor: page > 1 ? `page-${page}` : undefined,
-            limit: 2,
-          }),
-          bookService.list(),
-        ]);
-        const items = history.sessions.map((session) => {
-          const book = books.find(
-            (candidate) => candidate.id === session.book_id,
-          );
-          if (!book) throw new Error("Missing owned catalog item");
-          return mapSessionHistoryItem(session, child, book);
+        const history = await sessionService.list(child.id, {
+          cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
+          limit: 2,
         });
+        const items = await Promise.all(
+          history.sessions.map(async (session) => {
+            const book = await sessionService.getBook(session.id);
+            if (book.id !== session.book_id)
+              throw new Error("Invalid historical book response");
+            return mapSessionHistoryItem(session, child, book);
+          }),
+        );
         if (active) {
           setState({
             status: "ready",
@@ -84,7 +85,10 @@ export function SessionHistoryScreen({
             status:
               isServiceError(error) && error.status === 404
                 ? "not-found"
-                : "error",
+                : isServiceError(error) &&
+                    (error.status === 501 || error.status === 503)
+                  ? "unavailable"
+                  : "error",
           });
         }
       }
@@ -93,14 +97,7 @@ export function SessionHistoryScreen({
     return () => {
       active = false;
     };
-  }, [
-    bookService,
-    childService,
-    page,
-    requestKey,
-    requestedChildId,
-    sessionService,
-  ]);
+  }, [childService, currentPage, requestKey, requestedChildId, sessionService]);
 
   if (state.status === "loading") {
     return (
@@ -128,6 +125,32 @@ export function SessionHistoryScreen({
     );
   }
 
+  if (state.status === "unavailable")
+    return (
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <h1 className="text-heading font-extrabold text-ink">
+          Dữ liệu đang chờ bổ sung
+        </h1>
+        <StatusMessage tone="info">
+          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
+          liệu mẫu thay thế.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start sm:px-8"
+          onClick={() => setRequestKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+        </Button>
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/children"
+          variant="secondary"
+        >
+          Quản lý hồ sơ bé
+        </ButtonLink>
+      </section>
+    );
   if (state.status === "not-found") {
     return (
       <StatusMessage title="Không tìm thấy lịch sử" tone="error">
@@ -178,7 +201,9 @@ export function SessionHistoryScreen({
           description="Khi bé hoàn thành hoặc dừng một buổi đọc, thông tin sẽ xuất hiện ở đây."
           icon={<History aria-hidden="true" className="size-10 text-primary" />}
           title={
-            page > 1 ? "Không còn buổi đọc ở trang này" : "Chưa có buổi đọc"
+            currentPage > 1
+              ? "Không còn buổi đọc ở trang này"
+              : "Chưa có buổi đọc"
           }
         />
       ) : (
@@ -192,10 +217,10 @@ export function SessionHistoryScreen({
         aria-label="Phân trang lịch sử"
         className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between"
       >
-        {page > 1 ? (
+        {currentPage > 1 ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${page - 1}`}
+            href={`/sessions?${childQuery}&page=${currentPage - 1}`}
             variant="secondary"
           >
             Trang trước
@@ -206,7 +231,7 @@ export function SessionHistoryScreen({
         {state.hasNext ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${page + 1}`}
+            href={`/sessions?${childQuery}&page=${currentPage + 1}`}
           >
             Trang sau
           </ButtonLink>

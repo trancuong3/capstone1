@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
-import { parseAppMockScenario } from "@/lib/utils/ui-scenario";
 
 export const metadata: Metadata = {
   title: "Thư viện sách",
@@ -11,7 +10,6 @@ export const metadata: Metadata = {
 interface BooksPageProps {
   searchParams: Promise<{
     childId?: string | string[];
-    state?: string | string[];
   }>;
 }
 
@@ -21,10 +19,9 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 
 export default async function BooksPage({ searchParams }: BooksPageProps) {
   const query = await searchParams;
-  const scenario = parseAppMockScenario(query.state);
 
   return (
-    <AppServicesProvider bookScenario={scenario} scenario="default">
+    <AppServicesProvider>
       <BookLibraryScreen requestedChildId={firstValue(query.childId)} />
     </AppServicesProvider>
   );

@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useMemo,
-  type ReactNode,
-} from "react";
+import { createContext, useMemo, type ReactNode } from "react";
 
 import type { BookService } from "@/lib/api/book-service";
 import type { ChildService } from "@/lib/api/child-service";
@@ -20,6 +16,10 @@ import type { SessionService } from "@/lib/api/session-service";
 import type { TutorService } from "@/lib/api/tutor-service";
 
 import { createChildService } from "@/lib/api/child-service";
+import { createBookService } from "@/lib/api/book-service";
+import { createSessionService } from "@/lib/api/session-service";
+import { createReportService } from "@/lib/api/report-service";
+import { createDifficultWordService } from "@/lib/api/difficult-word-service";
 import { createProfileService } from "@/lib/api/profile-service";
 
 import type { AppMockScenario } from "@/types/ui-state";
@@ -40,8 +40,7 @@ export interface AppServices {
   tutorService: TutorService;
 }
 
-export const AppServicesContext =
-  createContext<AppServices | null>(null);
+export const AppServicesContext = createContext<AppServices | null>(null);
 
 interface AppServicesProviderProps {
   children: ReactNode;
@@ -50,7 +49,8 @@ interface AppServicesProviderProps {
    * Giữ lại các props này để tương thích
    * với các page hiện tại của project.
    *
-   * Chúng không được dùng để tạo Mock.
+   * @deprecated Props demo chỉ giữ để tương thích consumer cũ/Reading.
+   * Các service đọc thật luôn được tạo bên dưới, không đọc các props này.
    */
   bookScenario?: AppMockScenario;
   difficultWordScenario?: Group5DemoState;
@@ -59,26 +59,20 @@ interface AppServicesProviderProps {
   sessionScenario?: Group5DemoState;
 }
 
-function createUnavailableService<T>(
-  serviceName: string,
-): T {
+function createUnavailableService<T>(serviceName: string): T {
   return new Proxy(
     {},
     {
       get() {
         return () => {
-          throw new Error(
-            `${serviceName} is not implemented yet.`,
-          );
+          throw new Error(`${serviceName} is not implemented yet.`);
         };
       },
     },
   ) as T;
 }
 
-export function AppServicesProvider({
-  children,
-}: AppServicesProviderProps) {
+export function AppServicesProvider({ children }: AppServicesProviderProps) {
   const services = useMemo<AppServices>(
     () => ({
       /* ==========================================
@@ -91,62 +85,37 @@ export function AppServicesProvider({
        * ========================================== */
       profileService: createProfileService(),
 
-      /* ==========================================
-       * CÁC SERVICE KHÁC
-       * ==========================================
-       *
-       * Chưa triển khai trong phạm vi Dashboard
-       * hiện tại nên vẫn giữ unavailable service.
-       */
-      bookService:
-        createUnavailableService<BookService>(
-          "BookService",
-        ),
+      // Books, Sessions, Reports và Difficult Words đọc FastAPI.
+      // Các service Reading/AI bên dưới chưa thuộc phạm vi chuyển dữ liệu;
+      // unavailable là lỗi rõ ràng, không phải implementation mock.
+      bookService: createBookService(),
 
-      comprehensionService:
-        createUnavailableService<ComprehensionService>(
-          "ComprehensionService",
-        ),
+      comprehensionService: createUnavailableService<ComprehensionService>(
+        "ComprehensionService",
+      ),
 
       devicePermissionService:
         createUnavailableService<DevicePermissionService>(
           "DevicePermissionService",
         ),
 
-      difficultWordService:
-        createUnavailableService<DifficultWordService>(
-          "DifficultWordService",
-        ),
+      difficultWordService: createDifficultWordService(),
 
       pageMatchService:
-        createUnavailableService<PageMatchService>(
-          "PageMatchService",
-        ),
+        createUnavailableService<PageMatchService>("PageMatchService"),
 
-      reportService:
-        createUnavailableService<ReportService>(
-          "ReportService",
-        ),
+      reportService: createReportService(),
 
       readingService:
-        createUnavailableService<ReadingService>(
-          "ReadingService",
-        ),
+        createUnavailableService<ReadingService>("ReadingService"),
 
-      readingSocketAdapter:
-        createUnavailableService<ReadingSocketAdapter>(
-          "ReadingSocketAdapter",
-        ),
+      readingSocketAdapter: createUnavailableService<ReadingSocketAdapter>(
+        "ReadingSocketAdapter",
+      ),
 
-      sessionService:
-        createUnavailableService<SessionService>(
-          "SessionService",
-        ),
+      sessionService: createSessionService(),
 
-      tutorService:
-        createUnavailableService<TutorService>(
-          "TutorService",
-        ),
+      tutorService: createUnavailableService<TutorService>("TutorService"),
     }),
     [],
   );
