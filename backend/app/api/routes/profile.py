@@ -2,16 +2,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
-from typing import List
+from typing import List, Literal
 from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
 from app.models import Profile, ChildProfile
-from app.schemas.profile import AdminParentListResponse, AdminParentDetailResponse
+from app.schemas.profile import (
+    AdminParentListResponse,
+    AdminParentDetailResponse,
+    AdminParentCreateRequest,
+    AdminParentUpdateRequest,
+    AdminParentVisibilityRequest,
+    AdminParentVisibilityResponse,
+)
 from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
     AdminParentAccessDeniedError,
     AdminParentNotFoundError,
+    AdminParentConflictError,
+    AdminParentProviderUnavailableError,
+    AdminParentProviderOperationError,
+    AdminParentConsistencyError,
     AdminParentService,
 )
 from app.schemas import (
@@ -492,13 +503,16 @@ async def get_admin_parent_directory(
     search: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    visibility: Literal["visible", "hidden"] = Query(default="visible"),
     admin_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """List parent profiles for authenticated Admin users only."""
     service = AdminParentService(AdminParentRepository(db))
     try:
-        result = await service.list_parents(admin_id, search, limit, offset)
+        result = await service.list_parents(
+            admin_id, search, limit, offset, visibility=visibility
+        )
     except AdminParentAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -519,13 +533,16 @@ async def get_admin_parent_directory(
 )
 async def get_admin_parent_detail(
     parent_id: UUID,
+    include_hidden: bool = Query(default=False),
     admin_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Get one Parent and its linked children for authorized Admin users."""
     service = AdminParentService(AdminParentRepository(db))
     try:
-        result = await service.get_parent_detail(admin_id, parent_id)
+        result = await service.get_parent_detail(
+            admin_id, parent_id, include_hidden=include_hidden
+        )
     except AdminParentAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -543,9 +560,172 @@ async def get_admin_parent_detail(
         email=result.email,
         phone=result.phone,
         created_at=result.created_at,
+        admin_hidden_at=result.admin_hidden_at,
         children=result.children,
         contact_info_status=result.contact_info_status,
     )
+
+
+# =========================================================
+# ADMIN: PARENT CREATE / UPDATE / HIDE / RESTORE
+# =========================================================
+
+def _parent_detail_response(result):
+    return AdminParentDetailResponse(
+        id=result.id,
+        display_name=result.display_name,
+        email=result.email,
+        phone=result.phone,
+        created_at=result.created_at,
+        admin_hidden_at=result.admin_hidden_at,
+        children=result.children,
+        contact_info_status=result.contact_info_status,
+    )
+
+
+def _parent_admin_error_response(error: Exception):
+    if isinstance(error, AdminParentAccessDeniedError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
+        )
+    if isinstance(error, AdminParentNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
+        )
+    if isinstance(error, AdminParentConflictError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "PARENT_CONFLICT", "message": "The requested Parent data conflicts with an existing account"},
+        )
+    if isinstance(error, AdminParentProviderUnavailableError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "AUTH_PROVIDER_UNAVAILABLE", "message": "Supabase Auth Admin is not configured"},
+        )
+    if isinstance(error, (AdminParentProviderOperationError, AdminParentConsistencyError)):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "PARENT_AUTH_OPERATION_FAILED", "message": "The Parent operation could not be completed consistently"},
+        )
+    raise error
+
+
+@router.post(
+    "/admin/parents",
+    response_model=AdminParentDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_admin_parent(
+    parent_in: AdminParentCreateRequest,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Invite a Parent through Supabase Auth; the existing Auth trigger creates profiles."""
+    service = AdminParentService(AdminParentRepository(db))
+    try:
+        result = await service.create_parent(
+            admin_id,
+            display_name=parent_in.display_name,
+            email=str(parent_in.email),
+            phone=parent_in.phone,
+        )
+        return _parent_detail_response(result)
+    except (
+        AdminParentAccessDeniedError,
+        AdminParentNotFoundError,
+        AdminParentConflictError,
+        AdminParentProviderUnavailableError,
+        AdminParentProviderOperationError,
+        AdminParentConsistencyError,
+    ) as error:
+        raise _parent_admin_error_response(error) from error
+
+
+@router.patch(
+    "/admin/parents/{parent_id}",
+    response_model=AdminParentDetailResponse,
+)
+async def update_admin_parent(
+    parent_id: UUID,
+    parent_in: AdminParentUpdateRequest,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update only allowed Parent fields through their authoritative data stores."""
+    service = AdminParentService(AdminParentRepository(db))
+    fields = parent_in.model_fields_set
+    try:
+        result = await service.update_parent(
+            admin_id,
+            parent_id,
+            display_name=parent_in.display_name,
+            update_display_name="display_name" in fields,
+            email=str(parent_in.email) if parent_in.email is not None else None,
+            update_email="email" in fields,
+            phone=parent_in.phone,
+            update_phone="phone" in fields,
+        )
+        return _parent_detail_response(result)
+    except (
+        AdminParentAccessDeniedError,
+        AdminParentNotFoundError,
+        AdminParentConflictError,
+        AdminParentProviderUnavailableError,
+        AdminParentProviderOperationError,
+        AdminParentConsistencyError,
+    ) as error:
+        raise _parent_admin_error_response(error) from error
+
+
+@router.delete(
+    "/admin/parents/{parent_id}",
+    response_model=AdminParentVisibilityResponse,
+)
+async def hide_admin_parent(
+    parent_id: UUID,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide a Parent from the Admin directory by updating its visibility timestamp only."""
+    service = AdminParentService(AdminParentRepository(db))
+    try:
+        result = await service.hide_parent(admin_id, parent_id)
+        return AdminParentVisibilityResponse(
+            id=result.id,
+            is_hidden=result.is_hidden,
+            admin_hidden_at=result.admin_hidden_at,
+        )
+    except (AdminParentAccessDeniedError, AdminParentNotFoundError) as error:
+        raise _parent_admin_error_response(error) from error
+
+
+@router.patch(
+    "/admin/parents/{parent_id}/visibility",
+    response_model=AdminParentVisibilityResponse,
+)
+async def update_admin_parent_visibility(
+    parent_id: UUID,
+    visibility_in: AdminParentVisibilityRequest,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicitly hide or restore a Parent without deleting any underlying data."""
+    service = AdminParentService(AdminParentRepository(db))
+    try:
+        result = (
+            await service.hide_parent(admin_id, parent_id)
+            if visibility_in.is_hidden
+            else await service.restore_parent(admin_id, parent_id)
+        )
+        return AdminParentVisibilityResponse(
+            id=result.id,
+            is_hidden=result.is_hidden,
+            admin_hidden_at=result.admin_hidden_at,
+        )
+    except (AdminParentAccessDeniedError, AdminParentNotFoundError) as error:
+        raise _parent_admin_error_response(error) from error
 
 
 # GET ALL PROFILES
