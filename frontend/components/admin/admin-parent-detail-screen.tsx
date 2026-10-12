@@ -192,7 +192,6 @@ export function AdminParentDetailScreen({
                 <h2 className="text-xl font-black text-ink">
                   Thông tin phụ huynh
                 </h2>
-                <p className="break-all text-sm text-muted">{parent.id}</p>
               </div>
             </div>
 
