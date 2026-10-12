@@ -111,9 +111,12 @@ export function AdminParentDetailScreen({
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
+    const timeout = globalThis.setTimeout(() => {
+      void load(controller.signal);
+    }, 0);
 
     return () => {
+      globalThis.clearTimeout(timeout);
       controller.abort();
       requestIdRef.current += 1;
     };
