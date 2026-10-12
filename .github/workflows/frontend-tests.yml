@@ -19,11 +19,6 @@ jobs:
       run:
         working-directory: frontend
 
-    env:
-      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
-      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -48,4 +43,8 @@ jobs:
         run: npm run lint
 
       - name: Production build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
         run: npm run build
