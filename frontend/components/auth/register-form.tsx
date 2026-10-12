@@ -27,7 +27,7 @@ const registerSchema = z.object({
 });
 
 const safeRegistrationError =
-  "Chưa thể tạo tài khoản lúc này. Ba mẹ vui lòng thử lại sau.";
+  "Không thể hoàn tất đăng ký. Ba mẹ vui lòng kiểm tra thông tin hoặc đăng nhập nếu đã có tài khoản.";
 const registrationValidationError =
   "Thông tin đăng ký chưa hợp lệ. Ba mẹ vui lòng kiểm tra và thử lại.";
 

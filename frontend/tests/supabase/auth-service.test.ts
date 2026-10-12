@@ -10,16 +10,31 @@ import { describe, expect, it, vi } from "vitest";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
 
-const providerUser = {
+const providerUser: User = {
   id: "10000000-0000-4000-8000-000000000001",
   email: "parent@example.com",
+  app_metadata: { provider: "email", providers: ["email"] },
   user_metadata: { display_name: "Nguyen Minh Anh" },
-} as unknown as User;
+  aud: "authenticated",
+  created_at: "2026-10-12T00:00:00Z",
+  identities: [
+    {
+      id: "10000000-0000-4000-8000-000000000001",
+      user_id: "10000000-0000-4000-8000-000000000001",
+      identity_id: "20000000-0000-4000-8000-000000000001",
+      provider: "email",
+    },
+  ],
+};
 
-const providerSession = {
+const providerSession: Session = {
+  access_token: "isolated-test-access-token",
+  refresh_token: "isolated-test-refresh-token",
+  expires_in: 3600,
   expires_at: 1_800_000_000,
+  token_type: "bearer",
   user: providerUser,
-} as unknown as Session;
+};
 
 function authError(code: string, name?: string) {
   const error = new AuthApiError("Provider error", 400, code);
@@ -39,7 +54,7 @@ function createHarness() {
   const eq = vi.fn(() => ({ maybeSingle }));
   const select = vi.fn(() => ({ eq }));
   const from = vi.fn(() => ({ select }));
-  const signUp = vi.fn().mockResolvedValue({
+  const signUp = vi.fn<SupabaseClient["auth"]["signUp"]>().mockResolvedValue({
     data: { session: providerSession, user: providerUser },
     error: null,
   });
@@ -179,11 +194,78 @@ describe("SupabaseAuthService", () => {
     });
   });
 
-  it("normalizes duplicate signup without exposing account existence", async () => {
+  it.each(["email_exists", "user_already_exists"])(
+    "rejects duplicate signup code %s with a safe existing error",
+    async (code) => {
+      const harness = createHarness();
+      harness.signUp.mockResolvedValue({
+        data: { session: null, user: null },
+        error: authError(code),
+      });
+
+      await expect(
+        createService(harness).registerParent({
+          displayName: "Nguyen Minh Anh",
+          email: "parent@example.com",
+          password: "password123",
+        }),
+      ).rejects.toMatchObject({
+        reason: "unexpected",
+        message: "The authentication provider could not complete the request.",
+      });
+      expect(harness.signUp).toHaveBeenCalledOnce();
+      expect(harness.updateUser).not.toHaveBeenCalled();
+      expect(harness.from).not.toHaveBeenCalled();
+      expect(harness.signOut).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an obfuscated confirmed-account response without mutating the user", async () => {
+    const harness = createHarness();
+    const obfuscatedUser: User = { ...providerUser, identities: [] };
+    const before = structuredClone(obfuscatedUser);
+    harness.signUp.mockResolvedValue({
+      data: { session: null, user: obfuscatedUser },
+      error: null,
+    });
+
+    await expect(
+      createService(harness).registerParent({
+        displayName: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        password: "password123",
+      }),
+    ).rejects.toMatchObject({ reason: "unexpected" });
+    expect(obfuscatedUser).toEqual(before);
+    expect(harness.updateUser).not.toHaveBeenCalled();
+    expect(harness.from).not.toHaveBeenCalled();
+    expect(harness.signOut).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signup response with neither user nor session", async () => {
     const harness = createHarness();
     harness.signUp.mockResolvedValue({
       data: { session: null, user: null },
-      error: authError("email_exists"),
+      error: null,
+    });
+
+    await expect(
+      createService(harness).registerParent({
+        displayName: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        password: "password123",
+      }),
+    ).rejects.toMatchObject({ reason: "unexpected" });
+  });
+
+  it("keeps the confirmation flow for an existing unconfirmed email identity", async () => {
+    const harness = createHarness();
+    harness.signUp.mockResolvedValue({
+      data: {
+        session: null,
+        user: { ...providerUser, created_at: "2026-09-01T00:00:00Z" },
+      },
+      error: null,
     });
 
     await expect(
@@ -196,23 +278,79 @@ describe("SupabaseAuthService", () => {
       status: "email-confirmation-required",
       session: null,
     });
+    expect(harness.updateUser).not.toHaveBeenCalled();
+    expect(harness.from).not.toHaveBeenCalled();
   });
 
-  it("maps provider registration validation without exposing raw errors", async () => {
+  it("does not classify an omitted optional identities field as a duplicate", async () => {
     const harness = createHarness();
     harness.signUp.mockResolvedValue({
-      data: { session: null, user: null },
-      error: authError("weak_password"),
+      data: {
+        session: null,
+        user: { ...providerUser, identities: undefined },
+      },
+      error: null,
     });
 
     await expect(
       createService(harness).registerParent({
         displayName: "Nguyen Minh Anh",
         email: "parent@example.com",
-        password: "short",
+        password: "password123",
       }),
-    ).rejects.toMatchObject({ reason: "registration-validation" });
+    ).resolves.toMatchObject({ status: "email-confirmation-required" });
   });
+
+  it("sanitizes a rejected signup transport request", async () => {
+    const harness = createHarness();
+    harness.signUp.mockRejectedValue(new Error("sensitive transport details"));
+
+    await expect(
+      createService(harness).registerParent({
+        displayName: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        password: "password123",
+      }),
+    ).rejects.toMatchObject({
+      reason: "unexpected",
+      message: "The authentication provider could not complete the request.",
+    });
+  });
+
+  it("rejects a signup server error without treating it as pending confirmation", async () => {
+    const harness = createHarness();
+    harness.signUp.mockResolvedValue({
+      data: { session: null, user: null },
+      error: authError("unexpected_failure"),
+    });
+
+    await expect(
+      createService(harness).registerParent({
+        displayName: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        password: "password123",
+      }),
+    ).rejects.toMatchObject({ reason: "unexpected" });
+  });
+
+  it.each(["email_address_invalid", "validation_failed", "weak_password"])(
+    "maps registration validation code %s without exposing raw errors",
+    async (code) => {
+      const harness = createHarness();
+      harness.signUp.mockResolvedValue({
+        data: { session: null, user: null },
+        error: authError(code),
+      });
+
+      await expect(
+        createService(harness).registerParent({
+          displayName: "Nguyen Minh Anh",
+          email: "parent@example.com",
+          password: "short",
+        }),
+      ).rejects.toMatchObject({ reason: "registration-validation" });
+    },
+  );
 
   it.each(["invalid_credentials", "email_not_confirmed", "user_not_found"])(
     "maps %s to the same safe sign-in failure",
