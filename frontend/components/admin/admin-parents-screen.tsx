@@ -433,7 +433,7 @@ export function AdminParentsScreen() {
         title={formMode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
       >
         <form className="grid gap-4" noValidate onSubmit={submitParentForm}>
-          {formError ? <StatusMessage tone="error" title={formError} /> : null}
+          {formError ? <StatusMessage tone="error" title={formError}>Kiểm tra thông tin và thử lại.</StatusMessage> : null}
           <TextField label="Tên hiển thị" autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} required disabled={saving} />
           <TextField label="Email" type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required={formMode === "create"} disabled={saving} />
           <TextField label="Số điện thoại" type="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} disabled={saving} />
