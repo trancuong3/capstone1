@@ -54,12 +54,19 @@ describe("AdminParentDetailScreen", () => {
 
     renderScreen();
 
-    expect(await screen.findByRole("heading", { name: "Nguyen Van A" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Nguyen Van A" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(screen.getByText("0900000000")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Be An" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Be An" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(getById).toHaveBeenCalledWith(PARENT_ID, expect.any(AbortSignal));
+    expect(getById).toHaveBeenCalledWith(
+      PARENT_ID,
+      expect.any(AbortSignal),
+    );
   });
 
   it("shows missing contact fields without breaking the detail screen", async () => {
@@ -72,7 +79,9 @@ describe("AdminParentDetailScreen", () => {
     renderScreen();
 
     expect(await screen.findAllByText("Chưa cung cấp")).toHaveLength(2);
-    expect(screen.getByRole("heading", { name: "Be An" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Be An" }),
+    ).toBeInTheDocument();
   });
 
   it("shows an empty state when the parent has no children", async () => {
@@ -80,7 +89,9 @@ describe("AdminParentDetailScreen", () => {
 
     renderScreen();
 
-    expect(await screen.findByText("Phụ huynh chưa có hồ sơ trẻ em")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Phụ huynh chưa có hồ sơ trẻ em"),
+    ).toBeInTheDocument();
   });
 
   it("shows a safe not-found state and can return to the directory", async () => {
@@ -96,8 +107,12 @@ describe("AdminParentDetailScreen", () => {
 
     renderScreen();
 
-    expect(await screen.findByText("Không tìm thấy phụ huynh")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Quay lại danh sách/i })).toHaveAttribute("href", "/admin/parents");
+    expect(
+      await screen.findByText("Không tìm thấy phụ huynh"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Quay lại danh sách/i }),
+    ).toHaveAttribute("href", "/admin/parents");
   });
 
   it("allows retry after a temporary API failure", async () => {
@@ -106,11 +121,15 @@ describe("AdminParentDetailScreen", () => {
 
     renderScreen();
 
-    expect(await screen.findByText("Không thể tải thông tin phụ huynh")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Không thể tải thông tin phụ huynh"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("internal details")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
 
     await waitFor(() => expect(getById).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("heading", { name: "Be An" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Be An" }),
+    ).toBeInTheDocument();
   });
 });
