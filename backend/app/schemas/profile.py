@@ -147,3 +147,28 @@ class AdminParentListResponse(BaseModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+
+
+# =========================================================
+# ADMIN: READ-ONLY PARENT DETAIL
+# =========================================================
+
+class AdminParentDetailChild(BaseModel):
+    id: UUID
+    alias: str
+    grade: int = Field(ge=1, le=5)
+    created_at: datetime
+
+
+class AdminParentDetailResponse(BaseModel):
+    id: UUID
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    created_at: datetime
+    children: List[AdminParentDetailChild] = Field(default_factory=list)
+    contact_info_status: str = Field(
+        description="Normalized status of the server-side Supabase Auth lookup."
+    )
+
+    model_config = ConfigDict(extra="forbid")
