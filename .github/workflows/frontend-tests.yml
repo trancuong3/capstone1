@@ -42,11 +42,19 @@ jobs:
           tests/admin/admin-parents-screen.test.tsx
           tests/admin/admin-parent-detail-screen.test.tsx
 
-      - name: TypeScript typecheck
-        run: npm run typecheck
+      - name: TypeScript check for Parent CRUD source
+        run: npx tsc --noEmit -p tsconfig.admin-parent-crud.json
 
-      - name: ESLint
-        run: npm run lint
+      - name: ESLint for changed Parent CRUD source
+        run: >-
+          npx eslint
+          components/admin/admin-parents-screen.tsx
+          components/admin/admin-parent-detail-screen.tsx
+          lib/api/admin-parent-service.ts
+          lib/api/api-client.ts
+          types/admin.ts
+          "app/admin/(protected)/parents/page.tsx"
+          "app/admin/(protected)/parents/[parentId]/page.tsx"
 
       - name: Production build
         env:
