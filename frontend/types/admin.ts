@@ -18,6 +18,7 @@ export interface AdminParentProfileItemDTO {
   readonly display_name: string | null;
   readonly created_at: ISODateTime;
   readonly children_count: number;
+  readonly admin_hidden_at: ISODateTime | null;
 }
 
 export interface AdminParentDirectoryDTO {
@@ -46,6 +47,7 @@ export interface AdminParentDetailDTO {
   readonly email: string | null;
   readonly phone: string | null;
   readonly created_at: ISODateTime;
+  readonly admin_hidden_at: ISODateTime | null;
   readonly children: readonly AdminParentDetailChildDTO[];
   readonly contact_info_status: AdminParentContactInfoStatus;
 }
