@@ -1,9 +1,20 @@
 "use client";
 
-import { Search, UsersRound, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Search,
+  UsersRound,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import Link from "next/link";
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+
+import {
+  AdminLoading,
+  AdminPageHeader,
+} from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -19,6 +30,7 @@ type LoadError = "auth" | "forbidden" | "unavailable";
 
 function formatDate(value: string) {
   const date = new Date(value);
+
   return Number.isNaN(date.getTime())
     ? "Không rõ"
     : new Intl.DateTimeFormat("vi-VN", {
@@ -30,7 +42,9 @@ function formatDate(value: string) {
 
 export function AdminParentsScreen() {
   const { parents } = useAdminServices();
-  const [items, setItems] = useState<readonly AdminParentProfileItemDTO[] | null>(null);
+  const [items, setItems] = useState<
+    readonly AdminParentProfileItemDTO[] | null
+  >(null);
   const [total, setTotal] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -49,11 +63,14 @@ export function AdminParentsScreen() {
         limit: PAGE_SIZE,
         offset,
       });
+
       if (requestId !== requestIdRef.current) return;
+
       setItems(page.items);
       setTotal(page.total);
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
+
       setItems([]);
       setTotal(0);
       setError(
@@ -68,13 +85,14 @@ export function AdminParentsScreen() {
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
+
     return () => {
       globalThis.clearTimeout(timeout);
       requestIdRef.current += 1;
     };
   }, [load]);
 
-  function submitSearch(event: React.FormEvent<HTMLFormElement>) {
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setOffset(0);
     setSearch(searchInput.trim());
@@ -103,23 +121,35 @@ export function AdminParentsScreen() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
-          <p className="text-sm font-bold text-muted">Tổng phụ huynh phù hợp</p>
+          <p className="text-sm font-bold text-muted">
+            Tổng phụ huynh phù hợp
+          </p>
           <div className="flex items-center gap-3">
             <UsersRound aria-hidden className="size-8 text-primary" />
-            <p className="text-3xl font-black">{total.toLocaleString("vi-VN")}</p>
+            <p className="text-3xl font-black">
+              {total.toLocaleString("vi-VN")}
+            </p>
           </div>
         </Card>
+
         <Card className="bg-white">
           <p className="text-sm font-bold text-muted">Phạm vi danh sách</p>
           <p className="text-lg font-black">
-            {total === 0 ? "Chưa có dữ liệu" : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
+            {total === 0
+              ? "Chưa có dữ liệu"
+              : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
           </p>
-          <p className="text-sm text-muted">Sắp xếp theo ngày tạo mới nhất</p>
+          <p className="text-sm text-muted">
+            Sắp xếp theo ngày tạo mới nhất
+          </p>
         </Card>
       </div>
 
       <Card className="mb-6 bg-white">
-        <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={submitSearch}>
+        <form
+          className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          onSubmit={submitSearch}
+        >
           <div className="min-w-0 flex-1">
             <TextField
               label="Tìm phụ huynh theo tên hiển thị"
@@ -128,10 +158,12 @@ export function AdminParentsScreen() {
               value={searchInput}
             />
           </div>
+
           <Button className="sm:w-auto" type="submit">
             <Search aria-hidden className="size-5" />
             Tìm kiếm
           </Button>
+
           {search ? (
             <Button
               className="sm:w-auto"
@@ -152,34 +184,59 @@ export function AdminParentsScreen() {
       {items === null ? (
         <AdminLoading label="Đang tải danh sách phụ huynh từ database…" />
       ) : error ? (
-        <StatusMessage tone="error" title={
-          error === "auth"
-            ? "Phiên đăng nhập không hợp lệ"
-            : error === "forbidden"
-              ? "Bạn không có quyền xem danh sách phụ huynh"
-              : "Không thể tải danh sách phụ huynh"
-        }>
+        <StatusMessage
+          tone="error"
+          title={
+            error === "auth"
+              ? "Phiên đăng nhập không hợp lệ"
+              : error === "forbidden"
+                ? "Bạn không có quyền xem danh sách phụ huynh"
+                : "Không thể tải danh sách phụ huynh"
+          }
+        >
           {error === "auth" ? (
-            <Link className="font-extrabold underline" href="/admin/login">Đăng nhập lại</Link>
+            <Link className="font-extrabold underline" href="/admin/login">
+              Đăng nhập lại
+            </Link>
           ) : error === "forbidden" ? (
             "Chỉ tài khoản có role admin mới được phép xem dữ liệu này."
           ) : (
-            <button className="font-extrabold underline" onClick={() => void load()} type="button">
+            <button
+              className="font-extrabold underline"
+              onClick={() => void load()}
+              type="button"
+            >
               Thử lại
             </button>
           )}
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          title={search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"}
-          description={search ? "Thử tên khác hoặc xóa bộ lọc tìm kiếm." : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."}
-          action={search ? (
-            <Button className="sm:w-auto" onClick={() => {
-              setSearchInput("");
-              setSearch("");
-              setOffset(0);
-            }} variant="secondary">Xóa bộ lọc</Button>
-          ) : undefined}
+          title={
+            search
+              ? "Không tìm thấy phụ huynh"
+              : "Chưa có hồ sơ phụ huynh"
+          }
+          description={
+            search
+              ? "Thử tên khác hoặc xóa bộ lọc tìm kiếm."
+              : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."
+          }
+          action={
+            search ? (
+              <Button
+                className="sm:w-auto"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  setOffset(0);
+                }}
+                variant="secondary"
+              >
+                Xóa bộ lọc
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <>
@@ -190,20 +247,32 @@ export function AdminParentsScreen() {
                   <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
                     <UsersRound aria-hidden className="size-6" />
                   </div>
+
                   <div className="min-w-0 flex-1">
                     <h2 className="break-words text-xl font-black text-ink">
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
                     </h2>
-                    <p className="mt-1 break-all text-xs text-muted">ID: {parent.id}</p>
+                    <p className="mt-1 break-all text-xs text-muted">
+                      ID: {parent.id}
+                    </p>
                   </div>
+
                   <dl className="grid grid-cols-2 gap-3 sm:min-w-64">
                     <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-bold text-muted">Ngày tạo</dt>
-                      <dd className="mt-1 font-bold">{formatDate(parent.created_at)}</dd>
+                      <dt className="text-xs font-bold text-muted">
+                        Ngày tạo
+                      </dt>
+                      <dd className="mt-1 font-bold">
+                        {formatDate(parent.created_at)}
+                      </dd>
                     </div>
                     <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-bold text-muted">Hồ sơ bé</dt>
-                      <dd className="mt-1 font-bold">{parent.children_count}</dd>
+                      <dt className="text-xs font-bold text-muted">
+                        Hồ sơ bé
+                      </dt>
+                      <dd className="mt-1 font-bold">
+                        {parent.children_count}
+                      </dd>
                     </div>
                   </dl>
                 </div>
@@ -212,7 +281,10 @@ export function AdminParentsScreen() {
           </div>
 
           <div className="mt-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <p className="text-sm text-muted">Trang {currentPage} / {totalPages}</p>
+            <p className="text-sm text-muted">
+              Trang {currentPage} / {totalPages}
+            </p>
+
             <div className="flex gap-3">
               <Button
                 className="sm:w-auto"
@@ -224,6 +296,7 @@ export function AdminParentsScreen() {
                 <ChevronLeft aria-hidden className="size-5" />
                 Trang trước
               </Button>
+
               <Button
                 className="sm:w-auto"
                 disabled={offset + PAGE_SIZE >= total}
