@@ -97,6 +97,17 @@ class SupabaseAuthContactProvider:
             raise normalized from error
 
     @staticmethod
+    def _delete_new_invite(user_id: UUID) -> None:
+        """Compensation for a newly created invite whose profile could not be verified."""
+        client = get_supabase_admin_client()
+        if client is None:
+            raise SupabaseAuthProviderNotConfiguredError()
+        try:
+            client.auth.admin.delete_user(str(user_id))
+        except Exception as error:
+            raise SupabaseAuthContactProvider._normalize_error(error) from error
+
+    @staticmethod
     def _update_contact_info(
         user_id: UUID,
         email: str | None,
@@ -134,3 +145,7 @@ class SupabaseAuthContactProvider:
         self, user_id: UUID, *, email: str | None = None, phone: str | None = None
     ) -> None:
         await asyncio.to_thread(self._update_contact_info, user_id, email, phone)
+
+    async def compensate_failed_invite(self, user_id: UUID) -> None:
+        """Delete only the Auth identity created by the current failed Create request."""
+        await asyncio.to_thread(self._delete_new_invite, user_id)
