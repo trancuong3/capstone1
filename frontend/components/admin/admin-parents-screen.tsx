@@ -48,7 +48,7 @@ function safeMutationError(error: unknown) {
   if (isServiceError(error) && error.status === 422) {
     return "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường.";
   }
-  if (isServiceError(error) && error.code === "AUTH_PROVIDER_UNAVAILABLE") {
+  if (isServiceError(error) && error.status === 503) {
     return "Backend chưa được cấu hình quyền quản lý tài khoản Supabase Auth.";
   }
   return "Không thể hoàn thành thao tác. Vui lòng thử lại.";
