@@ -9,7 +9,6 @@ export interface AdminParentListQuery {
   readonly search?: string;
   readonly limit?: number;
   readonly offset?: number;
-  readonly visibility?: "visible" | "hidden";
 }
 
 export interface AdminParentCreateInput {
@@ -24,23 +23,14 @@ export interface AdminParentUpdateInput {
   readonly phone?: string;
 }
 
-export interface AdminParentVisibilityDTO {
-  readonly id: string;
-  readonly is_hidden: boolean;
-  readonly admin_hidden_at: string | null;
-}
-
 export interface AdminParentService {
   list(query?: AdminParentListQuery): Promise<AdminParentDirectoryDTO>;
   getById(
     parentId: string,
     signal?: AbortSignal,
-    includeHidden?: boolean,
   ): Promise<AdminParentDetailDTO>;
   create(input: AdminParentCreateInput): Promise<AdminParentDetailDTO>;
   update(parentId: string, input: AdminParentUpdateInput): Promise<AdminParentDetailDTO>;
-  hide(parentId: string): Promise<AdminParentVisibilityDTO>;
-  restore(parentId: string): Promise<AdminParentVisibilityDTO>;
 }
 
 const parentListResponseSchema = z.object({
@@ -50,7 +40,6 @@ const parentListResponseSchema = z.object({
       display_name: z.string().nullable(),
       created_at: z.iso.datetime({ offset: true }),
       children_count: z.number().int().nonnegative(),
-      admin_hidden_at: z.iso.datetime({ offset: true }).nullable(),
     }),
   ),
   total: z.number().int().nonnegative(),
@@ -64,7 +53,6 @@ const parentDetailResponseSchema = z.object({
   email: z.string().nullable(),
   phone: z.string().nullable(),
   created_at: z.iso.datetime({ offset: true }),
-  admin_hidden_at: z.iso.datetime({ offset: true }).nullable(),
   children: z.array(
     z.object({
       id: z.guid(),
@@ -81,11 +69,6 @@ const parentDetailResponseSchema = z.object({
   ]),
 });
 
-const parentVisibilitySchema = z.object({
-  id: z.guid(),
-  is_hidden: z.boolean(),
-  admin_hidden_at: z.iso.datetime({ offset: true }).nullable(),
-});
 
 export function createAdminParentService(): AdminParentService {
   return {
@@ -95,15 +78,12 @@ export function createAdminParentService(): AdminParentService {
           search: query?.search?.trim() || undefined,
           limit: query?.limit ?? 10,
           offset: query?.offset ?? 0,
-          visibility: query?.visibility === "hidden" ? "hidden" : undefined,
         })}`,
         parentListResponseSchema,
       ),
-    getById: (parentId, signal, includeHidden = false) =>
+    getById: (parentId, signal) =>
       requestApi(
-        `/profiles/admin/parents/${encodeURIComponent(parentId)}${apiQuery({
-          include_hidden: includeHidden ? "true" : undefined,
-        })}`,
+        `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
         parentDetailResponseSchema,
         signal,
       ),
@@ -121,19 +101,6 @@ export function createAdminParentService(): AdminParentService {
         undefined,
         { method: "PATCH", body: input },
       ),
-    hide: (parentId) =>
-      requestApi(
-        `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
-        parentVisibilitySchema,
-        undefined,
-        { method: "DELETE" },
-      ),
-    restore: (parentId) =>
-      requestApi(
-        `/profiles/admin/parents/${encodeURIComponent(parentId)}/visibility`,
-        parentVisibilitySchema,
-        undefined,
-        { method: "PATCH", body: { is_hidden: false } },
-      ),
+
   };
 }
