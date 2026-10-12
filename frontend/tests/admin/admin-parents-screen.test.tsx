@@ -165,6 +165,7 @@ describe("AdminParentsScreen", () => {
   it("restores a hidden Parent and reloads the hidden directory from the API", async () => {
     const parentId = "44444444-4444-4444-8444-444444444444";
     list
+      .mockResolvedValueOnce({ items: [], total: 0, limit: 10, offset: 0 })
       .mockResolvedValueOnce({
         items: [{
           id: parentId,
@@ -182,8 +183,9 @@ describe("AdminParentsScreen", () => {
 
     renderScreen();
 
-    // Switch to the hidden list before checking Restore.
-    fireEvent.click(await screen.findByRole("button", { name: "Đã ẩn" }));
+    // Wait for the default visible list before switching to the hidden filter.
+    await screen.findByText("Chưa có hồ sơ phụ huynh");
+    fireEvent.click(screen.getByRole("button", { name: "Đã ẩn" }));
     expect(await screen.findByText("Hidden Parent")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Khôi phục hiển thị" }));
 
