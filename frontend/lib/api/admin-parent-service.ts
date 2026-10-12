@@ -101,6 +101,5 @@ export function createAdminParentService(): AdminParentService {
         undefined,
         { method: "PATCH", body: input },
       ),
-
   };
 }
