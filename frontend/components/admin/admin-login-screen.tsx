@@ -49,7 +49,7 @@ export function AdminLoginScreen({
     setNotice(null);
     try {
       await auth.signIn(values);
-      replace("/admin/books");
+      replace("/admin/parents");
       refresh();
     } catch (error) {
       setNotice(
