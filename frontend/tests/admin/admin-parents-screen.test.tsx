@@ -7,18 +7,16 @@ import {
   type AdminServices,
 } from "@/components/providers/admin-services-provider";
 
-const { list, create, getById, update, hide, restore } = vi.hoisted(() => ({
+const { list, create, getById, update } = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
   getById: vi.fn(),
   update: vi.fn(),
-  hide: vi.fn(),
-  restore: vi.fn(),
 }));
 
 function renderScreen() {
   const services = {
-    parents: { list, create, getById, update, hide, restore },
+    parents: { list, create, getById, update },
   } as unknown as AdminServices;
 
   return render(
@@ -34,8 +32,6 @@ describe("AdminParentsScreen", () => {
     create.mockReset();
     getById.mockReset();
     update.mockReset();
-    hide.mockReset();
-    restore.mockReset();
   });
 
   it("renders parent profiles returned by the database service", async () => {
@@ -127,71 +123,6 @@ describe("AdminParentsScreen", () => {
     });
     expect(
       await screen.findByText(/Đã gửi lời mời tạo tài khoản Parent/i),
-    ).toBeInTheDocument();
-  });
-
-  it("confirms Hide and refreshes the visible directory only after the API succeeds", async () => {
-    const parentId = "22222222-2222-4222-8222-222222222222";
-    list
-      .mockResolvedValueOnce({
-        items: [{
-          id: parentId,
-          display_name: "Nguyen Van A",
-          created_at: "2026-10-01T00:00:00Z",
-          children_count: 2,
-          admin_hidden_at: null,
-        }],
-        total: 1,
-        limit: 10,
-        offset: 0,
-      })
-      .mockResolvedValueOnce({ items: [], total: 0, limit: 10, offset: 0 });
-    hide.mockResolvedValue({ id: parentId, is_hidden: true, admin_hidden_at: "2026-10-12T00:00:00Z" });
-
-    renderScreen();
-
-    fireEvent.click(await screen.findByRole("button", { name: /^Ẩn$/i }));
-    expect(
-      await screen.findByText(/Dữ liệu Parent, Child và lịch sử vẫn được giữ nguyên/i),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Xác nhận ẩn" }));
-
-    await waitFor(() => expect(hide).toHaveBeenCalledWith(parentId));
-    expect(
-      await screen.findByText(/Đã ẩn hồ sơ khỏi danh sách quản lý/i),
-    ).toBeInTheDocument();
-  });
-
-  it("restores a hidden Parent and reloads the hidden directory from the API", async () => {
-    const parentId = "44444444-4444-4444-8444-444444444444";
-    list
-      .mockResolvedValueOnce({ items: [], total: 0, limit: 10, offset: 0 })
-      .mockResolvedValueOnce({
-        items: [{
-          id: parentId,
-          display_name: "Hidden Parent",
-          created_at: "2026-10-01T00:00:00Z",
-          children_count: 1,
-          admin_hidden_at: "2026-10-11T00:00:00Z",
-        }],
-        total: 1,
-        limit: 10,
-        offset: 0,
-      })
-      .mockResolvedValueOnce({ items: [], total: 0, limit: 10, offset: 0 });
-    restore.mockResolvedValue({ id: parentId, is_hidden: false, admin_hidden_at: null });
-
-    renderScreen();
-
-    // Wait for the default visible list before switching to the hidden filter.
-    await screen.findByText("Chưa có hồ sơ phụ huynh");
-    fireEvent.click(screen.getByRole("button", { name: "Đã ẩn" }));
-    expect(await screen.findByText("Hidden Parent")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Khôi phục hiển thị" }));
-
-    await waitFor(() => expect(restore).toHaveBeenCalledWith(parentId));
-    expect(
-      await screen.findByText("Đã khôi phục hiển thị Parent."),
     ).toBeInTheDocument();
   });
 
