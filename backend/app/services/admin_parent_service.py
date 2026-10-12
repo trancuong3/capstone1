@@ -224,7 +224,7 @@ class AdminParentService:
                     phone=phone.strip() if update_phone and phone is not None else None,
                 )
             except SupabaseAuthProviderNotConfiguredError as error:
-                if name_changed and old_display_name is not None:
+                if name_changed:
                     try:
                         await self.repository.update_display_name(parent_id, old_display_name)
                     except Exception as rollback_error:
