@@ -13,7 +13,10 @@ export interface AdminParentListQuery {
 
 export interface AdminParentService {
   list(query?: AdminParentListQuery): Promise<AdminParentDirectoryDTO>;
-  getById(parentId: string, signal?: AbortSignal): Promise<AdminParentDetailDTO>;
+  getById(
+    parentId: string,
+    signal?: AbortSignal,
+  ): Promise<AdminParentDetailDTO>;
 }
 
 const parentListResponseSchema = z.object({
