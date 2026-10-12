@@ -92,7 +92,9 @@ export function AdminParentDetailScreen({
       setParent(null);
 
       try {
-        const detail = await parents.getById(parentId, signal, includeHidden);
+        const detail = includeHidden
+          ? await parents.getById(parentId, signal, true)
+          : await parents.getById(parentId, signal);
         if (signal?.aborted || requestId !== requestIdRef.current) return;
         setParent(detail);
       } catch (cause) {
@@ -228,7 +230,7 @@ export function AdminParentDetailScreen({
         <div className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold" role="status">{actionNotice}</div>
       ) : null}
       {actionError ? (
-        <div className="mb-4"><StatusMessage tone="error" title={actionError} /></div>
+        <div className="mb-4"><StatusMessage tone="error" title={actionError}>Vui lòng thử lại.</StatusMessage></div>
       ) : null}
       {parent && isHidden ? (
         <div className="mb-4 rounded-control border border-border bg-canvas p-4 text-sm font-bold" role="status">
@@ -413,7 +415,7 @@ export function AdminParentDetailScreen({
         title="Sửa hồ sơ Parent"
       >
         <form className="grid gap-4" noValidate onSubmit={submitEdit}>
-          {editError ? <StatusMessage tone="error" title={editError} /> : null}
+          {editError ? <StatusMessage tone="error" title={editError}>Kiểm tra thông tin và thử lại.</StatusMessage> : null}
           <TextField label="Tên hiển thị" autoComplete="name" value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} required disabled={saving} />
           <TextField label="Email" type="email" autoComplete="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} disabled={saving} />
           <TextField label="Số điện thoại" type="tel" autoComplete="tel" value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} disabled={saving} />
