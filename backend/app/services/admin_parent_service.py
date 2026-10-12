@@ -11,6 +11,7 @@ from app.providers.supabase_auth_contact_provider import (
     ContactInfoStatus,
     SupabaseAuthContactProvider,
     SupabaseAuthConflictError,
+    SupabaseAuthCompensationError,
     SupabaseAuthProviderError,
     SupabaseAuthProviderNotConfiguredError,
 )
@@ -180,6 +181,10 @@ class AdminParentService:
             raise AdminParentProviderUnavailableError() from error
         except SupabaseAuthConflictError as error:
             raise AdminParentConflictError("A user with this email already exists.") from error
+        except SupabaseAuthCompensationError as error:
+            raise AdminParentConsistencyError(
+                "The invitation operation failed and Auth cleanup also failed."
+            ) from error
         except SupabaseAuthProviderError as error:
             raise AdminParentProviderOperationError() from error
 
