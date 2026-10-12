@@ -6,9 +6,16 @@ export const metadata: Metadata = { title: "Chi tiết phụ huynh" };
 
 export default async function Page({
   params,
+  searchParams,
 }: {
   params: Promise<{ parentId: string }>;
+  searchParams: Promise<{ include_hidden?: string }>;
 }) {
-  const { parentId } = await params;
-  return <AdminParentDetailScreen parentId={parentId} />;
+  const [{ parentId }, query] = await Promise.all([params, searchParams]);
+  return (
+    <AdminParentDetailScreen
+      parentId={parentId}
+      includeHidden={query.include_hidden === "true"}
+    />
+  );
 }
