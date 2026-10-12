@@ -14,7 +14,7 @@ import {
   AdminLoading,
   AdminPageHeader,
 } from "@/components/admin/admin-ui";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
@@ -274,6 +274,16 @@ export function AdminParentsScreen() {
                       </dd>
                     </div>
                   </dl>
+                  <div className="sm:w-auto">
+                    <ButtonLink
+                      className="sm:w-auto"
+                      href={`/admin/parents/${encodeURIComponent(parent.id)}`}
+                      variant="secondary"
+                    >
+                      Xem chi tiết
+                      <ChevronRight aria-hidden className="size-5" />
+                    </ButtonLink>
+                  </div>
                 </div>
               </Card>
             ))}

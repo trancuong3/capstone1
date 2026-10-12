@@ -1,0 +1,306 @@
+"use client";
+
+import {
+  ArrowLeft,
+  CalendarDays,
+  GraduationCap,
+  Mail,
+  Phone,
+  RefreshCw,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import { Button, ButtonLink } from "@/components/common/button";
+import { Card } from "@/components/common/card";
+import { EmptyState } from "@/components/common/empty-state";
+import { StatusMessage } from "@/components/common/status-message";
+import { useAdminServices } from "@/hooks/use-admin-services";
+import { isServiceError } from "@/lib/api/service-error";
+import type { AdminParentDetailDTO } from "@/types/admin";
+
+type LoadError = "auth" | "forbidden" | "not-found" | "unavailable";
+
+function formatDate(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? "Không rõ"
+    : new Intl.DateTimeFormat("vi-VN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date);
+}
+
+function getLoadError(error: unknown): LoadError {
+  if (!isServiceError(error)) return "unavailable";
+  if (error.code === "AUTH_REQUIRED") return "auth";
+  if (error.code === "FORBIDDEN") return "forbidden";
+  if (
+    error.code === "RESOURCE_NOT_FOUND" ||
+    error.code === "VALIDATION_ERROR"
+  ) {
+    return "not-found";
+  }
+  return "unavailable";
+}
+
+function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
+  switch (status) {
+    case "not_configured":
+      return "Chưa thể tải email và số điện thoại vì backend chưa được cấu hình quyền truy xuất Supabase Auth.";
+    case "user_not_found":
+      return "Không tìm thấy tài khoản Supabase Auth liên kết với hồ sơ này. Thông tin hồ sơ và trẻ em vẫn được hiển thị.";
+    case "lookup_failed":
+      return "Không thể tải thông tin liên hệ từ Supabase Auth lúc này. Hãy kiểm tra cấu hình hoặc thử tải lại.";
+    case "available":
+      return null;
+  }
+}
+
+export function AdminParentDetailScreen({
+  parentId,
+}: {
+  parentId: string;
+}) {
+  const { parents } = useAdminServices();
+  const [parent, setParent] = useState<AdminParentDetailDTO | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<LoadError | null>(null);
+  const requestIdRef = useRef(0);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const requestId = ++requestIdRef.current;
+      setLoading(true);
+      setError(null);
+      setParent(null);
+
+      try {
+        const detail = await parents.getById(parentId, signal);
+        if (signal?.aborted || requestId !== requestIdRef.current) return;
+        setParent(detail);
+      } catch (cause) {
+        if (signal?.aborted || requestId !== requestIdRef.current) return;
+        setError(getLoadError(cause));
+      } finally {
+        if (!signal?.aborted && requestId === requestIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [parentId, parents],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+
+    return () => {
+      controller.abort();
+      requestIdRef.current += 1;
+    };
+  }, [load]);
+
+  const contactNotice = parent
+    ? contactMessage(parent.contact_info_status)
+    : null;
+  const fallbackContact =
+    parent?.contact_info_status === "available"
+      ? "Chưa cung cấp"
+      : "Chưa khả dụng";
+
+  return (
+    <>
+      <AdminPageHeader
+        eyebrow="Quản lý tài khoản"
+        title={parent?.display_name?.trim() || "Chi tiết phụ huynh"}
+        description="Thông tin tài khoản phụ huynh và các hồ sơ trẻ em được liên kết."
+        actions={
+          <ButtonLink
+            className="sm:w-auto"
+            href="/admin/parents"
+            variant="secondary"
+          >
+            <ArrowLeft aria-hidden className="size-5" />
+            Quay lại danh sách
+          </ButtonLink>
+        }
+      />
+
+      {loading ? (
+        <AdminLoading label="Đang tải thông tin phụ huynh…" />
+      ) : error ? (
+        <StatusMessage
+          tone="error"
+          title={
+            error === "auth"
+              ? "Phiên đăng nhập không hợp lệ"
+              : error === "forbidden"
+                ? "Bạn không có quyền xem thông tin phụ huynh"
+                : error === "not-found"
+                  ? "Không tìm thấy phụ huynh"
+                  : "Không thể tải thông tin phụ huynh"
+          }
+        >
+          <div className="flex flex-col items-start gap-3">
+            <p>
+              {error === "auth"
+                ? "Vui lòng đăng nhập lại bằng tài khoản quản trị."
+                : error === "forbidden"
+                  ? "Chỉ tài khoản có role admin mới được phép xem thông tin này."
+                  : error === "not-found"
+                    ? "Hồ sơ không tồn tại hoặc ID không hợp lệ."
+                    : "Có lỗi khi kết nối đến hệ thống. Vui lòng thử lại."}
+            </p>
+            {error === "auth" ? (
+              <ButtonLink href="/admin/login" className="sm:w-auto">
+                Đăng nhập lại
+              </ButtonLink>
+            ) : error === "not-found" || error === "forbidden" ? (
+              <ButtonLink
+                href="/admin/parents"
+                className="sm:w-auto"
+                variant="secondary"
+              >
+                <ArrowLeft aria-hidden className="size-5" />
+                Quay lại danh sách
+              </ButtonLink>
+            ) : (
+              <Button
+                className="sm:w-auto"
+                onClick={() => void load()}
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden className="size-5" />
+                Thử lại
+              </Button>
+            )}
+          </div>
+        </StatusMessage>
+      ) : parent ? (
+        <div className="grid gap-6">
+          <Card className="bg-white">
+            <div className="flex items-center gap-3">
+              <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
+                <UserRound aria-hidden className="size-6" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xl font-black text-ink">
+                  Thông tin phụ huynh
+                </h2>
+              </div>
+            </div>
+
+            <dl className="grid gap-4 sm:grid-cols-2">
+              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+                  <Mail aria-hidden className="size-4" />
+                  Email
+                </dt>
+                <dd className="break-words font-bold">
+                  {parent.email?.trim() || fallbackContact}
+                </dd>
+              </div>
+              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+                  <Phone aria-hidden className="size-4" />
+                  Số điện thoại
+                </dt>
+                <dd className="break-words font-bold">
+                  {parent.phone?.trim() || fallbackContact}
+                </dd>
+              </div>
+              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+                  <CalendarDays aria-hidden className="size-4" />
+                  Ngày tạo hồ sơ
+                </dt>
+                <dd className="font-bold">{formatDate(parent.created_at)}</dd>
+              </div>
+              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
+                <dt className="mb-1 text-sm font-bold text-muted">
+                  Mã phụ huynh
+                </dt>
+                <dd className="break-all font-bold">{parent.id}</dd>
+              </div>
+            </dl>
+
+            {contactNotice ? (
+              <div
+                className="rounded-control border border-border bg-canvas p-4 text-sm text-muted"
+                role="status"
+              >
+                {contactNotice}
+              </div>
+            ) : null}
+          </Card>
+
+          <section aria-labelledby="children-heading" className="grid gap-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2
+                  id="children-heading"
+                  className="text-xl font-black text-ink"
+                >
+                  Danh sách trẻ em
+                </h2>
+                <p className="mt-1 text-sm text-muted">
+                  {parent.children.length} hồ sơ trẻ em được liên kết với phụ
+                  huynh này.
+                </p>
+              </div>
+            </div>
+
+            {parent.children.length === 0 ? (
+              <EmptyState
+                title="Phụ huynh chưa có hồ sơ trẻ em"
+                description="Các hồ sơ trẻ em liên kết với phụ huynh sẽ xuất hiện tại đây."
+              />
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {parent.children.map((child) => (
+                  <Card className="bg-white" key={child.id}>
+                    <div className="flex items-center gap-3">
+                      <div className="grid size-11 shrink-0 place-items-center rounded-full bg-sky text-primary">
+                        <UsersRound aria-hidden className="size-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-ink">
+                          {child.alias}
+                        </h3>
+                        <p className="text-sm text-muted">
+                          ID: <span className="break-all">{child.id}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3">
+                      <div className="rounded-control bg-canvas px-3 py-2">
+                        <dt className="flex items-center gap-1 text-xs font-bold text-muted">
+                          <GraduationCap aria-hidden className="size-4" />
+                          Khối lớp
+                        </dt>
+                        <dd className="mt-1 font-bold">{child.grade}</dd>
+                      </div>
+                      <div className="rounded-control bg-canvas px-3 py-2">
+                        <dt className="text-xs font-bold text-muted">
+                          Ngày tạo
+                        </dt>
+                        <dd className="mt-1 font-bold">
+                          {formatDate(child.created_at)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}

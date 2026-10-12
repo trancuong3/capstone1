@@ -51,6 +51,10 @@ describe("AdminParentsScreen", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText(/ID: 22222222-2222-4222-8222-222222222222/))
       .toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Xem chi tiết/i })).toHaveAttribute(
+      "href",
+      "/admin/parents/22222222-2222-4222-8222-222222222222",
+    );
     expect(list).toHaveBeenCalledWith({
       search: undefined,
       limit: 10,

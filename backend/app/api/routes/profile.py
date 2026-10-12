@@ -7,7 +7,8 @@ from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
 from app.models import Profile, ChildProfile
-from app.schemas.profile import AdminParentListResponse
+from app.schemas.profile import AdminParentListResponse, AdminParentDetailResponse
+from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.schemas import (
     ProfileResponse,
     ProfileCreate,
@@ -489,6 +490,40 @@ class AdminParentRepository:
             select(Profile.Role).where(Profile.Id == actor_id)
         )
 
+    async def get_parent_detail(self, parent_id: UUID):
+        """Read one parent profile and only its linked child profiles."""
+        result = await self.db.execute(
+            select(Profile).where(
+                Profile.Id == parent_id,
+                Profile.Role == "parent",
+            )
+        )
+        parent = result.scalar_one_or_none()
+        if parent is None:
+            return None
+
+        child_result = await self.db.execute(
+            select(ChildProfile)
+            .where(ChildProfile.ParentId == parent_id)
+            .order_by(ChildProfile.CreatedAt.desc(), ChildProfile.Id.asc())
+        )
+        children = [
+            {
+                "id": child.Id,
+                "alias": child.Alias,
+                "grade": child.Grade,
+                "created_at": child.CreatedAt,
+            }
+            for child in child_result.scalars().all()
+        ]
+
+        return {
+            "id": parent.Id,
+            "display_name": parent.DisplayName,
+            "created_at": parent.CreatedAt,
+            "children": children,
+        }
+
     async def list_parent_rows(
         self,
         search: str | None,
@@ -564,6 +599,30 @@ class AdminParentService:
             offset=offset,
         )
 
+    async def get_parent_detail(
+        self,
+        actor_id: UUID,
+        parent_id: UUID,
+        auth_contact_provider: SupabaseAuthContactProvider | None = None,
+    ) -> AdminParentDetailResponse:
+        """Return a safe, read-only projection for one Parent to Admin users."""
+        if await self.repository.role(actor_id) != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Admin access required"},
+            )
+
+        parent = await self.repository.get_parent_detail(parent_id)
+        if parent is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
+            )
+
+        provider = auth_contact_provider or SupabaseAuthContactProvider()
+        contact = await provider.get_contact_info(parent_id)
+        return AdminParentDetailResponse(**parent, **contact)
+
 
 @router.get(
     "/admin/parents",
@@ -579,6 +638,20 @@ async def get_admin_parent_directory(
     """List parent profiles for authenticated Admin users only."""
     service = AdminParentService(AdminParentRepository(db))
     return await service.list_parents(admin_id, search, limit, offset)
+
+
+@router.get(
+    "/admin/parents/{parent_id}",
+    response_model=AdminParentDetailResponse,
+)
+async def get_admin_parent_detail(
+    parent_id: UUID,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get one Parent and its linked children for authorized Admin users."""
+    service = AdminParentService(AdminParentRepository(db))
+    return await service.get_parent_detail(admin_id, parent_id)
 
 
 # =========================================================

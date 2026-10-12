@@ -89,6 +89,120 @@ class AdminParentDirectoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 403)
         repository.list_parent_rows.assert_not_awaited()
 
+    async def test_admin_receives_parent_detail_and_only_linked_children(self):
+        child_id = UUID("33333333-3333-4333-8333-333333333333")
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Nguyen Van A",
+                "created_at": CREATED_AT,
+                "children": [
+                    {
+                        "id": child_id,
+                        "alias": "Be An",
+                        "grade": 2,
+                        "created_at": CREATED_AT,
+                    }
+                ],
+            }
+        )
+        auth_provider = MagicMock()
+        auth_provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "parent@example.com",
+                "phone": "0900000000",
+                "contact_info_status": "available",
+            }
+        )
+
+        response = await AdminParentService(repository).get_parent_detail(
+            actor_id=ADMIN_ID,
+            parent_id=PARENT_ID,
+            auth_contact_provider=auth_provider,
+        )
+
+        self.assertEqual(response.id, PARENT_ID)
+        self.assertEqual(response.email, "parent@example.com")
+        self.assertEqual(response.phone, "0900000000")
+        self.assertEqual(len(response.children), 1)
+        self.assertEqual(response.children[0].id, child_id)
+        self.assertEqual(response.children[0].alias, "Be An")
+        self.assertEqual(response.children[0].grade, 2)
+        self.assertFalse(hasattr(response, "password"))
+        self.assertFalse(hasattr(response, "reauthentication_token"))
+        repository.get_parent_detail.assert_awaited_once_with(PARENT_ID)
+        auth_provider.get_contact_info.assert_awaited_once_with(PARENT_ID)
+
+    async def test_non_admin_cannot_read_parent_detail(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="parent")
+        repository.get_parent_detail = AsyncMock()
+        auth_provider = MagicMock()
+        auth_provider.get_contact_info = AsyncMock()
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminParentService(repository).get_parent_detail(
+                actor_id=PARENT_ID,
+                parent_id=ADMIN_ID,
+                auth_contact_provider=auth_provider,
+            )
+
+        self.assertEqual(caught.exception.status_code, 403)
+        repository.get_parent_detail.assert_not_awaited()
+        auth_provider.get_contact_info.assert_not_awaited()
+
+    async def test_missing_parent_returns_404_without_auth_lookup(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(return_value=None)
+        auth_provider = MagicMock()
+        auth_provider.get_contact_info = AsyncMock()
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminParentService(repository).get_parent_detail(
+                actor_id=ADMIN_ID,
+                parent_id=PARENT_ID,
+                auth_contact_provider=auth_provider,
+            )
+
+        self.assertEqual(caught.exception.status_code, 404)
+        auth_provider.get_contact_info.assert_not_awaited()
+
+    async def test_parent_detail_survives_unavailable_auth_contact_data(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Nguyen Van A",
+                "created_at": CREATED_AT,
+                "children": [],
+            }
+        )
+        auth_provider = MagicMock()
+        auth_provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": None,
+                "phone": None,
+                "contact_info_status": "not_configured",
+            }
+        )
+
+        response = await AdminParentService(repository).get_parent_detail(
+            actor_id=ADMIN_ID,
+            parent_id=PARENT_ID,
+            auth_contact_provider=auth_provider,
+        )
+
+        self.assertIsNone(response.email)
+        self.assertIsNone(response.phone)
+        self.assertEqual(response.contact_info_status, "not_configured")
+        self.assertEqual(response.children, [])
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
