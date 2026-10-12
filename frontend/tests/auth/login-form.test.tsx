@@ -1,34 +1,29 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import {
-  AuthRuntimeContext,
-  AuthServiceContext,
-  AuthServiceProvider,
-} from "@/components/auth/auth-service-provider";
 import { LoginForm } from "@/components/auth/login-form";
 import { AuthServiceError } from "@/lib/api/auth-service";
-import { createMockAuthService } from "@/lib/mock/mock-auth-service";
+import {
+  authSessionFixture,
+  createAuthServiceFixture,
+  withAuthFixture,
+} from "@/test/fixtures/auth-service-fixture";
 import type { AuthMockScenario } from "@/types/auth";
 
 const { refreshMock, replaceMock } = vi.hoisted(() => ({
   refreshMock: vi.fn(),
   replaceMock: vi.fn(),
 }));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock, replace: replaceMock }),
 }));
 
-function renderLoginForm(scenario: AuthMockScenario = "default") {
-  return render(
-    <AuthServiceProvider mode="mock" scenario={scenario}>
-      <LoginForm scenario={scenario} />
-    </AuthServiceProvider>,
-  );
+function renderLoginForm(
+  scenario: AuthMockScenario = "default",
+  service = createAuthServiceFixture(),
+) {
+  return render(withAuthFixture(<LoginForm scenario={scenario} />, service));
 }
-
 async function fillValidLogin(user: ReturnType<typeof userEvent.setup>) {
   await user.type(
     screen.getByLabelText("Email của ba mẹ"),
@@ -43,12 +38,11 @@ describe("LoginForm", () => {
     replaceMock.mockClear();
   });
 
-  it("shows field-level validation and does not submit an invalid form", async () => {
+  it("shows field-level validation without submitting an invalid form", async () => {
     const user = userEvent.setup();
-    renderLoginForm();
-
+    const service = createAuthServiceFixture();
+    renderLoginForm("default", service);
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-
     expect(
       await screen.findByText("Mật khẩu cần có ít nhất 8 ký tự."),
     ).toBeInTheDocument();
@@ -56,136 +50,88 @@ describe("LoginForm", () => {
       "aria-invalid",
       "true",
     );
+    expect(service.signIn).not.toHaveBeenCalled();
   });
 
-  it("navigates to the dashboard after a successful mock login", async () => {
+  it("navigates to the dashboard after a successful service response", async () => {
     const user = userEvent.setup();
-    renderLoginForm();
-
+    const service = createAuthServiceFixture();
+    renderLoginForm("default", service);
     await fillValidLogin(user);
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/dashboard");
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
+    expect(service.signIn).toHaveBeenCalledWith({
+      email: "minhanh@example.com",
+      password: "matkhau123",
     });
     expect(refreshMock).toHaveBeenCalledOnce();
   });
 
   it("routes an admin role to the fixed admin destination", async () => {
-    const service = createMockAuthService("default");
-    vi.spyOn(service, "getCurrentRole").mockResolvedValue("admin");
+    const service = createAuthServiceFixture();
+    service.getCurrentRole.mockResolvedValue("admin");
     const user = userEvent.setup();
-    render(
-      <AuthServiceContext.Provider value={service}>
-        <LoginForm scenario="default" />
-      </AuthServiceContext.Provider>,
-    );
-
+    renderLoginForm("default", service);
     await fillValidLogin(user);
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/admin/books");
-    });
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("/admin/books"),
+    );
   });
 
   it("completes a verified signup callback using the profile role", async () => {
-    const service = createMockAuthService("default");
-    vi.spyOn(service, "getCurrentRole").mockResolvedValue("parent");
-
+    const service = createAuthServiceFixture();
     render(
-      <AuthRuntimeContext.Provider
-        value={{
-          initializationFailure: null,
-          isPasswordRecovery: false,
-          lastEvent: "SIGNED_IN",
-          mode: "supabase",
-          session: {
-            expires_at: null,
-            user: {
-              display_name: "Nguyen Minh Anh",
-              email: "minhanh@example.com",
-              id: "10000000-0000-4000-8000-000000000001",
-            },
-          },
-          status: "ready",
-        }}
-      >
-        <AuthServiceContext.Provider value={service}>
-          <LoginForm isAuthCallback scenario="default" />
-        </AuthServiceContext.Provider>
-      </AuthRuntimeContext.Provider>,
+      withAuthFixture(
+        <LoginForm isAuthCallback scenario="default" />,
+        service,
+        { lastEvent: "SIGNED_IN", session: authSessionFixture },
+      ),
     );
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/dashboard");
-    });
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
+    expect(service.getCurrentRole).toHaveBeenCalledOnce();
+    expect(service.signIn).not.toHaveBeenCalled();
     expect(refreshMock).toHaveBeenCalledOnce();
   });
 
   it("fails closed when a signup callback has no valid profile role", async () => {
-    const service = createMockAuthService("default");
-    vi.spyOn(service, "getCurrentRole").mockResolvedValue(null);
-    const signOut = vi.spyOn(service, "signOut");
-
+    const service = createAuthServiceFixture();
+    service.getCurrentRole.mockResolvedValue(null);
     render(
-      <AuthRuntimeContext.Provider
-        value={{
-          initializationFailure: null,
-          isPasswordRecovery: false,
-          lastEvent: "SIGNED_IN",
-          mode: "supabase",
-          session: {
-            expires_at: null,
-            user: {
-              display_name: "Nguyen Minh Anh",
-              email: "minhanh@example.com",
-              id: "10000000-0000-4000-8000-000000000001",
-            },
-          },
-          status: "ready",
-        }}
-      >
-        <AuthServiceContext.Provider value={service}>
-          <LoginForm isAuthCallback scenario="default" />
-        </AuthServiceContext.Provider>
-      </AuthRuntimeContext.Provider>,
+      withAuthFixture(
+        <LoginForm isAuthCallback scenario="default" />,
+        service,
+        { lastEvent: "SIGNED_IN", session: authSessionFixture },
+      ),
     );
-
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
     );
-    expect(signOut).toHaveBeenCalledOnce();
+    expect(service.signOut).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Đăng nhập" })).toBeEnabled();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it("fails closed and clears the session when role lookup fails", async () => {
-    const service = createMockAuthService("default");
-    vi.spyOn(service, "getCurrentRole").mockRejectedValue(
+  it("fails closed and signs out when role lookup fails", async () => {
+    const service = createAuthServiceFixture();
+    service.getCurrentRole.mockRejectedValue(
       new AuthServiceError("unexpected", "Sensitive provider details"),
     );
-    const signOut = vi.spyOn(service, "signOut");
     const user = userEvent.setup();
-    render(
-      <AuthServiceContext.Provider value={service}>
-        <LoginForm scenario="default" />
-      </AuthServiceContext.Provider>,
-    );
-
+    renderLoginForm("default", service);
     await fillValidLogin(user);
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
     );
-    expect(signOut).toHaveBeenCalledOnce();
+    expect(alert).not.toHaveTextContent("Sensitive provider details");
+    expect(service.signOut).toHaveBeenCalledOnce();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it("renders the safe invalid-credentials message", () => {
     renderLoginForm("invalid-credentials");
-
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Email hoặc mật khẩu chưa đúng",
     );
@@ -193,10 +139,9 @@ describe("LoginForm", () => {
 
   it("links the registration action to /register", () => {
     renderLoginForm();
-
     expect(screen.getByRole("link", { name: /Đăng ký/ })).toHaveAttribute(
       "href",
-      "/register?state=default",
+      "/register",
     );
   });
 });

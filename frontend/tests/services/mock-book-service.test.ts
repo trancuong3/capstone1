@@ -1,70 +1,111 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createBookService } from "@/lib/api/book-service";
+import {
+  apiFetchFixture,
+  installApiFetchFixture,
+  requestedApiUrl,
+} from "@/test/fixtures/api-test-fixture";
+import {
+  bookFixture,
+  pagePreviewFixture,
+  TEST_BOOK_ID,
+} from "@/test/fixtures/report-data-fixture";
 
-import { isServiceError } from "@/lib/api/service-error";
-import { createMockBookService } from "@/lib/mock/mock-book-service";
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: { session: { access_token: "isolated-test-token" } },
+        error: null,
+      }),
+    },
+  }),
+}));
+vi.mock("@/lib/supabase/config", () => ({
+  getApiBaseUrl: () => "http://127.0.0.1:8000",
+}));
+beforeEach(() => installApiFetchFixture());
+afterEach(() => vi.unstubAllGlobals());
 
-const catBookId = "20000000-0000-4000-8000-000000000001";
-const retiredBookId = "20000000-0000-4000-8000-000000000005";
-
-describe("MockBookService", () => {
-  it("returns only ACTIVE books with VERIFIED active pages", async () => {
-    const service = createMockBookService("default");
-    const books = await service.list();
-
-    expect(books).toHaveLength(4);
-    expect(books.every((book) => book.lifecycle_status === "ACTIVE")).toBe(
-      true,
-    );
-    expect(books.map((book) => book.title)).not.toContain(
-      "Sách đã ngừng phát hành",
-    );
-    expect(books.map((book) => book.title)).not.toContain(
-      "Bản thảo đang duyệt",
-    );
+describe("BookService real API contract (migrated from legacy mock tests)", () => {
+  it("returns validated ACTIVE catalog data without generating records", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json([bookFixture]));
+    expect(await createBookService().list()).toEqual([bookFixture]);
+    expect(requestedApiUrl().pathname).toBe("/books/catalog");
+    apiFetchFixture.mockResolvedValueOnce(Response.json([]));
+    expect(await createBookService().list()).toEqual([]);
   });
 
-  it("searches title and author and filters by grade deterministically", async () => {
-    const service = createMockBookService("default");
+  it("forwards encoded search, author and grade to the backend", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json([bookFixture]));
+    await createBookService().list({
+      search: "A & B",
+      author: "Tác giả",
+      grade: 2,
+    });
+    const url = requestedApiUrl();
+    expect(url.searchParams.get("search")).toBe("A & B");
+    expect(url.searchParams.get("author")).toBe("Tác giả");
+    expect(url.searchParams.get("grade")).toBe("2");
+  });
 
-    await expect(service.list({ search: "dân gian" })).resolves.toMatchObject([
-      { title: "Cây Khế" },
+  it("returns preview-safe ACTIVE pages with stored verified revision IDs", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json([pagePreviewFixture]));
+    expect(await createBookService().listPages(TEST_BOOK_ID)).toEqual([
+      pagePreviewFixture,
     ]);
-    await expect(service.list({ grade: 2 })).resolves.toHaveLength(4);
-    await expect(
-      service.list({ author: "Nhóm ReadAlong", grade: 2 }),
-    ).resolves.toHaveLength(3);
-  });
-
-  it("returns only preview-safe active pages with verified revisions", async () => {
-    const service = createMockBookService("default");
-    const pages = await service.listPages(catBookId);
-
-    expect(pages.map((page) => page.page_number)).toEqual([4, 5, 6]);
-    expect(
-      pages.every(
-        (page) =>
-          page.lifecycle_status === "ACTIVE" &&
-          page.current_verified_revision_id.length > 0,
-      ),
-    ).toBe(true);
-  });
-
-  it("uses canonical errors for unknown and inactive books", async () => {
-    const service = createMockBookService("default");
-
-    await expect(
-      service.get("ffffffff-ffff-4fff-8fff-ffffffffffff"),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        isServiceError(error) &&
-        error.code === "RESOURCE_NOT_FOUND" &&
-        error.status === 404,
-    );
-    await expect(service.get(retiredBookId)).rejects.toSatisfy(
-      (error: unknown) =>
-        isServiceError(error) &&
-        error.code === "CONTENT_INACTIVE" &&
-        error.status === 409,
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/catalog/${TEST_BOOK_ID}/preview`,
     );
   });
+
+  it.each([
+    {
+      payload: { ...bookFixture, lifecycle_status: "RETIRED" },
+      name: "inactive book",
+    },
+    {
+      payload: { ...bookFixture, min_grade: 5, max_grade: 1 },
+      name: "inverted grades",
+    },
+  ])(
+    "rejects $name instead of silently manufacturing eligible data",
+    async ({ payload }) => {
+      apiFetchFixture.mockResolvedValueOnce(Response.json([payload]));
+      await expect(createBookService().list()).rejects.toMatchObject({
+        code: "NETWORK_ERROR",
+      });
+    },
+  );
+
+  it.each([
+    { ...pagePreviewFixture, current_verified_revision_id: null },
+    { ...pagePreviewFixture, lifecycle_status: "RETIRED" },
+    { ...pagePreviewFixture, preview_url: "javascript:alert(1)" },
+  ])("rejects incomplete or unsafe page previews", async (payload) => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json([payload]));
+    await expect(
+      createBookService().listPages(TEST_BOOK_ID),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+
+  it.each([
+    { status: 404, code: "RESOURCE_NOT_FOUND" },
+    { status: 409, code: "CONTENT_INACTIVE" },
+  ])(
+    "preserves canonical HTTP $status failures without exposing server details",
+    async ({ status, code }) => {
+      apiFetchFixture.mockResolvedValueOnce(
+        Response.json({ detail: "private token SQL" }, { status }),
+      );
+      await expect(createBookService().get(TEST_BOOK_ID)).rejects.toMatchObject(
+        {
+          status,
+          code,
+          retryable: false,
+          message: "Có lỗi xảy ra. Vui lòng thử lại sau.",
+        },
+      );
+    },
+  );
 });
