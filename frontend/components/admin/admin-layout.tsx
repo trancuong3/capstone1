@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenCheck, HeartPulse, LogOut, ScrollText } from "lucide-react";
+import { BookOpenCheck, HeartPulse, LogOut, ScrollText, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -8,6 +8,7 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { cn } from "@/lib/utils/cn";
 
 const links = [
+  { href: "/admin/parents", label: "Phụ huynh", icon: UsersRound },
   { href: "/admin/books", label: "Kho sách", icon: BookOpenCheck },
   { href: "/admin/audit-logs", label: "Nhật ký", icon: ScrollText },
   { href: "/admin/health", label: "Vận hành", icon: HeartPulse },
@@ -43,7 +44,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-4 py-4 sm:px-8">
           <Link
             className="mr-auto flex min-h-11 items-center rounded-control text-xl font-black text-primary focus-visible:outline-3 focus-visible:outline-primary"
-            href="/admin/books"
+            href="/admin/parents"
           >
             ReadAlong <span className="text-ink">Admin</span>
           </Link>
