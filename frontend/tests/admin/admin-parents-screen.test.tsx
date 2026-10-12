@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminParentsScreen } from "@/components/admin/admin-parents-screen";
@@ -74,7 +74,7 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("internal server detail")).not.toBeInTheDocument();
 
-    screen.getByRole("button", { name: "Thử lại" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
 
     await waitFor(() => {
       expect(list).toHaveBeenCalledTimes(2);
