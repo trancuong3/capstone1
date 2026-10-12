@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "components/admin/admin-parents-screen.tsx",
+    "components/admin/admin-parent-detail-screen.tsx",
+    "lib/api/admin-parent-service.ts",
+    "lib/api/api-client.ts",
+    "types/admin.ts",
+    "app/admin/(protected)/parents/page.tsx",
+    "app/admin/(protected)/parents/[parentId]/page.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "test",
+    "tests"
+  ]
+}
