@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from typing import List, Literal
@@ -518,6 +519,8 @@ async def get_admin_parent_directory(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Admin access required"},
         ) from error
+    except SQLAlchemyError as error:
+        raise _parent_admin_error_response(error) from error
 
     return AdminParentListResponse(
         items=result.items,
@@ -553,6 +556,8 @@ async def get_admin_parent_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
         ) from error
+    except SQLAlchemyError as error:
+        raise _parent_admin_error_response(error) from error
 
     return AdminParentDetailResponse(
         id=result.id,
@@ -584,6 +589,11 @@ def _parent_detail_response(result):
 
 
 def _parent_admin_error_response(error: Exception):
+    if isinstance(error, SQLAlchemyError):
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "DATABASE_OPERATION_FAILED", "message": "The Parent operation could not be completed"},
+        )
     if isinstance(error, AdminParentAccessDeniedError):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -641,6 +651,8 @@ async def create_admin_parent(
         AdminParentConsistencyError,
     ) as error:
         raise _parent_admin_error_response(error) from error
+    except SQLAlchemyError as error:
+        raise _parent_admin_error_response(error) from error
 
 
 @router.patch(
@@ -677,6 +689,8 @@ async def update_admin_parent(
         AdminParentConsistencyError,
     ) as error:
         raise _parent_admin_error_response(error) from error
+    except SQLAlchemyError as error:
+        raise _parent_admin_error_response(error) from error
 
 
 @router.delete(
@@ -698,6 +712,8 @@ async def hide_admin_parent(
             admin_hidden_at=result.admin_hidden_at,
         )
     except (AdminParentAccessDeniedError, AdminParentNotFoundError) as error:
+        raise _parent_admin_error_response(error) from error
+    except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
 
@@ -725,6 +741,8 @@ async def update_admin_parent_visibility(
             admin_hidden_at=result.admin_hidden_at,
         )
     except (AdminParentAccessDeniedError, AdminParentNotFoundError) as error:
+        raise _parent_admin_error_response(error) from error
+    except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
 
