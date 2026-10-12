@@ -9,6 +9,9 @@ os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
 os.environ["SUPABASE_KEY"] = "isolated-test-key"
 
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
     AdminParentAccessDeniedError,
     AdminParentNotFoundError,
@@ -23,6 +26,25 @@ CREATED_AT = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parent_directory_sql_does_not_require_visibility_column(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=0)
+        result = MagicMock()
+        result.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        await AdminParentRepository(db).list_parent_rows(
+            search=None,
+            limit=10,
+            offset=0,
+        )
+
+        statement = db.execute.await_args.args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("admin_hidden_at", sql)
+        self.assertIn("profiles.role", sql)
+        self.assertIn("childprofiles", sql)
+
     async def test_admin_receives_parent_projection_and_pagination(self):
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
