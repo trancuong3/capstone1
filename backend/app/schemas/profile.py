@@ -136,6 +136,8 @@ class ProfileResponse(ProfileBase):
 # =========================================================
 
 class AdminParentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     display_name: str = Field(min_length=1, max_length=120)
     email: EmailStr
     phone: Optional[str] = Field(default=None, max_length=30)
