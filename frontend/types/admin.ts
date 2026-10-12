@@ -13,6 +13,20 @@ export interface AdminSessionUI {
   readonly display_name: string;
 }
 
+export interface AdminParentProfileItemDTO {
+  readonly id: UUID;
+  readonly display_name: string | null;
+  readonly created_at: ISODateTime;
+  readonly children_count: number;
+}
+
+export interface AdminParentDirectoryDTO {
+  readonly items: readonly AdminParentProfileItemDTO[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+}
+
 export interface AdminBookCreateDTO {
   readonly title: string;
   readonly author: string | null;
