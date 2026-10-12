@@ -7,8 +7,7 @@ import {
   Search,
   UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 
 import {
