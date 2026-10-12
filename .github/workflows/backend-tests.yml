@@ -40,5 +40,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run Admin Parent unit and API tests
-        run: python -m unittest -v test_admin_parents test_admin_parent_api
+      - name: Run full backend unit and API test suite
+        run: python -m unittest discover -v
