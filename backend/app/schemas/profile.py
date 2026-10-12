@@ -189,7 +189,7 @@ class AdminParentUpdateRequest(BaseModel):
                 raise ValueError("phone cannot be null; omit it to leave unchanged")
             self.phone = self.phone.strip()
             import re
-            if not re.fullmatch(r"\\+?[0-9][0-9\\s().-]{5,24}", self.phone):
+            if not re.fullmatch(r"\+?[0-9][0-9\s().-]{5,24}", self.phone):
                 raise ValueError("phone format is invalid")
         return self
 
