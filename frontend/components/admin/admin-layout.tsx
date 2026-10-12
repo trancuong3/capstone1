@@ -1,6 +1,12 @@
 "use client";
 
-import { BookOpenCheck, HeartPulse, LogOut, ScrollText, UsersRound } from "lucide-react";
+import {
+  BookOpenCheck,
+  HeartPulse,
+  LogOut,
+  ScrollText,
+  UsersRound,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
