@@ -153,10 +153,7 @@ export function RegisterForm({
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink
-        href={authRuntime.mode === "mock" ? "/login?state=default" : "/login"}
-        variant="secondary"
-      >
+      <ButtonLink href="/login" variant="secondary">
         Đã có tài khoản? Đăng nhập
       </ButtonLink>
     </form>

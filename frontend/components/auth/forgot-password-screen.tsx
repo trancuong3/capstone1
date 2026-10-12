@@ -8,7 +8,6 @@ import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
-import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import type { AuthMockScenario } from "@/types/auth";
 
@@ -18,7 +17,6 @@ interface ForgotPasswordScreenProps {
 
 export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
   const authService = useAuthService();
-  const authRuntime = useAuthRuntime();
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(
     scenario === "submitted" ? "minhanh@example.com" : null,
   );
@@ -65,11 +63,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
               Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
             </StatusMessage>
           ) : null}
-          <ButtonLink
-            href={
-              authRuntime.mode === "mock" ? "/login?state=default" : "/login"
-            }
-          >
+          <ButtonLink href="/login">
             Về đăng nhập
             <ArrowRight aria-hidden="true" className="size-5" />
           </ButtonLink>

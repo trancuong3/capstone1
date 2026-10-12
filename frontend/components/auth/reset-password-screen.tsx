@@ -60,11 +60,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
               sách.
             </p>
           </div>
-          <ButtonLink
-            href={
-              authRuntime.mode === "mock" ? "/login?state=default" : "/login"
-            }
-          >
+          <ButtonLink href="/login">
             Đăng nhập
             <ArrowRight aria-hidden="true" className="size-5" />
           </ButtonLink>
@@ -92,23 +88,11 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
           <StatusMessage tone="warning">
             Liên kết khôi phục không thể được sử dụng để đổi mật khẩu.
           </StatusMessage>
-          <ButtonLink
-            href={
-              authRuntime.mode === "mock"
-                ? "/forgot-password?state=default"
-                : "/forgot-password"
-            }
-            variant="secondary"
-          >
+          <ButtonLink href="/forgot-password" variant="secondary">
             Yêu cầu hướng dẫn mới
             <ArrowRight aria-hidden="true" className="size-5" />
           </ButtonLink>
-          <ButtonLink
-            href={
-              authRuntime.mode === "mock" ? "/login?state=default" : "/login"
-            }
-            variant="quiet"
-          >
+          <ButtonLink href="/login" variant="quiet">
             Về đăng nhập
           </ButtonLink>
         </Card>

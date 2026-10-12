@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
-
-import { MOCK_PROGRESS_REPORTS } from "@/lib/mock/mock-report-data";
+import { progressReportFixture } from "@/test/fixtures/report-data-fixture";
 import { formatPercent, mapReportMetrics } from "@/lib/utils/report-mappers";
 import {
   createCalendarWindow,
   currentDateInReportTimezone,
 } from "@/lib/utils/report-state";
 
-describe("Group 5 report utilities", () => {
+describe("Report utilities with typed test data", () => {
   it("creates inclusive 30-day and 90-day calendar windows", () => {
     expect(createCalendarWindow("2026-09-12", 30)).toMatchObject({
       period_start: "2026-08-14",
@@ -24,10 +23,25 @@ describe("Group 5 report utilities", () => {
   });
 
   it("keeps unavailable rates nullable in the presentation", () => {
-    const metrics = mapReportMetrics(MOCK_PROGRESS_REPORTS[1]);
+    const metrics = mapReportMetrics(progressReportFixture);
     expect(formatPercent(null)).toBe("Chưa đủ dữ liệu");
     expect(
       metrics.find((metric) => metric.id === "comprehension"),
     ).toMatchObject({ unavailable: true, value: "Chưa đủ dữ liệu" });
+  });
+
+  it("distinguishes an actual zero from an unavailable rate", () => {
+    const metrics = mapReportMetrics({
+      ...progressReportFixture,
+      omission_rate: 0,
+      comprehension_accuracy: 0,
+    });
+    expect(
+      metrics.find((metric) => metric.id === "comprehension"),
+    ).toMatchObject({ unavailable: false, value: "0.0%" });
+    expect(metrics.find((metric) => metric.id === "omission")).toMatchObject({
+      unavailable: false,
+      value: "0.0%",
+    });
   });
 });

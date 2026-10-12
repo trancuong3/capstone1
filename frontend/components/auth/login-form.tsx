@@ -75,7 +75,6 @@ export function LoginForm({
     Boolean(authRuntime.session) &&
     notice === null &&
     !isSubmitting;
-  const authMockSuffix = authRuntime.mode === "mock" ? "?state=default" : "";
 
   const clearSessionQuietly = useCallback(async () => {
     try {
@@ -201,10 +200,10 @@ export function LoginForm({
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink href={`/forgot-password${authMockSuffix}`} variant="quiet">
+      <ButtonLink href="/forgot-password" variant="quiet">
         Quên mật khẩu?
       </ButtonLink>
-      <ButtonLink href={`/register${authMockSuffix}`} variant="secondary">
+      <ButtonLink href="/register" variant="secondary">
         <span className="sm:hidden">Đăng ký tài khoản</span>
         <span className="hidden sm:inline">Chưa có tài khoản? Đăng ký</span>
       </ButtonLink>

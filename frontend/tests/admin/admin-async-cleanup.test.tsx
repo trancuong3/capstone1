@@ -4,127 +4,87 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-
 import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
 import {
-  AdminServicesContext,
-  type AdminServices,
-} from "@/components/providers/admin-services-provider";
-import type { AdminBookService } from "@/lib/api/admin-book-service";
-import type { RevisionService } from "@/lib/api/revision-service";
-import { createMockAdminAuthService } from "@/lib/mock/mock-admin-auth-service";
-import { createMockAdminBookService } from "@/lib/mock/mock-admin-book-service";
-import { createMockAdminPageService } from "@/lib/mock/mock-admin-page-service";
-import {
-  createMockAdminStore,
-  MOCK_ADMIN_BOOK_ID,
-  MOCK_ADMIN_PAGE_ID,
-  MOCK_ADMIN_R1_ID,
-} from "@/lib/mock/mock-admin-store";
-import { createMockAuditService } from "@/lib/mock/mock-audit-service";
-import { createMockHealthService } from "@/lib/mock/mock-health-service";
-import { createMockOcrReviewService } from "@/lib/mock/mock-ocr-review-service";
-import { createMockRevisionService } from "@/lib/mock/mock-revision-service";
-import type { AdminBookListItemUI } from "@/types/admin";
+  ADMIN_BOOK_ID,
+  ADMIN_PAGE_ID,
+  adminR1Fixture,
+  createAdminServiceFixture,
+  withAdminFixture,
+} from "@/test/fixtures/admin-service-fixture";
+import type {
+  AdminBookListItemUI,
+  AdminPageRevisionDetailDTO,
+} from "@/types/admin";
 
 describe("Admin async cleanup", () => {
-  it("settles a pending list request after unmount without updating UI", async () => {
-    const store = createMockAdminStore();
+  it("settles a pending list request after unmount without rendering its result", async () => {
+    const services = createAdminServiceFixture();
     let settle: (items: readonly AdminBookListItemUI[]) => void = () =>
       undefined;
-    const list = vi.fn(
+    services.books.list.mockImplementation(
       () =>
         new Promise<readonly AdminBookListItemUI[]>((resolve) => {
           settle = resolve;
         }),
     );
-    const books: AdminBookService = {
-      ...createMockAdminBookService(store, "default"),
-      list,
-    };
-    const services: AdminServices = {
-      auth: createMockAdminAuthService("default"),
-      books,
-      pages: createMockAdminPageService(store, "default"),
-      ocr: createMockOcrReviewService(store, "default"),
-      revisions: createMockRevisionService(store, "default"),
-      audit: createMockAuditService(store, "default"),
-      health: createMockHealthService("default"),
-    };
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    const view = render(
-      <AdminServicesContext.Provider value={services}>
-        <AdminBooksScreen />
-      </AdminServicesContext.Provider>,
-    );
-
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
-    view.unmount();
-    await act(async () => {
-      settle([]);
-      await Promise.resolve();
-    });
-
-    expect(consoleError).not.toHaveBeenCalled();
-    consoleError.mockRestore();
+    try {
+      const view = render(withAdminFixture(<AdminBooksScreen />, services));
+      await waitFor(() => expect(services.books.list).toHaveBeenCalledOnce());
+      view.unmount();
+      await act(async () => {
+        settle([]);
+      });
+      expect(view.container).toBeEmptyDOMElement();
+      expect(services.books.list).toHaveBeenCalledOnce();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
-  it("does not continue a delayed OCR reprocess after unmount", async () => {
-    const store = createMockAdminStore();
-    const review = store.revisions.get(MOCK_ADMIN_R1_ID);
-    if (!review) throw new Error("Missing mock revision fixture");
-
-    const baseRevisions = createMockRevisionService(store, "default");
-    const list = vi.fn(baseRevisions.list.bind(baseRevisions));
-    const reprocess = vi.fn<RevisionService["reprocess"]>(
+  it("ignores a delayed historical revision response after unmount without starting mutations", async () => {
+    const services = createAdminServiceFixture();
+    const view = render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+    let settle: (revision: AdminPageRevisionDetailDTO) => void = () =>
+      undefined;
+    services.ocr.getRevision.mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
-          globalThis.setTimeout(() => resolve(review), 100);
+        new Promise<AdminPageRevisionDetailDTO>((resolve) => {
+          settle = resolve;
         }),
     );
-    const services: AdminServices = {
-      auth: createMockAdminAuthService("default"),
-      books: createMockAdminBookService(store, "default"),
-      pages: createMockAdminPageService(store, "default"),
-      ocr: createMockOcrReviewService(store, "default"),
-      revisions: { ...baseRevisions, list, reprocess },
-      audit: createMockAuditService(store, "default"),
-      health: createMockHealthService("default"),
-    };
-    const view = render(
-      <AdminServicesContext.Provider value={services}>
-        <AdminOcrReviewScreen
-          bookId={MOCK_ADMIN_BOOK_ID}
-          pageId={MOCK_ADMIN_PAGE_ID}
-        />
-      </AdminServicesContext.Provider>,
-    );
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Chạy lại OCR" }),
-    );
-    const dialog = screen.getByRole("dialog", {
-      name: "Tạo revision OCR mới?",
-    });
-    vi.useFakeTimers();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Chạy lại OCR" }),
-    );
-    expect(reprocess).toHaveBeenCalledTimes(1);
-    expect(list).toHaveBeenCalledTimes(1);
-    view.unmount();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
-
-    expect(list).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /R1/ }));
+      expect(services.ocr.getRevision).toHaveBeenCalledTimes(2);
+      view.unmount();
+      await act(async () => {
+        settle(adminR1Fixture);
+      });
+      expect(view.container).toBeEmptyDOMElement();
+      expect(services.ocr.getRevision).toHaveBeenCalledTimes(2);
+      expect(services.revisions.list).toHaveBeenCalledOnce();
+      expect(services.revisions.reprocess).not.toHaveBeenCalled();
+      expect(services.revisions.verify).not.toHaveBeenCalled();
+      expect(services.ocr.saveDraft).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

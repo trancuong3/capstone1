@@ -9,7 +9,6 @@ import { ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface RegisterScreenProps {
@@ -36,7 +35,6 @@ function RegisterLoadingState() {
 }
 
 export function RegisterScreen({ scenario }: RegisterScreenProps) {
-  const authRuntime = useAuthRuntime();
   const [requiresEmailConfirmation, setRequiresEmailConfirmation] =
     useState(false);
 
@@ -61,11 +59,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
             Vì lý do bảo mật, thông báo này không xác nhận một email đã có tài
             khoản hay chưa.
           </StatusMessage>
-          <ButtonLink
-            href={
-              authRuntime.mode === "mock" ? "/login?state=default" : "/login"
-            }
-          >
+          <ButtonLink href="/login">
             Về đăng nhập
             <ArrowRight aria-hidden="true" className="size-5" />
           </ButtonLink>
