@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
@@ -15,7 +15,10 @@ import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { isServiceError } from "@/lib/api/service-error";
+import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -58,6 +61,9 @@ export function ReadingScreen({
   sessionId,
 }: ReadingScreenProps) {
   const services = useReadingServices();
+  const speechService = useMemo(() => createSpeechService(), []);
+  const speechPlayer = useSpeechPlayer();
+  const speechRecorder = useSpeechRecorder();
   const [loadKey, setLoadKey] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [uiState, setUiState] = useState<ReadingUiState>(initialUiState);
@@ -78,13 +84,16 @@ export function ReadingScreen({
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
+  const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
+  const transcriptionAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      transcriptionAbortRef.current?.abort();
     };
   }, []);
 
@@ -176,6 +185,51 @@ export function ReadingScreen({
     };
   }, [loadState, page, services.pageMatchService, sessionId, uiState]);
 
+  async function startListening() {
+    try {
+      await speechRecorder.start();
+      if (!mountedRef.current) {
+        speechRecorder.cancel();
+        return false;
+      }
+      setLatestTranscript(null);
+      return true;
+    } catch {
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("microphone-denied");
+      }
+      return false;
+    }
+  }
+
+  async function transcribeRecording(recording: Blob) {
+    transcriptionAbortRef.current?.abort();
+    const controller = new AbortController();
+    transcriptionAbortRef.current = controller;
+    try {
+      const transcript = await speechService.transcribe(recording, {
+        languageCode: "vi",
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      setLatestTranscript(transcript.text);
+    } catch {
+      if (!mountedRef.current || controller.signal.aborted) return;
+      setConnectionState("reconnecting");
+      setUiState("stt-error");
+    } finally {
+      if (transcriptionAbortRef.current === controller) {
+        transcriptionAbortRef.current = null;
+      }
+    }
+  }
+
+  async function stopListeningAndTranscribe() {
+    const recording = await speechRecorder.stop();
+    if (recording) void transcribeRecording(recording);
+  }
+
   async function startReading() {
     if (isBusy) return;
     setIsBusy(true);
@@ -184,6 +238,10 @@ export function ReadingScreen({
       "start",
     );
     if (!mountedRef.current) return;
+    if (!(await startListening())) {
+      if (mountedRef.current) setIsBusy(false);
+      return;
+    }
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
@@ -198,9 +256,32 @@ export function ReadingScreen({
       "resume",
     );
     if (!mountedRef.current) return;
+    if (!(await startListening())) {
+      if (mountedRef.current) setIsBusy(false);
+      return;
+    }
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
+    setIsBusy(false);
+  }
+
+  async function pauseReading() {
+    if (isBusy) return;
+    setIsBusy(true);
+    try {
+      await stopListeningAndTranscribe();
+    } catch {
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("stt-error");
+        setIsBusy(false);
+      }
+      return;
+    }
+    if (!mountedRef.current) return;
+    setCanonicalState("PAUSED");
+    setUiState("paused");
     setIsBusy(false);
   }
 
@@ -209,6 +290,10 @@ export function ReadingScreen({
     setIsBusy(true);
     await services.devicePermissionService.retry(kind);
     if (!mountedRef.current) return;
+    if (kind === "microphone" && !(await startListening())) {
+      if (mountedRef.current) setIsBusy(false);
+      return;
+    }
     setConnectionState("connected");
     setUiState("reading");
     setCanonicalState("LISTENING");
@@ -248,6 +333,7 @@ export function ReadingScreen({
 
   async function reconnect(mode: ReadingReconnectDemoMode) {
     if (isBusy) return;
+    const resumeMicrophone = uiState === "stt-error";
     setIsBusy(true);
     setConnectionState("reconnecting");
     const nextConnection = await services.readingSocketAdapter.reconnect(
@@ -257,6 +343,10 @@ export function ReadingScreen({
     if (!mountedRef.current) return;
     setConnectionState(nextConnection);
     if (nextConnection === "recovered") {
+      if (resumeMicrophone && !(await startListening())) {
+        if (mountedRef.current) setIsBusy(false);
+        return;
+      }
       setCanonicalState("LISTENING");
       setUiState("reading");
     }
@@ -265,37 +355,73 @@ export function ReadingScreen({
 
   async function requestTutor() {
     if (!page || !currentWordId || isBusy) return;
+    const word = page.words.find(
+      (item) => item.word_id === currentWordId,
+    )?.text;
+    if (!word) return;
     setTutorOpen(true);
     setIsBusy(true);
-    const action = await services.tutorService.requestReadExample(
-      sessionId,
-      currentWordId,
-    );
-    if (!mountedRef.current) return;
-    setTutorAction(action);
-    setIsBusy(false);
+    try {
+      let action: TutorAction | null = null;
+      try {
+        action = await services.tutorService.requestReadExample(
+          sessionId,
+          currentWordId,
+        );
+      } catch {
+        // Audio assistance remains available while the separate tutor-event API
+        // is being connected by the reading-session owner.
+      }
+      await speechPlayer.play(action?.tts_text ?? word);
+      if (mountedRef.current) setTutorAction(action);
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function retryTutor() {
     if (!page || !currentWordId || isBusy) return;
+    const word = page.words.find(
+      (item) => item.word_id === currentWordId,
+    )?.text;
+    if (!word) return;
     setIsBusy(true);
-    const baseAction =
-      tutorAction ??
-      (await services.tutorService.requestReadExample(
-        sessionId,
-        currentWordId,
-      ));
-    if (!mountedRef.current) return;
-    const nextAction = await services.tutorService.retryReadExample(baseAction);
-    if (!mountedRef.current) return;
-    setTutorAction(nextAction);
-    setIsBusy(false);
+    try {
+      let nextAction = tutorAction;
+      try {
+        nextAction = nextAction
+          ? await services.tutorService.retryReadExample(nextAction)
+          : await services.tutorService.requestReadExample(
+              sessionId,
+              currentWordId,
+            );
+      } catch {
+        // A retry must still replay the word even if tutor-event persistence is unavailable.
+      }
+      await speechPlayer.play(nextAction?.tts_text ?? word);
+      if (mountedRef.current) {
+        setTutorAction(nextAction);
+        setUiState("reading");
+      }
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function finishReading() {
     if (finishStartedRef.current) return;
     finishStartedRef.current = true;
     setIsBusy(true);
+    speechPlayer.stop();
+    try {
+      await stopListeningAndTranscribe();
+    } catch {
+      speechRecorder.cancel();
+    }
     await Promise.all([
       services.readingService.finish(sessionId),
       services.readingSocketAdapter.sendControl(sessionId, "finish"),
@@ -415,15 +541,17 @@ export function ReadingScreen({
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
-        onPause={() => {
-          setCanonicalState("PAUSED");
-          setUiState("paused");
-        }}
+        onPause={() => void pauseReading()}
         page={page}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
+          </StatusBanner>
+        ) : null}
+        {latestTranscript ? (
+          <StatusBanner className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
+            Mình nghe được: {latestTranscript}
           </StatusBanner>
         ) : null}
       </ReadingLayout>
@@ -563,8 +691,10 @@ export function ReadingScreen({
       {uiState === "tts-error" || tutorOpen ? (
         <TutorMessage
           action={tutorAction}
+          isPlaying={speechPlayer.isPlaying}
           isRetrying={isBusy}
           onClose={() => {
+            speechPlayer.stop();
             setTutorOpen(false);
             setUiState("reading");
           }}
