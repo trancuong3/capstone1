@@ -230,7 +230,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "Old Name",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
             }
         )
         repository.update_display_name = AsyncMock(
@@ -238,7 +237,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "Old Name",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
             }
         )
         repository.get_parent_detail = AsyncMock(
@@ -246,7 +244,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "New Name",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
                 "children": [{"id": CHILD_ID, "alias": "Kid", "grade": 2, "created_at": CREATED_AT}],
             }
         )
@@ -284,7 +281,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "Parent A",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
             }
         )
         repository.get_parent_detail = AsyncMock(
@@ -292,7 +288,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "Parent A",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
                 "children": [],
             }
         )
@@ -334,7 +329,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                 "id": PARENT_ID,
                 "display_name": "Old Name",
                 "created_at": CREATED_AT,
-                "admin_hidden_at": None,
             }
         )
         repository.update_display_name = AsyncMock(
@@ -343,14 +337,12 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                     "id": PARENT_ID,
                     "display_name": "Old Name",
                     "created_at": CREATED_AT,
-                    "admin_hidden_at": None,
-                },
+                    },
                 {
                     "id": PARENT_ID,
                     "display_name": "New Name",
                     "created_at": CREATED_AT,
-                    "admin_hidden_at": None,
-                },
+                    },
             ]
         )
         provider = MagicMock()
@@ -376,69 +368,11 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
             (PARENT_ID, "Old Name"),
         )
 
-    async def test_hide_persists_visibility_and_never_calls_delete(self):
-        hidden_at = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
-        repository = MagicMock()
-        repository.role = AsyncMock(return_value="admin")
-        repository.get_parent_record = AsyncMock(
-            return_value={"id": PARENT_ID, "admin_hidden_at": None}
-        )
-        repository.set_hidden = AsyncMock(
-            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
-        )
-        repository.delete = AsyncMock()
-
-        result = await AdminParentService(repository).hide_parent(ADMIN_ID, PARENT_ID)
-
-        self.assertTrue(result.is_hidden)
-        self.assertEqual(result.admin_hidden_at, hidden_at)
-        repository.set_hidden.assert_awaited_once()
-        self.assertEqual(repository.set_hidden.await_args.args[0], PARENT_ID)
-        self.assertIsNotNone(repository.set_hidden.await_args.args[1])
-        repository.delete.assert_not_awaited()
-
-    async def test_hide_is_idempotent_for_already_hidden_parent(self):
-        hidden_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
-        repository = MagicMock()
-        repository.role = AsyncMock(return_value="admin")
-        repository.get_parent_record = AsyncMock(
-            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
-        )
-        repository.set_hidden = AsyncMock()
-        repository.delete = AsyncMock()
-
-        result = await AdminParentService(repository).hide_parent(ADMIN_ID, PARENT_ID)
-
-        self.assertTrue(result.is_hidden)
-        self.assertEqual(result.admin_hidden_at, hidden_at)
-        repository.set_hidden.assert_not_awaited()
-        repository.delete.assert_not_awaited()
-
-    async def test_restore_changes_visibility_only_and_never_calls_delete(self):
-        hidden_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
-        repository = MagicMock()
-        repository.role = AsyncMock(return_value="admin")
-        repository.get_parent_record = AsyncMock(
-            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
-        )
-        repository.set_hidden = AsyncMock(
-            return_value={"id": PARENT_ID, "admin_hidden_at": None}
-        )
-        repository.delete = AsyncMock()
-
-        result = await AdminParentService(repository).restore_parent(ADMIN_ID, PARENT_ID)
-
-        self.assertFalse(result.is_hidden)
-        self.assertIsNone(result.admin_hidden_at)
-        repository.set_hidden.assert_awaited_once_with(PARENT_ID, None)
-        repository.delete.assert_not_awaited()
-
     async def test_create_uses_auth_invite_and_existing_profile_trigger(self):
         parent_row = {
             "id": PARENT_ID,
             "display_name": "Parent A",
             "created_at": CREATED_AT,
-            "admin_hidden_at": None,
             "children": [],
         }
         repository = MagicMock()
