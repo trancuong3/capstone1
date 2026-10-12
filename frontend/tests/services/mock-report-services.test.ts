@@ -1,92 +1,157 @@
-import { describe, expect, it } from "vitest";
-
-import { isServiceError } from "@/lib/api/service-error";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createSessionService } from "@/lib/api/session-service";
+import { createReportService } from "@/lib/api/report-service";
+import { createDifficultWordService } from "@/lib/api/difficult-word-service";
 import {
-  createMockAppStore,
-  MOCK_CURRENT_CHILD_ID,
-  MOCK_FOREIGN_CHILD_ID,
-  MOCK_SECOND_CHILD_ID,
-} from "@/lib/mock/mock-app-store";
-import { createMockDifficultWordService } from "@/lib/mock/mock-difficult-word-service";
+  apiFetchFixture,
+  installApiFetchFixture,
+  requestedApiUrl,
+} from "@/test/fixtures/api-test-fixture";
 import {
-  MOCK_FOREIGN_SESSION_ID,
-  MOCK_REPORT_SESSION_ID,
-} from "@/lib/mock/mock-report-data";
-import { createMockReportService } from "@/lib/mock/mock-report-service";
-import { createMockSessionService } from "@/lib/mock/mock-session-service";
+  TEST_CHILD_ID,
+  TEST_FOREIGN_CHILD_ID,
+  TEST_SESSION_ID,
+  sessionSummaryFixture,
+  sessionDetailFixture,
+  progressReportFixture,
+  difficultWordFixture,
+  reportWindowFixture,
+} from "@/test/fixtures/report-data-fixture";
 
-describe("Group 5 typed mock services", () => {
-  it("paginates history with an opaque cursor and canonical descending order", async () => {
-    const service = createMockSessionService(createMockAppStore(), "default");
-    const first = await service.list(MOCK_CURRENT_CHILD_ID, { limit: 2 });
-    const second = await service.list(MOCK_CURRENT_CHILD_ID, {
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: { session: { access_token: "isolated-test-token" } },
+        error: null,
+      }),
+    },
+  }),
+}));
+vi.mock("@/lib/supabase/config", () => ({
+  getApiBaseUrl: () => "http://127.0.0.1:8000",
+}));
+beforeEach(() => installApiFetchFixture());
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Report/Session real API contracts", () => {
+  it("forwards an opaque cursor and preserves server session order", async () => {
+    const older = {
+      ...sessionSummaryFixture,
+      id: "12000000-0000-4000-8000-000000000002",
+      started_at: "2026-09-30T00:00:00Z",
+      ended_at: "2026-09-30T00:08:00Z",
+    };
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        sessions: [sessionSummaryFixture, older],
+        next_cursor: "opaque & next",
+      }),
+    );
+    const first = await createSessionService().list(TEST_CHILD_ID, {
+      limit: 2,
+    });
+    expect(first.sessions.map((session) => session.id)).toEqual([
+      sessionSummaryFixture.id,
+      older.id,
+    ]);
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({ sessions: [], next_cursor: null }),
+    );
+    const second = await createSessionService().list(TEST_CHILD_ID, {
       cursor: first.next_cursor ?? undefined,
       limit: 2,
     });
-
-    expect(first.sessions).toHaveLength(2);
-    expect(first.next_cursor).toBe("page-2");
-    expect(second.sessions).toHaveLength(2);
-    expect(first.sessions[0].started_at >= first.sessions[1].started_at).toBe(
-      true,
-    );
+    expect(second).toEqual({ sessions: [], next_cursor: null });
+    expect(requestedApiUrl(1).searchParams.get("cursor")).toBe("opaque & next");
+    expect(requestedApiUrl(1).searchParams.get("child_id")).toBe(TEST_CHILD_ID);
+    expect(requestedApiUrl(1).searchParams.get("limit")).toBe("2");
   });
 
-  it("returns stored historical revision ids in session detail", async () => {
-    const detail = await createMockSessionService(
-      createMockAppStore(),
-      "default",
-    ).get(MOCK_REPORT_SESSION_ID);
-
-    expect(detail.events).not.toHaveLength(0);
+  it("preserves stored historical revisions and unavailable fluency score", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json(sessionDetailFixture));
+    const detail = await createSessionService().get(TEST_SESSION_ID);
+    expect(detail).toEqual(sessionDetailFixture);
     expect(
       detail.events.every((event) =>
         detail.reference_page_revision_ids.includes(event.page_revision_id),
       ),
     ).toBe(true);
-    expect(detail.fluency_assessment?.score).toBeNull();
+    expect(detail.fluency_assessment).toBeNull();
   });
 
-  it("uses the same safe 404 for foreign child and session resources", async () => {
-    const store = createMockAppStore();
-    const sessionService = createMockSessionService(store, "default");
-    const reportService = createMockReportService(store, "default");
-
-    await expect(sessionService.get(MOCK_FOREIGN_SESSION_ID)).rejects.toSatisfy(
-      (error: unknown) =>
-        isServiceError(error) &&
-        error.code === "RESOURCE_NOT_FOUND" &&
-        error.status === 404,
+  it("propagates the same safe 404 for foreign sessions and child reports", async () => {
+    apiFetchFixture.mockImplementation(async () =>
+      Response.json({ detail: "private account info" }, { status: 404 }),
     );
-    await expect(reportService.get(MOCK_FOREIGN_CHILD_ID)).rejects.toSatisfy(
-      (error: unknown) =>
-        isServiceError(error) &&
-        error.code === "RESOURCE_NOT_FOUND" &&
-        error.status === 404,
-    );
+    await expect(
+      createSessionService().get("12000000-0000-4000-8000-000000000002"),
+    ).rejects.toMatchObject({ status: 404, code: "RESOURCE_NOT_FOUND" });
+    await expect(
+      createReportService().get(TEST_FOREIGN_CHILD_ID),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "RESOURCE_NOT_FOUND",
+      message: "Có lỗi xảy ra. Vui lòng thử lại sau.",
+    });
   });
 
-  it("does not manufacture prior-period trends or practice evidence", async () => {
-    const store = createMockAppStore();
-    const report = await createMockReportService(store, "no-prior-period").get(
-      MOCK_CURRENT_CHILD_ID,
+  it("does not manufacture previous metrics or evidence when practice is unavailable", async () => {
+    apiFetchFixture
+      .mockResolvedValueOnce(Response.json(progressReportFixture))
+      .mockResolvedValueOnce(Response.json([difficultWordFixture]));
+    const report = await createReportService().get(
+      TEST_CHILD_ID,
+      reportWindowFixture,
     );
-    const wordsService = createMockDifficultWordService(store, "default");
-    const words = await wordsService.list(MOCK_CURRENT_CHILD_ID);
-    const before = words[0].evidence_word_ids.length;
-    const practice = await wordsService.practice(
-      MOCK_CURRENT_CHILD_ID,
-      words[0].normalized_word,
-    );
-
     expect(report.previous_period).toBeNull();
     expect(
       Object.values(report.trend_deltas).every((value) => value === null),
     ).toBe(true);
-    expect(practice.evidence_count_unchanged).toBe(true);
-    expect(
-      (await wordsService.list(MOCK_CURRENT_CHILD_ID))[0].evidence_word_ids,
-    ).toHaveLength(before);
-    await expect(wordsService.list(MOCK_SECOND_CHILD_ID)).resolves.toEqual([]);
+    const service = createDifficultWordService();
+    const words = await service.list(TEST_CHILD_ID, reportWindowFixture);
+    expect(words).toEqual([difficultWordFixture]);
+    const before = structuredClone(words);
+    await expect(
+      service.practice(TEST_CHILD_ID, words[0].normalized_word),
+    ).rejects.toMatchObject({ status: 501, retryable: false });
+    expect(apiFetchFixture).toHaveBeenCalledTimes(2);
+    expect(words).toEqual(before);
+  });
+
+  it("rejects history for a different child rather than displaying it", async () => {
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        sessions: [
+          { ...sessionSummaryFixture, child_id: TEST_FOREIGN_CHILD_ID },
+        ],
+        next_cursor: null,
+      }),
+    );
+    await expect(
+      createSessionService().list(TEST_CHILD_ID),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+
+  it("rejects session events that belong to a different session", async () => {
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        ...sessionDetailFixture,
+        events: [
+          {
+            ...sessionDetailFixture.events[0],
+            session_id: "12000000-0000-4000-8000-000000000002",
+          },
+        ],
+      }),
+    );
+    await expect(
+      createSessionService().get(TEST_SESSION_ID),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+
+  it("preserves genuinely empty difficult-word data", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json([]));
+    expect(await createDifficultWordService().list(TEST_CHILD_ID)).toEqual([]);
   });
 });

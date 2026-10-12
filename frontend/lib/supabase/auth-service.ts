@@ -235,13 +235,16 @@ export function createSupabaseAuthService(
 
       if (error) {
         if (duplicateRegistrationCodes.has(error.code ?? "")) {
-          return {
-            status: "email-confirmation-required",
-            session: null,
-          };
+          throw unexpectedAuthError();
         }
 
         throw mapRegistrationError(error);
+      }
+
+      // Confirmed accounts can receive an obfuscated user instead of an error.
+      // Do not treat that response or a missing user as a new pending account.
+      if (!data.user || data.user.identities?.length === 0) {
+        throw unexpectedAuthError();
       }
 
       if (!data.session) {

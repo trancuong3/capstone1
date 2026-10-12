@@ -113,10 +113,7 @@ export function ResetPasswordForm({
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <ButtonLink
-        href={authRuntime.mode === "mock" ? "/login?state=default" : "/login"}
-        variant="quiet"
-      >
+      <ButtonLink href="/login" variant="quiet">
         <ArrowLeft aria-hidden="true" className="size-5" />
         Về đăng nhập
       </ButtonLink>

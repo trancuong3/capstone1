@@ -1,72 +1,79 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-
 import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
-import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
-import { AdminStoreContext } from "@/components/providers/admin-store-provider";
 import {
-  createMockAdminStore,
-  MOCK_ADMIN_BOOK_ID,
-  MOCK_ADMIN_PAGE_ID,
-  MOCK_ADMIN_R1_ID,
-  MOCK_REVIEW_BOOK_ID,
-} from "@/lib/mock/mock-admin-store";
-import { createMockRevisionService } from "@/lib/mock/mock-revision-service";
-
-const reviewPageId = "83000000-0000-4000-8000-000000000003";
-
-function renderWithStore(
-  store: ReturnType<typeof createMockAdminStore>,
-  bookId = MOCK_ADMIN_BOOK_ID,
-  pageId = MOCK_ADMIN_PAGE_ID,
-) {
-  return render(
-    <AdminStoreContext.Provider value={store}>
-      <AdminServicesProvider scenario="default">
-        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
-      </AdminServicesProvider>
-    </AdminStoreContext.Provider>,
-  );
-}
+  ADMIN_BOOK_ID,
+  ADMIN_PAGE_ID,
+  ADMIN_R1_ID,
+  adminR1Fixture,
+  adminR2Fixture,
+  createAdminServiceFixture,
+  withAdminFixture,
+} from "@/test/fixtures/admin-service-fixture";
 
 describe("AdminOcrReviewScreen safety boundaries", () => {
-  it("shows the same safe not-found state when a known page belongs to another book", async () => {
-    renderWithStore(createMockAdminStore(), MOCK_ADMIN_BOOK_ID, reviewPageId);
-
+  it("returns safe not-found for a page outside the requested book without fetching its content", async () => {
+    const services = createAdminServiceFixture();
+    const foreignPageId = "83000000-0000-4000-8000-000000000003";
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={foreignPageId} />,
+        services,
+      ),
+    );
     expect(
       await screen.findByRole("heading", { name: "Không tìm thấy trang" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/không thuộc sách/i)).toBeInTheDocument();
-    expect(screen.queryByText(MOCK_REVIEW_BOOK_ID)).toBeNull();
+    expect(screen.queryByText(foreignPageId)).not.toBeInTheDocument();
+    expect(services.pages.list).toHaveBeenCalledWith(ADMIN_BOOK_ID);
+    expect(services.pages.getImage).not.toHaveBeenCalled();
+    expect(services.revisions.list).not.toHaveBeenCalled();
+    expect(services.ocr.getRevision).not.toHaveBeenCalled();
   });
 
-  it("does not offer reprocess from an immutable historical revision", async () => {
-    const store = createMockAdminStore();
-    const revisions = createMockRevisionService(store, "default");
-    const r2 = await revisions.reprocess(MOCK_ADMIN_PAGE_ID);
-    await revisions.verify(MOCK_ADMIN_PAGE_ID, {
-      page_revision_id: r2.page_revision_id,
-      corrected_text: r2.draft_text ?? "Nội dung",
-      words: r2.words,
-    });
+  it("keeps both current and historical revisions read-only", async () => {
+    const services = createAdminServiceFixture();
     const user = userEvent.setup();
-
-    renderWithStore(store);
-    expect(
-      await screen.findByRole("button", { name: "Chạy lại OCR" }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /R1/ }));
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: "Chạy lại OCR" }),
-      ).not.toBeInTheDocument(),
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
     );
     expect(
-      screen.getAllByText(/revision VERIFIED hiện hành mới nhất/i),
-    ).not.toHaveLength(0);
-    expect(screen.getByRole("heading", { name: /R1/ })).toBeInTheDocument();
-    expect(screen.queryByText(MOCK_ADMIN_R1_ID)).toBeNull();
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toHaveValue(
+      adminR2Fixture.draft_text,
+    );
+    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Chạy lại OCR" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Ngừng trang" })).toBeDisabled();
+    expect(screen.getByText("Hiện hành")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /R1/ }));
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R1/ }),
+    ).toBeInTheDocument();
+    expect(services.ocr.getRevision).toHaveBeenLastCalledWith(
+      ADMIN_PAGE_ID,
+      ADMIN_R1_ID,
+    );
+    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toHaveValue(
+      adminR1Fixture.draft_text,
+    );
+    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Chạy lại OCR" })).toBeDisabled();
+    expect(
+      screen.getByRole("img", { name: /Bounding box từ OCR: 1 vùng/ }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Chạy lại OCR" }));
+    expect(services.revisions.reprocess).not.toHaveBeenCalled();
+    expect(services.revisions.verify).not.toHaveBeenCalled();
+    expect(services.ocr.saveDraft).not.toHaveBeenCalled();
+    expect(services.pages.updateStatus).not.toHaveBeenCalled();
+    expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
 });

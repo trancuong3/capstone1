@@ -1,23 +1,25 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { AdminLayout } from "@/components/admin/admin-layout";
 import { AdminLoginScreen } from "@/components/admin/admin-login-screen";
-import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
-import { AdminStoreProvider } from "@/components/providers/admin-store-provider";
+import { AdminAuthError } from "@/lib/api/admin-auth-service";
+import {
+  adminBookListItemFixture,
+  createAdminServiceFixture,
+  withAdminFixture,
+} from "@/test/fixtures/admin-service-fixture";
 
-const { navigationMock, signOutMock } = vi.hoisted(() => ({
+const { navigationMock } = vi.hoisted(() => ({
   navigationMock: {
     pathname: "/admin/books",
     push: vi.fn(),
     refresh: vi.fn(),
     replace: vi.fn(),
   },
-  signOutMock: vi.fn<() => Promise<void>>(async () => undefined),
 }));
-
 vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
   useRouter: () => ({
@@ -27,83 +29,60 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/lib/mock/mock-admin-auth-service", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/mock/mock-admin-auth-service")>();
-
-  return {
-    ...actual,
-    createMockAdminAuthService: (
-      scenario: Parameters<typeof actual.createMockAdminAuthService>[0],
-    ) => ({
-      ...actual.createMockAdminAuthService(scenario),
-      signOut: signOutMock,
-    }),
-  };
-});
-
-function withServices(child: React.ReactNode, scenario = "default") {
-  return render(
-    <AdminStoreProvider>
-      <AdminServicesProvider
-        scenario={scenario as "default" | "invalid-credentials"}
-      >
-        {child}
-      </AdminServicesProvider>
-    </AdminStoreProvider>,
-  );
-}
-
 describe("admin components", () => {
   beforeEach(() => {
     navigationMock.pathname = "/admin/books";
     navigationMock.push.mockClear();
     navigationMock.refresh.mockClear();
     navigationMock.replace.mockClear();
-    signOutMock.mockReset();
-    signOutMock.mockResolvedValue(undefined);
   });
 
-  it("validates the admin login and uses a safe credential message", async () => {
-    const user = userEvent.setup();
-    withServices(
-      <AdminLoginScreen scenario="invalid-credentials" />,
-      "invalid-credentials",
+  it("uses a safe message when the admin auth service rejects credentials", async () => {
+    const services = createAdminServiceFixture();
+    services.auth.signIn.mockRejectedValue(
+      new AdminAuthError("invalid-credentials"),
     );
+    const user = userEvent.setup();
+    render(withAdminFixture(<AdminLoginScreen scenario="default" />, services));
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Thông tin đăng nhập chưa đúng",
     );
+    expect(services.auth.signIn).toHaveBeenCalledOnce();
+    expect(navigationMock.replace).not.toHaveBeenCalled();
     expect(navigationMock.push).not.toHaveBeenCalled();
   });
 
   it("awaits admin sign-out, blocks repeats, and replaces the protected route", async () => {
-    const user = userEvent.setup();
-    let completeSignOut: (() => void) | undefined;
-    signOutMock.mockImplementationOnce(
+    const services = createAdminServiceFixture();
+    let completeSignOut: () => void = () => undefined;
+    services.auth.signOut.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           completeSignOut = resolve;
         }),
     );
-    withServices(
-      <AdminLayout>
-        <p>Nội dung quản trị</p>
-      </AdminLayout>,
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminLayout>
+          <p>Nội dung quản trị</p>
+        </AdminLayout>,
+        services,
+      ),
     );
-
-    const button = screen.getByRole("button", { name: "Đăng xuất" });
-    await user.click(button);
-
-    expect(signOutMock).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+    expect(services.auth.signOut).toHaveBeenCalledOnce();
     expect(
       screen.getByRole("button", { name: "Đang đăng xuất…" }),
     ).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Đang đăng xuất…" }));
-    expect(signOutMock).toHaveBeenCalledTimes(1);
-
-    completeSignOut?.();
+    expect(services.auth.signOut).toHaveBeenCalledOnce();
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+    await act(async () => {
+      completeSignOut();
+    });
     await waitFor(() =>
       expect(navigationMock.replace).toHaveBeenCalledWith("/admin/login"),
     );
@@ -111,19 +90,23 @@ describe("admin components", () => {
   });
 
   it("keeps the protected route visible when admin sign-out fails", async () => {
+    const services = createAdminServiceFixture();
+    services.auth.signOut.mockRejectedValueOnce(
+      new Error("provider unavailable"),
+    );
     const user = userEvent.setup();
-    signOutMock.mockRejectedValueOnce(new Error("provider unavailable"));
-    withServices(
-      <AdminLayout>
-        <p>Nội dung quản trị</p>
-      </AdminLayout>,
+    render(
+      withAdminFixture(
+        <AdminLayout>
+          <p>Nội dung quản trị</p>
+        </AdminLayout>,
+        services,
+      ),
     );
-
     await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Chưa thể đăng xuất lúc này",
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Chưa thể đăng xuất lúc này");
+    expect(alert).not.toHaveTextContent("provider unavailable");
     expect(navigationMock.replace).not.toHaveBeenCalled();
     expect(navigationMock.refresh).not.toHaveBeenCalled();
   });
@@ -142,12 +125,40 @@ describe("admin components", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it("renders lifecycle and OCR metrics from the typed service", async () => {
-    withServices(<AdminBooksScreen />);
-    await waitFor(() =>
-      expect(screen.getByText("Chú Mèo Nhỏ")).toBeInTheDocument(),
-    );
-    expect(screen.getAllByText("Đang hoạt động").length).toBeGreaterThan(0);
-    expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
+  it("renders lifecycle and OCR metrics from typed service responses and forwards filters", async () => {
+    const services = createAdminServiceFixture();
+    const retired = {
+      ...adminBookListItemFixture,
+      book: {
+        ...adminBookListItemFixture.book,
+        lifecycle_status: "RETIRED" as const,
+      },
+      parent_catalog_eligible: false,
+    };
+    const user = userEvent.setup();
+    render(withAdminFixture(<AdminBooksScreen />, services));
+    await screen.findByRole("heading", {
+      name: adminBookListItemFixture.book.title,
+    });
+    expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
+    const card = screen.getByRole("link", { name: /Sách kiểm thử/ });
+    expect(
+      within(card).getByText("Trang").nextElementSibling,
+    ).toHaveTextContent("3");
+    for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
+      expect(
+        within(card).getByText(label).nextElementSibling,
+      ).toHaveTextContent("1");
+    }
+    services.books.list.mockResolvedValueOnce([retired]);
+    await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
+    expect(await screen.findByText("Đã ngừng")).toBeInTheDocument();
+    expect(services.books.list).toHaveBeenLastCalledWith({
+      search: "",
+      lifecycle_status: "RETIRED",
+      verification_status: undefined,
+    });
+    expect(services.books.create).not.toHaveBeenCalled();
+    expect(services.books.update).not.toHaveBeenCalled();
   });
 });

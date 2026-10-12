@@ -1,29 +1,44 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
-import { AppStoreProvider } from "@/components/providers/app-store-provider";
 import { DifficultWordItem } from "@/components/reports/difficult-word-item";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
 import { SessionDetailScreen } from "@/components/reports/session-detail-screen";
-import { MOCK_CURRENT_CHILD_ID } from "@/lib/mock/mock-app-store";
 import {
-  MOCK_DIFFICULT_WORDS,
-  MOCK_PROGRESS_REPORTS,
-  MOCK_REPORT_SESSION_ID,
-} from "@/lib/mock/mock-report-data";
+  apiFetchFixture,
+  installApiFetchFixture,
+  requestedApiUrl,
+} from "@/test/fixtures/api-test-fixture";
+import {
+  TEST_CHILD_ID,
+  TEST_SESSION_ID,
+  TEST_REVISION_ID,
+  childFixture,
+  bookFixture,
+  sessionDetailFixture,
+  difficultWordFixture,
+  progressReportFixture,
+} from "@/test/fixtures/report-data-fixture";
 
-function Services({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <AppStoreProvider>
-      <AppServicesProvider scenario="default">{children}</AppServicesProvider>
-    </AppStoreProvider>
-  );
-}
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: { session: { access_token: "isolated-test-token" } },
+        error: null,
+      }),
+    },
+  }),
+}));
+vi.mock("@/lib/supabase/config", () => ({
+  getApiBaseUrl: () => "http://127.0.0.1:8000",
+}));
+beforeEach(() => installApiFetchFixture());
+afterEach(() => vi.unstubAllGlobals());
 
-describe("Group 5 report components", () => {
+describe("Report components with typed data and real API adapters", () => {
   it("uses a non-orphaned heading level for a report metric", () => {
     render(
       <MetricCard
@@ -36,49 +51,73 @@ describe("Group 5 report components", () => {
         }}
       />,
     );
-
     expect(
       screen.getByRole("heading", { level: 2, name: "Completed sessions" }),
     ).toBeInTheDocument();
   });
 
-  it("renders a textual table summary for the visual chart", () => {
-    render(<ProgressChart report={MOCK_PROGRESS_REPORTS[0]} />);
+  it("renders matching numerical values in the chart's accessible table", () => {
+    render(<ProgressChart report={progressReportFixture} />);
+    const table = screen.getByRole("table", {
+      name: "Tóm tắt dạng bảng của biểu đồ bằng chứng đọc",
+    });
     expect(
-      screen.getByRole("table", {
-        name: "Tóm tắt dạng bảng của biểu đồ bằng chứng đọc",
-      }),
+      within(table).getByRole("row", { name: "Bỏ sót 2" }),
+    ).toBeInTheDocument();
+    expect(
+      within(table).getByRole("row", { name: "Lặp từ 1" }),
+    ).toBeInTheDocument();
+    expect(
+      within(table).getByRole("row", { name: "Dừng lâu 0" }),
     ).toBeInTheDocument();
   });
 
-  it("shows historical revision and nullable fluency score", async () => {
+  it("shows stored historical revision and unavailable fluency score through real services", async () => {
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `/reading/history/${TEST_SESSION_ID}`)
+        return Response.json(sessionDetailFixture);
+      if (path === `/reading/history/${TEST_SESSION_ID}/book`)
+        return Response.json(bookFixture);
+      if (path === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      throw new Error("Unexpected isolated report route");
+    });
     render(
-      <Services>
-        <SessionDetailScreen sessionId={MOCK_REPORT_SESSION_ID} />
-      </Services>,
+      <AppServicesProvider>
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
+      </AppServicesProvider>,
     );
     expect(await screen.findByText("Chưa đánh giá")).toBeInTheDocument();
+    expect(screen.getAllByText(TEST_REVISION_ID).length).toBeGreaterThan(0);
     expect(
-      screen.getAllByText("40000000-0000-4000-8000-900000000014").length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText("Sự kiện trong buổi đọc")).toBeInTheDocument();
+      screen.getByRole("heading", { name: "Sự kiện trong buổi đọc" }),
+    ).toBeInTheDocument();
+    expect(requestedApiUrl().pathname).toBe(
+      `/reading/history/${TEST_SESSION_ID}`,
+    );
+    expect(apiFetchFixture).toHaveBeenCalledTimes(3);
   });
 
-  it("practices with text-only mock feedback and no evidence claim", async () => {
+  it("reports unavailable practice without audio playback, API writes or evidence claims", async () => {
     const user = userEvent.setup();
+    const snapshot = structuredClone(difficultWordFixture);
     render(
-      <Services>
+      <AppServicesProvider>
         <DifficultWordItem
-          childId={MOCK_CURRENT_CHILD_ID}
-          word={MOCK_DIFFICULT_WORDS[0]}
+          childId={TEST_CHILD_ID}
+          word={difficultWordFixture}
         />
-      </Services>,
+      </AppServicesProvider>,
     );
     await user.click(screen.getByRole("button", { name: "Luyện từ" }));
     expect(
       await screen.findByText(
-        /Đây là mô phỏng chữ, không phát TTS thật và không thêm bằng chứng/,
+        "Chức năng luyện từ chưa sẵn sàng. Chưa phát âm thanh hoặc thêm bằng chứng.",
       ),
     ).toBeInTheDocument();
+    expect(apiFetchFixture).not.toHaveBeenCalled();
+    expect(difficultWordFixture).toEqual(snapshot);
+    expect(screen.getByRole("button", { name: "Luyện từ" })).toBeEnabled();
   });
 });
