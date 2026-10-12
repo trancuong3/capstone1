@@ -267,16 +267,7 @@ export function AdminParentDetailScreen({
               <ButtonLink href="/admin/login" className="sm:w-auto">
                 Đăng nhập lại
               </ButtonLink>
-            ) : error === "not-found" || error === "forbidden" ? (
-              <ButtonLink
-                href="/admin/parents"
-                className="sm:w-auto"
-                variant="secondary"
-              >
-                <ArrowLeft aria-hidden className="size-5" />
-                Quay lại danh sách
-              </ButtonLink>
-            ) : (
+            ) : error === "not-found" || error === "forbidden" ? null : (
               <Button
                 className="sm:w-auto"
                 onClick={() => void load()}
