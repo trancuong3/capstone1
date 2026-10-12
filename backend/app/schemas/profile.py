@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -167,7 +167,7 @@ class AdminParentDetailResponse(BaseModel):
     phone: Optional[str] = None
     created_at: datetime
     children: List[AdminParentDetailChild] = Field(default_factory=list)
-    contact_info_status: str = Field(
+    contact_info_status: Literal["available", "not_configured", "user_not_found", "lookup_failed"] = Field(
         description="Normalized status of the server-side Supabase Auth lookup."
     )
 
