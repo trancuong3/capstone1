@@ -141,7 +141,7 @@ class AdminParentRepository:
         return items, int(total or 0)
 
     async def update_display_name(
-        self, parent_id: UUID, display_name: str
+        self, parent_id: UUID, display_name: str | None
     ) -> dict[str, Any] | None:
         """Update only the profile display name; no relationship fields are touched."""
         parent = await self.get_parent_record(parent_id)
