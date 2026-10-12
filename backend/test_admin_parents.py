@@ -9,6 +9,9 @@ os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
 os.environ["SUPABASE_KEY"] = "isolated-test-key"
 
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
     AdminParentAccessDeniedError,
     AdminParentNotFoundError,
@@ -23,6 +26,25 @@ CREATED_AT = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parent_directory_sql_does_not_require_visibility_column(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=0)
+        result = MagicMock()
+        result.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+
+        await AdminParentRepository(db).list_parent_rows(
+            search=None,
+            limit=10,
+            offset=0,
+        )
+
+        statement = db.execute.await_args.args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("admin_hidden_at", sql)
+        self.assertIn("profiles.role", sql)
+        self.assertIn("childprofiles", sql)
+
     async def test_admin_receives_parent_projection_and_pagination(self):
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
@@ -220,6 +242,212 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.phone)
         self.assertEqual(result.contact_info_status, "lookup_failed")
         self.assertEqual(result.id, PARENT_ID)
+
+
+    async def test_update_parent_updates_display_name_without_changing_role_or_links(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Old Name",
+                "created_at": CREATED_AT,
+            }
+        )
+        repository.update_display_name = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Old Name",
+                "created_at": CREATED_AT,
+            }
+        )
+        repository.get_parent_detail = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "New Name",
+                "created_at": CREATED_AT,
+                "children": [{"id": CHILD_ID, "alias": "Kid", "grade": 2, "created_at": CREATED_AT}],
+            }
+        )
+        provider = MagicMock()
+        provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "parent@example.com",
+                "phone": "0900000000",
+                "contact_info_status": "available",
+            }
+        )
+        provider.update_contact_info = AsyncMock()
+        provider.delete_user = AsyncMock()
+
+        result = await AdminParentService(
+            repository, auth_contact_provider=provider
+        ).update_parent(
+            ADMIN_ID,
+            PARENT_ID,
+            display_name="  New Name  ",
+            update_display_name=True,
+        )
+
+        self.assertEqual(result.display_name, "New Name")
+        self.assertEqual(len(result.children), 1)
+        repository.update_display_name.assert_awaited_once_with(PARENT_ID, "New Name")
+        provider.update_contact_info.assert_not_awaited()
+        provider.delete_user.assert_not_awaited()
+
+    async def test_update_contact_fields_uses_auth_provider(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Parent A",
+                "created_at": CREATED_AT,
+            }
+        )
+        repository.get_parent_detail = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Parent A",
+                "created_at": CREATED_AT,
+                "children": [],
+            }
+        )
+        provider = MagicMock()
+        provider.update_contact_info = AsyncMock()
+        provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "new@example.com",
+                "phone": "0912345678",
+                "contact_info_status": "available",
+            }
+        )
+
+        result = await AdminParentService(
+            repository, auth_contact_provider=provider
+        ).update_parent(
+            ADMIN_ID,
+            PARENT_ID,
+            email=" NEW@example.com ",
+            update_email=True,
+            phone=" 0912345678 ",
+            update_phone=True,
+        )
+
+        provider.update_contact_info.assert_awaited_once_with(
+            PARENT_ID, email="new@example.com", phone="0912345678"
+        )
+        repository.update_display_name.assert_not_called()
+        self.assertEqual(result.email, "new@example.com")
+
+    async def test_update_rolls_back_display_name_when_auth_update_fails(self):
+        from app.services.admin_parent_service import AdminParentProviderOperationError
+        from app.providers.supabase_auth_contact_provider import SupabaseAuthProviderError
+
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={
+                "id": PARENT_ID,
+                "display_name": "Old Name",
+                "created_at": CREATED_AT,
+            }
+        )
+        repository.update_display_name = AsyncMock(
+            side_effect=[
+                {
+                    "id": PARENT_ID,
+                    "display_name": "Old Name",
+                    "created_at": CREATED_AT,
+                    },
+                {
+                    "id": PARENT_ID,
+                    "display_name": "New Name",
+                    "created_at": CREATED_AT,
+                    },
+            ]
+        )
+        provider = MagicMock()
+        provider.update_contact_info = AsyncMock(
+            side_effect=SupabaseAuthProviderError("private provider detail")
+        )
+
+        with self.assertRaises(AdminParentProviderOperationError):
+            await AdminParentService(
+                repository, auth_contact_provider=provider
+            ).update_parent(
+                ADMIN_ID,
+                PARENT_ID,
+                display_name="New Name",
+                update_display_name=True,
+                email="new@example.com",
+                update_email=True,
+            )
+
+        self.assertEqual(repository.update_display_name.await_count, 2)
+        self.assertEqual(
+            repository.update_display_name.await_args_list[-1].args,
+            (PARENT_ID, "Old Name"),
+        )
+
+    async def test_create_uses_auth_invite_and_existing_profile_trigger(self):
+        parent_row = {
+            "id": PARENT_ID,
+            "display_name": "Parent A",
+            "created_at": CREATED_AT,
+            "children": [],
+        }
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(return_value=parent_row)
+        provider = MagicMock()
+        provider.invite_parent = AsyncMock(return_value=PARENT_ID)
+        provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "parent@example.com",
+                "phone": None,
+                "contact_info_status": "available",
+            }
+        )
+
+        result = await AdminParentService(
+            repository, auth_contact_provider=provider
+        ).create_parent(
+            ADMIN_ID,
+            display_name="  Parent A  ",
+            email="  PARENT@example.com ",
+            phone="   ",
+        )
+
+        self.assertEqual(result.id, PARENT_ID)
+        provider.invite_parent.assert_awaited_once_with(
+            "parent@example.com", "Parent A", None
+        )
+        # Profile creation belongs to the existing auth.users trigger; the service
+        # verifies the row and never inserts another profile itself.
+        repository.get_parent_detail.assert_awaited()
+        provider.get_contact_info.assert_awaited_once_with(PARENT_ID)
+
+    async def test_create_compensates_invite_when_triggered_profile_is_missing(self):
+        from app.services.admin_parent_service import AdminParentConsistencyError
+
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(return_value=None)
+        provider = MagicMock()
+        provider.invite_parent = AsyncMock(return_value=PARENT_ID)
+        provider.compensate_failed_invite = AsyncMock()
+
+        with self.assertRaises(AdminParentConsistencyError):
+            await AdminParentService(
+                repository, auth_contact_provider=provider
+            ).create_parent(
+                ADMIN_ID,
+                display_name="Parent A",
+                email="parent@example.com",
+            )
+
+        provider.compensate_failed_invite.assert_awaited_once_with(PARENT_ID)
 
 
 if __name__ == "__main__":

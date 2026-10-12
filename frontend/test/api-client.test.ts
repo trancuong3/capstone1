@@ -150,4 +150,51 @@ describe("real API client", () => {
     ).rejects.toBeInstanceOf(ServiceError);
     expect(getSession).not.toHaveBeenCalled();
   });
+
+  it("sends authenticated JSON bodies for mutation requests", async () => {
+    fetchMock.mockResolvedValue(Response.json({ title: "Updated" }));
+    const body = { title: "Updated" };
+
+    await expect(
+      requestApi("/admin/parents", schema, undefined, {
+        method: "PATCH",
+        body,
+      }),
+    ).resolves.toEqual({ title: "Updated" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/admin/parents",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify(body),
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer isolated-test-token",
+          "Content-Type": "application/json",
+        },
+        credentials: "omit",
+        redirect: "error",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  it("sends DELETE without inventing a JSON body", async () => {
+    fetchMock.mockResolvedValue(Response.json({ title: "Hidden" }));
+    await requestApi("/admin/parents/parent-id", schema, undefined, {
+      method: "DELETE",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/admin/parents/parent-id",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer isolated-test-token",
+        },
+      }),
+    );
+  });
+
 });

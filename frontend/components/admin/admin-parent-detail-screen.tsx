@@ -5,16 +5,19 @@ import {
   CalendarDays,
   GraduationCap,
   Mail,
+  Pencil,
   Phone,
   RefreshCw,
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { Modal } from "@/components/common/modal";
+import { TextField } from "@/components/common/text-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -61,15 +64,17 @@ function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
   }
 }
 
-export function AdminParentDetailScreen({
-  parentId,
-}: {
-  parentId: string;
-}) {
+export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   const { parents } = useAdminServices();
   const [parent, setParent] = useState<AdminParentDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ display_name: "", email: "", phone: "" });
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const load = useCallback(
@@ -97,9 +102,12 @@ export function AdminParentDetailScreen({
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
+    const timeout = globalThis.setTimeout(() => {
+      void load(controller.signal);
+    }, 0);
 
     return () => {
+      globalThis.clearTimeout(timeout);
       controller.abort();
       requestIdRef.current += 1;
     };
@@ -108,6 +116,59 @@ export function AdminParentDetailScreen({
   const contactNotice = parent
     ? contactMessage(parent.contact_info_status)
     : null;
+
+  function openEdit() {
+    if (!parent) return;
+    setEditForm({
+      display_name: parent.display_name ?? "",
+      email: parent.email ?? "",
+      phone: parent.phone ?? "",
+    });
+    setEditError(null);
+    setActionError(null);
+    setEditOpen(true);
+  }
+
+  async function submitEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!parent || saving) return;
+    const displayName = editForm.display_name.trim();
+    const email = editForm.email.trim().toLowerCase();
+    const phone = editForm.phone.trim();
+    if (!displayName) {
+      setEditError("Vui lòng nhập tên hiển thị.");
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEditError("Email chưa đúng định dạng.");
+      return;
+    }
+    const update: { display_name: string; email?: string; phone?: string } = {
+      display_name: displayName,
+    };
+    if (email && email !== (parent.email ?? "").trim().toLowerCase()) update.email = email;
+    if (phone && phone !== (parent.phone ?? "").trim()) update.phone = phone;
+
+    setSaving(true);
+    setEditError(null);
+    try {
+      const updated = await parents.update(parent.id, update);
+      setParent(updated);
+      setEditOpen(false);
+      setActionNotice("Đã cập nhật hồ sơ Parent.");
+    } catch (cause) {
+      setEditError(
+        isServiceError(cause) && cause.status === 409
+          ? "Email hoặc số điện thoại bị trùng với tài khoản khác."
+          : isServiceError(cause) && cause.status === 422
+            ? "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại."
+            : "Không thể cập nhật hồ sơ lúc này. Vui lòng thử lại.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const fallbackContact =
     parent?.contact_info_status === "available"
       ? "Chưa cung cấp"
@@ -120,17 +181,31 @@ export function AdminParentDetailScreen({
         title={parent?.display_name?.trim() || "Chi tiết phụ huynh"}
         description="Thông tin tài khoản phụ huynh và các hồ sơ trẻ em được liên kết."
         actions={
-          <ButtonLink
-            className="sm:w-auto"
-            href="/admin/parents"
-            variant="secondary"
-          >
-            <ArrowLeft aria-hidden className="size-5" />
-            Quay lại danh sách
-          </ButtonLink>
+          <>
+            {parent ? (
+              <Button className="sm:w-auto" onClick={openEdit} variant="secondary">
+                <Pencil aria-hidden className="size-5" />
+                Sửa Parent
+              </Button>
+            ) : null}
+            <ButtonLink
+              className="sm:w-auto"
+              href="/admin/parents"
+              variant="secondary"
+            >
+              <ArrowLeft aria-hidden className="size-5" />
+              Quay lại danh sách
+            </ButtonLink>
+          </>
         }
       />
 
+      {actionNotice ? (
+        <div className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold" role="status">{actionNotice}</div>
+      ) : null}
+      {actionError ? (
+        <div className="mb-4"><StatusMessage tone="error" title={actionError}>Vui lòng thử lại.</StatusMessage></div>
+      ) : null}
       {loading ? (
         <AdminLoading label="Đang tải thông tin phụ huynh…" />
       ) : error ? (
@@ -160,16 +235,7 @@ export function AdminParentDetailScreen({
               <ButtonLink href="/admin/login" className="sm:w-auto">
                 Đăng nhập lại
               </ButtonLink>
-            ) : error === "not-found" || error === "forbidden" ? (
-              <ButtonLink
-                href="/admin/parents"
-                className="sm:w-auto"
-                variant="secondary"
-              >
-                <ArrowLeft aria-hidden className="size-5" />
-                Quay lại danh sách
-              </ButtonLink>
-            ) : (
+            ) : error === "not-found" || error === "forbidden" ? null : (
               <Button
                 className="sm:w-auto"
                 onClick={() => void load()}
@@ -301,6 +367,26 @@ export function AdminParentDetailScreen({
           </section>
         </div>
       ) : null}
+
+      <Modal
+        isOpen={editOpen}
+        onClose={() => { if (!saving) { setEditOpen(false); setEditError(null); } }}
+        title="Sửa hồ sơ Parent"
+      >
+        <form className="grid gap-4" noValidate onSubmit={submitEdit}>
+          {editError ? <StatusMessage tone="error" title={editError}>Kiểm tra thông tin và thử lại.</StatusMessage> : null}
+          <TextField label="Tên hiển thị" autoComplete="name" value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} required disabled={saving} />
+          <TextField label="Email" type="email" autoComplete="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} disabled={saving} />
+          <TextField label="Số điện thoại" type="tel" autoComplete="tel" value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} disabled={saving} />
+          <p className="text-sm text-muted">
+            Các trường liên hệ được cập nhật qua backend và Supabase Auth. Để giữ nguyên email hoặc số điện thoại, hãy để nguyên giá trị hiện tại.
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <Button className="sm:w-auto" disabled={saving} onClick={() => setEditOpen(false)} type="button" variant="secondary">Hủy</Button>
+            <Button className="sm:w-auto" isLoading={saving} type="submit">Lưu thay đổi</Button>
+          </div>
+        </form>
+      </Modal>
     </>
   );
 }

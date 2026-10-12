@@ -11,12 +11,26 @@ export interface AdminParentListQuery {
   readonly offset?: number;
 }
 
+export interface AdminParentCreateInput {
+  readonly display_name: string;
+  readonly email: string;
+  readonly phone?: string;
+}
+
+export interface AdminParentUpdateInput {
+  readonly display_name?: string;
+  readonly email?: string;
+  readonly phone?: string;
+}
+
 export interface AdminParentService {
   list(query?: AdminParentListQuery): Promise<AdminParentDirectoryDTO>;
   getById(
     parentId: string,
     signal?: AbortSignal,
   ): Promise<AdminParentDetailDTO>;
+  create(input: AdminParentCreateInput): Promise<AdminParentDetailDTO>;
+  update(parentId: string, input: AdminParentUpdateInput): Promise<AdminParentDetailDTO>;
 }
 
 const parentListResponseSchema = z.object({
@@ -55,6 +69,7 @@ const parentDetailResponseSchema = z.object({
   ]),
 });
 
+
 export function createAdminParentService(): AdminParentService {
   return {
     list: (query) =>
@@ -71,6 +86,20 @@ export function createAdminParentService(): AdminParentService {
         `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
         parentDetailResponseSchema,
         signal,
+      ),
+    create: (input) =>
+      requestApi(
+        "/profiles/admin/parents",
+        parentDetailResponseSchema,
+        undefined,
+        { method: "POST", body: input },
+      ),
+    update: (parentId, input) =>
+      requestApi(
+        `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
+        parentDetailResponseSchema,
+        undefined,
+        { method: "PATCH", body: input },
       ),
   };
 }

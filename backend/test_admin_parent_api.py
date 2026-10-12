@@ -155,5 +155,21 @@ class AdminParentApiTests(unittest.TestCase):
         self.assertNotIn("reauthentication_token", body)
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+    def test_admin_parent_routes_do_not_expose_hide_or_delete(self):
+        parent_routes = [
+            route for route in profile_routes.router.routes
+            if getattr(route, "path", "").startswith("/admin/parents")
+        ]
+        self.assertFalse(
+            any(
+                "DELETE" in getattr(route, "methods", set())
+                for route in parent_routes
+            )
+        )
+        self.assertFalse(
+            any(
+                "/visibility" in getattr(route, "path", "")
+                for route in parent_routes
+            )
+        )

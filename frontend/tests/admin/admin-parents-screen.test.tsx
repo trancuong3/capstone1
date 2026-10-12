@@ -7,13 +7,16 @@ import {
   type AdminServices,
 } from "@/components/providers/admin-services-provider";
 
-const { list } = vi.hoisted(() => ({
+const { list, create, getById, update } = vi.hoisted(() => ({
   list: vi.fn(),
+  create: vi.fn(),
+  getById: vi.fn(),
+  update: vi.fn(),
 }));
 
 function renderScreen() {
   const services = {
-    parents: { list },
+    parents: { list, create, getById, update },
   } as unknown as AdminServices;
 
   return render(
@@ -26,6 +29,9 @@ function renderScreen() {
 describe("AdminParentsScreen", () => {
   beforeEach(() => {
     list.mockReset();
+    create.mockReset();
+    getById.mockReset();
+    update.mockReset();
   });
 
   it("renders parent profiles returned by the database service", async () => {
@@ -84,4 +90,40 @@ describe("AdminParentsScreen", () => {
       expect(list).toHaveBeenCalledTimes(2);
     });
   });
+
+  it("creates a Parent through the API service instead of local mock data", async () => {
+    list.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 10,
+      offset: 0,
+    });
+    create.mockResolvedValue({});
+
+    renderScreen();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Thêm Parent/i }));
+    fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
+      target: { value: "Nguyen Van B" },
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "parent-b@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Số điện thoại"), {
+      target: { value: "0900000000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Tạo Parent" }));
+
+    await waitFor(() => {
+      expect(create).toHaveBeenCalledWith({
+        display_name: "Nguyen Van B",
+        email: "parent-b@example.com",
+        phone: "0900000000",
+      });
+    });
+    expect(
+      await screen.findByText(/Đã gửi lời mời tạo tài khoản Parent/i),
+    ).toBeInTheDocument();
+  });
+
 });

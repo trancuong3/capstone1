@@ -34,10 +34,17 @@ function failure(status: number, requestId = "", retryable = false) {
 }
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
+export interface RequestApiOptions {
+  readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
+  readonly body?: unknown;
+}
+
+/** Existing GET callers keep their signature; mutations pass RequestApiOptions as argument four. */
 export async function requestApi<T>(
   path: string,
   schema: ZodType<T>,
   signal?: AbortSignal,
+  requestOptions: RequestApiOptions = {},
 ): Promise<T> {
   if (!path.startsWith("/") || path.startsWith("//")) {
     throw failure(0);
@@ -57,11 +64,13 @@ export async function requestApi<T>(
   let response: Response;
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: "GET",
+      method: requestOptions.method ?? "GET",
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${token}`,
+        ...(requestOptions.body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
+      ...(requestOptions.body !== undefined ? { body: JSON.stringify(requestOptions.body) } : {}),
       cache: "no-store",
       credentials: "omit",
       redirect: "error",
