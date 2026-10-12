@@ -196,6 +196,13 @@ class AdminParentUpdateRequest(BaseModel):
         return self
 
 
+class AdminParentListItem(BaseModel):
+    id: UUID
+    display_name: Optional[str] = None
+    created_at: datetime
+    children_count: int = Field(ge=0)
+
+
 class AdminParentListResponse(BaseModel):
     items: List[AdminParentListItem]
     total: int = Field(ge=0)
