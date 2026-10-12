@@ -222,5 +222,123 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.id, PARENT_ID)
 
 
+    async def test_hide_persists_visibility_and_never_calls_delete(self):
+        hidden_at = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": None}
+        )
+        repository.set_hidden = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
+        )
+        repository.delete = AsyncMock()
+
+        result = await AdminParentService(repository).hide_parent(ADMIN_ID, PARENT_ID)
+
+        self.assertTrue(result.is_hidden)
+        self.assertEqual(result.admin_hidden_at, hidden_at)
+        repository.set_hidden.assert_awaited_once()
+        self.assertEqual(repository.set_hidden.await_args.args[0], PARENT_ID)
+        self.assertIsNotNone(repository.set_hidden.await_args.args[1])
+        repository.delete.assert_not_awaited()
+
+    async def test_hide_is_idempotent_for_already_hidden_parent(self):
+        hidden_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
+        )
+        repository.set_hidden = AsyncMock()
+        repository.delete = AsyncMock()
+
+        result = await AdminParentService(repository).hide_parent(ADMIN_ID, PARENT_ID)
+
+        self.assertTrue(result.is_hidden)
+        self.assertEqual(result.admin_hidden_at, hidden_at)
+        repository.set_hidden.assert_not_awaited()
+        repository.delete.assert_not_awaited()
+
+    async def test_restore_changes_visibility_only_and_never_calls_delete(self):
+        hidden_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
+        )
+        repository.set_hidden = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": None}
+        )
+        repository.delete = AsyncMock()
+
+        result = await AdminParentService(repository).restore_parent(ADMIN_ID, PARENT_ID)
+
+        self.assertFalse(result.is_hidden)
+        self.assertIsNone(result.admin_hidden_at)
+        repository.set_hidden.assert_awaited_once_with(PARENT_ID, None)
+        repository.delete.assert_not_awaited()
+
+    async def test_create_uses_auth_invite_and_existing_profile_trigger(self):
+        parent_row = {
+            "id": PARENT_ID,
+            "display_name": "Parent A",
+            "created_at": CREATED_AT,
+            "admin_hidden_at": None,
+            "children": [],
+        }
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(return_value=parent_row)
+        provider = MagicMock()
+        provider.invite_parent = AsyncMock(return_value=PARENT_ID)
+        provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "parent@example.com",
+                "phone": None,
+                "contact_info_status": "available",
+            }
+        )
+
+        result = await AdminParentService(
+            repository, auth_contact_provider=provider
+        ).create_parent(
+            ADMIN_ID,
+            display_name="  Parent A  ",
+            email="  PARENT@example.com ",
+            phone="   ",
+        )
+
+        self.assertEqual(result.id, PARENT_ID)
+        provider.invite_parent.assert_awaited_once_with(
+            "parent@example.com", "Parent A", None
+        )
+        # Profile creation belongs to the existing auth.users trigger; the service
+        # verifies the row and never inserts another profile itself.
+        repository.get_parent_detail.assert_awaited()
+        provider.get_contact_info.assert_awaited_once_with(PARENT_ID)
+
+    async def test_create_compensates_invite_when_triggered_profile_is_missing(self):
+        from app.services.admin_parent_service import AdminParentConsistencyError
+
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_detail = AsyncMock(return_value=None)
+        provider = MagicMock()
+        provider.invite_parent = AsyncMock(return_value=PARENT_ID)
+        provider.compensate_failed_invite = AsyncMock()
+
+        with self.assertRaises(AdminParentConsistencyError):
+            await AdminParentService(
+                repository, auth_contact_provider=provider
+            ).create_parent(
+                ADMIN_ID,
+                display_name="Parent A",
+                email="parent@example.com",
+            )
+
+        provider.compensate_failed_invite.assert_awaited_once_with(PARENT_ID)
+
+
 if __name__ == "__main__":
     unittest.main()
