@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, model_validator
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 from uuid import UUID
@@ -132,7 +132,80 @@ class ProfileResponse(ProfileBase):
 
 
 # =========================================================
-# ADMIN: READ-ONLY LIST OF PARENT PROFILES
+# ADMIN: PARENT CRUD REQUEST SCHEMAS
+# =========================================================
+
+class AdminParentCreateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    phone: Optional[str] = Field(default=None, max_length=30)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("display_name must not be empty")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
+        value = value.strip()
+        import re
+        if not re.fullmatch(r"\\+?[0-9][0-9\\s().-]{5,24}", value):
+            raise ValueError("phone format is invalid")
+        return value
+
+
+class AdminParentUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = Field(default=None, max_length=30)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_patch(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be supplied")
+        if "display_name" in self.model_fields_set:
+            if self.display_name is None or not self.display_name.strip():
+                raise ValueError("display_name must not be empty")
+            self.display_name = self.display_name.strip()
+        if "email" in self.model_fields_set:
+            if self.email is None:
+                raise ValueError("email cannot be null")
+            self.email = str(self.email).strip().lower()
+        if "phone" in self.model_fields_set:
+            if self.phone is None:
+                raise ValueError("phone cannot be null; omit it to leave unchanged")
+            self.phone = self.phone.strip()
+            import re
+            if not re.fullmatch(r"\\+?[0-9][0-9\\s().-]{5,24}", self.phone):
+                raise ValueError("phone format is invalid")
+        return self
+
+
+class AdminParentVisibilityRequest(BaseModel):
+    is_hidden: bool
+
+
+class AdminParentVisibilityResponse(BaseModel):
+    id: UUID
+    is_hidden: bool
+    admin_hidden_at: Optional[datetime] = None
+
+
+# =========================================================
+# ADMIN: PARENT DIRECTORY LIST
 # =========================================================
 
 class AdminParentListItem(BaseModel):
@@ -140,6 +213,7 @@ class AdminParentListItem(BaseModel):
     display_name: Optional[str] = None
     created_at: datetime
     children_count: int = Field(ge=0)
+    admin_hidden_at: Optional[datetime] = None
 
 
 class AdminParentListResponse(BaseModel):
@@ -166,6 +240,7 @@ class AdminParentDetailResponse(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     created_at: datetime
+    admin_hidden_at: Optional[datetime] = None
     children: List[AdminParentDetailChild] = Field(default_factory=list)
     contact_info_status: Literal["available", "not_configured", "user_not_found", "lookup_failed"] = Field(
         description="Normalized status of the server-side Supabase Auth lookup."
