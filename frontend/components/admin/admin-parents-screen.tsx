@@ -377,8 +377,6 @@ export function AdminParentsScreen() {
           </div>
         </form>
       </Modal>
-
-
     </>
   );
 }
