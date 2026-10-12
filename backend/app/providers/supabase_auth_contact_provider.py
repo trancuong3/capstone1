@@ -25,6 +25,10 @@ class SupabaseAuthConflictError(SupabaseAuthProviderError):
     """The requested Auth identity or contact field conflicts with an existing user."""
 
 
+class SupabaseAuthCompensationError(SupabaseAuthProviderError):
+    """A newly created Auth identity could not be safely compensated after Create failed."""
+
+
 class SupabaseAuthContactProvider:
     """Return only safe contact fields; never expose a raw Auth User object."""
 
@@ -86,8 +90,10 @@ class SupabaseAuthContactProvider:
                     # linked reading history at creation time.
                     try:
                         client.auth.admin.delete_user(str(user_id))
-                    except Exception:
-                        pass
+                    except Exception as cleanup_error:
+                        raise SupabaseAuthCompensationError(
+                            "The newly created invitation could not be cleaned up after phone update failed."
+                        ) from cleanup_error
                     raise SupabaseAuthContactProvider._normalize_error(error) from error
             return user_id
         except SupabaseAuthProviderError:
