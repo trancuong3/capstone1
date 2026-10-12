@@ -453,6 +453,11 @@ export function AdminParentsScreen() {
         title="Ẩn hồ sơ Parent"
       >
         <div className="grid gap-5">
+          {actionError ? (
+            <StatusMessage tone="error" title={actionError}>
+              Thao tác chưa được lưu. Dữ liệu vẫn được giữ nguyên; hãy thử lại.
+            </StatusMessage>
+          ) : null}
           <p>
             Bạn có chắc muốn ẩn <strong>{parentToHide?.display_name?.trim() || "Parent này"}</strong>?
           </p>
