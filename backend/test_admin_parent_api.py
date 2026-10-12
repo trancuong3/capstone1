@@ -155,5 +155,59 @@ class AdminParentApiTests(unittest.TestCase):
         self.assertNotIn("reauthentication_token", body)
 
 
+    def test_hide_endpoint_only_updates_visibility_and_never_deletes(self):
+        hidden_at = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": None}
+        )
+        repository.set_hidden = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
+        )
+        repository.delete = AsyncMock()
+
+        with patch.object(profile_routes, "AdminParentRepository", return_value=repository):
+            with make_client(ADMIN_ID) as client:
+                response = client.delete(f"/profiles/admin/parents/{PARENT_ID}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], str(PARENT_ID))
+        self.assertTrue(response.json()["is_hidden"])
+        repository.set_hidden.assert_awaited_once()
+        repository.delete.assert_not_awaited()
+
+    def test_restore_endpoint_is_authorized_and_returns_visible_state(self):
+        hidden_at = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": hidden_at}
+        )
+        repository.set_hidden = AsyncMock(
+            return_value={"id": PARENT_ID, "admin_hidden_at": None}
+        )
+        repository.delete = AsyncMock()
+
+        with patch.object(profile_routes, "AdminParentRepository", return_value=repository):
+            with make_client(ADMIN_ID) as client:
+                response = client.patch(
+                    f"/profiles/admin/parents/{PARENT_ID}/visibility",
+                    json={"is_hidden": False},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], str(PARENT_ID))
+        self.assertFalse(response.json()["is_hidden"])
+        self.assertIsNone(response.json()["admin_hidden_at"])
+        repository.set_hidden.assert_awaited_once_with(PARENT_ID, None)
+        repository.delete.assert_not_awaited()
+
+    def test_hide_endpoint_rejects_unauthenticated_request(self):
+        with make_client() as client:
+            response = client.delete(f"/profiles/admin/parents/{PARENT_ID}")
+        self.assertEqual(response.status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
