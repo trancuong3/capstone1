@@ -64,13 +64,7 @@ function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
   }
 }
 
-export function AdminParentDetailScreen({
-  parentId,
-  includeHidden = false,
-}: {
-  parentId: string;
-  includeHidden?: boolean;
-}) {
+export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   const { parents } = useAdminServices();
   const [parent, setParent] = useState<AdminParentDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,7 +73,6 @@ export function AdminParentDetailScreen({
   const [editForm, setEditForm] = useState({ display_name: "", email: "", phone: "" });
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -92,9 +85,7 @@ export function AdminParentDetailScreen({
       setParent(null);
 
       try {
-        const detail = includeHidden
-          ? await parents.getById(parentId, signal, true)
-          : await parents.getById(parentId, signal);
+        const detail = await parents.getById(parentId, signal);
         if (signal?.aborted || requestId !== requestIdRef.current) return;
         setParent(detail);
       } catch (cause) {
@@ -106,7 +97,7 @@ export function AdminParentDetailScreen({
         }
       }
     },
-    [includeHidden, parentId, parents],
+    [parentId, parents],
   );
 
   useEffect(() => {
@@ -125,7 +116,6 @@ export function AdminParentDetailScreen({
   const contactNotice = parent
     ? contactMessage(parent.contact_info_status)
     : null;
-  const isHidden = Boolean(parent?.admin_hidden_at);
 
   function openEdit() {
     if (!parent) return;
@@ -179,20 +169,6 @@ export function AdminParentDetailScreen({
     }
   }
 
-  async function restoreHiddenParent() {
-    if (!parent || visibilityBusy) return;
-    setVisibilityBusy(true);
-    setActionError(null);
-    try {
-      await parents.restore(parent.id);
-      setParent({ ...parent, admin_hidden_at: null });
-      setActionNotice("Đã khôi phục hiển thị Parent.");
-    } catch {
-      setActionError("Không thể khôi phục hồ sơ lúc này. Vui lòng thử lại.");
-    } finally {
-      setVisibilityBusy(false);
-    }
-  }
   const fallbackContact =
     parent?.contact_info_status === "available"
       ? "Chưa cung cấp"
@@ -206,15 +182,10 @@ export function AdminParentDetailScreen({
         description="Thông tin tài khoản phụ huynh và các hồ sơ trẻ em được liên kết."
         actions={
           <>
-            {parent && !isHidden ? (
+            {parent ? (
               <Button className="sm:w-auto" onClick={openEdit} variant="secondary">
                 <Pencil aria-hidden className="size-5" />
                 Sửa Parent
-              </Button>
-            ) : null}
-            {parent && isHidden ? (
-              <Button className="sm:w-auto" disabled={visibilityBusy} isLoading={visibilityBusy} onClick={() => void restoreHiddenParent()}>
-                Khôi phục hiển thị
               </Button>
             ) : null}
             <ButtonLink
@@ -235,12 +206,6 @@ export function AdminParentDetailScreen({
       {actionError ? (
         <div className="mb-4"><StatusMessage tone="error" title={actionError}>Vui lòng thử lại.</StatusMessage></div>
       ) : null}
-      {parent && isHidden ? (
-        <div className="mb-4 rounded-control border border-border bg-canvas p-4 text-sm font-bold" role="status">
-          Hồ sơ này đang bị ẩn khỏi danh sách Admin. Tài khoản và dữ liệu liên quan vẫn được giữ nguyên.
-        </div>
-      ) : null}
-
       {loading ? (
         <AdminLoading label="Đang tải thông tin phụ huynh…" />
       ) : error ? (
