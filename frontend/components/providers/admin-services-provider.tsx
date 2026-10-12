@@ -4,12 +4,14 @@ import { createContext, useMemo, type ReactNode } from "react";
 import type { AdminAuthService } from "@/lib/api/admin-auth-service";
 import type { AdminBookService } from "@/lib/api/admin-book-service";
 import type { AdminPageService } from "@/lib/api/admin-page-service";
+import type { AdminParentService } from "@/lib/api/admin-parent-service";
 import type { AuditService } from "@/lib/api/audit-service";
 import type { HealthService } from "@/lib/api/health-service";
 import type { OcrReviewService } from "@/lib/api/ocr-review-service";
 import type { RevisionService } from "@/lib/api/revision-service";
 import { createAdminBookService } from "@/lib/api/admin-book-service";
 import { createAdminPageService } from "@/lib/api/admin-page-service";
+import { createAdminParentService } from "@/lib/api/admin-parent-service";
 import { createAuditService } from "@/lib/api/audit-service";
 import { createHealthService } from "@/lib/api/health-service";
 import { createOcrReviewService } from "@/lib/api/ocr-review-service";
@@ -21,6 +23,7 @@ export interface AdminServices {
   auth: AdminAuthService;
   books: AdminBookService;
   pages: AdminPageService;
+  parents: AdminParentService;
   ocr: OcrReviewService;
   revisions: RevisionService;
   audit: AuditService;
@@ -43,6 +46,7 @@ export function AdminServicesProvider({
       auth: createSupabaseAdminAuthService(),
       books: createAdminBookService(),
       pages: createAdminPageService(),
+      parents: createAdminParentService(),
       ocr: createOcrReviewService(),
       revisions: createRevisionService(),
       audit: createAuditService(),

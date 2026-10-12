@@ -121,6 +121,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
 | Reports  | `/reports/difficult-words`             | Từ khó trong cửa sổ 90 ngày                                |
 | Admin    | `/admin/login`                         | Đăng nhập Admin bằng Supabase và kiểm tra role             |
+| Admin    | `/admin/parents`                       | Danh sách hồ sơ phụ huynh từ database                       |
 | Admin    | `/admin/books`                         | Danh mục, tìm kiếm và lọc vận hành                         |
 | Admin    | `/admin/books/new`                     | Tạo sách                                                   |
 | Admin    | `/admin/books/[bookId]`                | Chi tiết sách, upload trang, lifecycle                     |

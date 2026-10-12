@@ -49,7 +49,7 @@ export function AdminLoginScreen({
     setNotice(null);
     try {
       await auth.signIn(values);
-      replace("/admin/books");
+      replace("/admin/parents");
       refresh();
     } catch (error) {
       setNotice(
@@ -71,7 +71,7 @@ export function AdminLoginScreen({
           <p className="font-extrabold text-primary">ReadAlong Vision</p>
           <h1 className="mt-2 text-heading font-black">Đăng nhập quản trị</h1>
           <p className="mt-2 text-muted">
-            Quản lý sách, OCR và trạng thái vận hành.
+            Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.
           </p>
         </div>
         <form className="flex flex-col gap-5" noValidate onSubmit={submit}>

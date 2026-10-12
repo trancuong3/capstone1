@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from typing import List
 from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
 from app.models import Profile, ChildProfile
+from app.schemas.profile import AdminParentListResponse
 from app.schemas import (
     ProfileResponse,
     ProfileCreate,
@@ -471,6 +472,113 @@ async def get_current_profile(
         profile,
         from_attributes=True,
     )
+
+
+# =========================================================
+# ADMIN: LIST PARENT PROFILES
+# =========================================================
+
+class AdminParentRepository:
+    """Read-only database access for the Admin parent directory."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def role(self, actor_id: UUID) -> str | None:
+        return await self.db.scalar(
+            select(Profile.Role).where(Profile.Id == actor_id)
+        )
+
+    async def list_parent_rows(
+        self,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ):
+        filters = [Profile.Role == "parent"]
+        if search and search.strip():
+            # Escape SQL LIKE wildcards so user input is treated literally.
+            term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            filters.append(Profile.DisplayName.ilike(f"%{term}%", escape="\\"))
+
+        total = await self.db.scalar(
+            select(func.count(Profile.Id)).where(*filters)
+        )
+
+        query = (
+            select(
+                Profile.Id.label("id"),
+                Profile.DisplayName.label("display_name"),
+                Profile.CreatedAt.label("created_at"),
+                func.count(ChildProfile.Id).label("children_count"),
+            )
+            .outerjoin(ChildProfile, ChildProfile.ParentId == Profile.Id)
+            .where(*filters)
+            .group_by(Profile.Id, Profile.DisplayName, Profile.CreatedAt)
+            .order_by(Profile.CreatedAt.desc(), Profile.Id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.db.execute(query)
+        rows = result.all()
+        items = [
+            {
+                "id": row.id,
+                "display_name": row.display_name,
+                "created_at": row.created_at,
+                "children_count": row.children_count,
+            }
+            for row in rows
+        ]
+        return items, int(total or 0)
+
+
+class AdminParentService:
+    """Enforces the Admin role before returning parent profile data."""
+
+    def __init__(self, repository: AdminParentRepository):
+        self.repository = repository
+
+    async def list_parents(
+        self,
+        actor_id: UUID,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> AdminParentListResponse:
+        if await self.repository.role(actor_id) != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "FORBIDDEN", "message": "Admin access required"},
+            )
+
+        items, total = await self.repository.list_parent_rows(
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        return AdminParentListResponse(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+
+@router.get(
+    "/admin/parents",
+    response_model=AdminParentListResponse,
+)
+async def get_admin_parent_directory(
+    search: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List parent profiles for authenticated Admin users only."""
+    service = AdminParentService(AdminParentRepository(db))
+    return await service.list_parents(admin_id, search, limit, offset)
 
 
 # =========================================================
