@@ -160,7 +160,7 @@ class AdminParentCreateRequest(BaseModel):
             return None
         value = value.strip()
         import re
-        if not re.fullmatch(r"\\+?[0-9][0-9\\s().-]{5,24}", value):
+        if not re.fullmatch(r"\+?[0-9][0-9\s().-]{5,24}", value):
             raise ValueError("phone format is invalid")
         return value
 
