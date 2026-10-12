@@ -320,7 +320,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         provider.update_contact_info.assert_awaited_once_with(
             PARENT_ID, email="new@example.com", phone="0912345678"
         )
-        repository.update_display_name.assert_not_awaited()
+        repository.update_display_name.assert_not_called()
         self.assertEqual(result.email, "new@example.com")
 
     async def test_update_rolls_back_display_name_when_auth_update_fails(self):
