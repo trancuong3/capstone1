@@ -13,8 +13,6 @@ class Profile(Base):
     Role = Column("role", String, nullable=False)
     DisplayName = Column("displayname", String)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
-    # Admin visibility only. NULL means visible; a timestamp means hidden.
-    AdminHiddenAt = Column("admin_hidden_at", DateTime(timezone=True), nullable=True)
 
     children = relationship("ChildProfile", back_populates="parent", cascade="all, delete-orphan")
 
