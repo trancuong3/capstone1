@@ -84,6 +84,25 @@ describe("AdminParentDetailScreen", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains when server-side Auth contact lookup is not configured", async () => {
+    getById.mockResolvedValueOnce({
+      ...parentDetail,
+      email: null,
+      phone: null,
+      contact_info_status: "not_configured" as const,
+    });
+
+    renderScreen();
+
+    expect(
+      await screen.findByText(
+        /backend chưa được cấu hình quyền truy xuất Supabase Auth/i,
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findAllByText("Chưa khả dụng")).toHaveLength(2);
+    expect(screen.queryByText("Chưa cung cấp")).not.toBeInTheDocument();
+  });
+
   it("shows an empty state when the parent has no children", async () => {
     getById.mockResolvedValueOnce({ ...parentDetail, children: [] });
 
