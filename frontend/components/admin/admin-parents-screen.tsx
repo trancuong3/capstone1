@@ -3,8 +3,6 @@
 import {
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
   Pencil,
   Plus,
   RefreshCw,
@@ -27,7 +25,6 @@ import type { AdminParentProfileItemDTO } from "@/types/admin";
 
 const PAGE_SIZE = 10;
 type LoadError = "auth" | "forbidden" | "unavailable";
-type VisibilityFilter = "visible" | "hidden";
 type ParentForm = { display_name: string; email: string; phone: string };
 
 function formatDate(value: string) {
@@ -63,7 +60,6 @@ export function AdminParentsScreen() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
-  const [visibility, setVisibility] = useState<VisibilityFilter>("visible");
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -74,8 +70,6 @@ export function AdminParentsScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [parentToHide, setParentToHide] = useState<AdminParentProfileItemDTO | null>(null);
-  const [mutatingId, setMutatingId] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -87,7 +81,6 @@ export function AdminParentsScreen() {
         search: search || undefined,
         limit: PAGE_SIZE,
         offset,
-        ...(visibility === "hidden" ? { visibility: "hidden" as const } : {}),
       };
       const page = await parents.list(query);
       if (requestId !== requestIdRef.current) return;
@@ -105,7 +98,7 @@ export function AdminParentsScreen() {
             : "unavailable",
       );
     }
-  }, [offset, parents, search, visibility]);
+  }, [offset, parents, search]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
@@ -119,13 +112,6 @@ export function AdminParentsScreen() {
     event.preventDefault();
     setOffset(0);
     setSearch(searchInput.trim());
-  }
-
-  function changeVisibility(next: VisibilityFilter) {
-    setVisibility(next);
-    setOffset(0);
-    setNotice(null);
-    setActionError(null);
   }
 
   function openCreate() {
@@ -204,38 +190,6 @@ export function AdminParentsScreen() {
     }
   }
 
-  async function confirmHide() {
-    if (!parentToHide || mutatingId) return;
-    const id = parentToHide.id;
-    setMutatingId(id);
-    setActionError(null);
-    try {
-      await parents.hide(id);
-      setParentToHide(null);
-      setNotice("Đã ẩn hồ sơ khỏi danh sách quản lý. Dữ liệu Parent, Child và lịch sử vẫn được giữ nguyên.");
-      await load();
-    } catch (cause) {
-      setActionError(safeMutationError(cause));
-    } finally {
-      setMutatingId(null);
-    }
-  }
-
-  async function restoreParent(parentId: string) {
-    if (mutatingId) return;
-    setMutatingId(parentId);
-    setActionError(null);
-    try {
-      await parents.restore(parentId);
-      setNotice("Đã khôi phục hiển thị Parent.");
-      await load();
-    } catch (cause) {
-      setActionError(safeMutationError(cause));
-    } finally {
-      setMutatingId(null);
-    }
-  }
-
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -244,7 +198,7 @@ export function AdminParentsScreen() {
       <AdminPageHeader
         eyebrow="Quản lý tài khoản"
         title="Danh sách phụ huynh"
-        description="Quản lý hồ sơ Parent và các hồ sơ bé liên kết. Ẩn hồ sơ chỉ thay đổi khả năng hiển thị trong Admin; dữ liệu gốc vẫn được giữ."
+        description="Quản lý hồ sơ Parent và các hồ sơ bé liên kết."
         actions={
           <>
             <Button className="sm:w-auto" onClick={openCreate}>
@@ -277,7 +231,7 @@ export function AdminParentsScreen() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
           <p className="text-sm font-bold text-muted">
-            {visibility === "hidden" ? "Tổng Parent đã ẩn" : "Tổng Parent đang hiển thị"}
+            Tổng Parent
           </p>
           <div className="flex items-center gap-3">
             <UsersRound aria-hidden className="size-8 text-primary" />
@@ -294,14 +248,6 @@ export function AdminParentsScreen() {
       </div>
 
       <Card className="mb-6 bg-white">
-        <div className="mb-4 flex flex-wrap gap-3" role="group" aria-label="Lọc trạng thái Parent">
-          <Button className="sm:w-auto" onClick={() => changeVisibility("visible")} variant={visibility === "visible" ? "primary" : "secondary"}>
-            Đang hiển thị
-          </Button>
-          <Button className="sm:w-auto" onClick={() => changeVisibility("hidden")} variant={visibility === "hidden" ? "primary" : "secondary"}>
-            Đã ẩn
-          </Button>
-        </div>
         <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={submitSearch}>
           <div className="min-w-0 flex-1">
             <TextField
@@ -348,13 +294,11 @@ export function AdminParentsScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          title={search ? "Không tìm thấy phụ huynh" : visibility === "hidden" ? "Không có Parent đã ẩn" : "Chưa có hồ sơ phụ huynh"}
+          title={search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"}
           description={
             search
               ? "Thử tên khác hoặc xóa bộ lọc tìm kiếm."
-              : visibility === "hidden"
-                ? "Các hồ sơ được ẩn sẽ xuất hiện tại đây để Admin khôi phục."
-                : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."
+              : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."
           }
           action={search ? (
             <Button className="sm:w-auto" onClick={() => { setSearchInput(""); setSearch(""); setOffset(0); }} variant="secondary">
@@ -376,7 +320,6 @@ export function AdminParentsScreen() {
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
                     </h2>
                     <p className="mt-1 break-all text-xs text-muted">ID: {parent.id}</p>
-                    {visibility === "hidden" ? <p className="mt-1 text-sm font-bold text-muted">Đã ẩn khỏi danh sách Admin</p> : null}
                   </div>
                   <dl className="grid grid-cols-2 gap-3 sm:min-w-64">
                     <div className="rounded-control bg-canvas px-4 py-3">
@@ -389,25 +332,13 @@ export function AdminParentsScreen() {
                     </div>
                   </dl>
                   <div className="flex flex-wrap gap-2 sm:w-auto">
-                    <ButtonLink className="sm:w-auto" href={`/admin/parents/${encodeURIComponent(parent.id)}${visibility === "hidden" ? "?include_hidden=true" : ""}`} variant="secondary">
-                      {visibility === "hidden" ? <Eye aria-hidden className="size-5" /> : null}
+                    <ButtonLink className="sm:w-auto" href={`/admin/parents/${encodeURIComponent(parent.id)}`} variant="secondary">
                       Xem chi tiết
                       <ChevronRight aria-hidden className="size-5" />
                     </ButtonLink>
-                    {visibility === "visible" ? (
-                      <>
-                        <Button className="sm:w-auto" disabled={mutatingId === parent.id} onClick={() => void openEdit(parent.id)} variant="secondary">
-                          <Pencil aria-hidden className="size-5" /> Sửa
-                        </Button>
-                        <Button className="sm:w-auto" disabled={mutatingId === parent.id} onClick={() => setParentToHide(parent)} variant="secondary">
-                          <EyeOff aria-hidden className="size-5" /> Ẩn
-                        </Button>
-                      </>
-                    ) : (
-                      <Button className="sm:w-auto" disabled={mutatingId === parent.id} isLoading={mutatingId === parent.id} onClick={() => void restoreParent(parent.id)}>
-                        Khôi phục hiển thị
-                      </Button>
-                    )}
+                    <Button className="sm:w-auto" onClick={() => void openEdit(parent.id)} variant="secondary">
+                      <Pencil aria-hidden className="size-5" /> Sửa
+                    </Button>
                   </div>
                 </div>
               </Card>
@@ -447,29 +378,7 @@ export function AdminParentsScreen() {
         </form>
       </Modal>
 
-      <Modal
-        isOpen={parentToHide !== null}
-        onClose={() => { if (!mutatingId) setParentToHide(null); }}
-        title="Ẩn hồ sơ Parent"
-      >
-        <div className="grid gap-5">
-          {actionError ? (
-            <StatusMessage tone="error" title={actionError}>
-              Thao tác chưa được lưu. Dữ liệu vẫn được giữ nguyên; hãy thử lại.
-            </StatusMessage>
-          ) : null}
-          <p>
-            Bạn có chắc muốn ẩn <strong>{parentToHide?.display_name?.trim() || "Parent này"}</strong>?
-          </p>
-          <p className="rounded-control bg-canvas p-4 text-sm">
-            Hồ sơ sẽ được ẩn khỏi danh sách quản lý. Dữ liệu Parent, Child và lịch sử vẫn được giữ nguyên.
-          </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button className="sm:w-auto" disabled={Boolean(mutatingId)} onClick={() => setParentToHide(null)} variant="secondary">Hủy</Button>
-            <Button className="sm:w-auto" disabled={Boolean(mutatingId)} isLoading={Boolean(mutatingId)} onClick={() => void confirmHide()}>Xác nhận ẩn</Button>
-          </div>
-        </div>
-      </Modal>
+
     </>
   );
 }
