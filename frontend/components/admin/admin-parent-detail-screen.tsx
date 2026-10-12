@@ -25,6 +25,7 @@ type LoadError = "auth" | "forbidden" | "not-found" | "unavailable";
 
 function formatDate(value: string) {
   const date = new Date(value);
+
   return Number.isNaN(date.getTime())
     ? "Không rõ"
     : new Intl.DateTimeFormat("vi-VN", {
@@ -38,7 +39,10 @@ function getLoadError(error: unknown): LoadError {
   if (!isServiceError(error)) return "unavailable";
   if (error.code === "AUTH_REQUIRED") return "auth";
   if (error.code === "FORBIDDEN") return "forbidden";
-  if (error.code === "RESOURCE_NOT_FOUND" || error.code === "VALIDATION_ERROR") {
+  if (
+    error.code === "RESOURCE_NOT_FOUND" ||
+    error.code === "VALIDATION_ERROR"
+  ) {
     return "not-found";
   }
   return "unavailable";
@@ -57,46 +61,57 @@ function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
   }
 }
 
-export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
+export function AdminParentDetailScreen({
+  parentId,
+}: {
+  parentId: string;
+}) {
   const { parents } = useAdminServices();
   const [parent, setParent] = useState<AdminParentDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
   const requestIdRef = useRef(0);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
-    setParent(null);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      const requestId = ++requestIdRef.current;
+      setLoading(true);
+      setError(null);
+      setParent(null);
 
-    try {
-      const detail = await parents.getById(parentId, signal);
-      if (signal?.aborted || requestId !== requestIdRef.current) return;
-      setParent(detail);
-    } catch (cause) {
-      if (signal?.aborted || requestId !== requestIdRef.current) return;
-      setError(getLoadError(cause));
-    } finally {
-      if (!signal?.aborted && requestId === requestIdRef.current) {
-        setLoading(false);
+      try {
+        const detail = await parents.getById(parentId, signal);
+        if (signal?.aborted || requestId !== requestIdRef.current) return;
+        setParent(detail);
+      } catch (cause) {
+        if (signal?.aborted || requestId !== requestIdRef.current) return;
+        setError(getLoadError(cause));
+      } finally {
+        if (!signal?.aborted && requestId === requestIdRef.current) {
+          setLoading(false);
+        }
       }
-    }
-  }, [parentId, parents]);
+    },
+    [parentId, parents],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
+
     return () => {
       controller.abort();
       requestIdRef.current += 1;
     };
   }, [load]);
 
-  const contactNotice = parent ? contactMessage(parent.contact_info_status) : null;
-  const fallbackContact = parent?.contact_info_status === "available"
-    ? "Chưa cung cấp"
-    : "Chưa khả dụng";
+  const contactNotice = parent
+    ? contactMessage(parent.contact_info_status)
+    : null;
+  const fallbackContact =
+    parent?.contact_info_status === "available"
+      ? "Chưa cung cấp"
+      : "Chưa khả dụng";
 
   return (
     <>
@@ -105,7 +120,11 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
         title={parent?.display_name?.trim() || "Chi tiết phụ huynh"}
         description="Thông tin tài khoản phụ huynh và các hồ sơ trẻ em được liên kết."
         actions={
-          <ButtonLink className="sm:w-auto" href="/admin/parents" variant="secondary">
+          <ButtonLink
+            className="sm:w-auto"
+            href="/admin/parents"
+            variant="secondary"
+          >
             <ArrowLeft aria-hidden className="size-5" />
             Quay lại danh sách
           </ButtonLink>
@@ -142,12 +161,20 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 Đăng nhập lại
               </ButtonLink>
             ) : error === "not-found" || error === "forbidden" ? (
-              <ButtonLink href="/admin/parents" className="sm:w-auto" variant="secondary">
+              <ButtonLink
+                href="/admin/parents"
+                className="sm:w-auto"
+                variant="secondary"
+              >
                 <ArrowLeft aria-hidden className="size-5" />
                 Quay lại danh sách
               </ButtonLink>
             ) : (
-              <Button className="sm:w-auto" onClick={() => void load()} variant="secondary">
+              <Button
+                className="sm:w-auto"
+                onClick={() => void load()}
+                variant="secondary"
+              >
                 <RefreshCw aria-hidden className="size-5" />
                 Thử lại
               </Button>
@@ -162,7 +189,9 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 <UserRound aria-hidden className="size-6" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-xl font-black text-ink">Thông tin phụ huynh</h2>
+                <h2 className="text-xl font-black text-ink">
+                  Thông tin phụ huynh
+                </h2>
                 <p className="break-all text-sm text-muted">{parent.id}</p>
               </div>
             </div>
@@ -173,14 +202,18 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                   <Mail aria-hidden className="size-4" />
                   Email
                 </dt>
-                <dd className="break-words font-bold">{parent.email?.trim() || fallbackContact}</dd>
+                <dd className="break-words font-bold">
+                  {parent.email?.trim() || fallbackContact}
+                </dd>
               </div>
               <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
                 <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
                   <Phone aria-hidden className="size-4" />
                   Số điện thoại
                 </dt>
-                <dd className="break-words font-bold">{parent.phone?.trim() || fallbackContact}</dd>
+                <dd className="break-words font-bold">
+                  {parent.phone?.trim() || fallbackContact}
+                </dd>
               </div>
               <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
                 <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
@@ -190,13 +223,18 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 <dd className="font-bold">{formatDate(parent.created_at)}</dd>
               </div>
               <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
-                <dt className="mb-1 text-sm font-bold text-muted">Mã phụ huynh</dt>
+                <dt className="mb-1 text-sm font-bold text-muted">
+                  Mã phụ huynh
+                </dt>
                 <dd className="break-all font-bold">{parent.id}</dd>
               </div>
             </dl>
 
             {contactNotice ? (
-              <div className="rounded-control border border-border bg-canvas p-4 text-sm text-muted" role="status">
+              <div
+                className="rounded-control border border-border bg-canvas p-4 text-sm text-muted"
+                role="status"
+              >
                 {contactNotice}
               </div>
             ) : null}
@@ -205,9 +243,15 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
           <section aria-labelledby="children-heading" className="grid gap-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 id="children-heading" className="text-xl font-black text-ink">Danh sách trẻ em</h2>
+                <h2
+                  id="children-heading"
+                  className="text-xl font-black text-ink"
+                >
+                  Danh sách trẻ em
+                </h2>
                 <p className="mt-1 text-sm text-muted">
-                  {parent.children.length} hồ sơ trẻ em được liên kết với phụ huynh này.
+                  {parent.children.length} hồ sơ trẻ em được liên kết với phụ
+                  huynh này.
                 </p>
               </div>
             </div>
@@ -226,8 +270,12 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                         <UsersRound aria-hidden className="size-5" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="break-words text-lg font-black text-ink">{child.alias}</h3>
-                        <p className="text-sm text-muted">ID: <span className="break-all">{child.id}</span></p>
+                        <h3 className="break-words text-lg font-black text-ink">
+                          {child.alias}
+                        </h3>
+                        <p className="text-sm text-muted">
+                          ID: <span className="break-all">{child.id}</span>
+                        </p>
                       </div>
                     </div>
                     <dl className="grid grid-cols-2 gap-3">
@@ -239,8 +287,12 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                         <dd className="mt-1 font-bold">{child.grade}</dd>
                       </div>
                       <div className="rounded-control bg-canvas px-3 py-2">
-                        <dt className="text-xs font-bold text-muted">Ngày tạo</dt>
-                        <dd className="mt-1 font-bold">{formatDate(child.created_at)}</dd>
+                        <dt className="text-xs font-bold text-muted">
+                          Ngày tạo
+                        </dt>
+                        <dd className="mt-1 font-bold">
+                          {formatDate(child.created_at)}
+                        </dd>
                       </div>
                     </dl>
                   </Card>
