@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from supabase import Client, create_client
+from supabase.lib.client_options import ClientOptions
 
 from .config import (
     SUPABASE_KEY,
@@ -21,4 +22,8 @@ def get_supabase_admin_client() -> Client | None:
     """Return a server-only Auth Admin client when its secret is configured."""
     if not SUPABASE_SERVICE_ROLE_KEY:
         return None
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return create_client(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+        options=ClientOptions(auto_refresh_token=False, persist_session=False),
+    )
