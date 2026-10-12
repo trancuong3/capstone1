@@ -11,15 +11,14 @@ import { ServiceError } from "@/lib/api/service-error";
 const PARENT_ID = "22222222-2222-4222-8222-222222222222";
 const CHILD_ID = "33333333-3333-4333-8333-333333333333";
 
-const { getById, update, restore } = vi.hoisted(() => ({
+const { getById, update } = vi.hoisted(() => ({
   getById: vi.fn(),
   update: vi.fn(),
-  restore: vi.fn(),
 }));
 
 function renderScreen(parentId = PARENT_ID) {
   const services = {
-    parents: { getById, update, restore },
+    parents: { getById, update },
   } as unknown as AdminServices;
 
   return render(
@@ -50,7 +49,6 @@ describe("AdminParentDetailScreen", () => {
   beforeEach(() => {
     getById.mockReset();
     update.mockReset();
-    restore.mockReset();
   });
 
   it("renders parent contact information and linked children from the API", async () => {
