@@ -196,28 +196,6 @@ class AdminParentUpdateRequest(BaseModel):
         return self
 
 
-class AdminParentVisibilityRequest(BaseModel):
-    is_hidden: bool
-
-
-class AdminParentVisibilityResponse(BaseModel):
-    id: UUID
-    is_hidden: bool
-    admin_hidden_at: Optional[datetime] = None
-
-
-# =========================================================
-# ADMIN: PARENT DIRECTORY LIST
-# =========================================================
-
-class AdminParentListItem(BaseModel):
-    id: UUID
-    display_name: Optional[str] = None
-    created_at: datetime
-    children_count: int = Field(ge=0)
-    admin_hidden_at: Optional[datetime] = None
-
-
 class AdminParentListResponse(BaseModel):
     items: List[AdminParentListItem]
     total: int = Field(ge=0)
@@ -242,7 +220,6 @@ class AdminParentDetailResponse(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     created_at: datetime
-    admin_hidden_at: Optional[datetime] = None
     children: List[AdminParentDetailChild] = Field(default_factory=list)
     contact_info_status: Literal["available", "not_configured", "user_not_found", "lookup_failed"] = Field(
         description="Normalized status of the server-side Supabase Auth lookup."
