@@ -186,6 +186,14 @@ export function ReadingScreen({
   }, [loadState, page, services.pageMatchService, sessionId, uiState]);
 
   async function startListening() {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      if (mountedRef.current) setLatestTranscript(null);
+      return true;
+    }
     try {
       await speechRecorder.start();
       if (!mountedRef.current) {
@@ -194,7 +202,12 @@ export function ReadingScreen({
       }
       setLatestTranscript(null);
       return true;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("not supported")) {
+        if (mountedRef.current) setLatestTranscript(null);
+        return true;
+      }
       if (mountedRef.current) {
         setConnectionState("reconnecting");
         setUiState("microphone-denied");
