@@ -149,6 +149,15 @@ class AdminParentService:
             admin_hidden_at=parent.get("admin_hidden_at"),
         )
 
+    async def _compensate_failed_invite(self, parent_id: UUID) -> None:
+        """Remove only the Auth identity created by this failed Create operation."""
+        try:
+            await self.auth_contact_provider.compensate_failed_invite(parent_id)
+        except Exception as error:
+            raise AdminParentConsistencyError(
+                "Parent invitation failed to synchronize; manual reconciliation is required."
+            ) from error
+
     async def create_parent(
         self,
         actor_id: UUID,
@@ -179,12 +188,14 @@ class AdminParentService:
         try:
             parent = await self.repository.get_parent_detail(parent_id)
         except Exception as error:
-            # Do not report success on a partial Auth/database result. We deliberately
-            # do not hard-delete data here; a human can reconcile the just-created invite.
-            raise AdminParentConsistencyError() from error
-        if parent is None:
+            await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
-                "The Auth invite succeeded but no linked Parent profile was found."
+                "The Auth invite could not be verified against PostgreSQL."
+            ) from error
+        if parent is None:
+            await self._compensate_failed_invite(parent_id)
+            raise AdminParentConsistencyError(
+                "The Auth invite did not produce a linked Parent profile."
             )
 
         return await self.get_parent_detail(actor_id, parent_id)
@@ -231,11 +242,14 @@ class AdminParentService:
                         raise AdminParentConsistencyError() from rollback_error
                 raise AdminParentProviderUnavailableError() from error
             except SupabaseAuthConflictError as error:
-                if name_changed and old_display_name is not None:
-                    await self.repository.update_display_name(parent_id, old_display_name)
+                if name_changed:
+                    try:
+                        await self.repository.update_display_name(parent_id, old_display_name)
+                    except Exception as rollback_error:
+                        raise AdminParentConsistencyError() from rollback_error
                 raise AdminParentConflictError("The requested contact information conflicts with an existing account.") from error
             except SupabaseAuthProviderError as error:
-                if name_changed and old_display_name is not None:
+                if name_changed:
                     try:
                         await self.repository.update_display_name(parent_id, old_display_name)
                     except Exception as rollback_error:
