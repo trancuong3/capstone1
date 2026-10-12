@@ -146,7 +146,7 @@ export function AdminParentDetailScreen({
       setEditError("Vui lòng nhập tên hiển thị.");
       return;
     }
-    if (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setEditError("Email chưa đúng định dạng.");
       return;
     }
