@@ -1,4 +1,7 @@
-import type { AdminParentDirectoryDTO } from "@/types/admin";
+import type {
+  AdminParentDetailDTO,
+  AdminParentDirectoryDTO,
+} from "@/types/admin";
 import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 
@@ -10,9 +13,10 @@ export interface AdminParentListQuery {
 
 export interface AdminParentService {
   list(query?: AdminParentListQuery): Promise<AdminParentDirectoryDTO>;
+  getById(parentId: string, signal?: AbortSignal): Promise<AdminParentDetailDTO>;
 }
 
-const responseSchema = z.object({
+const parentListResponseSchema = z.object({
   items: z.array(
     z.object({
       id: z.guid(),
@@ -26,6 +30,28 @@ const responseSchema = z.object({
   offset: z.number().int().nonnegative(),
 });
 
+const parentDetailResponseSchema = z.object({
+  id: z.guid(),
+  display_name: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  children: z.array(
+    z.object({
+      id: z.guid(),
+      alias: z.string(),
+      grade: z.number().int().min(1).max(5),
+      created_at: z.iso.datetime({ offset: true }),
+    }),
+  ),
+  contact_info_status: z.enum([
+    "available",
+    "not_configured",
+    "user_not_found",
+    "lookup_failed",
+  ]),
+});
+
 export function createAdminParentService(): AdminParentService {
   return {
     list: (query) =>
@@ -35,7 +61,13 @@ export function createAdminParentService(): AdminParentService {
           limit: query?.limit ?? 10,
           offset: query?.offset ?? 0,
         })}`,
-        responseSchema,
+        parentListResponseSchema,
+      ),
+    getById: (parentId, signal) =>
+      requestApi(
+        `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
+        parentDetailResponseSchema,
+        signal,
       ),
   };
 }
