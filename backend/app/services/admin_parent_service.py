@@ -3,7 +3,7 @@
 HTTP and API response schemas deliberately remain outside this service.
 """
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -59,14 +59,7 @@ class AdminParentDetailResult:
     email: str | None
     phone: str | None
     contact_info_status: ContactInfoStatus
-    admin_hidden_at: datetime | None = None
 
-
-@dataclass(frozen=True)
-class AdminParentVisibilityResult:
-    id: UUID
-    is_hidden: bool
-    admin_hidden_at: datetime | None
 
 
 class AdminParentService:
@@ -90,33 +83,22 @@ class AdminParentService:
         search: str | None,
         limit: int,
         offset: int,
-        visibility: str = "visible",
     ) -> AdminParentListResult:
         await self._ensure_admin(actor_id)
-        if visibility not in {"visible", "hidden"}:
-            raise ValueError("Unsupported parent visibility filter")
-        if visibility == "hidden":
-            items, total = await self.repository.list_parent_rows(
-                search=search, limit=limit, offset=offset, include_hidden=True
-            )
-        else:
-            # Preserve the existing repository call contract for visible records.
-            items, total = await self.repository.list_parent_rows(
-                search=search, limit=limit, offset=offset
-            )
+        items, total = await self.repository.list_parent_rows(
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
         return AdminParentListResult(items=items, total=total, limit=limit, offset=offset)
 
     async def get_parent_detail(
         self,
         actor_id: UUID,
         parent_id: UUID,
-        include_hidden: bool = False,
     ) -> AdminParentDetailResult:
         await self._ensure_admin(actor_id)
-        if include_hidden:
-            parent = await self.repository.get_parent_detail(parent_id, include_hidden=True)
-        else:
-            parent = await self.repository.get_parent_detail(parent_id)
+        parent = await self.repository.get_parent_detail(parent_id)
         if parent is None:
             raise AdminParentNotFoundError("Parent profile was not found.")
 
@@ -147,7 +129,6 @@ class AdminParentService:
             email=email,
             phone=phone,
             contact_info_status=status_value,
-            admin_hidden_at=parent.get("admin_hidden_at"),
         )
 
     async def _compensate_failed_invite(self, parent_id: UUID) -> None:
@@ -262,27 +243,3 @@ class AdminParentService:
                 raise AdminParentProviderOperationError() from error
 
         return await self.get_parent_detail(actor_id, parent_id)
-
-    async def hide_parent(self, actor_id: UUID, parent_id: UUID) -> AdminParentVisibilityResult:
-        await self._ensure_admin(actor_id)
-        parent = await self.repository.get_parent_record(parent_id, include_hidden=True)
-        if parent is None:
-            raise AdminParentNotFoundError("Parent profile was not found.")
-        hidden_at = parent.get("admin_hidden_at")
-        if hidden_at is None:
-            result = await self.repository.set_hidden(parent_id, datetime.now(timezone.utc))
-            if result is None:
-                raise AdminParentNotFoundError("Parent profile was not found.")
-            hidden_at = result["admin_hidden_at"]
-        return AdminParentVisibilityResult(id=parent_id, is_hidden=True, admin_hidden_at=hidden_at)
-
-    async def restore_parent(self, actor_id: UUID, parent_id: UUID) -> AdminParentVisibilityResult:
-        await self._ensure_admin(actor_id)
-        parent = await self.repository.get_parent_record(parent_id, include_hidden=True)
-        if parent is None:
-            raise AdminParentNotFoundError("Parent profile was not found.")
-        if parent.get("admin_hidden_at") is not None:
-            result = await self.repository.set_hidden(parent_id, None)
-            if result is None:
-                raise AdminParentNotFoundError("Parent profile was not found.")
-        return AdminParentVisibilityResult(id=parent_id, is_hidden=False, admin_hidden_at=None)
