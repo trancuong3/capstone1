@@ -19,6 +19,10 @@ const safeBackendMessages: Record<string, string> = {
     "Supabase Storage chưa sẵn sàng. Hãy kiểm tra cấu hình project và kết nối.",
   "Could not save the image to Supabase Storage":
     "Supabase Storage từ chối lưu ảnh. Hãy kiểm tra bucket có tồn tại trong đúng project và khóa server-side có quyền upload.",
+  "Supabase Storage bucket was not found; verify SUPABASE_STORAGE_BUCKET in the configured project":
+    "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL.",
+  "Supabase Storage rejected the server credentials or upload permission":
+    "Supabase Storage từ chối quyền ghi ảnh. Hãy kiểm tra server-side key và chính sách quyền của bucket.",
   "Tesseract OCR 5.x is not installed or TESSERACT_CMD is invalid":
     "Tiến trình Backend không tìm thấy Tesseract. Hãy kiểm tra TESSERACT_CMD hoặc PATH của Uvicorn.",
   "Tesseract language data vie.traineddata is missing":
@@ -147,8 +151,16 @@ export async function requestApi<T>(
 
   const requestId = response.headers.get("x-request-id") ?? "";
   if (!response.ok) {
-    const message = await safeBackendMessage(response);
-    throw failure(response.status, requestId, response.status >= 500, message);
+    const backendMessage = await safeBackendMessage(response);
+    const correlation = response.status >= 500 && requestId
+      ? ` Mã yêu cầu: ${requestId}.`
+      : "";
+    throw failure(
+      response.status,
+      requestId,
+      response.status >= 500,
+      `${backendMessage}${correlation}`,
+    );
   }
 
   let payload: unknown;
