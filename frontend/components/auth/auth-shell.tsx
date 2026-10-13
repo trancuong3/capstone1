@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
-import { BrandHeader } from "@/components/common/brand-header";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
+import { SiteFooter } from "@/components/layout/site-footer";
+import { SiteHeader } from "@/components/layout/site-header";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -10,10 +11,13 @@ interface AuthShellProps {
 
 export function AuthShell({ children }: AuthShellProps) {
   return (
-    <main className="flex min-h-dvh w-full flex-col items-center gap-4 overflow-x-hidden bg-canvas p-4 sm:gap-6 sm:p-8">
-      <BrandHeader />
-      <div className="w-full max-w-[640px]">{children}</div>
-    </main>
+    <div className="flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
+      <SiteHeader />
+      <main className="flex w-full min-w-0 flex-1 flex-col items-center px-4 py-6 sm:px-8 sm:py-8">
+        <div className="w-full max-w-[640px]">{children}</div>
+      </main>
+      <SiteFooter />
+    </div>
   );
 }
 

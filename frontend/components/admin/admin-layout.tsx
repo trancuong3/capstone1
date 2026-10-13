@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { cn } from "@/lib/utils/cn";
 
@@ -45,8 +46,8 @@ export function AdminLayout({ children }: { children: ReactNode }) {
 
   if (pathname === "/admin/login") return <>{children}</>;
   return (
-    <div className="min-h-dvh bg-canvas">
-      <header className="border-b border-border bg-white">
+    <div className="flex min-h-dvh w-full flex-col bg-canvas">
+      <header className="shrink-0 border-b border-border bg-white">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-4 py-4 sm:px-8">
           <Link
             className="mr-auto flex min-h-11 items-center rounded-control text-xl font-black text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -93,9 +94,10 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           Chưa thể đăng xuất lúc này. Vui lòng thử lại.
         </p>
       ) : null}
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-8 sm:py-10">
+      <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 py-6 sm:px-8 sm:py-10">
         {children}
       </main>
+      <SiteFooter variant="admin" />
     </div>
   );
 }

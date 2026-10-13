@@ -54,9 +54,12 @@ test.describe("Group 1 authentication UI", () => {
 
   test("login links to parent registration", async ({ page }) => {
     await page.goto("/login?state=default");
-    await page.getByRole("link", { name: /Đăng ký/ }).click();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: /Đăng ký/ })
+      .click();
 
-    await expect(page).toHaveURL(/\/register\?state=default$/);
+    await expect(page).toHaveURL(/\/register$/);
     await expect(
       page.getByRole("heading", {
         name: /Đăng ký|Tạo tài khoản cho ba mẹ/,
@@ -103,7 +106,7 @@ test.describe("Group 1 authentication UI", () => {
     await expect(page.locator('a[href^="mailto:"]')).toHaveCount(0);
     await expect(
       page.getByRole("link", { name: "Về đăng nhập" }),
-    ).toHaveAttribute("href", "/login?state=default");
+    ).toHaveAttribute("href", "/login");
   });
 
   test("forgot-password continues through reset success and login", async ({
@@ -111,7 +114,7 @@ test.describe("Group 1 authentication UI", () => {
   }) => {
     await page.goto("/login?state=default");
     await page.getByRole("link", { name: "Quên mật khẩu?" }).click();
-    await expect(page).toHaveURL(/\/forgot-password\?state=default$/);
+    await expect(page).toHaveURL(/\/forgot-password$/);
     await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByRole("button", { name: "Gửi hướng dẫn" }).click();
 
@@ -130,8 +133,11 @@ test.describe("Group 1 authentication UI", () => {
     await expect(
       page.getByRole("heading", { name: "Đã đổi mật khẩu" }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Đăng nhập" }).click();
-    await expect(page).toHaveURL(/\/login\?state=default$/);
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Đăng nhập" })
+      .click();
+    await expect(page).toHaveURL(/\/login$/);
     await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhaumoi123");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
