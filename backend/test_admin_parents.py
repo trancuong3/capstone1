@@ -547,6 +547,25 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(type(normalized), SupabaseAuthProviderError)
         self.assertNotIsInstance(normalized, SupabaseAuthConflictError)
 
+    def test_auth_conflict_error_code_maps_to_conflict_even_with_generic_message(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthConflictError,
+        )
+
+        class DuplicateEmailError(Exception):
+            status = 422
+            code = "email_exists"
+
+        with self.assertLogs(
+            "app.providers.supabase_auth_contact_provider", level="WARNING"
+        ):
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                DuplicateEmailError("request failed"), operation="test"
+            )
+
+        self.assertIsInstance(normalized, SupabaseAuthConflictError)
+
 
 if __name__ == "__main__":
     unittest.main()
