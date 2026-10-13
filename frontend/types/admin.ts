@@ -143,6 +143,7 @@ export interface AdminPageUploadProgressUI {
   readonly client_id: string;
   readonly progress_percent: number;
   readonly status: "QUEUED" | "UPLOADING" | "PROCESSING" | "FAILED";
+  readonly error_message?: string;
 }
 
 export interface AdminRevisionVerifyRequestDTO {
