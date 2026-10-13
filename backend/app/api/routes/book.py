@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_parent_id
 from app.models import Book, BookPage
 from app.schemas import BookResponse, BookCreate, BookPageResponse
 
