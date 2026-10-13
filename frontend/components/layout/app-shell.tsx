@@ -13,6 +13,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
+import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { cn } from "@/lib/utils/cn";
 
@@ -82,10 +83,15 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-canvas">
+    <div
+      className={cn(
+        "min-h-dvh bg-canvas",
+        !isImmersiveRoute && "flex flex-col",
+      )}
+    >
       <header
         className={cn(
-          "px-4 pt-4 sm:px-8 sm:pt-8",
+          "shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8",
           isImmersiveRoute && "hidden",
         )}
       >
@@ -100,7 +106,7 @@ export function AppShell({ children }: AppShellProps) {
         >
           <Link
             className={cn(
-              "flex items-center rounded-control font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+              "flex items-center rounded-control font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
               isChildOnboarding
                 ? "min-h-11 text-label"
                 : "min-h-11 text-label sm:mr-auto sm:text-body",
@@ -168,12 +174,14 @@ export function AppShell({ children }: AppShellProps) {
           isImmersiveRoute
             ? "w-full"
             : "mx-auto w-full max-w-[1440px] px-4 sm:px-8",
+          !isImmersiveRoute && "min-w-0 flex-1",
           !isImmersiveRoute &&
             (isChildOnboarding ? "pb-8 pt-4 sm:pb-12" : "py-8 sm:py-12"),
         )}
       >
         {children}
       </main>
+      {!isImmersiveRoute ? <SiteFooter /> : null}
     </div>
   );
 }

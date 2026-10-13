@@ -10,6 +10,8 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { SiteFooter } from "@/components/layout/site-footer";
+import { SiteHeader } from "@/components/layout/site-header";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isAdminAuthError } from "@/lib/api/admin-auth-service";
 import type { AdminLoginRequest, AdminMockScenario } from "@/types/admin";
@@ -62,46 +64,52 @@ export function AdminLoginScreen({
     }
   });
   return (
-    <main className="grid min-h-dvh place-items-center bg-sky px-4 py-10">
-      <Card className="max-w-[560px] bg-cream shadow-xl">
-        <div className="mx-auto grid size-16 place-items-center rounded-full bg-primary text-white">
-          <LockKeyhole aria-hidden className="size-8" />
-        </div>
-        <div className="text-center">
-          <p className="font-extrabold text-primary">ReadAlong Vision</p>
-          <h1 className="mt-2 text-heading font-black">Đăng nhập quản trị</h1>
-          <p className="mt-2 text-muted">
-            Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.
+    <div className="flex min-h-dvh w-full flex-col bg-sky">
+      <SiteHeader variant="admin-login" />
+      <main className="grid w-full min-w-0 flex-1 place-items-center px-4 py-10">
+        <Card className="max-w-[560px] bg-cream shadow-xl">
+          <div className="mx-auto grid size-16 place-items-center rounded-full bg-primary text-white">
+            <LockKeyhole aria-hidden className="size-8" />
+          </div>
+          <div className="text-center">
+            <p className="font-extrabold text-primary">ReadAlong Vision</p>
+            <h1 className="mt-2 text-heading font-black">Đăng nhập quản trị</h1>
+            <p className="mt-2 text-muted">
+              Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.
+            </p>
+          </div>
+          <form className="flex flex-col gap-5" noValidate onSubmit={submit}>
+            {notice ? (
+              <StatusMessage tone="error">{notice}</StatusMessage>
+            ) : null}
+            <TextField
+              autoComplete="username"
+              error={errors.email?.message}
+              label="Email quản trị"
+              type="email"
+              {...register("email")}
+            />
+            <TextField
+              autoComplete="current-password"
+              error={errors.password?.message}
+              label="Mật khẩu"
+              type="password"
+              {...register("password")}
+            />
+            <Button
+              disabled={isSubmitting}
+              isLoading={isSubmitting}
+              type="submit"
+            >
+              {isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
+            </Button>
+          </form>
+          <p className="text-center text-sm text-muted">
+            Chỉ tài khoản có quyền quản trị mới có thể truy cập khu vực này.
           </p>
-        </div>
-        <form className="flex flex-col gap-5" noValidate onSubmit={submit}>
-          {notice ? <StatusMessage tone="error">{notice}</StatusMessage> : null}
-          <TextField
-            autoComplete="username"
-            error={errors.email?.message}
-            label="Email quản trị"
-            type="email"
-            {...register("email")}
-          />
-          <TextField
-            autoComplete="current-password"
-            error={errors.password?.message}
-            label="Mật khẩu"
-            type="password"
-            {...register("password")}
-          />
-          <Button
-            disabled={isSubmitting}
-            isLoading={isSubmitting}
-            type="submit"
-          >
-            {isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
-          </Button>
-        </form>
-        <p className="text-center text-sm text-muted">
-          Chỉ tài khoản có quyền quản trị mới có thể truy cập khu vực này.
-        </p>
-      </Card>
-    </main>
+        </Card>
+      </main>
+      <SiteFooter variant="admin" />
+    </div>
   );
 }
