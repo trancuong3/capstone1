@@ -274,7 +274,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
           name:
             status === 404
               ? "Không tìm thấy trang"
-              : "Dữ liệu OCR đang chờ bổ sung",
+              : "Dữ liệu OCR chưa khả dụng",
         }),
       ).toBeInTheDocument();
       expect(screen.queryByText("private sql token")).not.toBeInTheDocument();
@@ -297,7 +297,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       fetchMock.mock.calls.some(([url]) => String(url).endsWith("/image")),
     ).toBe(false);
   });
-  it("renders stored revision and image in read-only mode", async () => {
+  it("renders verified revision as read-only and allows a new OCR revision", async () => {
     render(
       <AdminServicesProvider>
         <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
@@ -307,7 +307,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
       "Văn bản đã lưu thật",
     );
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
+    expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Chạy lại OCR từ ảnh đã lưu" })).toBeEnabled();
     expect(
       screen.getByRole("img", { name: `Ảnh trang 2 của ${book.title}` }),
