@@ -66,10 +66,15 @@ export function AdminPageUploader({
         ),
       );
       setRetryEntries(stillFailed);
-      if (stillFailed.length)
+      if (stillFailed.length) {
+        const message = progressRef.current.find(
+          (item) => item.status === "FAILED" && item.error_message,
+        )?.error_message;
         setError(
-          "Một số file vẫn thất bại. Kiểm tra cấu hình Backend/Storage rồi thử lại.",
+          message ??
+            "Một số file vẫn thất bại. Kiểm tra cấu hình Backend/Storage rồi thử lại.",
         );
+      }
     } catch {
       setError(
         "Không thể tải lại danh sách trang sau khi thử lại. Hãy tải lại dữ liệu để xác minh.",
@@ -176,8 +181,12 @@ export function AdminPageUploader({
           "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
         );
       } else if (localFailures.length || failedEntries.length) {
+        const message = progressRef.current.find(
+          (item) => item.status === "FAILED" && item.error_message,
+        )?.error_message;
         setError(
-          "Một số file không hợp lệ hoặc upload thất bại. Dùng nút thử lại cho file thất bại.",
+          message ??
+            "Một số file không hợp lệ hoặc upload thất bại. Dùng nút thử lại cho file thất bại.",
         );
       }
       if (entries.length) onUploaded();
@@ -259,6 +268,11 @@ export function AdminPageUploader({
               key={item.client_id}
             >
               <span className="break-all text-sm">{item.client_id}</span>
+              {item.status === "FAILED" && item.error_message ? (
+                <span className="basis-full text-sm text-red-700">
+                  {item.error_message}
+                </span>
+              ) : null}
               <span
                 className={
                   item.status === "FAILED"
