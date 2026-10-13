@@ -1,8 +1,7 @@
 import logging
 from functools import lru_cache
 
-from supabase import Client, create_client
-from supabase.lib.client_options import ClientOptions
+from supabase import Client, ClientOptions, create_client
 
 from .config import (
     SUPABASE_ADMIN_KEY,

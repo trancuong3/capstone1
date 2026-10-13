@@ -493,6 +493,16 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             supabase_client.get_supabase_admin_client.cache_clear()
 
+    def test_admin_client_uses_sync_compatible_client_options(self):
+        options = supabase_client.ClientOptions(
+            auto_refresh_token=False,
+            persist_session=False,
+        )
+        self.assertTrue(
+            hasattr(options, "storage"),
+            "The sync Supabase client options must include storage.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
