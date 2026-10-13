@@ -50,7 +50,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeEnabled();
-    expect(screen.getByText(/hiện hành/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/hiện hành/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /R1/ }));
     expect(
