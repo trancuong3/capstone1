@@ -443,19 +443,24 @@ describe("real Admin adapters", () => {
     fetchMock
       .mockResolvedValueOnce(
         Response.json(
-          { detail: "Server-side Supabase Storage credentials are not configured" },
+          {
+            detail:
+              "Server-side Supabase Storage credentials are not configured",
+          },
           { status: 503 },
         ),
       )
       .mockResolvedValueOnce(Response.json([page]));
     const progress: { status: string; error_message?: string }[] = [];
 
-    expect(await createAdminPageService().upload(bookId, [input], (item) => {
-      progress.push({
-        status: item.status,
-        error_message: item.error_message,
-      });
-    })).toEqual([page]);
+    expect(
+      await createAdminPageService().upload(bookId, [input], (item) => {
+        progress.push({
+          status: item.status,
+          error_message: item.error_message,
+        });
+      }),
+    ).toEqual([page]);
     expect(progress[1]).toEqual({
       status: "FAILED",
       error_message:
