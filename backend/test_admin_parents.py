@@ -456,10 +456,6 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         provider.compensate_failed_invite.assert_awaited_once_with(PARENT_ID)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     async def test_admin_soft_delete_sets_only_active_flag(self):
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
@@ -483,3 +479,7 @@ if __name__ == "__main__":
             await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
 
         repository.soft_delete_parent.assert_not_awaited()
+
+
+if __name__ == "__main__":
+    unittest.main()
