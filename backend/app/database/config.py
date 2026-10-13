@@ -7,10 +7,11 @@ from dotenv import load_dotenv
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
+WORKSPACE_ROOT = REPOSITORY_ROOT.parent
 
 # Prefer backend/.env for server-only settings, then use the repository-root
 # .env to fill any missing values. Existing process environment always wins.
-for _dotenv_path in (BACKEND_ROOT / ".env", REPOSITORY_ROOT / ".env"):
+for _dotenv_path in (BACKEND_ROOT / ".env", REPOSITORY_ROOT / ".env", WORKSPACE_ROOT / ".env"):
     if _dotenv_path.is_file():
         load_dotenv(dotenv_path=_dotenv_path, override=False)
 
