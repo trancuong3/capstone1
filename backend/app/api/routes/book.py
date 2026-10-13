@@ -95,18 +95,47 @@ class CatalogRepository:
         return (await self.db.scalar(select(Book.Id).where(Book.Id == book_id, self.eligible_book()))) is not None
 
     async def previews(self, book_id: UUID):
+        result = await self.db.execute(
+            select(BookPage)
+            .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+            .where(BookPage.BookId == book_id, self.eligible_page())
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return result.scalars().all()
+
+
+class CatalogService:
+    def __init__(self, repository: CatalogRepository):
+        self.repository = repository
+
+    async def require_parent(self, actor_id: UUID):
+        if await self.repository.role(actor_id) != "parent":
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    async def list(self, search: str | None, author: str | None, grade: int | None):
+        return [CatalogBookResponse.model_validate(book) for book in await self.repository.list(search, author, grade)]
+
+    async def get(self, book_id: UUID):
+        book = await self.repository.get(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if not await self.repository.is_eligible(book_id):
+            raise HTTPException(status_code=409, detail={"code": "CONTENT_INACTIVE"})
+        return CatalogBookResponse.model_validate(book)
+
+    async def previews(self, book_id: UUID):
         await self.get(book_id)
         pages = await self.repository.previews(book_id)
-        previews = []
-        for page in pages:
-            previews.append(CatalogPagePreviewResponse(
+        return [
+            CatalogPagePreviewResponse(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 lifecycle_status=page.LifecycleStatus,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
                 preview_url=create_signed_image_url(page.ImagePath),
-            ))
-        return previews
+            )
+            for page in pages
+        ]
 
 
 @router.get("/catalog", response_model=list[CatalogBookResponse])
@@ -292,35 +321,45 @@ class AdminCatalogService:
         words = []
         for word in await self.repository.words(revision_id):
             box = word.BoundingBox
-            # New writes use [x, y, width, height]; old object-shaped rows are read-only compatibility.
+            # New writes use [x, y, width, height]. Legacy object rows are read-only compatibility.
             if isinstance(box, dict):
                 box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
             if not isinstance(box, list) or len(box) != 4:
-                raise HTTPException(status_code=501, detail="Stored bounding box does not match the OCR contract")
+                raise HTTPException(status_code=501, detail="Word bounding box contract is not available yet")
             if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in box):
-                raise HTTPException(status_code=501, detail="Stored bounding box is invalid")
+                raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
             x, y, width, height = [float(value) for value in box]
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
-                raise HTTPException(status_code=501, detail="Stored bounding box is outside the normalized image")
+                raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
             words.append({
-                "word_index": word.WordIndex, "line_index": word.LineIndex, "text": word.Text,
-                "normalized_text": word.NormalizedText, "bbox": (x, y, width, height),
+                "word_index": word.WordIndex,
+                "line_index": word.LineIndex,
+                "text": word.Text,
+                "normalized_text": word.NormalizedText,
+                "bbox": (x, y, width, height),
                 "ocr_confidence": word.OCRConfidence,
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
-            raise HTTPException(status_code=409, detail="Stored revision number is not a positive numeric string")
+            raise HTTPException(status_code=501, detail="Revision number contract is not available yet")
         try:
             return AdminRevisionDetailRead(
-                page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
-                verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
+                page_id=page.Id,
+                page_revision_id=revision.Id,
+                revision_no=int(raw_revision),
+                verification_status=revision.VerificationStatus,
+                lifecycle_status=page.LifecycleStatus,
                 draft_text=getattr(revision, "DraftText", None) if getattr(revision, "DraftText", None) is not None else revision.VerifiedText,
-                words=words, ocr_metadata={}, created_at=revision.CreatedAt,
-                verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
+                words=words,
+                # Only explicitly approved fields should be exposed by this public DTO.
+                ocr_metadata={},
+                created_at=revision.CreatedAt,
+                verified_at=revision.VerifiedAt,
+                verified_by=revision.VerifiedBy,
             )
         except ValidationError:
-            raise HTTPException(status_code=501, detail="Revision data does not match the admin contract") from None
+            raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
 
 
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])
