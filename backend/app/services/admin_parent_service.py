@@ -2,6 +2,7 @@
 
 HTTP and API response schemas deliberately remain outside this service.
 """
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,8 @@ from app.providers.supabase_auth_contact_provider import (
     SupabaseAuthProviderNotConfiguredError,
 )
 from app.repositories.admin_parent_repository import AdminParentRepository
+
+logger = logging.getLogger(__name__)
 
 
 class AdminParentAccessDeniedError(Exception):
@@ -136,6 +139,10 @@ class AdminParentService:
         try:
             await self.auth_contact_provider.compensate_failed_invite(parent_id)
         except Exception as error:
+            logger.error(
+                "Supabase Auth invite compensation failed (exception_type=%s)",
+                type(error).__name__,
+            )
             raise AdminParentConsistencyError(
                 "Parent invitation failed to synchronize; manual reconciliation is required."
             ) from error
@@ -181,11 +188,23 @@ class AdminParentService:
                 else None
             )
         except Exception as error:
+            logger.error(
+                "Parent profile activation or PostgreSQL verification failed "
+                "(exception_type=%s, database_error_type=%s)",
+                type(error).__name__,
+                type(getattr(error, "orig", None)).__name__
+                if getattr(error, "orig", None) is not None
+                else None,
+            )
             await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
                 "The Auth invite could not be verified against PostgreSQL."
             ) from error
         if parent is None:
+            logger.error(
+                "Supabase Auth invite did not produce a visible Parent profile "
+                "after the existing database trigger and repository verification."
+            )
             await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
                 "The Auth invite did not produce a linked Parent profile."
