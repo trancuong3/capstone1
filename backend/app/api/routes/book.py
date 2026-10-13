@@ -216,6 +216,115 @@ class AdminCatalogRepository(CatalogRepository):
         return result.scalars().all()
 
     async def revision(self, page_id: UUID, revision_id: UUID):
+        return await self.db.scalar(select(PageRevision).where(PageRevision.Id == revision_id, PageRevision.PageId == page_id))
+
+    async def words(self, revision_id: UUID):
+        result = await self.db.execute(select(PageRevisionWord).where(PageRevisionWord.PageRevisionId == revision_id).order_by(PageRevisionWord.WordIndex, PageRevisionWord.Id))
+        return result.scalars().all()
+
+
+class AdminCatalogService:
+    def __init__(self, repository: AdminCatalogRepository):
+        self.repository = repository
+
+    async def require_admin(self, actor_id: UUID):
+        if await self.repository.role(actor_id) != "admin":
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    @staticmethod
+    def revision_number(revision):
+        value = str(revision.RevisionNo)
+        if not value.isascii() or not value.isdecimal() or len(value) > 16 or int(value) <= 0 or int(value) > 9007199254740991:
+            raise HTTPException(status_code=501, detail="Revision number contract is not available yet")
+        return int(value)
+
+    async def book(self, book_id: UUID):
+        row = await self.repository.get(book_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        try:
+            return CatalogBookResponse.model_validate(row)
+        except ValidationError:
+            raise HTTPException(status_code=501, detail="Book contract is not available yet") from None
+
+    async def page(self, page_id: UUID):
+        page = await self.repository.page(page_id)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return page
+
+    async def list(self, search: str | None, lifecycle_status: str | None, verification_status: str | None):
+        output = []
+        for book in await self.repository.books(search, lifecycle_status):
+            pages = await self.repository.pages(book.Id)
+            statuses = []
+            for page in pages:
+                revisions = await self.repository.revisions(page.Id)
+                if revisions:
+                    if revisions[0].VerificationStatus not in ("PROCESSING", "NEEDS_REVIEW", "VERIFIED"):
+                        raise HTTPException(status_code=501, detail="Page status contract is not available yet")
+                    statuses.append(revisions[0].VerificationStatus)
+            if verification_status is not None and verification_status not in statuses:
+                continue
+            try:
+                output.append(AdminCatalogBookResponse(
+                book=CatalogBookResponse.model_validate(book), page_count=len(pages),
+                processing_count=statuses.count("PROCESSING"), needs_review_count=statuses.count("NEEDS_REVIEW"),
+                verified_count=statuses.count("VERIFIED"), parent_catalog_eligible=await self.repository.is_eligible(book.Id),
+                ))
+            except ValidationError:
+                raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
+        return output
+
+    async def processing(self, page):
+        revisions = await self.repository.revisions(page.Id)
+        if not revisions:
+            raise HTTPException(status_code=501, detail="Page has no revision yet")
+        # Only numeric version numbers can be mapped to the current UI contract.
+        revision = revisions[0]
+        try:
+            return AdminPageProcessingRead(
+                page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
+                verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
+                ocr_preview_metadata=revision.ProcessingMeta or {}, verified_at=revision.VerifiedAt,
+                current_verified_revision_id=page.CurrentVerifiedRevisionId,
+            )
+        except ValidationError:
+            raise HTTPException(status_code=501, detail="Page contract is not available yet") from None
+
+    async def pages(self, book_id: UUID):
+        await self.book(book_id)
+        try:
+            return [AdminPageListRead(book_id=page.BookId, page_number=page.PageNumber, processing=await self.processing(page)) for page in await self.repository.pages(book_id)]
+        except ValidationError:
+            raise HTTPException(status_code=501, detail="Page list contract is not available yet") from None
+
+    async def image(self, page_id: UUID):
+        page = await self.page(page_id)
+        preview_url = create_signed_image_url(page.ImagePath)
+        try:
+            return AdminPageImageRead(
+                page_id=page.Id,
+                page_number=page.PageNumber,
+                preview_url=preview_url,
+                width=page.Width,
+                height=page.Height,
+            )
+        except ValidationError:
+            raise HTTPException(status_code=409, detail="Image metadata does not match the admin contract") from None
+
+    async def revisions(self, page_id: UUID):
+        page = await self.page(page_id)
+        try:
+            return [AdminRevisionSummaryRead(
+                page_revision_id=revision.Id, revision_no=self.revision_number(revision),
+                verification_status=revision.VerificationStatus, created_at=revision.CreatedAt,
+                is_current_verified=revision.Id == page.CurrentVerifiedRevisionId,
+            ) for revision in await self.repository.revisions(page_id)]
+        except ValidationError:
+            raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
+
+    async def revision(self, page_id: UUID, revision_id: UUID):
         page = await self.page(page_id)
         revision = await self.repository.revision(page_id, revision_id)
         if revision is None:
@@ -223,8 +332,7 @@ class AdminCatalogRepository(CatalogRepository):
         words = []
         for word in await self.repository.words(revision_id):
             box = word.BoundingBox
-            # New writes use the contract array [x, y, width, height]. Support
-            # legacy object rows for reads only; no new object-shaped boxes are written.
+            # New writes use [x, y, width, height]; old object-shaped rows are read-only compatibility.
             if isinstance(box, dict):
                 box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
             if not isinstance(box, list) or len(box) != 4:
