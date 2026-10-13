@@ -11,6 +11,7 @@ os.environ["SUPABASE_KEY"] = "isolated-test-key"
 
 from sqlalchemy.dialects import postgresql
 
+from app.database import supabase_client
 from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
     AdminParentAccessDeniedError,
@@ -479,6 +480,18 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
             await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
 
         repository.soft_delete_parent.assert_not_awaited()
+
+    def test_missing_admin_key_logs_safe_configuration_warning(self):
+        supabase_client.get_supabase_admin_client.cache_clear()
+        try:
+            with patch.object(supabase_client, "SUPABASE_ADMIN_KEY", None):
+                with self.assertLogs("app.database.supabase_client", level="WARNING") as captured:
+                    self.assertIsNone(supabase_client.get_supabase_admin_client())
+            output = "\n".join(captured.output)
+            self.assertIn("SUPABASE_SECRET_KEY", output)
+            self.assertIn("SUPABASE_SERVICE_ROLE_KEY", output)
+        finally:
+            supabase_client.get_supabase_admin_client.cache_clear()
 
 
 if __name__ == "__main__":

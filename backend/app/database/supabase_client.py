@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 
 from supabase import Client, create_client
@@ -8,6 +9,8 @@ from .config import (
     SUPABASE_KEY,
     SUPABASE_URL,
 )
+
+logger = logging.getLogger(__name__)
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -21,6 +24,10 @@ def get_supabase_client() -> Client:
 def get_supabase_admin_client() -> Client | None:
     """Return a server-only Auth Admin client when a secret/service-role key is configured."""
     if not SUPABASE_ADMIN_KEY:
+        logger.warning(
+            "Supabase Auth Admin is not configured; set SUPABASE_SECRET_KEY "
+            "or SUPABASE_SERVICE_ROLE_KEY in the Backend environment."
+        )
         return None
     return create_client(
         SUPABASE_URL,
