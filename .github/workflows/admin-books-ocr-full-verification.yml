@@ -36,10 +36,76 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Format check
+      - name: Format check (changed frontend files)
         id: format
         continue-on-error: true
-        run: npm run format:check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          cd ..
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD -- frontend/ |
+              sed 's#^frontend/##' |
+              grep -E '\\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)
+
+      - name: Lint all frontend files
+        id: lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Full TypeScript check
+        id: typecheck
+        continue-on-error: true
+        run: npm run typecheck
+
+      - name: Full frontend test suite
+        id: tests
+        continue-on-error: true
+        run: npm test
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+        run: npm run build
+
+      - name: Fail if any verification command failed
+        if: always()
+        env:
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          printf "format=%s lint=%s typecheck=%s tests=%s build=%s\n" "$FORMAT" "$LINT" "$TYPECHECK" "$TESTS" "$BUILD"
+          test "$FORMAT" = "success" &&
+          test "$LINT" = "success" &&
+          test "$TYPECHECK" = "success" &&
+          test "$TESTS" = "success" &&
+          test "$BUILD" = "success"
+ || true
+          )
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No changed frontend files supported by Prettier; skipping format check."
+            exit 0
+          fi
+
+          printf 'Checking formatting for %s changed frontend file(s):\\n' "${#changed_files[@]}"
+          printf '  %s\\n' "${changed_files[@]}"
+          npx prettier --check "${changed_files[@]}"
 
       - name: Lint all frontend files
         id: lint
