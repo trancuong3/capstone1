@@ -14,6 +14,7 @@ import {
   ADMIN_PAGE_ID,
   ADMIN_R1_ID,
   ADMIN_R2_ID,
+  adminBookFixture,
   adminBookListItemFixture,
   adminR1Fixture,
   adminR2Fixture,
