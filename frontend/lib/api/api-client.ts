@@ -35,7 +35,7 @@ function failure(status: number, requestId = "", retryable = false) {
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
-  readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
+  readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly body?: unknown;
 }
 
@@ -62,15 +62,26 @@ export async function requestApi<T>(
   }
 
   let response: Response;
+  const isFormDataBody =
+    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+  if (requestOptions.body !== undefined && !isFormDataBody) {
+    headers["Content-Type"] = "application/json";
+  }
+  const body =
+    requestOptions.body === undefined
+      ? undefined
+      : isFormDataBody
+        ? requestOptions.body
+        : JSON.stringify(requestOptions.body);
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: requestOptions.method ?? "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(requestOptions.body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(requestOptions.body !== undefined ? { body: JSON.stringify(requestOptions.body) } : {}),
+      headers,
+      ...(body !== undefined ? { body: body as BodyInit } : {}),
       cache: "no-store",
       credentials: "omit",
       redirect: "error",
