@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -21,6 +22,8 @@ from app.services.ocr_engine import (
 )
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
+logger = logging.getLogger(__name__)
+
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 6000
 ALLOWED_FORMATS = {
@@ -34,6 +37,16 @@ class AdminOcrService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = AdminOcrRepository(db)
+
+    async def _cleanup_uploaded_object(self, object_path: str) -> None:
+        """Best-effort cleanup must never hide the original upload failure."""
+        try:
+            await run_in_threadpool(delete_object, object_path)
+        except Exception as exc:
+            logger.warning(
+                "Admin OCR cleanup failed (exception_type=%s)",
+                type(exc).__name__,
+            )
 
     async def require_admin(self, actor_id: UUID) -> None:
         if await self.repo.role(actor_id) != "admin":
@@ -141,8 +154,12 @@ class AdminOcrService:
         # has been saved, and all failure paths attempt to remove the orphaned object.
         try:
             await run_in_threadpool(upload_object, object_path, data, content_type)
-        except Exception:
-            await run_in_threadpool(delete_object, object_path)
+        except Exception as exc:
+            logger.error(
+                "Admin OCR upload failed at stage=storage_upload (exception_type=%s)",
+                type(exc).__name__,
+            )
+            await self._cleanup_uploaded_object(object_path)
             raise
 
         try:
@@ -160,25 +177,33 @@ class AdminOcrService:
                 ).encode("utf-8")
             ).hexdigest()
         except OcrEngineUnavailable as exc:
-            await run_in_threadpool(delete_object, object_path)
+            logger.warning(
+                "Admin OCR upload failed at stage=ocr_preflight (exception_type=%s)",
+                type(exc).__name__,
+            )
+            await self._cleanup_uploaded_object(object_path)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except OcrNoTextDetected as exc:
-            await run_in_threadpool(delete_object, object_path)
+            await self._cleanup_uploaded_object(object_path)
             raise HTTPException(
                 status_code=422,
                 detail="No usable text was detected; check the image quality",
             ) from exc
         except ValueError as exc:
-            await run_in_threadpool(delete_object, object_path)
+            await self._cleanup_uploaded_object(object_path)
             raise HTTPException(
                 status_code=422,
                 detail="The image could not be decoded by the OCR engine",
             ) from exc
         except HTTPException:
-            await run_in_threadpool(delete_object, object_path)
+            await self._cleanup_uploaded_object(object_path)
             raise
         except Exception as exc:
-            await run_in_threadpool(delete_object, object_path)
+            logger.error(
+                "Admin OCR upload failed at stage=ocr_processing (exception_type=%s)",
+                type(exc).__name__,
+            )
+            await self._cleanup_uploaded_object(object_path)
             raise HTTPException(
                 status_code=503,
                 detail="OCR processing failed; check the local OCR configuration",
@@ -205,12 +230,20 @@ class AdminOcrService:
             await self.db.refresh(page)
             await self.db.refresh(revision)
         except IntegrityError as exc:
+            logger.warning(
+                "Admin OCR upload failed at stage=database_commit (exception_type=%s)",
+                type(exc).__name__,
+            )
             await self.db.rollback()
-            await run_in_threadpool(delete_object, object_path)
+            await self._cleanup_uploaded_object(object_path)
             raise HTTPException(status_code=409, detail="Page number conflicts with an existing page") from exc
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "Admin OCR upload failed at stage=database_commit (exception_type=%s)",
+                type(exc).__name__,
+            )
             await self.db.rollback()
-            await run_in_threadpool(delete_object, object_path)
+            await self._cleanup_uploaded_object(object_path)
             raise
         return await self.revision_detail(page, revision)
 
