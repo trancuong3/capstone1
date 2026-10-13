@@ -8,6 +8,7 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import { requestApi, unavailableOperation } from "@/lib/api/api-client";
+import { isServiceError } from "@/lib/api/service-error";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 
 export interface AdminPageService {
@@ -103,11 +104,14 @@ export function createAdminPageService(): AdminPageService {
             progress_percent: 100,
             status: "PROCESSING",
           });
-        } catch {
+        } catch (cause) {
           onProgress?.({
             client_id: page.client_id,
             progress_percent: 0,
             status: "FAILED",
+            error_message: isServiceError(cause)
+              ? cause.message
+              : "Upload thất bại. Hãy kiểm tra Backend và thử lại.",
           });
         }
       }
