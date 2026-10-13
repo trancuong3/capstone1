@@ -16,9 +16,11 @@ from app.database.config import (
 def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, bool | None]:
     """Return booleans only; never return URLs, bucket names, commands, or keys."""
     configured_command = (os.getenv("TESSERACT_CMD") or "").strip()
-    binary = configured_command or pytesseract.pytesseract.tesseract_cmd
-    executable_available = bool(os.path.isfile(binary) or shutil.which(binary))
+    executable_available: bool | None = None
     language_available: bool | None = None
+    if include_ocr:
+        binary = configured_command or pytesseract.pytesseract.tesseract_cmd
+        executable_available = bool(os.path.isfile(binary) or shutil.which(binary))
 
     # Use the configured binary while probing its language data, then restore
     # pytesseract's process-global value so diagnostics do not alter OCR behavior.
