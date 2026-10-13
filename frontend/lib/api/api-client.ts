@@ -152,9 +152,8 @@ export async function requestApi<T>(
   const requestId = response.headers.get("x-request-id") ?? "";
   if (!response.ok) {
     const backendMessage = await safeBackendMessage(response);
-    const correlation = response.status >= 500 && requestId
-      ? ` Mã yêu cầu: ${requestId}.`
-      : "";
+    const correlation =
+      response.status >= 500 && requestId ? ` Mã yêu cầu: ${requestId}.` : "";
     throw failure(
       response.status,
       requestId,
