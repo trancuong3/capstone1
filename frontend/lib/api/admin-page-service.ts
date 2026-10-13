@@ -113,13 +113,15 @@ export function createAdminPageService(): AdminPageService {
       }
       return requestApi(
         `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
-        z.array(
-          z.object({
-            book_id: z.uuid(),
-            page_number: z.number().int().positive(),
-            processing: adminProcessingSchema,
-          }),
-        ).refine((items) => items.every((item) => item.book_id === bookId)),
+        z
+          .array(
+            z.object({
+              book_id: z.uuid(),
+              page_number: z.number().int().positive(),
+              processing: adminProcessingSchema,
+            }),
+          )
+          .refine((items) => items.every((item) => item.book_id === bookId)),
       );
     },
     updateStatus: unavailableOperation,

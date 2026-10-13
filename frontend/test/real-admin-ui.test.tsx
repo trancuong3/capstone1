@@ -308,7 +308,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       "Văn bản đã lưu thật",
     );
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Chạy lại OCR từ ảnh đã lưu" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Chạy lại OCR từ ảnh đã lưu" }),
+    ).toBeEnabled();
     expect(
       screen.getByRole("img", { name: `Ảnh trang 2 của ${book.title}` }),
     ).toHaveAttribute("src", "https://example.test/image.png");

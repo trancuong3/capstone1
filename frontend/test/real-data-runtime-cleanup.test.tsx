@@ -114,13 +114,25 @@ describe("Phase 5 real-data runtime cleanup", () => {
       "components/admin/admin-new-book-screen.tsx",
       "components/admin/admin-page-uploader.tsx",
     ]) {
-      expect(source(path), path).not.toMatch(/wordsFromText|OCR mock|fake OCR|mock OCR/i);
+      expect(source(path), path).not.toMatch(
+        /wordsFromText|OCR mock|fake OCR|mock OCR/i,
+      );
     }
-    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(/ocr\.saveDraft\(/);
-    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(/revisions\.verify\(/);
-    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(/revisions\.reprocess\(/);
-    expect(source("components/admin/admin-new-book-screen.tsx")).toMatch(/books\.create\(/);
-    expect(source("components/admin/admin-page-uploader.tsx")).toMatch(/pages\.upload\(/);
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /ocr\.saveDraft\(/,
+    );
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /revisions\.verify\(/,
+    );
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /revisions\.reprocess\(/,
+    );
+    expect(source("components/admin/admin-new-book-screen.tsx")).toMatch(
+      /books\.create\(/,
+    );
+    expect(source("components/admin/admin-page-uploader.tsx")).toMatch(
+      /pages\.upload\(/,
+    );
   });
   it("new-book screen exposes a validated form and waits for submit before writing", () => {
     render(
@@ -128,27 +140,45 @@ describe("Phase 5 real-data runtime cleanup", () => {
         <AdminNewBookScreen />
       </AdminServicesProvider>,
     );
-    expect(screen.getByRole("heading", { name: "Tạo sách mới" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Tên sách" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /Tác giả/ })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Khối lớp nhỏ nhất" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Khối lớp lớn nhất" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Tạo sách mới" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Tên sách" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: /Tác giả/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Khối lớp nhỏ nhất" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Khối lớp lớn nhất" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo sách" })).toBeEnabled();
-    expect(screen.getByRole("link", { name: /Hủy và quay lại/ })).toHaveAttribute("href", "/admin/books");
+    expect(
+      screen.getByRole("link", { name: /Hủy và quay lại/ }),
+    ).toHaveAttribute("href", "/admin/books");
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("uploader accepts multiple page images and exposes the real upload action", () => {
     const onUploaded = vi.fn();
     render(
       <AdminServicesProvider>
-        <AdminPageUploader bookId={bookId} nextPageNumber={1} onUploaded={onUploaded} />
+        <AdminPageUploader
+          bookId={bookId}
+          nextPageNumber={1}
+          onUploaded={onUploaded}
+        />
       </AdminServicesProvider>,
     );
     const input = screen.getByLabelText(/Chọn một hoặc nhiều ảnh trang sách/);
     expect(input).toBeEnabled();
     expect(input).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
     expect(input).toHaveAttribute("multiple");
-    expect(screen.getByRole("button", { name: "Upload và chạy OCR" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Upload và chạy OCR" }),
+    ).toBeEnabled();
     expect(onUploaded).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });

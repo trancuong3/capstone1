@@ -60,7 +60,8 @@ export function createOcrReviewService(): OcrReviewService {
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}/draft`,
         adminRevisionDetailSchema.refine(
-          (item) => item.page_id === pageId && item.page_revision_id === revisionId,
+          (item) =>
+            item.page_id === pageId && item.page_revision_id === revisionId,
         ),
         undefined,
         {

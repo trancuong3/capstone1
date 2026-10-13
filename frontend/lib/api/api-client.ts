@@ -121,8 +121,13 @@ export function apiQuery(
 
 /** Out-of-scope writes preserve their interface but never report fake success. */
 export function unavailableOperation(): Promise<never> {
-  return Promise.reject(new ServiceError({
-    code: "NETWORK_ERROR", message: "Chức năng này chưa sẵn sàng.",
-    status: 501, request_id: "", retryable: false,
-  }));
+  return Promise.reject(
+    new ServiceError({
+      code: "NETWORK_ERROR",
+      message: "Chức năng này chưa sẵn sàng.",
+      status: 501,
+      request_id: "",
+      retryable: false,
+    }),
+  );
 }

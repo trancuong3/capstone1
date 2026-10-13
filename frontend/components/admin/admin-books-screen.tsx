@@ -71,10 +71,15 @@ export function AdminBooksScreen() {
         eyebrow="Quản trị nội dung"
         title="Kho sách"
         description="Theo dõi vòng đời sách và trạng thái OCR của từng trang."
-        actions={<ButtonLink className="sm:w-auto" href="/admin/books/new">Tạo sách mới</ButtonLink>}
+        actions={
+          <ButtonLink className="sm:w-auto" href="/admin/books/new">
+            Tạo sách mới
+          </ButtonLink>
+        }
       />
       <StatusMessage className="mb-6" tone="info">
-        Danh mục được tải từ API thật. Tạo sách để bắt đầu upload ảnh và xác minh OCR.
+        Danh mục được tải từ API thật. Tạo sách để bắt đầu upload ảnh và xác
+        minh OCR.
       </StatusMessage>
       <Card className="mb-6 bg-white">
         <div className="grid gap-4 lg:grid-cols-[1fr_240px_240px]">

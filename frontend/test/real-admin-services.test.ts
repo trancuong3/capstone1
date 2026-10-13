@@ -347,7 +347,9 @@ describe("real Admin adapters", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/books/admin/catalog");
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
     expect(JSON.parse(String(init.body))).toEqual({
       title: "Chú mèo nhỏ",
       author: null,
@@ -365,7 +367,9 @@ describe("real Admin adapters", () => {
       verified_at: null,
       verified_by: null,
     };
-    const file = new File(["valid-for-mock"], "page-2.png", { type: "image/png" });
+    const file = new File(["valid-for-mock"], "page-2.png", {
+      type: "image/png",
+    });
     const input = {
       client_id: "2-page-2.png-14",
       file_name: file.name,
@@ -380,9 +384,16 @@ describe("real Admin adapters", () => {
       .mockResolvedValueOnce(Response.json(needsReviewDetail))
       .mockResolvedValueOnce(Response.json([page]));
     const progress: { status: string; progress_percent: number }[] = [];
-    const result = await createAdminPageService().upload(bookId, [input], (item) => {
-      progress.push({ status: item.status, progress_percent: item.progress_percent });
-    });
+    const result = await createAdminPageService().upload(
+      bookId,
+      [input],
+      (item) => {
+        progress.push({
+          status: item.status,
+          progress_percent: item.progress_percent,
+        });
+      },
+    );
     expect(result).toEqual([page]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -390,8 +401,12 @@ describe("real Admin adapters", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get("page_number")).toBe("2");
-    expect((init.body as FormData).get("image")).toMatchObject({ name: "page-2.png" });
-    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-2.png",
+    });
+    expect(
+      (init.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
     expect(progress).toEqual([
       { status: "UPLOADING", progress_percent: 0 },
       { status: "PROCESSING", progress_percent: 100 },
@@ -407,18 +422,27 @@ describe("real Admin adapters", () => {
       bbox: [0.1, 0.2, 0.2, 0.05] as const,
       ocr_confidence: 0.82,
     };
-    fetchMock.mockResolvedValueOnce(Response.json({
-      ...detail,
-      verification_status: "NEEDS_REVIEW",
-      draft_text: "Chú",
-      words: [word],
-      verified_at: null,
-      verified_by: null,
-    }));
-    const saved = await createOcrReviewService().saveDraft(pageId, revisionId, "Chú", [word]);
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
+    const saved = await createOcrReviewService().saveDraft(
+      pageId,
+      revisionId,
+      "Chú",
+      [word],
+    );
     expect(saved.draft_text).toBe("Chú");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain(`/books/admin/pages/${pageId}/revisions/${revisionId}/draft`);
+    expect(url).toContain(
+      `/books/admin/pages/${pageId}/revisions/${revisionId}/draft`,
+    );
     expect(init.method).toBe("PUT");
     expect(JSON.parse(String(init.body))).toMatchObject({
       draft_text: "Chú",
@@ -435,40 +459,49 @@ describe("real Admin adapters", () => {
       bbox: [0.1, 0.2, 0.2, 0.05] as const,
       ocr_confidence: 0.82,
     };
-    fetchMock.mockResolvedValueOnce(Response.json({
-      ...detail,
-      verification_status: "VERIFIED",
-      draft_text: "Chú",
-      words: [word],
-      verified_at: timestamp,
-      verified_by: "11111111-1111-4111-8111-111111111111",
-    }));
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "VERIFIED",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: timestamp,
+        verified_by: "11111111-1111-4111-8111-111111111111",
+      }),
+    );
     const verified = await createRevisionService().verify(pageId, {
       page_revision_id: revisionId,
       corrected_text: "Chú",
       words: [word],
     });
     expect(verified.verification_status).toBe("VERIFIED");
-    const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
     expect(verifyUrl).toContain(`/books/admin/pages/${pageId}/verify`);
     expect(verifyInit.method).toBe("POST");
 
     const nextRevisionId = "55555555-5555-4555-8555-555555555555";
     fetchMock.mockReset();
-    fetchMock.mockResolvedValueOnce(Response.json({
-      ...detail,
-      page_revision_id: nextRevisionId,
-      revision_no: 3,
-      verification_status: "NEEDS_REVIEW",
-      draft_text: "Chú",
-      words: [word],
-      verified_at: null,
-      verified_by: null,
-    }));
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        page_revision_id: nextRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
     const next = await createRevisionService().reprocess(pageId);
     expect(next.page_revision_id).toBe(nextRevisionId);
     expect(next.revision_no).toBe(3);
-    expect(fetchMock.mock.calls[0][0]).toContain(`/books/admin/pages/${pageId}/reprocess`);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/pages/${pageId}/reprocess`,
+    );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 
@@ -476,7 +509,12 @@ describe("real Admin adapters", () => {
     const books = createAdminBookService();
     const pages = createAdminPageService();
     const operations = [
-      books.update(bookId, { title: "X", author: null, min_grade: 1, max_grade: 3 }),
+      books.update(bookId, {
+        title: "X",
+        author: null,
+        min_grade: 1,
+        max_grade: 3,
+      }),
       books.updateStatus(bookId, { status: "RETIRED" }),
       pages.updateStatus(pageId, { status: "RETIRED" }),
     ];

@@ -44,20 +44,15 @@ export function createAdminBookService(): AdminBookService {
         bookDtoSchema.refine((book) => book.id === bookId),
       ),
     create: (request) =>
-      requestApi(
-        "/books/admin/catalog",
-        bookDtoSchema,
-        undefined,
-        {
-          method: "POST",
-          body: {
-            title: request.title.trim(),
-            author: request.author?.trim() || null,
-            min_grade: request.min_grade,
-            max_grade: request.max_grade,
-          },
+      requestApi("/books/admin/catalog", bookDtoSchema, undefined, {
+        method: "POST",
+        body: {
+          title: request.title.trim(),
+          author: request.author?.trim() || null,
+          min_grade: request.min_grade,
+          max_grade: request.max_grade,
         },
-      ),
+      }),
     update: unavailableOperation,
     updateStatus: unavailableOperation,
   };

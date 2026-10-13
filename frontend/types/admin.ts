@@ -35,10 +35,7 @@ export interface AdminParentDetailChildDTO {
 }
 
 export type AdminParentContactInfoStatus =
-  | "available"
-  | "not_configured"
-  | "user_not_found"
-  | "lookup_failed";
+  "available" | "not_configured" | "user_not_found" | "lookup_failed";
 
 export interface AdminParentDetailDTO {
   readonly id: UUID;

@@ -120,28 +120,36 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
   });
 
   it("uploads a file as multipart and then reloads pages from the API", async () => {
-    const file = new File(["image bytes for transport test"], "page.png", { type: "image/png" });
-    const pageList = [{
-      book_id: ADMIN_BOOK_ID,
-      page_number: 1,
-      processing,
-    }];
+    const file = new File(["image bytes for transport test"], "page.png", {
+      type: "image/png",
+    });
+    const pageList = [
+      {
+        book_id: ADMIN_BOOK_ID,
+        page_number: 1,
+        processing,
+      },
+    ];
     apiFetchFixture
-      .mockResolvedValueOnce(Response.json({
-        ...adminR2Fixture,
-        verification_status: "NEEDS_REVIEW",
-        verified_at: null,
-        verified_by: null,
-      }))
+      .mockResolvedValueOnce(
+        Response.json({
+          ...adminR2Fixture,
+          verification_status: "NEEDS_REVIEW",
+          verified_at: null,
+          verified_by: null,
+        }),
+      )
       .mockResolvedValueOnce(Response.json(pageList));
-    const result = await createAdminPageService().upload(ADMIN_BOOK_ID, [{
-      client_id: "1-page.png",
-      file_name: file.name,
-      mime_type: "image/png",
-      size_bytes: file.size,
-      page_number: 1,
-      file,
-    }]);
+    const result = await createAdminPageService().upload(ADMIN_BOOK_ID, [
+      {
+        client_id: "1-page.png",
+        file_name: file.name,
+        mime_type: "image/png",
+        size_bytes: file.size,
+        page_number: 1,
+        file,
+      },
+    ]);
     expect(result).toEqual(pageList);
     expect(apiFetchFixture).toHaveBeenCalledTimes(2);
     expect(requestedApiUrl(0).pathname).toBe(
@@ -151,8 +159,12 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     expect(uploadInit.method).toBe("POST");
     expect(uploadInit.body).toBeInstanceOf(FormData);
     expect((uploadInit.body as FormData).get("page_number")).toBe("1");
-    expect((uploadInit.body as FormData).get("image")).toMatchObject({ name: "page.png" });
-    expect((uploadInit.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    expect((uploadInit.body as FormData).get("image")).toMatchObject({
+      name: "page.png",
+    });
+    expect(
+      (uploadInit.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
     expect(requestedApiUrl(1).pathname).toBe(
       `/books/admin/catalog/${ADMIN_BOOK_ID}/pages`,
     );
@@ -198,13 +210,15 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     );
     expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("POST");
 
-    apiFetchFixture.mockResolvedValueOnce(Response.json({
-      ...adminR2Fixture,
-      verification_status: "NEEDS_REVIEW",
-      verified_at: null,
-      verified_by: null,
-      revision_no: 3,
-    }));
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        ...adminR2Fixture,
+        verification_status: "NEEDS_REVIEW",
+        verified_at: null,
+        verified_by: null,
+        revision_no: 3,
+      }),
+    );
     const reprocessed = await createRevisionService().reprocess(ADMIN_PAGE_ID);
     expect(reprocessed.revision_no).toBe(3);
     expect(requestedApiUrl(1).pathname).toBe(
@@ -216,17 +230,27 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
   it.each([
     {
       name: "page lifecycle",
-      call: () => createAdminPageService().updateStatus(ADMIN_PAGE_ID, { status: "RETIRED" }),
+      call: () =>
+        createAdminPageService().updateStatus(ADMIN_PAGE_ID, {
+          status: "RETIRED",
+        }),
     },
     {
       name: "book lifecycle",
-      call: () => createAdminBookService().updateStatus(ADMIN_BOOK_ID, { status: "RETIRED" }),
+      call: () =>
+        createAdminBookService().updateStatus(ADMIN_BOOK_ID, {
+          status: "RETIRED",
+        }),
     },
     {
       name: "book metadata update",
-      call: () => createAdminBookService().update(ADMIN_BOOK_ID, {
-        title: "Test", author: null, min_grade: 1, max_grade: 3,
-      }),
+      call: () =>
+        createAdminBookService().update(ADMIN_BOOK_ID, {
+          title: "Test",
+          author: null,
+          min_grade: 1,
+          max_grade: 3,
+        }),
     },
   ])("keeps unsupported $name operations unavailable", async ({ call }) => {
     await expect(call()).rejects.toMatchObject({

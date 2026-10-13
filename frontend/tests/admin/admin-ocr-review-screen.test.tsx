@@ -75,7 +75,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(services.revisions.verify).not.toHaveBeenCalled();
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Không thể chạy lại OCR/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Không thể chạy lại OCR/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
 });

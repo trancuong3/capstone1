@@ -43,7 +43,9 @@ export function createRevisionService(): RevisionService {
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/verify`,
         adminRevisionDetailSchema.refine(
-          (item) => item.page_id === pageId && item.page_revision_id === request.page_revision_id,
+          (item) =>
+            item.page_id === pageId &&
+            item.page_revision_id === request.page_revision_id,
         ),
         undefined,
         {
@@ -77,7 +79,11 @@ export function createRevisionService(): RevisionService {
               page_id: z.uuid(),
               page_revision_id: z.uuid(),
               revision_no: z.number().int().positive(),
-              verification_status: z.enum(["PROCESSING", "NEEDS_REVIEW", "VERIFIED"]),
+              verification_status: z.enum([
+                "PROCESSING",
+                "NEEDS_REVIEW",
+                "VERIFIED",
+              ]),
               lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
               ocr_preview_metadata: z.record(z.string(), z.unknown()),
               verified_at: z.iso.datetime({ offset: true }).nullable(),
