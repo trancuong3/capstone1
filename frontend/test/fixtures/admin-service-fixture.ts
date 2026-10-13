@@ -163,6 +163,9 @@ export function createAdminServiceFixture() {
       update: vi
         .fn<AdminServices["parents"]["update"]>()
         .mockRejectedValue(unavailable()),
+      deactivate: vi
+        .fn<AdminServices["parents"]["deactivate"]>()
+        .mockRejectedValue(unavailable()),
     },
     ocr: {
       getRevision: vi
