@@ -210,7 +210,7 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Page number conflicts with an existing page") from exc
         except Exception:
             await self.db.rollback()
-            delete_object(object_path)
+            await run_in_threadpool(delete_object, object_path)
             raise
         return await self.revision_detail(page, revision)
 
