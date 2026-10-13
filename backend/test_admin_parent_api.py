@@ -156,14 +156,15 @@ class AdminParentApiTests(unittest.TestCase):
 
 
 
-    def test_admin_parent_routes_do_not_expose_hide_or_delete(self):
+    def test_admin_parent_exposes_soft_delete_without_visibility_routes(self):
         parent_routes = [
             route for route in profile_routes.router.routes
             if getattr(route, "path", "").startswith("/admin/parents")
         ]
-        self.assertFalse(
+        self.assertTrue(
             any(
-                "DELETE" in getattr(route, "methods", set())
+                getattr(route, "path", "") == "/admin/parents/{parent_id}"
+                and "DELETE" in getattr(route, "methods", set())
                 for route in parent_routes
             )
         )
@@ -173,3 +174,19 @@ class AdminParentApiTests(unittest.TestCase):
                 for route in parent_routes
             )
         )
+
+    def test_delete_admin_parent_sets_active_zero(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "display_name": "Nguyen Van A", "created_at": CREATED_AT}
+        )
+        repository.soft_delete_parent = AsyncMock(return_value=True)
+
+        with patch.object(profile_routes, "AdminParentRepository", return_value=repository):
+            with make_client(ADMIN_ID) as client:
+                response = client.delete(f"/profiles/admin/parents/{PARENT_ID}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"id": str(PARENT_ID), "active": 0})
+        repository.soft_delete_parent.assert_awaited_once_with(PARENT_ID)

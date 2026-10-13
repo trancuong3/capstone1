@@ -43,6 +43,10 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         sql = str(statement.compile(dialect=postgresql.dialect()))
         self.assertNotIn("admin_hidden_at", sql)
         self.assertIn("profiles.role", sql)
+        self.assertIn("profiles.active", sql)
+        self.assertIn(1, statement.compile(dialect=postgresql.dialect()).params.values())
+        count_sql = str(db.scalar.await_args.args[0].compile(dialect=postgresql.dialect()))
+        self.assertIn("profiles.active", count_sql)
         self.assertIn("childprofiles", sql)
 
     async def test_admin_receives_parent_projection_and_pagination(self):
@@ -399,6 +403,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         }
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
+        repository.activate_parent = AsyncMock(return_value=True)
         repository.get_parent_detail = AsyncMock(return_value=parent_row)
         provider = MagicMock()
         provider.invite_parent = AsyncMock(return_value=PARENT_ID)
@@ -433,6 +438,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
+        repository.activate_parent = AsyncMock(return_value=True)
         repository.get_parent_detail = AsyncMock(return_value=None)
         provider = MagicMock()
         provider.invite_parent = AsyncMock(return_value=PARENT_ID)
@@ -452,3 +458,28 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    async def test_admin_soft_delete_sets_only_active_flag(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "display_name": "Parent A", "created_at": CREATED_AT}
+        )
+        repository.soft_delete_parent = AsyncMock(return_value=True)
+
+        result = await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
+
+        self.assertEqual(result, {"id": PARENT_ID, "active": 0})
+        repository.soft_delete_parent.assert_awaited_once_with(PARENT_ID)
+
+    async def test_inactive_or_missing_parent_cannot_be_deleted_twice(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(return_value=None)
+        repository.soft_delete_parent = AsyncMock()
+
+        with self.assertRaises(AdminParentNotFoundError):
+            await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
+
+        repository.soft_delete_parent.assert_not_awaited()

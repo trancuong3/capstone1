@@ -31,6 +31,7 @@ export interface AdminParentService {
   ): Promise<AdminParentDetailDTO>;
   create(input: AdminParentCreateInput): Promise<AdminParentDetailDTO>;
   update(parentId: string, input: AdminParentUpdateInput): Promise<AdminParentDetailDTO>;
+  deactivate(parentId: string): Promise<{ id: string; active: 0 }>;
 }
 
 const parentListResponseSchema = z.object({
@@ -45,6 +46,11 @@ const parentListResponseSchema = z.object({
   total: z.number().int().nonnegative(),
   limit: z.number().int().min(1).max(100),
   offset: z.number().int().nonnegative(),
+});
+
+const parentSoftDeleteResponseSchema = z.object({
+  id: z.guid(),
+  active: z.literal(0),
 });
 
 const parentDetailResponseSchema = z.object({
@@ -100,6 +106,13 @@ export function createAdminParentService(): AdminParentService {
         parentDetailResponseSchema,
         undefined,
         { method: "PATCH", body: input },
+      ),
+    deactivate: (parentId) =>
+      requestApi(
+        `/profiles/admin/parents/${encodeURIComponent(parentId)}`,
+        parentSoftDeleteResponseSchema,
+        undefined,
+        { method: "DELETE" },
       ),
   };
 }

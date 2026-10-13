@@ -172,7 +172,14 @@ class AdminParentService:
         # The Auth trigger in the existing migration creates public.profiles with
         # role='parent'. Never insert a second profile from this service.
         try:
-            parent = await self.repository.get_parent_detail(parent_id)
+            # The trigger creates the profile, and this explicit update ensures the
+            # authoritative active flag is set for the successful Admin Create flow.
+            activated = await self.repository.activate_parent(parent_id)
+            parent = (
+                await self.repository.get_parent_detail(parent_id)
+                if activated
+                else None
+            )
         except Exception as error:
             await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
@@ -243,3 +250,21 @@ class AdminParentService:
                 raise AdminParentProviderOperationError() from error
 
         return await self.get_parent_detail(actor_id, parent_id)
+
+
+    async def deactivate_parent(
+        self,
+        actor_id: UUID,
+        parent_id: UUID,
+    ) -> dict[str, Any]:
+        """Soft-delete a Parent by setting active=0; linked data and Auth remain."""
+        await self._ensure_admin(actor_id)
+        parent = await self.repository.get_parent_record(parent_id)
+        if parent is None:
+            raise AdminParentNotFoundError("Parent profile was not found or is inactive.")
+
+        changed = await self.repository.soft_delete_parent(parent_id)
+        if not changed:
+            raise AdminParentNotFoundError("Parent profile was not found or is inactive.")
+
+        return {"id": parent_id, "active": 0}

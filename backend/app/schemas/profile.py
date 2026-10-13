@@ -210,6 +210,11 @@ class AdminParentListResponse(BaseModel):
     offset: int = Field(ge=0)
 
 
+class AdminParentSoftDeleteResponse(BaseModel):
+    id: UUID
+    active: Literal[0]
+
+
 # =========================================================
 # ADMIN: READ-ONLY PARENT DETAIL
 # =========================================================

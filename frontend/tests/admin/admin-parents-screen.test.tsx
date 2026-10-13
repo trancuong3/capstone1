@@ -7,16 +7,17 @@ import {
   type AdminServices,
 } from "@/components/providers/admin-services-provider";
 
-const { list, create, getById, update } = vi.hoisted(() => ({
+const { list, create, getById, update, deactivate } = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
   getById: vi.fn(),
   update: vi.fn(),
+  deactivate: vi.fn(),
 }));
 
 function renderScreen() {
   const services = {
-    parents: { list, create, getById, update },
+    parents: { list, create, getById, update, deactivate },
   } as unknown as AdminServices;
 
   return render(
@@ -32,6 +33,7 @@ describe("AdminParentsScreen", () => {
     create.mockReset();
     getById.mockReset();
     update.mockReset();
+    deactivate.mockReset();
   });
 
   it("renders parent profiles returned by the database service", async () => {
@@ -126,4 +128,37 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
   });
 
+  it("soft-deletes a Parent through the API and removes it from the refreshed list", async () => {
+    const parent = {
+      id: "22222222-2222-4222-8222-222222222222",
+      display_name: "Nguyen Van A",
+      created_at: "2026-10-01T00:00:00Z",
+      children_count: 2,
+    };
+    list.mockResolvedValueOnce({
+      items: [parent],
+      total: 1,
+      limit: 10,
+      offset: 0,
+    }).mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 10,
+      offset: 0,
+    });
+    deactivate.mockResolvedValueOnce({ id: parent.id, active: 0 });
+
+    renderScreen();
+    expect(await screen.findByRole("heading", { name: "Nguyen Van A" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Xóa" }));
+    expect(await screen.findByText(/Đây là xóa mềm/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Xóa Parent" }));
+
+    await waitFor(() => {
+      expect(deactivate).toHaveBeenCalledWith(parent.id);
+    });
+    expect(await screen.findByText("Chưa có hồ sơ phụ huynh")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Nguyen Van A" })).not.toBeInTheDocument();
+  });
 });
