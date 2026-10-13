@@ -503,6 +503,50 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
             "The sync Supabase client options must include storage.",
         )
 
+    def test_invite_normalizes_client_initialization_error_without_logging_details(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthProviderError,
+        )
+
+        with patch(
+            "app.providers.supabase_auth_contact_provider.get_supabase_admin_client",
+            side_effect=AttributeError("private detail that must not be logged"),
+        ):
+            with self.assertLogs(
+                "app.providers.supabase_auth_contact_provider", level="WARNING"
+            ) as captured:
+                with self.assertRaises(SupabaseAuthProviderError):
+                    SupabaseAuthContactProvider._invite_parent(
+                        "parent@example.com", "Parent A", None
+                    )
+
+        output = "\\n".join(captured.output)
+        self.assertIn("operation=invite_parent", output)
+        self.assertIn("exception_type=AttributeError", output)
+        self.assertNotIn("private detail that must not be logged", output)
+
+    def test_unrelated_auth_422_is_not_mislabeled_as_account_conflict(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthProviderError,
+            SupabaseAuthConflictError,
+        )
+
+        class InvalidRequestError(Exception):
+            status = 422
+            error_code = "validation_error"
+
+        with self.assertLogs(
+            "app.providers.supabase_auth_contact_provider", level="WARNING"
+        ):
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                InvalidRequestError("invalid request"), operation="test"
+            )
+
+        self.assertIs(type(normalized), SupabaseAuthProviderError)
+        self.assertNotIsInstance(normalized, SupabaseAuthConflictError)
+
 
 if __name__ == "__main__":
     unittest.main()
