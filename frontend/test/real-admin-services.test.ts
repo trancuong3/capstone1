@@ -347,6 +347,27 @@ describe("real Admin adapters", () => {
     });
   });
 
+  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          detail:
+            "Supabase Storage bucket was not found; verify SUPABASE_STORAGE_BUCKET in the configured project",
+        },
+        {
+          status: 503,
+          headers: { "X-Request-ID": "request-test-123" },
+        },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      request_id: "request-test-123",
+      message:
+        "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
+    });
+  });
+
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
     const created = await createAdminBookService().create({
