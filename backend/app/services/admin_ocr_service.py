@@ -351,7 +351,17 @@ class AdminOcrService:
                 status_code=422,
                 detail="The image could not be decoded by the OCR engine",
             ) from exc
-        except HTTPException:
+        except HTTPException as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_failed",
+                stage="ocr_processing",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             await self._cleanup_uploaded_object(
                 object_path,
                 object_may_exist=storage_uploaded,
