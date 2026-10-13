@@ -485,5 +485,5 @@ describe("real Admin adapters", () => {
       ),
     );
     expect(fetchMock).not.toHaveBeenCalled();
-  });;
+  });
 });
