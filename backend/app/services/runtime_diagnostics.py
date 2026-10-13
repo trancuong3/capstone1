@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+
 import pytesseract
 
 from app.database.config import (
@@ -18,11 +19,20 @@ def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, 
     binary = configured_command or pytesseract.pytesseract.tesseract_cmd
     executable_available = bool(os.path.isfile(binary) or shutil.which(binary))
     language_available: bool | None = None
+
+    # Use the configured binary while probing its language data, then restore
+    # pytesseract's process-global value so diagnostics do not alter OCR behavior.
     if executable_available and include_ocr:
+        original_command = pytesseract.pytesseract.tesseract_cmd
         try:
+            if configured_command:
+                pytesseract.pytesseract.tesseract_cmd = configured_command
             language_available = "vie" in set(pytesseract.get_languages(config=""))
         except Exception:
             language_available = False
+        finally:
+            pytesseract.pytesseract.tesseract_cmd = original_command
+
     return {
         "supabase_url_configured": bool(SUPABASE_URL),
         "supabase_storage_bucket_configured": bool(SUPABASE_STORAGE_BUCKET),
