@@ -65,11 +65,17 @@ def download_object(object_path: str) -> bytes:
         raise HTTPException(status_code=503, detail="Could not read the image from Supabase Storage") from exc
 
 
-def create_signed_image_url(image_path: str) -> str:
+def create_signed_image_url(image_path: str | None) -> str:
+    if not isinstance(image_path, str) or not image_path.strip():
+        raise HTTPException(status_code=503, detail="Stored image reference is invalid")
     if image_path.startswith(("https://", "http://")):
-        parsed = urlsplit(image_path)
-        if parsed.hostname and not parsed.username and not parsed.password:
-            return image_path  # Legacy references remain readable; new writes store object paths.
+        try:
+            parsed = urlsplit(image_path)
+            parsed.port  # Validate malformed port values without exposing the URL.
+            if parsed.hostname and not parsed.username and not parsed.password:
+                return image_path  # Legacy references remain readable; new writes store object paths.
+        except ValueError:
+            pass
         raise HTTPException(status_code=503, detail="Stored image reference is invalid")
     try:
         result = _storage_bucket().create_signed_url(image_path, SIGNED_URL_TTL_SECONDS)
