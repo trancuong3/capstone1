@@ -72,21 +72,6 @@ jobs:
           fi
           git -C .. config user.name "github-actions[bot]"
           git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C .. add frontend/components/admin/admin-book-detail-screen.tsx \
-            frontend/components/admin/admin-books-screen.tsx \
-            frontend/components/admin/admin-new-book-screen.tsx \
-            frontend/components/admin/admin-ocr-review-screen.tsx \
-            frontend/components/admin/admin-page-uploader.tsx \
-            frontend/lib/api/admin-book-service.ts \
-            frontend/lib/api/admin-page-service.ts \
-            frontend/lib/api/api-client.ts \
-            frontend/lib/api/ocr-review-service.ts \
-            frontend/lib/api/revision-service.ts \
-            frontend/test/real-admin-services.test.ts \
-            frontend/test/real-admin-ui.test.tsx \
-            frontend/test/real-data-runtime-cleanup.test.tsx \
-            frontend/tests/admin/admin-ocr-review-screen.test.tsx \
-            frontend/tests/services/mock-admin-services.test.ts \
-            frontend/types/admin.ts
+          git -C .. add -u
           git -C .. commit -m "style(admin-ocr): format OCR feature files"
           git -C .. push origin HEAD:feature/admin-book-ocr-integration
