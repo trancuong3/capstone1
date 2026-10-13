@@ -40,7 +40,7 @@ jobs:
         id: format
         continue-on-error: true
         env:
-          BASE_SHA: \${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           cd ..
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
@@ -92,11 +92,11 @@ jobs:
       - name: Fail if any verification command failed
         if: always()
         env:
-          FORMAT: \${{ steps.format.outcome }}
-          LINT: \${{ steps.lint.outcome }}
-          TYPECHECK: \${{ steps.typecheck.outcome }}
-          TESTS: \${{ steps.tests.outcome }}
-          BUILD: \${{ steps.build.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
         run: |
           printf "format=%s lint=%s typecheck=%s tests=%s build=%s\n" "$FORMAT" "$LINT" "$TYPECHECK" "$TESTS" "$BUILD"
           test "$FORMAT" = "success" &&
