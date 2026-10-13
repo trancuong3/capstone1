@@ -29,6 +29,10 @@ class SupabaseAuthConflictError(SupabaseAuthProviderError):
     """The requested Auth identity or contact field conflicts with an existing user."""
 
 
+class SupabaseAuthRateLimitError(SupabaseAuthProviderError):
+    """Supabase Auth temporarily rate-limited an email or authentication request."""
+
+
 class SupabaseAuthCompensationError(SupabaseAuthProviderError):
     """A newly created Auth identity could not be safely compensated after Create failed."""
 
@@ -71,6 +75,15 @@ class SupabaseAuthContactProvider:
             "identity_already_exists",
             "email_conflict_identity_not_deletable",
         }
+        rate_limit_codes = {
+            "over_email_send_rate_limit",
+            "over_request_rate_limit",
+            "over_sms_send_rate_limit",
+            "over_email_rate_limit",
+        }
+        if status_code == 429 or safe_error_code in rate_limit_codes:
+            return SupabaseAuthRateLimitError()
+
         if status_code == 409 or safe_error_code in conflict_codes or any(
             marker in message
             for marker in (
