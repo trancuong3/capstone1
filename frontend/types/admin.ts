@@ -136,8 +136,8 @@ export interface AdminPageUploadInputUI {
   readonly mime_type: "image/jpeg" | "image/png" | "image/webp";
   readonly size_bytes: number;
   readonly page_number: number;
-  readonly width: number;
-  readonly height: number;
+  readonly width?: number;
+  readonly height?: number;
   /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
   readonly file: File;
 }
