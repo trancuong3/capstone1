@@ -220,7 +220,7 @@ export function AdminOcrReviewScreen({ bookId, pageId }: { bookId: string; pageI
             <h2 className="text-2xl font-black">Ảnh trang gốc</h2>
             <span className="text-sm text-muted">{image.width} × {image.height} px</span>
           </div>
-          <div className="relative aspect-[3/4] overflow-hidden rounded-control bg-desk">
+          <div className="relative overflow-hidden rounded-control bg-desk" style={{ aspectRatio: `${image.width} / ${image.height}` }}>
             <Image alt={`Ảnh trang ${image.page_number} của ${book.title}`} className="object-contain" fill sizes="(max-width:1280px) 100vw, 55vw" src={image.preview_url} unoptimized />
             <div aria-label={`Bounding box từ OCR: ${words.length} từ`} className="pointer-events-none absolute inset-0" role="img">
               {words.map((word) => (
