@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -13,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, PageRevision, PageRevisionWord
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
@@ -38,14 +40,30 @@ class AdminOcrService:
         self.db = db
         self.repo = AdminOcrRepository(db)
 
-    async def _cleanup_uploaded_object(self, object_path: str) -> None:
-        """Best-effort cleanup must never hide the original upload failure."""
+    async def _cleanup_uploaded_object(
+        self,
+        object_path: str,
+        *,
+        object_may_exist: bool,
+        book_id: UUID | None = None,
+        page_id: UUID | None = None,
+        started_at: float | None = None,
+    ) -> None:
+        """Best-effort cleanup without masking the primary upload/OCR/database error."""
+        if not object_may_exist:
+            return
         try:
             await run_in_threadpool(delete_object, object_path)
         except Exception as exc:
-            logger.warning(
-                "Admin OCR cleanup failed (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_cleanup_failed",
+                stage="cleanup",
+                exception=exc,
+                book_id=str(book_id) if book_id else None,
+                page_id=str(page_id) if page_id else None,
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000) if started_at else None,
             )
 
     async def require_admin(self, actor_id: UUID) -> None:
@@ -134,7 +152,37 @@ class AdminOcrService:
         return normalized
 
     async def upload_page(self, actor_id: UUID, book_id: UUID, page_number: int, file: UploadFile) -> AdminRevisionDetailRead:
-        await self.require_admin(actor_id)
+        started_at = time.perf_counter()
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_upload_started",
+            stage="request_received",
+            book_id=str(book_id),
+            page_number=page_number,
+        )
+        try:
+            await self.require_admin(actor_id)
+        except HTTPException as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_rejected",
+                stage="admin_authorization",
+                exception=exc,
+                book_id=str(book_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_authorization_passed",
+            stage="admin_authorization",
+            book_id=str(book_id),
+            elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+        )
+
         book = await self.repo.book(book_id)
         if book is None:
             raise HTTPException(status_code=404, detail="Book not found")
@@ -144,25 +192,79 @@ class AdminOcrService:
             raise HTTPException(status_code=422, detail="page_number is out of range")
         if await self.repo.page_number_exists(book_id, page_number):
             raise HTTPException(status_code=409, detail="This page number already exists for the book")
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_book_validation_passed",
+            stage="book_validation",
+            book_id=str(book_id),
+            page_number=page_number,
+        )
 
-        data, content_type, extension, width, height = await self._read_validate_image(file)
+        try:
+            data, content_type, extension, width, height = await self._read_validate_image(file)
+        except HTTPException as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_image_rejected",
+                stage="image_validation",
+                exception=exc,
+                book_id=str(book_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
+
         page_id = uuid4()
         revision_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
 
-        # Storage is the durable source asset. OCR runs only after the validated image
-        # has been saved, and all failure paths attempt to remove the orphaned object.
+        # Storage initialization errors are distinct from remote upload errors. The
+        # storage adapter marks only ambiguous write failures for best-effort cleanup.
         try:
             await run_in_threadpool(upload_object, object_path, data, content_type)
         except Exception as exc:
-            logger.error(
-                "Admin OCR upload failed at stage=storage_upload (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_upload_failed",
+                stage="storage_upload",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                cleanup_may_be_needed=bool(getattr(exc, "cleanup_may_be_needed", False)),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            await self._cleanup_uploaded_object(object_path)
+            if bool(getattr(exc, "cleanup_may_be_needed", False)):
+                await self._cleanup_uploaded_object(
+                    object_path,
+                    object_may_exist=True,
+                    book_id=book_id,
+                    page_id=page_id,
+                    started_at=started_at,
+                )
             raise
 
+        storage_uploaded = True
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_storage_upload_succeeded",
+            stage="storage_upload",
+            book_id=str(book_id),
+            page_id=str(page_id),
+            elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+        )
+
         try:
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="admin_ocr_ocr_started",
+                stage="tesseract_preflight",
+                book_id=str(book_id),
+                page_id=str(page_id),
+            )
             ocr = await run_in_threadpool(extract_text_and_boxes, data)
             words = self._word_data(ocr["words"])  # Real Tesseract TSV boxes only.
             text_value = str(ocr["text"]).strip()
@@ -176,34 +278,107 @@ class AdminOcrService:
                     sort_keys=True,
                 ).encode("utf-8")
             ).hexdigest()
-        except OcrEngineUnavailable as exc:
-            logger.warning(
-                "Admin OCR upload failed at stage=ocr_preflight (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="admin_ocr_ocr_succeeded",
+                stage="ocr_processing",
+                book_id=str(book_id),
+                page_id=str(page_id),
+                word_count=len(words),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            await self._cleanup_uploaded_object(object_path)
+        except OcrEngineUnavailable as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_failed",
+                stage="tesseract_preflight",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except OcrNoTextDetected as exc:
-            await self._cleanup_uploaded_object(object_path)
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_failed",
+                stage="ocr_processing",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise HTTPException(
                 status_code=422,
                 detail="No usable text was detected; check the image quality",
             ) from exc
         except ValueError as exc:
-            await self._cleanup_uploaded_object(object_path)
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_failed",
+                stage="ocr_processing",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise HTTPException(
                 status_code=422,
                 detail="The image could not be decoded by the OCR engine",
             ) from exc
         except HTTPException:
-            await self._cleanup_uploaded_object(object_path)
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise
         except Exception as exc:
-            logger.error(
-                "Admin OCR upload failed at stage=ocr_processing (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_upload_failed",
+                stage="ocr_processing",
+                exception=exc,
+                include_traceback=True,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            await self._cleanup_uploaded_object(object_path)
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="OCR processing failed; check the local OCR configuration",
@@ -226,26 +401,95 @@ class AdminOcrService:
                 OCRConfidence=word["ocr_confidence"],
             ))
         try:
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="admin_ocr_database_persist_started",
+                stage="database_persist",
+                book_id=str(book_id),
+                page_id=str(page_id),
+                word_count=len(words),
+            )
             await self.db.commit()
             await self.db.refresh(page)
             await self.db.refresh(revision)
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="admin_ocr_database_commit_succeeded",
+                stage="database_commit",
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
         except IntegrityError as exc:
-            logger.warning(
-                "Admin OCR upload failed at stage=database_commit (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ocr_upload_failed",
+                stage="database_commit",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
             await self.db.rollback()
-            await self._cleanup_uploaded_object(object_path)
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise HTTPException(status_code=409, detail="Page number conflicts with an existing page") from exc
         except Exception as exc:
-            logger.error(
-                "Admin OCR upload failed at stage=database_commit (exception_type=%s)",
-                type(exc).__name__,
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_upload_failed",
+                stage="database_commit",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
             await self.db.rollback()
-            await self._cleanup_uploaded_object(object_path)
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=storage_uploaded,
+                book_id=book_id,
+                page_id=page_id,
+                started_at=started_at,
+            )
             raise
-        return await self.revision_detail(page, revision)
+
+        try:
+            result = await self.revision_detail(page, revision)
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_response_failed",
+                stage="response_validation",
+                exception=exc,
+                include_traceback=True,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_upload_succeeded",
+            stage="response_validation",
+            book_id=str(book_id),
+            page_id=str(page_id),
+            revision_id=str(revision_id),
+            word_count=len(words),
+            elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+        )
+        return result
 
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
