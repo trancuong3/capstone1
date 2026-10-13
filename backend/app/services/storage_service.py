@@ -140,6 +140,7 @@ def upload_object(object_path: str, data: bytes, content_type: str) -> None:
             error_code=error_code,
             upstream_http_status=http_status,
             cleanup_may_be_needed=cleanup_may_be_needed,
+            include_traceback=cleanup_may_be_needed,
             **runtime_configuration_diagnostics(include_ocr=False),
         )
         raise StorageUploadFailure(
