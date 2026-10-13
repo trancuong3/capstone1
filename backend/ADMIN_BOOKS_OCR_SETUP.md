@@ -22,7 +22,7 @@ Tên bucket `book-pages` ở ví dụ là giá trị cần thống nhất khi t�
 
 Áp dụng migration mới theo quy trình migration của dự án:
 
-`supabase/migrations/20261013090000_add_pagerevisions_drafttext.sql`
+`supabase/migrations/20261013210000_add_pagerevisions_drafttext.sql`
 
 Migration chỉ thêm `public.pagerevisions.drafttext TEXT` với `IF NOT EXISTS`; không xóa bảng hoặc dữ liệu. Trước khi áp dụng, đối chiếu schema thật trên Supabase và bảo đảm `public.pagerevisions` là bảng vật lý đang sử dụng.
 
@@ -34,7 +34,7 @@ Migration chỉ thêm `public.pagerevisions.drafttext TEXT` với `IF NOT EXISTS
 4. Cài Python dependencies trong `backend/requirements.txt` và khởi động Backend như bình thường.
 5. OCR báo `503` nếu Tesseract hoặc `vie.traineddata` chưa được cấu hình; không có fallback OCR cloud.
 
-Các endpoint ghi Admin dùng token Supabase hiện hành và kiểm tra `profiles.role = 'admin'`. DDL được cung cấp chưa chứng minh `profiles.id` liên kết với `auth.users.id`; trước khi chạy trên Supabase thật, cần xác minh mapping identity và trigger/migration đang dùng. Nếu mapping không đúng, API sẽ từ chối truy cập thay vì bỏ kiểm tra quyền.
+Các endpoint ghi Admin dùng token Supabase hiện hành và kiểm tra `profiles.role = 'admin'`. Migration `20260928144208_phase4_auth_profiles.sql` tạo trigger để `profiles.id = auth.users.id` đối với tài khoản Auth mới và khai báo khóa ngoại `NOT VALID` vì còn profile legacy có thể không có Auth tương ứng. Trước khi dùng OCR, hãy xác minh chính tài khoản Admin có hàng `profiles` với cùng UUID như Auth user và `role = 'admin'`. Profile legacy không có Auth ID tương ứng sẽ bị từ chối; không được bỏ kiểm tra role để lách vấn đề.
 
 ## API được bổ sung
 
