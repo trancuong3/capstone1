@@ -43,7 +43,21 @@ export function createAdminBookService(): AdminBookService {
         `/books/admin/catalog/${encodeURIComponent(bookId)}`,
         bookDtoSchema.refine((book) => book.id === bookId),
       ),
-    create: unavailableOperation,
+    create: (request) =>
+      requestApi(
+        "/books/admin/catalog",
+        bookDtoSchema,
+        undefined,
+        {
+          method: "POST",
+          body: {
+            title: request.title.trim(),
+            author: request.author?.trim() || null,
+            min_grade: request.min_grade,
+            max_grade: request.max_grade,
+          },
+        },
+      ),
     update: unavailableOperation,
     updateStatus: unavailableOperation,
   };
