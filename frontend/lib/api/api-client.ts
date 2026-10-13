@@ -6,6 +6,37 @@ import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
 
+// Only deliberately authored backend details are shown to users. Unknown server
+// messages may contain SQL, tokens, file paths, or other private diagnostic data.
+const safeBackendMessages: Record<string, string> = {
+  "Supabase Storage is not configured":
+    "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+  "Server-side Supabase Storage credentials are not configured":
+    "Backend thiếu SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Hãy cấu hình khóa chỉ ở môi trường Backend.",
+  "Supabase Storage client initialization failed; check the server configuration":
+    "Không khởi tạo được Supabase Storage. Hãy kiểm tra SUPABASE_URL và khóa server-side.",
+  "Supabase Storage is unavailable":
+    "Supabase Storage chưa sẵn sàng. Hãy kiểm tra cấu hình project và kết nối.",
+  "Could not save the image to Supabase Storage":
+    "Supabase Storage từ chối lưu ảnh. Hãy kiểm tra bucket có tồn tại trong đúng project và khóa server-side có quyền upload.",
+  "Tesseract OCR 5.x is not installed or TESSERACT_CMD is invalid":
+    "Tiến trình Backend không tìm thấy Tesseract. Hãy kiểm tra TESSERACT_CMD hoặc PATH của Uvicorn.",
+  "Tesseract language data vie.traineddata is missing":
+    "Tesseract chưa tìm thấy dữ liệu tiếng Việt vie.traineddata.",
+  "Tesseract is unavailable; install Tesseract 5.x and its language data":
+    "Tiến trình Backend không chạy được Tesseract hoặc không đọc được dữ liệu ngôn ngữ.",
+  "Tesseract failed to process the image with Vietnamese language data":
+    "Tesseract gặp lỗi khi xử lý ảnh. Hãy kiểm tra Tesseract và vie.traineddata.",
+  "OCR processing failed; check the local OCR configuration":
+    "OCR thất bại ở bước xử lý nội bộ. Hãy xem log Backend để xác định giai đoạn xảy ra lỗi.",
+  "No usable text was detected; check the image quality":
+    "Không phát hiện được chữ trong ảnh. Hãy thử ảnh rõ nét, đủ sáng và đúng chiều.",
+  "Could not read the image from Supabase Storage":
+    "Không đọc được ảnh từ Supabase Storage. Hãy kiểm tra object path và quyền truy cập.",
+  "Could not create an image preview URL":
+    "Không tạo được URL xem trước ảnh từ Supabase Storage.",
+};
+
 function errorCode(status: number): ServiceErrorCode {
   switch (status) {
     case 401:
@@ -23,14 +54,36 @@ function errorCode(status: number): ServiceErrorCode {
   }
 }
 
-function failure(status: number, requestId = "", retryable = false) {
+function failure(
+  status: number,
+  requestId = "",
+  retryable = false,
+  message = safeMessage,
+) {
   return new ServiceError({
     code: errorCode(status),
-    message: safeMessage,
+    message,
     status,
     request_id: requestId,
     retryable,
   });
+}
+
+async function safeBackendMessage(response: Response): Promise<string> {
+  try {
+    const payload: unknown = await response.clone().json();
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in payload &&
+      typeof payload.detail === "string"
+    ) {
+      return safeBackendMessages[payload.detail] ?? safeMessage;
+    }
+  } catch {
+    // A non-JSON error body must not be reflected to the browser.
+  }
+  return safeMessage;
 }
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
@@ -94,8 +147,8 @@ export async function requestApi<T>(
 
   const requestId = response.headers.get("x-request-id") ?? "";
   if (!response.ok) {
-    // Do not reflect server details: SQL, tokens and account data are private.
-    throw failure(response.status, requestId, response.status >= 500);
+    const message = await safeBackendMessage(response);
+    throw failure(response.status, requestId, response.status >= 500, message);
   }
 
   let payload: unknown;
