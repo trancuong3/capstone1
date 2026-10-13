@@ -334,6 +334,19 @@ describe("real Admin adapters", () => {
       });
     },
   );
+  it("shows a mapped safe message for a known OCR configuration error", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { detail: "Supabase Storage is not configured" },
+        { status: 503 },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+    });
+  });
+
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
     const created = await createAdminBookService().create({
@@ -411,6 +424,43 @@ describe("real Admin adapters", () => {
       { status: "UPLOADING", progress_percent: 0 },
       { status: "PROCESSING", progress_percent: 100 },
     ]);
+  });
+
+  it("shows a safe Storage reason for a failed page upload", async () => {
+    const file = new File(["image-bytes"], "page-3.png", {
+      type: "image/png",
+    });
+    const input = {
+      client_id: "3-page-3.png-11",
+      file_name: file.name,
+      mime_type: "image/png" as const,
+      size_bytes: file.size,
+      page_number: 3,
+      width: 800,
+      height: 1000,
+      file,
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json(
+          { detail: "Server-side Supabase Storage credentials are not configured" },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json([page]));
+    const progress: { status: string; error_message?: string }[] = [];
+
+    expect(await createAdminPageService().upload(bookId, [input], (item) => {
+      progress.push({
+        status: item.status,
+        error_message: item.error_message,
+      });
+    })).toEqual([page]);
+    expect(progress[1]).toEqual({
+      status: "FAILED",
+      error_message:
+        "Backend thiếu SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Hãy cấu hình khóa chỉ ở môi trường Backend.",
+    });
   });
 
   it("persists an OCR draft using the validated revision contract", async () => {
