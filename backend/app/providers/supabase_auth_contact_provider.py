@@ -63,7 +63,15 @@ class SupabaseAuthContactProvider:
             safe_error_code,
         )
 
-        if status_code == 409 or any(
+        conflict_codes = {
+            "conflict",
+            "email_exists",
+            "phone_exists",
+            "user_already_exists",
+            "identity_already_exists",
+            "email_conflict_identity_not_deletable",
+        }
+        if status_code == 409 or safe_error_code in conflict_codes or any(
             marker in message
             for marker in (
                 "already registered",
@@ -126,15 +134,23 @@ class SupabaseAuthContactProvider:
                     try:
                         client.auth.admin.delete_user(str(user_id))
                     except Exception as cleanup_error:
+                        SupabaseAuthContactProvider._normalize_error(
+                            cleanup_error,
+                            operation="cleanup_after_phone_update_failure",
+                        )
                         raise SupabaseAuthCompensationError(
                             "The newly created invitation could not be cleaned up after phone update failed."
                         ) from cleanup_error
-                    raise SupabaseAuthContactProvider._normalize_error(error, operation="update_phone") from error
+                    raise SupabaseAuthContactProvider._normalize_error(
+                        error, operation="update_phone"
+                    ) from error
             return user_id
         except SupabaseAuthProviderError:
             raise
         except Exception as error:
-            normalized = SupabaseAuthContactProvider._normalize_error(error, operation="invite_parent")
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                error, operation="invite_parent"
+            )
             raise normalized from error
 
     @staticmethod
