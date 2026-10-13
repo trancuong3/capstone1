@@ -6,6 +6,7 @@ import { createOcrReviewService } from "@/lib/api/ocr-review-service";
 import { createAuditService } from "@/lib/api/audit-service";
 import { createHealthService } from "@/lib/api/health-service";
 
+// Exercise Admin OCR writes through the real request adapter.
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
