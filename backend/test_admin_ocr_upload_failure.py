@@ -71,6 +71,84 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
         service.db.add_all.assert_not_called()
 
+    async def test_database_commit_failure_rolls_back_and_attempts_cleanup(self):
+        service = self.make_service()
+        service.db.commit = AsyncMock(side_effect=RuntimeError("private database details"))
+        service.db.refresh = AsyncMock()
+        service.db.rollback = AsyncMock()
+        service.db.add_all = MagicMock()
+        service.db.add = MagicMock()
+        cleanup = AsyncMock()
+        ocr_result = {
+            "text": "Chú mèo",
+            "words": [
+                {
+                    "word_index": 0,
+                    "line_index": 0,
+                    "text": "Chú",
+                    "normalized_text": "chú",
+                    "bbox": [0.1, 0.2, 0.1, 0.05],
+                    "ocr_confidence": 0.9,
+                }
+            ],
+            "metadata": {"engine": "tesseract", "language": "vie"},
+        }
+        with (
+            patch("app.services.admin_ocr_service.upload_object"),
+            patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
+            patch.object(service, "_cleanup_uploaded_object", cleanup),
+            self.assertLogs("app.services.admin_ocr_service", level="ERROR"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "private database details"):
+                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+
+        service.db.rollback.assert_awaited_once()
+        cleanup.assert_awaited_once()
+        self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
+        self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
+
+    async def test_success_creates_unverified_revision_and_stores_real_ocr_boxes(self):
+        service = self.make_service()
+        service.db.commit = AsyncMock()
+        service.db.refresh = AsyncMock()
+        service.db.rollback = AsyncMock()
+        service.db.add_all = MagicMock()
+        service.db.add = MagicMock()
+        service.repo.words = AsyncMock(return_value=[])
+        expected_response = object()
+        service.revision_detail = AsyncMock(return_value=expected_response)
+        ocr_result = {
+            "text": "Chú mèo",
+            "words": [
+                {
+                    "word_index": 0,
+                    "line_index": 0,
+                    "text": "Chú",
+                    "normalized_text": "chú",
+                    "bbox": [0.1, 0.2, 0.1, 0.05],
+                    "ocr_confidence": 0.9,
+                }
+            ],
+            "metadata": {"engine": "tesseract", "language": "vie"},
+        }
+        uploaded = MagicMock()
+        with (
+            patch("app.services.admin_ocr_service.upload_object", uploaded),
+            patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
+        ):
+            response = await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+
+        self.assertIs(response, expected_response)
+        uploaded.assert_called_once()
+        service.db.commit.assert_awaited_once()
+        page, revision = service.db.add_all.call_args.args[0]
+        self.assertEqual(page.ImagePath.split("/")[-1].split(".")[-1], "png")
+        self.assertEqual(revision.VerificationStatus, "NEEDS_REVIEW")
+        self.assertEqual(revision.DraftText, "Chú mèo")
+        word_row = service.db.add.call_args.args[0]
+        self.assertEqual(word_row.BoundingBox, [0.1, 0.2, 0.1, 0.05])
+        self.assertEqual(word_row.OCRConfidence, 0.9)
+
 
 if __name__ == "__main__":
     unittest.main()
