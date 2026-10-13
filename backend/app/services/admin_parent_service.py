@@ -2,6 +2,7 @@
 
 HTTP and API response schemas deliberately remain outside this service.
 """
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,8 @@ from app.providers.supabase_auth_contact_provider import (
     SupabaseAuthProviderNotConfiguredError,
 )
 from app.repositories.admin_parent_repository import AdminParentRepository
+
+logger = logging.getLogger(__name__)
 
 
 class AdminParentAccessDeniedError(Exception):
@@ -136,6 +139,10 @@ class AdminParentService:
         try:
             await self.auth_contact_provider.compensate_failed_invite(parent_id)
         except Exception as error:
+            logger.error(
+                "Supabase Auth invite compensation failed (exception_type=%s)",
+                type(error).__name__,
+            )
             raise AdminParentConsistencyError(
                 "Parent invitation failed to synchronize; manual reconciliation is required."
             ) from error
@@ -172,13 +179,32 @@ class AdminParentService:
         # The Auth trigger in the existing migration creates public.profiles with
         # role='parent'. Never insert a second profile from this service.
         try:
-            parent = await self.repository.get_parent_detail(parent_id)
+            # The trigger creates the profile, and this explicit update ensures the
+            # authoritative active flag is set for the successful Admin Create flow.
+            activated = await self.repository.activate_parent(parent_id)
+            parent = (
+                await self.repository.get_parent_detail(parent_id)
+                if activated
+                else None
+            )
         except Exception as error:
+            logger.error(
+                "Parent profile activation or PostgreSQL verification failed "
+                "(exception_type=%s, database_error_type=%s)",
+                type(error).__name__,
+                type(getattr(error, "orig", None)).__name__
+                if getattr(error, "orig", None) is not None
+                else None,
+            )
             await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
                 "The Auth invite could not be verified against PostgreSQL."
             ) from error
         if parent is None:
+            logger.error(
+                "Supabase Auth invite did not produce a visible Parent profile "
+                "after the existing database trigger and repository verification."
+            )
             await self._compensate_failed_invite(parent_id)
             raise AdminParentConsistencyError(
                 "The Auth invite did not produce a linked Parent profile."
@@ -243,3 +269,21 @@ class AdminParentService:
                 raise AdminParentProviderOperationError() from error
 
         return await self.get_parent_detail(actor_id, parent_id)
+
+
+    async def deactivate_parent(
+        self,
+        actor_id: UUID,
+        parent_id: UUID,
+    ) -> dict[str, Any]:
+        """Soft-delete a Parent by setting active=0; linked data and Auth remain."""
+        await self._ensure_admin(actor_id)
+        parent = await self.repository.get_parent_record(parent_id)
+        if parent is None:
+            raise AdminParentNotFoundError("Parent profile was not found or is inactive.")
+
+        changed = await self.repository.soft_delete_parent(parent_id)
+        if not changed:
+            raise AdminParentNotFoundError("Parent profile was not found or is inactive.")
+
+        return {"id": parent_id, "active": 0}

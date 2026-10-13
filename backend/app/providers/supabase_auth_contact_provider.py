@@ -1,9 +1,13 @@
 """Server-side Supabase Auth integration for Admin Parent contact management."""
 import asyncio
+import logging
+import re
 from typing import Literal
 from uuid import UUID
 
 from app.database.supabase_client import get_supabase_admin_client
+
+logger = logging.getLogger(__name__)
 
 ContactInfoStatus = Literal[
     "available",
@@ -25,6 +29,10 @@ class SupabaseAuthConflictError(SupabaseAuthProviderError):
     """The requested Auth identity or contact field conflicts with an existing user."""
 
 
+class SupabaseAuthRateLimitError(SupabaseAuthProviderError):
+    """Supabase Auth temporarily rate-limited an email or authentication request."""
+
+
 class SupabaseAuthCompensationError(SupabaseAuthProviderError):
     """A newly created Auth identity could not be safely compensated after Create failed."""
 
@@ -33,12 +41,58 @@ class SupabaseAuthContactProvider:
     """Return only safe contact fields; never expose a raw Auth User object."""
 
     @staticmethod
-    def _normalize_error(error: Exception) -> SupabaseAuthProviderError:
+    def _normalize_error(
+        error: Exception, *, operation: str = "request"
+    ) -> SupabaseAuthProviderError:
         message = str(error).lower()
         status_code = getattr(error, "status", None) or getattr(error, "status_code", None)
-        if status_code in {409, 422} or any(
+        if not isinstance(status_code, int):
+            status_code = None
+
+        raw_error_code = getattr(error, "error_code", None) or getattr(error, "code", None)
+        safe_error_code = None
+        if isinstance(raw_error_code, (str, int)):
+            candidate = str(raw_error_code)
+            if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", candidate):
+                safe_error_code = candidate
+
+        # Log only structured, allow-listed diagnostics. Do not log the raw
+        # provider message because it can contain contact details or credentials.
+        logger.warning(
+            "Supabase Auth Admin operation failed "
+            "(operation=%s, exception_type=%s, status_code=%s, error_code=%s)",
+            operation,
+            type(error).__name__,
+            status_code,
+            safe_error_code,
+        )
+
+        conflict_codes = {
+            "conflict",
+            "email_exists",
+            "phone_exists",
+            "user_already_exists",
+            "identity_already_exists",
+            "email_conflict_identity_not_deletable",
+        }
+        rate_limit_codes = {
+            "over_email_send_rate_limit",
+            "over_request_rate_limit",
+            "over_sms_send_rate_limit",
+            "over_email_rate_limit",
+        }
+        if status_code == 429 or safe_error_code in rate_limit_codes:
+            return SupabaseAuthRateLimitError()
+
+        if status_code == 409 or safe_error_code in conflict_codes or any(
             marker in message
-            for marker in ("already registered", "already exists", "already been registered", "email_exists", "phone_exists")
+            for marker in (
+                "already registered",
+                "already exists",
+                "already been registered",
+                "email_exists",
+                "phone_exists",
+            )
         ):
             return SupabaseAuthConflictError()
         return SupabaseAuthProviderError()
@@ -69,10 +123,12 @@ class SupabaseAuthContactProvider:
 
     @staticmethod
     def _invite_parent(email: str, display_name: str, phone: str | None) -> UUID:
-        client = get_supabase_admin_client()
-        if client is None:
-            raise SupabaseAuthProviderNotConfiguredError()
         try:
+            # Keep client initialization inside the guarded block so an SDK or
+            # configuration failure is logged and normalized like other Auth errors.
+            client = get_supabase_admin_client()
+            if client is None:
+                raise SupabaseAuthProviderNotConfiguredError()
             response = client.auth.admin.invite_user_by_email(
                 email,
                 {"data": {"display_name": display_name}},
@@ -91,27 +147,39 @@ class SupabaseAuthContactProvider:
                     try:
                         client.auth.admin.delete_user(str(user_id))
                     except Exception as cleanup_error:
+                        SupabaseAuthContactProvider._normalize_error(
+                            cleanup_error,
+                            operation="cleanup_after_phone_update_failure",
+                        )
                         raise SupabaseAuthCompensationError(
                             "The newly created invitation could not be cleaned up after phone update failed."
                         ) from cleanup_error
-                    raise SupabaseAuthContactProvider._normalize_error(error) from error
+                    raise SupabaseAuthContactProvider._normalize_error(
+                        error, operation="update_phone"
+                    ) from error
             return user_id
         except SupabaseAuthProviderError:
             raise
         except Exception as error:
-            normalized = SupabaseAuthContactProvider._normalize_error(error)
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                error, operation="invite_parent"
+            )
             raise normalized from error
 
     @staticmethod
     def _delete_new_invite(user_id: UUID) -> None:
         """Compensation for a newly created invite whose profile could not be verified."""
-        client = get_supabase_admin_client()
-        if client is None:
-            raise SupabaseAuthProviderNotConfiguredError()
         try:
+            client = get_supabase_admin_client()
+            if client is None:
+                raise SupabaseAuthProviderNotConfiguredError()
             client.auth.admin.delete_user(str(user_id))
+        except SupabaseAuthProviderError:
+            raise
         except Exception as error:
-            raise SupabaseAuthContactProvider._normalize_error(error) from error
+            raise SupabaseAuthContactProvider._normalize_error(
+                error, operation="compensate_delete_user"
+            ) from error
 
     @staticmethod
     def _update_contact_info(
@@ -119,9 +187,6 @@ class SupabaseAuthContactProvider:
         email: str | None,
         phone: str | None,
     ) -> None:
-        client = get_supabase_admin_client()
-        if client is None:
-            raise SupabaseAuthProviderNotConfiguredError()
         attributes: dict[str, str] = {}
         if email is not None:
             attributes["email"] = email
@@ -130,11 +195,18 @@ class SupabaseAuthContactProvider:
         if not attributes:
             return
         try:
+            client = get_supabase_admin_client()
+            if client is None:
+                raise SupabaseAuthProviderNotConfiguredError()
             # Do not set email_confirm/phone_confirm: verification must follow the
             # project's Supabase Auth policy rather than being silently bypassed.
             client.auth.admin.update_user_by_id(str(user_id), attributes)
+        except SupabaseAuthProviderError:
+            raise
         except Exception as error:
-            normalized = SupabaseAuthContactProvider._normalize_error(error)
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                error, operation="update_contact_info"
+            )
             raise normalized from error
 
     async def get_contact_info(

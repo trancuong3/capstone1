@@ -13,6 +13,7 @@ from app.schemas.profile import (
     AdminParentDetailResponse,
     AdminParentCreateRequest,
     AdminParentUpdateRequest,
+    AdminParentSoftDeleteResponse,
 )
 from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
@@ -891,3 +892,35 @@ async def delete_profile(
     return {
         "message": "Profile deleted"
     }
+
+# =========================================================
+# ADMIN: PARENT SOFT DELETE
+# =========================================================
+
+@router.delete(
+    "/admin/parents/{parent_id}",
+    response_model=AdminParentSoftDeleteResponse,
+)
+async def deactivate_admin_parent(
+    parent_id: UUID,
+    admin_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide an active Parent from the directory without deleting its Auth identity or history."""
+    service = AdminParentService(AdminParentRepository(db))
+    try:
+        result = await service.deactivate_parent(admin_id, parent_id)
+    except AdminParentAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
+        ) from error
+    except AdminParentNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
+        ) from error
+    except SQLAlchemyError as error:
+        raise _parent_admin_error_response(error) from error
+
+    return AdminParentSoftDeleteResponse(id=result["id"], active=0)

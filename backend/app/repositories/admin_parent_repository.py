@@ -31,6 +31,7 @@ class AdminParentRepository:
             ).where(
                 Profile.Id == parent_id,
                 Profile.Role == "parent",
+                Profile.Active == 1,
             )
         )
         row = result.one_or_none()
@@ -52,6 +53,7 @@ class AdminParentRepository:
             ).where(
                 Profile.Id == parent_id,
                 Profile.Role == "parent",
+                Profile.Active == 1,
             )
         )
         parent = result.one_or_none()
@@ -92,7 +94,7 @@ class AdminParentRepository:
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
         """Return visible Parent records, pagination metadata, and child counts."""
-        filters = [Profile.Role == "parent"]
+        filters = [Profile.Role == "parent", Profile.Active == 1]
         if search and search.strip():
             term = (
                 search.strip()
@@ -144,6 +146,7 @@ class AdminParentRepository:
             .where(
                 Profile.Id == parent_id,
                 Profile.Role == "parent",
+                Profile.Active == 1,
             )
             .values(DisplayName=display_name)
             .returning(Profile.Id)
@@ -153,3 +156,39 @@ class AdminParentRepository:
             return None
         await self.db.commit()
         return parent
+
+
+    async def activate_parent(self, parent_id: UUID) -> bool:
+        """Set a newly-created Parent profile active after its Auth trigger has run."""
+        result = await self.db.execute(
+            update(Profile)
+            .where(
+                Profile.Id == parent_id,
+                Profile.Role == "parent",
+            )
+            .values(Active=1)
+            .returning(Profile.Id)
+        )
+        if result.scalar_one_or_none() is None:
+            await self.db.rollback()
+            return False
+        await self.db.commit()
+        return True
+
+    async def soft_delete_parent(self, parent_id: UUID) -> bool:
+        """Soft-delete an active Parent without deleting its profile or linked history."""
+        result = await self.db.execute(
+            update(Profile)
+            .where(
+                Profile.Id == parent_id,
+                Profile.Role == "parent",
+                Profile.Active == 1,
+            )
+            .values(Active=0)
+            .returning(Profile.Id)
+        )
+        if result.scalar_one_or_none() is None:
+            await self.db.rollback()
+            return False
+        await self.db.commit()
+        return True
