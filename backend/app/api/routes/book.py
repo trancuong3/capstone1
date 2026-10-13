@@ -126,16 +126,19 @@ class CatalogService:
     async def previews(self, book_id: UUID):
         await self.get(book_id)
         pages = await self.repository.previews(book_id)
-        return [
-            CatalogPagePreviewResponse(
+        previews = []
+        for page in pages:
+            # Validate/create an image URL before projecting the remaining page fields.
+            # This also returns a safe 503 for malformed legacy paths.
+            preview_url = create_signed_image_url(page.ImagePath)
+            previews.append(CatalogPagePreviewResponse(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 lifecycle_status=page.LifecycleStatus,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
-                preview_url=create_signed_image_url(page.ImagePath),
-            )
-            for page in pages
-        ]
+                preview_url=preview_url,
+            ))
+        return previews
 
 
 @router.get("/catalog", response_model=list[CatalogBookResponse])
