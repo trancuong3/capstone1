@@ -3,19 +3,29 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 WORKSPACE_ROOT = REPOSITORY_ROOT.parent
 
-# Prefer backend/.env for server-only settings, then use the repository-root
-# .env to fill any missing values. Existing process environment always wins.
-for _dotenv_path in (BACKEND_ROOT / ".env", REPOSITORY_ROOT / ".env", WORKSPACE_ROOT / ".env"):
-    if _dotenv_path.is_file():
-        load_dotenv(dotenv_path=_dotenv_path, override=False)
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+def _load_missing_dotenv_values() -> None:
+    """Load known dotenv paths without replacing non-empty process settings."""
+    for dotenv_path in (BACKEND_ROOT / ".env", REPOSITORY_ROOT / ".env", WORKSPACE_ROOT / ".env"):
+        if not dotenv_path.is_file():
+            continue
+        for key, value in dotenv_values(dotenv_path).items():
+            if value is None:
+                continue
+            current = os.getenv(key)
+            if current is None or not current.strip():
+                os.environ[key] = value
+
+
+_load_missing_dotenv_values()
+
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or None
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip() or None
 SUPABASE_STORAGE_BUCKET = (os.getenv("SUPABASE_STORAGE_BUCKET") or "").strip() or None
