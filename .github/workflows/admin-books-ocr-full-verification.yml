@@ -1,0 +1,106 @@
+name: Admin Books OCR full frontend verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/admin-books-ocr-full-verification.yml"
+  push:
+    branches: [feature/admin-book-ocr-integration]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/admin-books-ocr-full-verification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-full:
+    name: Full Frontend verification
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format check (changed frontend files)
+        id: format
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          cd ..
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+
+          changed_files="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD -- frontend/ |
+            sed 's#^frontend/##' |
+            grep -E '\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)$' || true)"
+
+          if [ -z "$changed_files" ]; then
+            echo "No changed frontend files supported by Prettier; skipping format check."
+            exit 0
+          fi
+
+          echo "Checking formatting for changed frontend files:"
+          printf '%s\n' "$changed_files"
+          cd frontend
+          printf '%s\n' "$changed_files" | xargs -r npx prettier --check --
+
+      - name: Lint all frontend files
+        id: lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Full TypeScript check
+        id: typecheck
+        continue-on-error: true
+        run: npm run typecheck
+
+      - name: Full frontend test suite
+        id: tests
+        continue-on-error: true
+        run: npm test
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+        run: npm run build
+
+      - name: Fail if any verification command failed
+        if: always()
+        env:
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        run: |
+          printf "format=%s lint=%s typecheck=%s tests=%s build=%s\n" "$FORMAT" "$LINT" "$TYPECHECK" "$TESTS" "$BUILD"
+          test "$FORMAT" = "success" &&
+          test "$LINT" = "success" &&
+          test "$TYPECHECK" = "success" &&
+          test "$TESTS" = "success" &&
+          test "$BUILD" = "success"

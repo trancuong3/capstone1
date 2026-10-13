@@ -14,6 +14,7 @@ import {
   ADMIN_PAGE_ID,
   ADMIN_R1_ID,
   ADMIN_R2_ID,
+  adminBookFixture,
   adminBookListItemFixture,
   adminR1Fixture,
   adminR2Fixture,
@@ -98,34 +99,135 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     expect(await createRevisionService().list(ADMIN_PAGE_ID)).toEqual(history);
   });
 
-  it.each([
-    {
-      name: "reprocess",
-      call: () => createRevisionService().reprocess(ADMIN_PAGE_ID),
-    },
-    {
-      name: "verify",
-      call: () =>
-        createRevisionService().verify(ADMIN_PAGE_ID, {
-          page_revision_id: ADMIN_R1_ID,
-          corrected_text: "Test",
-          words: adminR1Fixture.words,
+  it("creates a book through the API and validates the returned book", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json(adminBookFixture));
+    const created = await createAdminBookService().create({
+      title: "  Sách kiểm thử  ",
+      author: "  ",
+      min_grade: 1,
+      max_grade: 3,
+    });
+    expect(created).toEqual(adminBookFixture);
+    expect(requestedApiUrl().pathname).toBe("/books/admin/catalog");
+    expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("POST");
+    const body = JSON.parse(String(apiFetchFixture.mock.calls[0][1]?.body));
+    expect(body).toEqual({
+      title: "Sách kiểm thử",
+      author: null,
+      min_grade: 1,
+      max_grade: 3,
+    });
+  });
+
+  it("uploads a file as multipart and then reloads pages from the API", async () => {
+    const file = new File(["image bytes for transport test"], "page.png", {
+      type: "image/png",
+    });
+    const pageList = [
+      {
+        book_id: ADMIN_BOOK_ID,
+        page_number: 1,
+        processing,
+      },
+    ];
+    apiFetchFixture
+      .mockResolvedValueOnce(
+        Response.json({
+          ...adminR2Fixture,
+          verification_status: "NEEDS_REVIEW",
+          verified_at: null,
+          verified_by: null,
         }),
-    },
-    {
-      name: "edit draft",
-      call: () =>
-        createOcrReviewService().saveDraft(
-          ADMIN_PAGE_ID,
-          ADMIN_R1_ID,
-          "Test",
-          [],
-        ),
-    },
-    {
-      name: "upload",
-      call: () => createAdminPageService().upload(ADMIN_BOOK_ID, []),
-    },
+      )
+      .mockResolvedValueOnce(Response.json(pageList));
+    const result = await createAdminPageService().upload(ADMIN_BOOK_ID, [
+      {
+        client_id: "1-page.png",
+        file_name: file.name,
+        mime_type: "image/png",
+        size_bytes: file.size,
+        page_number: 1,
+        file,
+      },
+    ]);
+    expect(result).toEqual(pageList);
+    expect(apiFetchFixture).toHaveBeenCalledTimes(2);
+    expect(requestedApiUrl(0).pathname).toBe(
+      `/books/admin/catalog/${ADMIN_BOOK_ID}/pages`,
+    );
+    const uploadInit = apiFetchFixture.mock.calls[0][1] as RequestInit;
+    expect(uploadInit.method).toBe("POST");
+    expect(uploadInit.body).toBeInstanceOf(FormData);
+    expect((uploadInit.body as FormData).get("page_number")).toBe("1");
+    expect((uploadInit.body as FormData).get("image")).toMatchObject({
+      name: "page.png",
+    });
+    expect(
+      (uploadInit.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
+    expect(requestedApiUrl(1).pathname).toBe(
+      `/books/admin/catalog/${ADMIN_BOOK_ID}/pages`,
+    );
+  });
+
+  it("saves a validated draft without reporting it as verified", async () => {
+    const draft = {
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW" as const,
+      draft_text: "Nội dung đã sửa",
+      verified_at: null,
+      verified_by: null,
+    };
+    apiFetchFixture.mockResolvedValueOnce(Response.json(draft));
+    const saved = await createOcrReviewService().saveDraft(
+      ADMIN_PAGE_ID,
+      ADMIN_R2_ID,
+      "Nội dung đã sửa",
+      adminR2Fixture.words,
+    );
+    expect(saved).toEqual(draft);
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/admin/pages/${ADMIN_PAGE_ID}/revisions/${ADMIN_R2_ID}/draft`,
+    );
+    const init = apiFetchFixture.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      draft_text: "Nội dung đã sửa",
+      words: [{ word_index: 0, bbox: [0.1, 0.1, 0.2, 0.05] }],
+    });
+  });
+
+  it("verifies and reprocesses through the backend rather than mutating local revision state", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json(adminR1Fixture));
+    const verified = await createRevisionService().verify(ADMIN_PAGE_ID, {
+      page_revision_id: ADMIN_R1_ID,
+      corrected_text: adminR1Fixture.draft_text ?? "",
+      words: adminR1Fixture.words,
+    });
+    expect(verified).toEqual(adminR1Fixture);
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/admin/pages/${ADMIN_PAGE_ID}/verify`,
+    );
+    expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("POST");
+
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        ...adminR2Fixture,
+        verification_status: "NEEDS_REVIEW",
+        verified_at: null,
+        verified_by: null,
+        revision_no: 3,
+      }),
+    );
+    const reprocessed = await createRevisionService().reprocess(ADMIN_PAGE_ID);
+    expect(reprocessed.revision_no).toBe(3);
+    expect(requestedApiUrl(1).pathname).toBe(
+      `/books/admin/pages/${ADMIN_PAGE_ID}/reprocess`,
+    );
+    expect(apiFetchFixture.mock.calls[1][1]?.method).toBe("POST");
+  });
+
+  it.each([
     {
       name: "page lifecycle",
       call: () =>
@@ -141,17 +243,7 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
         }),
     },
     {
-      name: "create book",
-      call: () =>
-        createAdminBookService().create({
-          title: "Test",
-          author: null,
-          min_grade: 1,
-          max_grade: 3,
-        }),
-    },
-    {
-      name: "update book",
+      name: "book metadata update",
       call: () =>
         createAdminBookService().update(ADMIN_BOOK_ID, {
           title: "Test",
@@ -160,17 +252,14 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
           max_grade: 3,
         }),
     },
-  ])(
-    "returns 501 for unavailable $name without writes or fake success",
-    async ({ call }) => {
-      await expect(call()).rejects.toMatchObject({
-        code: "NETWORK_ERROR",
-        status: 501,
-        retryable: false,
-      });
-      expect(apiFetchFixture).not.toHaveBeenCalled();
-    },
-  );
+  ])("keeps unsupported $name operations unavailable", async ({ call }) => {
+    await expect(call()).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      status: 501,
+      retryable: false,
+    });
+    expect(apiFetchFixture).not.toHaveBeenCalled();
+  });
 
   it.each([
     { ...adminR1Fixture, page_id: ADMIN_BOOK_ID },

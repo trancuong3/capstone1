@@ -35,10 +35,7 @@ export interface AdminParentDetailChildDTO {
 }
 
 export type AdminParentContactInfoStatus =
-  | "available"
-  | "not_configured"
-  | "user_not_found"
-  | "lookup_failed";
+  "available" | "not_configured" | "user_not_found" | "lookup_failed";
 
 export interface AdminParentDetailDTO {
   readonly id: UUID;
@@ -136,14 +133,17 @@ export interface AdminPageUploadInputUI {
   readonly mime_type: "image/jpeg" | "image/png" | "image/webp";
   readonly size_bytes: number;
   readonly page_number: number;
-  readonly width: number;
-  readonly height: number;
+  readonly width?: number;
+  readonly height?: number;
+  /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
+  readonly file: File;
 }
 
 export interface AdminPageUploadProgressUI {
   readonly client_id: string;
   readonly progress_percent: number;
   readonly status: "QUEUED" | "UPLOADING" | "PROCESSING" | "FAILED";
+  readonly error_message?: string;
 }
 
 export interface AdminRevisionVerifyRequestDTO {

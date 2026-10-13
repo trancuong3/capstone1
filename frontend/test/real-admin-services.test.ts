@@ -6,6 +6,7 @@ import { createOcrReviewService } from "@/lib/api/ocr-review-service";
 import { createAuditService } from "@/lib/api/audit-service";
 import { createHealthService } from "@/lib/api/health-service";
 
+// Exercise Admin OCR writes through the real request adapter.
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
@@ -333,12 +334,257 @@ describe("real Admin adapters", () => {
       });
     },
   );
-  it("retains write interfaces but never fetches or reports fake success", async () => {
+  it("shows a mapped safe message for a known OCR configuration error", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { detail: "Supabase Storage is not configured" },
+        { status: 503 },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+    });
+  });
+
+  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          detail:
+            "Supabase Storage bucket was not found; verify SUPABASE_STORAGE_BUCKET in the configured project",
+        },
+        {
+          status: 503,
+          headers: { "X-Request-ID": "request-test-123" },
+        },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      request_id: "request-test-123",
+      message:
+        "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
+    });
+  });
+
+  it("creates a book through the protected Admin endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json(book));
+    const created = await createAdminBookService().create({
+      title: "  Chú mèo nhỏ  ",
+      author: "  ",
+      min_grade: 1,
+      max_grade: 3,
+    });
+    expect(created).toEqual(book);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/books/admin/catalog");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      title: "Chú mèo nhỏ",
+      author: null,
+      min_grade: 1,
+      max_grade: 3,
+    });
+  });
+
+  it("uploads each page as multipart data and reloads the server page list", async () => {
+    const needsReviewDetail = {
+      ...detail,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "Chú mèo",
+      words: [],
+      verified_at: null,
+      verified_by: null,
+    };
+    const file = new File(["valid-for-mock"], "page-2.png", {
+      type: "image/png",
+    });
+    const input = {
+      client_id: "2-page-2.png-14",
+      file_name: file.name,
+      mime_type: "image/png" as const,
+      size_bytes: file.size,
+      page_number: 2,
+      width: 800,
+      height: 1000,
+      file,
+    };
+    fetchMock
+      .mockResolvedValueOnce(Response.json(needsReviewDetail))
+      .mockResolvedValueOnce(Response.json([page]));
+    const progress: { status: string; progress_percent: number }[] = [];
+    const result = await createAdminPageService().upload(
+      bookId,
+      [input],
+      (item) => {
+        progress.push({
+          status: item.status,
+          progress_percent: item.progress_percent,
+        });
+      },
+    );
+    expect(result).toEqual([page]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("page_number")).toBe("2");
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-2.png",
+    });
+    expect(
+      (init.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
+    expect(progress).toEqual([
+      { status: "UPLOADING", progress_percent: 0 },
+      { status: "PROCESSING", progress_percent: 100 },
+    ]);
+  });
+
+  it("shows a safe Storage reason for a failed page upload", async () => {
+    const file = new File(["image-bytes"], "page-3.png", {
+      type: "image/png",
+    });
+    const input = {
+      client_id: "3-page-3.png-11",
+      file_name: file.name,
+      mime_type: "image/png" as const,
+      size_bytes: file.size,
+      page_number: 3,
+      width: 800,
+      height: 1000,
+      file,
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            detail:
+              "Server-side Supabase Storage credentials are not configured",
+          },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json([page]));
+    const progress: { status: string; error_message?: string }[] = [];
+
+    expect(
+      await createAdminPageService().upload(bookId, [input], (item) => {
+        progress.push({
+          status: item.status,
+          error_message: item.error_message,
+        });
+      }),
+    ).toEqual([page]);
+    expect(progress[1]).toEqual({
+      status: "FAILED",
+      error_message:
+        "Backend thiếu SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Hãy cấu hình khóa chỉ ở môi trường Backend.",
+    });
+  });
+
+  it("persists an OCR draft using the validated revision contract", async () => {
+    const word = {
+      word_index: 0,
+      line_index: 0,
+      text: "Chú",
+      normalized_text: "chú",
+      bbox: [0.1, 0.2, 0.2, 0.05] as const,
+      ocr_confidence: 0.82,
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
+    const saved = await createOcrReviewService().saveDraft(
+      pageId,
+      revisionId,
+      "Chú",
+      [word],
+    );
+    expect(saved.draft_text).toBe("Chú");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(
+      `/books/admin/pages/${pageId}/revisions/${revisionId}/draft`,
+    );
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      draft_text: "Chú",
+      words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
+    });
+  });
+
+  it("verifies a revision and can request a new immutable OCR revision", async () => {
+    const word = {
+      word_index: 0,
+      line_index: 0,
+      text: "Chú",
+      normalized_text: "chú",
+      bbox: [0.1, 0.2, 0.2, 0.05] as const,
+      ocr_confidence: 0.82,
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "VERIFIED",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: timestamp,
+        verified_by: "11111111-1111-4111-8111-111111111111",
+      }),
+    );
+    const verified = await createRevisionService().verify(pageId, {
+      page_revision_id: revisionId,
+      corrected_text: "Chú",
+      words: [word],
+    });
+    expect(verified.verification_status).toBe("VERIFIED");
+    const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(verifyUrl).toContain(`/books/admin/pages/${pageId}/verify`);
+    expect(verifyInit.method).toBe("POST");
+
+    const nextRevisionId = "55555555-5555-4555-8555-555555555555";
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        page_revision_id: nextRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
+    const next = await createRevisionService().reprocess(pageId);
+    expect(next.page_revision_id).toBe(nextRevisionId);
+    expect(next.revision_no).toBe(3);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/pages/${pageId}/reprocess`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+  });
+
+  it("keeps unsupported edit and lifecycle operations explicitly unavailable", async () => {
     const books = createAdminBookService();
     const pages = createAdminPageService();
-    const revisions = createRevisionService();
     const operations = [
-      books.create({ title: "X", author: null, min_grade: 1, max_grade: 3 }),
       books.update(bookId, {
         title: "X",
         author: null,
@@ -346,15 +592,7 @@ describe("real Admin adapters", () => {
         max_grade: 3,
       }),
       books.updateStatus(bookId, { status: "RETIRED" }),
-      pages.upload(bookId, []),
       pages.updateStatus(pageId, { status: "RETIRED" }),
-      revisions.verify(pageId, {
-        page_revision_id: revisionId,
-        corrected_text: "X",
-        words: [],
-      }),
-      revisions.reprocess(pageId),
-      createOcrReviewService().saveDraft(pageId, revisionId, "X", []),
     ];
     await Promise.all(
       operations.map((operation) =>
