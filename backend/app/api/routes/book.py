@@ -95,56 +95,16 @@ class CatalogRepository:
         return (await self.db.scalar(select(Book.Id).where(Book.Id == book_id, self.eligible_book()))) is not None
 
     async def previews(self, book_id: UUID):
-        result = await self.db.execute(
-            select(BookPage)
-            .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-            .where(BookPage.BookId == book_id, self.eligible_page())
-            .order_by(BookPage.PageNumber, BookPage.Id)
-        )
-        return result.scalars().all()
-
-
-class CatalogService:
-    def __init__(self, repository: CatalogRepository):
-        self.repository = repository
-
-    async def require_parent(self, actor_id: UUID):
-        if await self.repository.role(actor_id) != "parent":
-            raise HTTPException(status_code=403, detail="Access denied")
-
-    async def list(self, search: str | None, author: str | None, grade: int | None):
-        return [CatalogBookResponse.model_validate(book) for book in await self.repository.list(search, author, grade)]
-
-    async def get(self, book_id: UUID):
-        book = await self.repository.get(book_id)
-        if book is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if not await self.repository.is_eligible(book_id):
-            raise HTTPException(status_code=409, detail={"code": "CONTENT_INACTIVE"})
-        return CatalogBookResponse.model_validate(book)
-
-    async def previews(self, book_id: UUID):
         await self.get(book_id)
         pages = await self.repository.previews(book_id)
         previews = []
         for page in pages:
-            try:
-                path = urlsplit(page.ImagePath)
-                valid_url = (path.scheme in ("https", "http") and path.hostname
-                             and not path.username and not path.password)
-                # Accessing port also validates malformed ports in stored URLs.
-                path.port
-            except ValueError:
-                valid_url = False
-            if not valid_url:
-                # Relative Storage paths need a real bucket/access policy first.
-                raise HTTPException(status_code=503, detail="Preview is not available yet")
             previews.append(CatalogPagePreviewResponse(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 lifecycle_status=page.LifecycleStatus,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
-                preview_url=page.ImagePath,
+                preview_url=create_signed_image_url(page.ImagePath),
             ))
         return previews
 
