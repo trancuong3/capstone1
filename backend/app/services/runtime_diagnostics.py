@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Any
-
 import pytesseract
 
 from app.database.config import (
@@ -14,13 +12,13 @@ from app.database.config import (
 )
 
 
-def runtime_configuration_diagnostics() -> dict[str, bool | None]:
+def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, bool | None]:
     """Return booleans only; never return URLs, bucket names, commands, or keys."""
     configured_command = (os.getenv("TESSERACT_CMD") or "").strip()
     binary = configured_command or pytesseract.pytesseract.tesseract_cmd
     executable_available = bool(os.path.isfile(binary) or shutil.which(binary))
     language_available: bool | None = None
-    if executable_available:
+    if executable_available and include_ocr:
         try:
             language_available = "vie" in set(pytesseract.get_languages(config=""))
         except Exception:
