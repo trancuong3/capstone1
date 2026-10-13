@@ -521,7 +521,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
                         "parent@example.com", "Parent A", None
                     )
 
-        output = "\\n".join(captured.output)
+        output = "\n".join(captured.output)
         self.assertIn("operation=invite_parent", output)
         self.assertIn("exception_type=AttributeError", output)
         self.assertNotIn("private detail that must not be logged", output)
