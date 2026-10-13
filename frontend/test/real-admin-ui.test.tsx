@@ -157,7 +157,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       screen.queryByText("Không thể tải kho sách"),
     ).not.toBeInTheDocument();
   });
-  it("renders real admin catalog including retired books and no create action", async () => {
+  it("renders retired admin books and links to the real create-book flow", async () => {
     render(
       <AdminServicesProvider>
         <AdminBooksScreen />
@@ -169,9 +169,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       screen.getByRole("link", { name: /Sách Admin từ database/ }),
     ).toHaveAttribute("href", `/admin/books/${bookId}`);
-    expect(
-      screen.queryByRole("link", { name: "Thêm sách" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Tạo sách mới" })).toHaveAttribute(
+      "href",
+      "/admin/books/new",
+    );
   });
   it("forwards search and lifecycle filters to the API", async () => {
     const user = userEvent.setup();
@@ -227,15 +228,15 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Sách chưa có trang")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Sửa thông tin" }),
-    ).toBeDisabled();
+      screen.getByRole("button", { name: "Upload và chạy OCR" }),
+    ).toBeEnabled();
     fetchMock.mockImplementation(async (url: string) => readyResponse(url));
     await user.click(screen.getByRole("button", { name: "Tải lại" }));
     expect(
       await screen.findByRole("heading", { name: "Trang 2" }),
     ).toBeInTheDocument();
   });
-  it("shows true empty pages without promising an upload", async () => {
+  it("shows true empty pages with the upload workflow available", async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith("/pages") ? Response.json([]) : readyResponse(url),
     );
@@ -250,6 +251,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       screen.queryByText("Dữ liệu trang đang chờ bổ sung"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upload và chạy OCR" }),
+    ).toBeEnabled();
   });
   it.each([404, 501, 503])(
     "shows OCR status %s without mock fallback and offers retry",
@@ -300,11 +304,11 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toHaveValue(
+    expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
       "Văn bản đã lưu thật",
     );
     expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Chạy lại OCR" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Chạy lại OCR từ ảnh đã lưu" })).toBeEnabled();
     expect(
       screen.getByRole("img", { name: `Ảnh trang 2 của ${book.title}` }),
     ).toHaveAttribute("src", "https://example.test/image.png");
