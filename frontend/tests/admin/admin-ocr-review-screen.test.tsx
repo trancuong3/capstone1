@@ -33,7 +33,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.ocr.getRevision).not.toHaveBeenCalled();
   });
 
-  it("keeps both current and historical revisions read-only", async () => {
+  it("keeps verified text read-only while preserving the option to reprocess", async () => {
     const services = createAdminServiceFixture();
     const user = userEvent.setup();
     render(
@@ -45,13 +45,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(
       await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toHaveValue(
+    expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
       adminR2Fixture.draft_text,
     );
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Chạy lại OCR" })).toBeDisabled();
+    expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Ngừng trang" })).toBeDisabled();
-    expect(screen.getByText("Hiện hành")).toBeInTheDocument();
+    expect(screen.getByText(/hiện hành/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /R1/ }));
     expect(
@@ -61,19 +61,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ADMIN_PAGE_ID,
       ADMIN_R1_ID,
     );
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toHaveValue(
+    expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
       adminR1Fixture.draft_text,
     );
-    expect(screen.getByLabelText("Nội dung đã hiệu chỉnh")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Chạy lại OCR" })).toBeDisabled();
+    expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeDisabled();
     expect(
       screen.getByRole("img", { name: /Bounding box từ OCR: 1 vùng/ }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Chạy lại OCR" }));
-    expect(services.revisions.reprocess).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Chạy lại OCR/ }));
+    expect(services.revisions.reprocess).toHaveBeenCalledWith(
+      ADMIN_PAGE_ID,
+      expect.any(Function),
+    );
     expect(services.revisions.verify).not.toHaveBeenCalled();
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
-    expect(services.pages.updateStatus).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Không thể chạy lại OCR/)).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
 });
