@@ -78,7 +78,7 @@ class AdminOcrService:
             with Image.open(BytesIO(data)) as image:
                 image_format = image.format or ""
                 width, height = image.size
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid image") from exc
         actual = ALLOWED_FORMATS.get(image_format)
         if actual is None or actual[0] != declared_type:
@@ -157,7 +157,7 @@ class AdminOcrService:
         page = BookPage(
             Id=page_id, BookId=book_id, PageNumber=page_number, ImagePath=object_path,
             Width=width, Height=height, LifecycleStatus="ACTIVE", FeaturePath=None,
-            ProcessingMeta={"storage_bucket": "configured_by_environment"},
+            ProcessingMeta={"storage": "supabase"},
         )
         revision = PageRevision(
             Id=revision_id, PageId=page_id, RevisionNo="1", VerificationStatus="NEEDS_REVIEW",
@@ -235,6 +235,9 @@ class AdminOcrService:
         words = self._validated_words(payload.words)
         await self.repo.sync_words(revision.Id, words)
         revision.DraftText = payload.draft_text.strip()
+        revision.ContentHash = hashlib.sha256(
+            json.dumps({"text": revision.DraftText, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         try:
             await self.db.commit()
             await self.db.refresh(revision)
