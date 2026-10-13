@@ -64,7 +64,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       adminR1Fixture.draft_text,
     );
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeEnabled();
     expect(
       screen.getByRole("img", { name: /Bounding box từ OCR: 1 vùng/ }),
     ).toBeInTheDocument();
