@@ -10,6 +10,7 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.models import Book, BookPage, PageRevision, PageRevisionWord
 from app.repositories.admin_ocr_repository import AdminOcrRepository
@@ -132,28 +133,57 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="This page number already exists for the book")
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
-        try:
-            ocr = extract_text_and_boxes(data)
-        except OcrEngineUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except OcrNoTextDetected as exc:
-            raise HTTPException(status_code=422, detail="No usable text was detected; check the image quality") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="The image could not be decoded by the OCR engine") from exc
-
-        words = self._word_data(ocr["words"])  # real TSV boxes only
-        text_value = str(ocr["text"]).strip()
-        if not text_value:
-            raise HTTPException(status_code=422, detail="OCR produced empty text")
         page_id = uuid4()
         revision_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
-        metadata = dict(ocr["metadata"])
-        content_hash = hashlib.sha256(
-            json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        ).hexdigest()
 
-        upload_object(object_path, data, content_type)
+        # Storage is the durable source asset. OCR runs only after the validated image
+        # has been saved, and all failure paths attempt to remove the orphaned object.
+        try:
+            await run_in_threadpool(upload_object, object_path, data, content_type)
+        except Exception:
+            await run_in_threadpool(delete_object, object_path)
+            raise
+
+        try:
+            ocr = await run_in_threadpool(extract_text_and_boxes, data)
+            words = self._word_data(ocr["words"])  # Real Tesseract TSV boxes only.
+            text_value = str(ocr["text"]).strip()
+            if not text_value:
+                raise HTTPException(status_code=422, detail="OCR produced empty text")
+            metadata = dict(ocr["metadata"])
+            content_hash = hashlib.sha256(
+                json.dumps(
+                    {"text": text_value, "words": words},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+        except OcrEngineUnavailable as exc:
+            await run_in_threadpool(delete_object, object_path)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except OcrNoTextDetected as exc:
+            await run_in_threadpool(delete_object, object_path)
+            raise HTTPException(
+                status_code=422,
+                detail="No usable text was detected; check the image quality",
+            ) from exc
+        except ValueError as exc:
+            await run_in_threadpool(delete_object, object_path)
+            raise HTTPException(
+                status_code=422,
+                detail="The image could not be decoded by the OCR engine",
+            ) from exc
+        except HTTPException:
+            await run_in_threadpool(delete_object, object_path)
+            raise
+        except Exception as exc:
+            await run_in_threadpool(delete_object, object_path)
+            raise HTTPException(
+                status_code=503,
+                detail="OCR processing failed; check the local OCR configuration",
+            ) from exc
+
         page = BookPage(
             Id=page_id, BookId=book_id, PageNumber=page_number, ImagePath=object_path,
             Width=width, Height=height, LifecycleStatus="ACTIVE", FeaturePath=None,
@@ -176,7 +206,7 @@ class AdminOcrService:
             await self.db.refresh(revision)
         except IntegrityError as exc:
             await self.db.rollback()
-            delete_object(object_path)
+            await run_in_threadpool(delete_object, object_path)
             raise HTTPException(status_code=409, detail="Page number conflicts with an existing page") from exc
         except Exception:
             await self.db.rollback()
@@ -291,8 +321,8 @@ class AdminOcrService:
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
         try:
-            image_bytes = download_object(page.ImagePath)
-            ocr = extract_text_and_boxes(image_bytes)
+            image_bytes = await run_in_threadpool(download_object, page.ImagePath)
+            ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
             await self.db.rollback()
             raise HTTPException(status_code=503, detail=str(exc)) from exc
