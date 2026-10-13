@@ -138,6 +138,8 @@ export interface AdminPageUploadInputUI {
   readonly page_number: number;
   readonly width: number;
   readonly height: number;
+  /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
+  readonly file: File;
 }
 
 export interface AdminPageUploadProgressUI {
