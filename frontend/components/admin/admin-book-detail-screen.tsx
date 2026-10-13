@@ -13,6 +13,7 @@ import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
@@ -102,22 +103,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         eyebrow="Chi tiết sách"
         title={book.title}
         description={`${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
-        actions={
-          <>
-            <Button disabled className="sm:w-auto" variant="secondary">
-              Sửa thông tin
-            </Button>
-            <Button
-              disabled
-              className="sm:w-auto"
-              variant={book.lifecycle_status === "ACTIVE" ? "quiet" : "primary"}
-            >
-              {book.lifecycle_status === "ACTIVE"
-                ? "Ngừng phát hành"
-                : "Kích hoạt"}
-            </Button>
-          </>
-        }
       />
       <Link
         className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -129,10 +114,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         <AdminStatusBadge status={book.lifecycle_status} />
         <span className="text-sm text-muted">ID: {book.id}</span>
       </div>
-      <StatusMessage tone="info">
-        Đang xem dữ liệu thật ở chế độ chỉ đọc. Tạo, sửa, tải ảnh và đổi trạng
-        thái chưa sẵn sàng.
-      </StatusMessage>
+      <AdminPageUploader
+        bookId={book.id}
+        nextPageNumber={Math.max(1, ...((items ?? []).map((item) => item.page_number + 1)))}
+        onUploaded={() => void load()}
+      />
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-2xl font-black" id="pages-title">
