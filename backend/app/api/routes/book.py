@@ -17,12 +17,25 @@ async def get_books(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 @router.post("/", response_model=BookResponse)
-async def create_book(book_in: BookCreate, db: AsyncSession = Depends(get_db)):
-    """Thêm một đầu sách mới"""
-    new_book = Book(**book_in.model_dump())
+async def create_book(
+    book_in: BookCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Legacy book-creation route; Admin role and actor are resolved by Backend."""
+    role = await db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    values = book_in.model_dump(exclude={"CreatedBy"})
+    values["CreatedBy"] = actor_id
+    new_book = Book(**values)
     db.add(new_book)
-    await db.commit()
-    await db.refresh(new_book)
+    try:
+        await db.commit()
+        await db.refresh(new_book)
+    except Exception:
+        await db.rollback()
+        raise
     return new_book
 
 @router.get("/{book_id}/pages", response_model=List[BookPageResponse])
