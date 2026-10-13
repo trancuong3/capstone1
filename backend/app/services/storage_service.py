@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import os
+import re
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, status
@@ -7,27 +10,62 @@ from fastapi import HTTPException, status
 from app.database.config import SUPABASE_URL
 from app.database.supabase_client import get_supabase_admin_client
 
+logger = logging.getLogger(__name__)
 SIGNED_URL_TTL_SECONDS = 3600
 
 
+def _safe_numeric_status(exc: Exception) -> int | None:
+    value = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if 100 <= parsed <= 599 else None
+
+
+def _safe_error_code(exc: Exception) -> str | None:
+    value = getattr(exc, "code", None)
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", value):
+        return value
+    return None
+
+
 def _bucket_name() -> str:
-    import os
     value = (os.getenv("SUPABASE_STORAGE_BUCKET") or "").strip()
     if not value:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Supabase Storage is not configured")
+        logger.warning("Supabase Storage configuration missing: SUPABASE_STORAGE_BUCKET is empty")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase Storage is not configured",
+        )
     return value
 
 
 def _storage_bucket():
-    client = get_supabase_admin_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Server-side Supabase Storage credentials are not configured")
+    bucket_name = _bucket_name()
     try:
-        return client.storage.from_(_bucket_name())
+        client = get_supabase_admin_client()
+        if client is None:
+            logger.warning(
+                "Supabase Storage configuration missing: no server-side key is configured"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server-side Supabase Storage credentials are not configured",
+            )
+        return client.storage.from_(bucket_name)
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Supabase Storage is unavailable") from exc
+        logger.error(
+            "Supabase Storage client initialization failed (exception_type=%s, status_code=%s)",
+            type(exc).__name__,
+            _safe_numeric_status(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase Storage client initialization failed; check the server configuration",
+        ) from exc
 
 
 def upload_object(object_path: str, data: bytes, content_type: str) -> None:
@@ -40,20 +78,37 @@ def upload_object(object_path: str, data: bytes, content_type: str) -> None:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Could not save the image to Supabase Storage") from exc
+        logger.error(
+            "Supabase Storage upload failed (exception_type=%s, status_code=%s, error_code=%s)",
+            type(exc).__name__,
+            _safe_numeric_status(exc),
+            _safe_error_code(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not save the image to Supabase Storage",
+        ) from exc
 
 
 def delete_object(object_path: str) -> None:
     try:
         _storage_bucket().remove([object_path])
-    except Exception:
-        # Cleanup is best-effort. Never leak the Storage exception or its credentials.
+    except Exception as exc:
+        # Cleanup is best-effort. Log only safe metadata and never replace the original failure.
+        logger.warning(
+            "Supabase Storage cleanup failed (exception_type=%s, status_code=%s)",
+            type(exc).__name__,
+            _safe_numeric_status(exc),
+        )
         return
 
 
 def download_object(object_path: str) -> bytes:
     if not object_path or object_path.startswith(("http://", "https://")):
-        raise HTTPException(status_code=503, detail="The stored image is not a Storage object path")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The stored image is not a Storage object path",
+        )
     try:
         result = _storage_bucket().download(object_path)
         if not isinstance(result, (bytes, bytearray)) or not result:
@@ -62,12 +117,21 @@ def download_object(object_path: str) -> bytes:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Could not read the image from Supabase Storage") from exc
+        logger.error(
+            "Supabase Storage download failed (exception_type=%s, status_code=%s, error_code=%s)",
+            type(exc).__name__,
+            _safe_numeric_status(exc),
+            _safe_error_code(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not read the image from Supabase Storage",
+        ) from exc
 
 
 def create_signed_image_url(image_path: str | None) -> str:
     if not isinstance(image_path, str) or not image_path.strip():
-        raise HTTPException(status_code=503, detail="Stored image reference is invalid")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
     if image_path.startswith(("https://", "http://")):
         try:
             parsed = urlsplit(image_path)
@@ -76,7 +140,7 @@ def create_signed_image_url(image_path: str | None) -> str:
                 return image_path  # Legacy references remain readable; new writes store object paths.
         except ValueError:
             pass
-        raise HTTPException(status_code=503, detail="Stored image reference is invalid")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
     try:
         result = _storage_bucket().create_signed_url(image_path, SIGNED_URL_TTL_SECONDS)
         signed = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
@@ -92,4 +156,13 @@ def create_signed_image_url(image_path: str | None) -> str:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Could not create an image preview URL") from exc
+        logger.error(
+            "Supabase signed URL creation failed (exception_type=%s, status_code=%s, error_code=%s)",
+            type(exc).__name__,
+            _safe_numeric_status(exc),
+            _safe_error_code(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not create an image preview URL",
+        ) from exc
