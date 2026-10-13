@@ -246,7 +246,7 @@ class AdminCatalogService:
             return AdminPageProcessingRead(
                 page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
                 verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                ocr_preview_metadata=revision.ProcessingMeta or {}, verified_at=revision.VerifiedAt,
+                ocr_preview_metadata={}, verified_at=revision.VerifiedAt,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
             )
         except ValidationError:
@@ -271,7 +271,7 @@ class AdminCatalogService:
                 height=page.Height,
             )
         except ValidationError:
-            raise HTTPException(status_code=409, detail="Image metadata does not match the admin contract") from None
+            raise HTTPException(status_code=501, detail="Image metadata does not match the admin contract") from None
 
     async def revisions(self, page_id: UUID):
         page = await self.page(page_id)
@@ -296,13 +296,13 @@ class AdminCatalogService:
             if isinstance(box, dict):
                 box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
             if not isinstance(box, list) or len(box) != 4:
-                raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
+                raise HTTPException(status_code=501, detail="Stored bounding box does not match the OCR contract")
             if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in box):
-                raise HTTPException(status_code=409, detail="Stored bounding box is invalid")
+                raise HTTPException(status_code=501, detail="Stored bounding box is invalid")
             x, y, width, height = [float(value) for value in box]
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
-                raise HTTPException(status_code=409, detail="Stored bounding box is outside the normalized image")
+                raise HTTPException(status_code=501, detail="Stored bounding box is outside the normalized image")
             words.append({
                 "word_index": word.WordIndex, "line_index": word.LineIndex, "text": word.Text,
                 "normalized_text": word.NormalizedText, "bbox": (x, y, width, height),
@@ -315,12 +315,12 @@ class AdminCatalogService:
             return AdminRevisionDetailRead(
                 page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
                 verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                draft_text=revision.DraftText if revision.DraftText is not None else revision.VerifiedText,
-                words=words, ocr_metadata=revision.ProcessingMeta or {}, created_at=revision.CreatedAt,
+                draft_text=getattr(revision, "DraftText", None) if getattr(revision, "DraftText", None) is not None else revision.VerifiedText,
+                words=words, ocr_metadata={}, created_at=revision.CreatedAt,
                 verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
             )
         except ValidationError:
-            raise HTTPException(status_code=409, detail="Revision data does not match the admin contract") from None
+            raise HTTPException(status_code=501, detail="Revision data does not match the admin contract") from None
 
 
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])
