@@ -41,8 +41,7 @@ export function validateUploadFile(
       mime_type: file.type,
       size_bytes: file.size,
       page_number: pageNumber,
-      width: 1200,
-      height: 1600,
+      file,
     },
     error: null,
   };
@@ -51,6 +50,10 @@ export function validateUploadFile(
 export function validateUploadDimensions(
   input: AdminPageUploadInputUI,
 ): string | null {
+  if (input.width === undefined || input.height === undefined) {
+    // Dimensions are read from decoded bytes by the active uploader / Backend, not guessed here.
+    return null;
+  }
   if (
     !Number.isSafeInteger(input.width) ||
     !Number.isSafeInteger(input.height) ||
