@@ -53,4 +53,7 @@ tests/
 # Python Virtual Environments
 venv/
 .venv/
-env/
+env/.env.*
+**/.env
+**/.env.*
+!**/.env.example
