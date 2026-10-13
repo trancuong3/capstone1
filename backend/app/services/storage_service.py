@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, status
 
-from app.database.config import SUPABASE_STORAGE_BUCKET, SUPABASE_URL
+from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_STORAGE_BUCKET, SUPABASE_URL
 from app.database.supabase_client import get_supabase_admin_client
 from app.diagnostic_logging import log_diagnostic
 from app.services.runtime_diagnostics import runtime_configuration_diagnostics
@@ -51,7 +51,7 @@ def _safe_error_code(exc: Exception) -> str | None:
 def _bucket_name() -> str:
     value = (SUPABASE_STORAGE_BUCKET or "").strip()
     if not value:
-        diagnostics = runtime_configuration_diagnostics()
+        diagnostics = runtime_configuration_diagnostics(include_ocr=False)
         log_diagnostic(
             logger,
             logging.WARNING,
@@ -68,8 +68,8 @@ def _bucket_name() -> str:
 
 def _storage_bucket():
     bucket_name = _bucket_name()
-    if not get_supabase_admin_client():
-        diagnostics = runtime_configuration_diagnostics()
+    if not SUPABASE_ADMIN_KEY:
+        diagnostics = runtime_configuration_diagnostics(include_ocr=False)
         log_diagnostic(
             logger,
             logging.WARNING,
@@ -83,17 +83,20 @@ def _storage_bucket():
         )
     try:
         client = get_supabase_admin_client()
+        if client is None:
+            raise RuntimeError("server-side Supabase client initialization returned no client")
         return client.storage.from_(bucket_name)
     except HTTPException:
         raise
     except Exception as exc:
+        diagnostics = runtime_configuration_diagnostics(include_ocr=False)
         log_diagnostic(
             logger,
             logging.ERROR,
             event="storage_client_initialization_failed",
             stage="storage_configuration",
             exception=exc,
-            supabase_url_configured=bool(runtime_configuration_diagnostics()["supabase_url_configured"]),
+            supabase_url_configured=diagnostics["supabase_url_configured"],
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -137,7 +140,7 @@ def upload_object(object_path: str, data: bytes, content_type: str) -> None:
             error_code=error_code,
             upstream_http_status=http_status,
             cleanup_may_be_needed=cleanup_may_be_needed,
-            **runtime_configuration_diagnostics(),
+            **runtime_configuration_diagnostics(include_ocr=False),
         )
         raise StorageUploadFailure(
             detail,
