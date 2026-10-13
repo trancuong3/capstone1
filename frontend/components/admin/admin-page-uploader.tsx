@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
@@ -20,16 +20,41 @@ export function AdminPageUploader({ bookId, nextPageNumber, onUploaded }: AdminP
   const [files, setFiles] = useState<File[]>([]);
   const [startNumber, setStartNumber] = useState(String(nextPageNumber));
   const [progress, setProgress] = useState<AdminPageUploadProgressUI[]>([]);
+  const progressRef = useRef<AdminPageUploadProgressUI[]>([]);
+  const [retryEntries, setRetryEntries] = useState<AdminPageUploadInputUI[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function updateProgress(item: AdminPageUploadProgressUI) {
-    setProgress((current) => {
-      const found = current.some((entry) => entry.client_id === item.client_id);
-      return found
-        ? current.map((entry) => entry.client_id === item.client_id ? item : entry)
-        : [...current, item];
-    });
+    const current = progressRef.current;
+    const found = current.some((entry) => entry.client_id === item.client_id);
+    const next = found
+      ? current.map((entry) => entry.client_id === item.client_id ? item : entry)
+      : [...current, item];
+    progressRef.current = next;
+    setProgress(next);
+  }
+
+  async function retryFailed() {
+    const failed = retryEntries.filter((entry) =>
+      progressRef.current.some((item) => item.client_id === entry.client_id && item.status === "FAILED")
+    );
+    if (!failed.length || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await pages.upload(bookId, failed, updateProgress);
+      onUploaded();
+      const stillFailed = failed.filter((entry) =>
+        progressRef.current.some((item) => item.client_id === entry.client_id && item.status === "FAILED")
+      );
+      setRetryEntries(stillFailed);
+      if (stillFailed.length) setError("Một số file vẫn thất bại. Kiểm tra cấu hình Backend/Storage rồi thử lại.");
+    } catch {
+      setError("Không thể tải lại danh sách trang sau khi thử lại. Hãy tải lại dữ liệu để xác minh.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -81,19 +106,26 @@ export function AdminPageUploader({ bookId, nextPageNumber, onUploaded }: AdminP
         localFailures.push({ client_id: clientId, progress_percent: 0, status: "FAILED" });
       }
     }
-    setProgress([
+    const initialProgress = [
       ...localFailures,
       ...entries.map((entry) => ({ client_id: entry.client_id, progress_percent: 0, status: "QUEUED" as const })),
-    ]);
+    ];
+    progressRef.current = initialProgress;
+    setProgress(initialProgress);
+    setRetryEntries(entries);
 
     try {
       if (entries.length) {
         await pages.upload(bookId, entries, updateProgress);
       }
+      const failedEntries = entries.filter((entry) =>
+        progressRef.current.some((item) => item.client_id === entry.client_id && item.status === "FAILED")
+      );
+      setRetryEntries(failedEntries);
       if (entries.length === 0 || localFailures.length === files.length) {
         setError("Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.");
-      } else if (localFailures.length) {
-        setError("Một số file không hợp lệ hoặc upload thất bại. Kiểm tra trạng thái từng file bên dưới.");
+      } else if (localFailures.length || failedEntries.length) {
+        setError("Một số file không hợp lệ hoặc upload thất bại. Dùng nút thử lại cho file thất bại.");
       }
       if (entries.length) onUploaded();
       setFiles([]);
@@ -138,6 +170,11 @@ export function AdminPageUploader({ bookId, nextPageNumber, onUploaded }: AdminP
             </div>
           ))}
         </div>
+      ) : null}
+      {retryEntries.length ? (
+        <Button className="mt-4 sm:w-auto" disabled={busy} isLoading={busy} onClick={() => void retryFailed()} variant="secondary">
+          Thử lại các file thất bại
+        </Button>
       ) : null}
     </section>
   );
