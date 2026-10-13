@@ -38,7 +38,19 @@ class AdminOcrRepository:
             .where(PageRevision.PageId == page_id)
             .order_by(PageRevision.CreatedAt.desc(), PageRevision.Id.desc())
         )
-        return list(result.scalars().all())
+        # revisionno is TEXT in the established schema. Sort valid numeric strings
+        # numerically after retrieval so same-timestamp inserts cannot reorder history
+        # lexically or by random UUID. Invalid legacy values remain visible at the end
+        # and are rejected by the service contract instead of being silently rewritten.
+        rows = list(result.scalars().all())
+
+        def revision_order(row: PageRevision) -> tuple[int, int]:
+            value = str(row.RevisionNo)
+            if value.isascii() and value.isdecimal() and int(value) > 0:
+                return (1, int(value))
+            return (0, -1)
+
+        return sorted(rows, key=revision_order, reverse=True)
 
     async def revision(self, page_id: UUID, revision_id: UUID, *, lock: bool = False) -> PageRevision | None:
         query = select(PageRevision).where(
