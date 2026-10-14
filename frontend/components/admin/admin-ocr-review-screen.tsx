@@ -262,6 +262,10 @@ export function AdminOcrReviewScreen({
       word.ocr_confidence === null ||
       word.ocr_confidence < confidenceThreshold,
   );
+  const ocrWarnings = detail?.ocr_metadata.warnings;
+  const hasAmbiguousCandidates =
+    Array.isArray(ocrWarnings) &&
+    ocrWarnings.includes("candidate_scores_ambiguous");
   if (error) {
     return (
       <EmptyState
@@ -319,6 +323,11 @@ export function AdminOcrReviewScreen({
           tone={notice.startsWith("Không thể") ? "error" : "info"}
         >
           {notice}
+        </StatusMessage>
+      ) : null}
+      {hasAmbiguousCandidates ? (
+        <StatusMessage className="mb-6" tone="info">
+          Các kết quả OCR có điểm đánh giá gần nhau. Vui lòng kiểm tra kỹ nội dung trước khi xác minh.
         </StatusMessage>
       ) : null}
       {wordsNeedingReview.length ? (
