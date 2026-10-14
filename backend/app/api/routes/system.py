@@ -198,9 +198,10 @@ class AdminSystemService:
         # This checks only this API handler and a real database round trip.
         # Auth/OCR/STT/TTS are not probed and must not be reported healthy.
         try:
-            async with asyncio.timeout(4):
-                database_ready = await self.repository.probe_database()
-        except (TimeoutError, SQLAlchemyError, OSError):
+            # asyncio.timeout is only available since Python 3.11. Use wait_for
+            # so the health endpoint still works on legacy 3.10 environments.
+            database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
+        except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
             database_ready = False
         checked_at = datetime.now(timezone.utc)
         return AdminHealthRead(
