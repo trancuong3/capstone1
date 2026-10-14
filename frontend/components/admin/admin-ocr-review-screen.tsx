@@ -327,7 +327,8 @@ export function AdminOcrReviewScreen({
       ) : null}
       {hasAmbiguousCandidates ? (
         <StatusMessage className="mb-6" tone="info">
-          Các kết quả OCR có điểm đánh giá gần nhau. Vui lòng kiểm tra kỹ nội dung trước khi xác minh.
+          Các kết quả OCR có điểm đánh giá gần nhau. Vui lòng kiểm tra kỹ
+          nội dung trước khi xác minh.
         </StatusMessage>
       ) : null}
       {wordsNeedingReview.length ? (
