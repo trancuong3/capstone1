@@ -7,6 +7,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -46,7 +47,7 @@ function safeMutationError(error: unknown) {
     return "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường.";
   }
   if (isServiceError(error) && error.status === 503) {
-    return "Backend chưa được cấu hình quyền quản lý tài khoản Supabase Auth.";
+    return "Backend thiếu khóa Supabase Auth Admin. Hãy cấu hình SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY trong backend/.env rồi khởi động lại Backend.";
   }
   return "Không thể hoàn thành thao tác. Vui lòng thử lại.";
 }
@@ -70,6 +71,9 @@ export function AdminParentsScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<AdminParentProfileItemDTO | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -187,6 +191,26 @@ export function AdminParentsScreen() {
       setFormError(safeMutationError(cause));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function confirmDeleteParent() {
+    if (!pendingDelete || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await parents.deactivate(pendingDelete.id);
+      setNotice("Đã ẩn Parent khỏi danh sách. Tài khoản Supabase Auth và dữ liệu liên quan vẫn được giữ.");
+      setPendingDelete(null);
+      if (items?.length === 1 && offset > 0) {
+        setOffset(Math.max(0, offset - PAGE_SIZE));
+      } else {
+        await load();
+      }
+    } catch (cause) {
+      setDeleteError(safeMutationError(cause));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -339,6 +363,13 @@ export function AdminParentsScreen() {
                     <Button className="sm:w-auto" onClick={() => void openEdit(parent.id)} variant="secondary">
                       <Pencil aria-hidden className="size-5" /> Sửa
                     </Button>
+                    <Button
+                      className="sm:w-auto"
+                      onClick={() => { setPendingDelete(parent); setDeleteError(null); }}
+                      variant="secondary"
+                    >
+                      <Trash2 aria-hidden className="size-5" /> Xóa
+                    </Button>
                   </div>
                 </div>
               </Card>
@@ -376,6 +407,35 @@ export function AdminParentsScreen() {
             <Button className="sm:w-auto" isLoading={saving} type="submit">{formMode === "create" ? "Tạo Parent" : "Lưu thay đổi"}</Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={pendingDelete !== null}
+        onClose={() => { if (!deleting) { setPendingDelete(null); setDeleteError(null); } }}
+        title="Xóa Parent"
+      >
+        {pendingDelete ? (
+          <div className="grid gap-4">
+            <p>
+              Bạn có chắc muốn ẩn Parent{" "}
+              <strong>{pendingDelete.display_name?.trim() || pendingDelete.id}</strong>{" "}
+              khỏi danh sách quản trị?
+            </p>
+            <p className="text-sm text-muted">
+              Đây là xóa mềm: trạng thái active sẽ chuyển thành 0. Hồ sơ, tài khoản Supabase Auth,
+              hồ sơ bé và lịch sử học tập sẽ được giữ nguyên.
+            </p>
+            {deleteError ? <StatusMessage tone="error" title={deleteError}>Hãy kiểm tra cấu hình và thử lại.</StatusMessage> : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <Button className="sm:w-auto" disabled={deleting} onClick={() => { setPendingDelete(null); setDeleteError(null); }} type="button" variant="secondary">
+                Hủy
+              </Button>
+              <Button className="sm:w-auto" isLoading={deleting} onClick={() => void confirmDeleteParent()} type="button">
+                Xóa Parent
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </>
   );

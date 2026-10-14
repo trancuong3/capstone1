@@ -46,6 +46,7 @@ class PageRevision(Base):
     RevisionNo = Column("revisionno", String, nullable=False)
     VerificationStatus = Column("verificationstatus", String, nullable=False)
     VerifiedText = Column("verifiedtext", String)
+    DraftText = Column("drafttext", String)
     ContentHash = Column("contenthash", String, nullable=False)
     ProcessingMeta = Column("processingmeta", JSONB, server_default=text("'{}'::jsonb"))
     VerifiedBy = Column("verifiedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))

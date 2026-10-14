@@ -2,7 +2,7 @@
 import os
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
@@ -11,6 +11,7 @@ os.environ["SUPABASE_KEY"] = "isolated-test-key"
 
 from sqlalchemy.dialects import postgresql
 
+from app.database import supabase_client
 from app.repositories.admin_parent_repository import AdminParentRepository
 from app.services.admin_parent_service import (
     AdminParentAccessDeniedError,
@@ -43,6 +44,10 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         sql = str(statement.compile(dialect=postgresql.dialect()))
         self.assertNotIn("admin_hidden_at", sql)
         self.assertIn("profiles.role", sql)
+        self.assertIn("profiles.active", sql)
+        self.assertIn(1, statement.compile(dialect=postgresql.dialect()).params.values())
+        count_sql = str(db.scalar.await_args.args[0].compile(dialect=postgresql.dialect()))
+        self.assertIn("profiles.active", count_sql)
         self.assertIn("childprofiles", sql)
 
     async def test_admin_receives_parent_projection_and_pagination(self):
@@ -399,6 +404,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
         }
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
+        repository.activate_parent = AsyncMock(return_value=True)
         repository.get_parent_detail = AsyncMock(return_value=parent_row)
         provider = MagicMock()
         provider.invite_parent = AsyncMock(return_value=PARENT_ID)
@@ -433,6 +439,7 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
+        repository.activate_parent = AsyncMock(return_value=True)
         repository.get_parent_detail = AsyncMock(return_value=None)
         provider = MagicMock()
         provider.invite_parent = AsyncMock(return_value=PARENT_ID)
@@ -448,6 +455,116 @@ class AdminParentServiceTests(unittest.IsolatedAsyncioTestCase):
             )
 
         provider.compensate_failed_invite.assert_awaited_once_with(PARENT_ID)
+
+
+    async def test_admin_soft_delete_sets_only_active_flag(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(
+            return_value={"id": PARENT_ID, "display_name": "Parent A", "created_at": CREATED_AT}
+        )
+        repository.soft_delete_parent = AsyncMock(return_value=True)
+
+        result = await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
+
+        self.assertEqual(result, {"id": PARENT_ID, "active": 0})
+        repository.soft_delete_parent.assert_awaited_once_with(PARENT_ID)
+
+    async def test_inactive_or_missing_parent_cannot_be_deleted_twice(self):
+        repository = MagicMock()
+        repository.role = AsyncMock(return_value="admin")
+        repository.get_parent_record = AsyncMock(return_value=None)
+        repository.soft_delete_parent = AsyncMock()
+
+        with self.assertRaises(AdminParentNotFoundError):
+            await AdminParentService(repository).deactivate_parent(ADMIN_ID, PARENT_ID)
+
+        repository.soft_delete_parent.assert_not_awaited()
+
+    def test_missing_admin_key_logs_safe_configuration_warning(self):
+        supabase_client.get_supabase_admin_client.cache_clear()
+        try:
+            with patch.object(supabase_client, "SUPABASE_ADMIN_KEY", None):
+                with self.assertLogs("app.database.supabase_client", level="WARNING") as captured:
+                    self.assertIsNone(supabase_client.get_supabase_admin_client())
+            output = "\n".join(captured.output)
+            self.assertIn("SUPABASE_SECRET_KEY", output)
+            self.assertIn("SUPABASE_SERVICE_ROLE_KEY", output)
+        finally:
+            supabase_client.get_supabase_admin_client.cache_clear()
+
+    def test_admin_client_uses_sync_compatible_client_options(self):
+        options = supabase_client.ClientOptions(
+            auto_refresh_token=False,
+            persist_session=False,
+        )
+        self.assertTrue(
+            hasattr(options, "storage"),
+            "The sync Supabase client options must include storage.",
+        )
+
+    def test_invite_normalizes_client_initialization_error_without_logging_details(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthProviderError,
+        )
+
+        with patch(
+            "app.providers.supabase_auth_contact_provider.get_supabase_admin_client",
+            side_effect=AttributeError("private detail that must not be logged"),
+        ):
+            with self.assertLogs(
+                "app.providers.supabase_auth_contact_provider", level="WARNING"
+            ) as captured:
+                with self.assertRaises(SupabaseAuthProviderError):
+                    SupabaseAuthContactProvider._invite_parent(
+                        "parent@example.com", "Parent A", None
+                    )
+
+        output = "\n".join(captured.output)
+        self.assertIn("operation=invite_parent", output)
+        self.assertIn("exception_type=AttributeError", output)
+        self.assertNotIn("private detail that must not be logged", output)
+
+    def test_unrelated_auth_422_is_not_mislabeled_as_account_conflict(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthProviderError,
+            SupabaseAuthConflictError,
+        )
+
+        class InvalidRequestError(Exception):
+            status = 422
+            error_code = "validation_error"
+
+        with self.assertLogs(
+            "app.providers.supabase_auth_contact_provider", level="WARNING"
+        ):
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                InvalidRequestError("invalid request"), operation="test"
+            )
+
+        self.assertIs(type(normalized), SupabaseAuthProviderError)
+        self.assertNotIsInstance(normalized, SupabaseAuthConflictError)
+
+    def test_auth_conflict_error_code_maps_to_conflict_even_with_generic_message(self):
+        from app.providers.supabase_auth_contact_provider import (
+            SupabaseAuthContactProvider,
+            SupabaseAuthConflictError,
+        )
+
+        class DuplicateEmailError(Exception):
+            status = 422
+            code = "email_exists"
+
+        with self.assertLogs(
+            "app.providers.supabase_auth_contact_provider", level="WARNING"
+        ):
+            normalized = SupabaseAuthContactProvider._normalize_error(
+                DuplicateEmailError("request failed"), operation="test"
+            )
+
+        self.assertIsInstance(normalized, SupabaseAuthConflictError)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import { requestApi, unavailableOperation } from "@/lib/api/api-client";
+import { isServiceError } from "@/lib/api/service-error";
+import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 
 export interface AdminPageService {
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
@@ -79,7 +81,53 @@ export function createAdminPageService(): AdminPageService {
         `/books/admin/pages/${encodeURIComponent(pageId)}/processing`,
         adminProcessingSchema.refine((item) => item.page_id === pageId),
       ),
-    upload: unavailableOperation,
+    upload: async (bookId, pages, onProgress) => {
+      for (const page of pages) {
+        onProgress?.({
+          client_id: page.client_id,
+          progress_percent: 0,
+          status: "UPLOADING",
+        });
+        const form = new FormData();
+        form.append("image", page.file, page.file_name);
+        form.append("page_number", String(page.page_number));
+        try {
+          await requestApi(
+            `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
+            adminRevisionDetailSchema,
+            undefined,
+            { method: "POST", body: form },
+          );
+          // The endpoint returns only after OCR and database persistence complete.
+          onProgress?.({
+            client_id: page.client_id,
+            progress_percent: 100,
+            status: "PROCESSING",
+          });
+        } catch (cause) {
+          onProgress?.({
+            client_id: page.client_id,
+            progress_percent: 0,
+            status: "FAILED",
+            error_message: isServiceError(cause)
+              ? cause.message
+              : "Upload thất bại. Hãy kiểm tra Backend và thử lại.",
+          });
+        }
+      }
+      return requestApi(
+        `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
+        z
+          .array(
+            z.object({
+              book_id: z.uuid(),
+              page_number: z.number().int().positive(),
+              processing: adminProcessingSchema,
+            }),
+          )
+          .refine((items) => items.every((item) => item.book_id === bookId)),
+      );
+    },
     updateStatus: unavailableOperation,
   };
 }

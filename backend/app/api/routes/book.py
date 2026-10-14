@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_parent_id
 from app.models import Book, BookPage
 from app.schemas import BookResponse, BookCreate, BookPageResponse
 
@@ -17,12 +17,25 @@ async def get_books(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 @router.post("/", response_model=BookResponse)
-async def create_book(book_in: BookCreate, db: AsyncSession = Depends(get_db)):
-    """Thêm một đầu sách mới"""
-    new_book = Book(**book_in.model_dump())
+async def create_book(
+    book_in: BookCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Legacy book-creation route; Admin role and actor are resolved by Backend."""
+    role = await db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    values = book_in.model_dump(exclude={"CreatedBy"})
+    values["CreatedBy"] = actor_id
+    new_book = Book(**values)
     db.add(new_book)
-    await db.commit()
-    await db.refresh(new_book)
+    try:
+        await db.commit()
+        await db.refresh(new_book)
+    except Exception:
+        await db.rollback()
+        raise
     return new_book
 
 @router.get("/{book_id}/pages", response_model=List[BookPageResponse])
@@ -41,6 +54,7 @@ from urllib.parse import urlsplit
 from app.api.deps import get_current_parent_id
 from app.models import PageRevision, Profile
 from app.schemas.book import CatalogBookResponse, CatalogPagePreviewResponse
+from app.services.storage_service import create_signed_image_url
 
 
 class CatalogRepository:
@@ -127,23 +141,15 @@ class CatalogService:
         pages = await self.repository.previews(book_id)
         previews = []
         for page in pages:
-            try:
-                path = urlsplit(page.ImagePath)
-                valid_url = (path.scheme in ("https", "http") and path.hostname
-                             and not path.username and not path.password)
-                # Accessing port also validates malformed ports in stored URLs.
-                path.port
-            except ValueError:
-                valid_url = False
-            if not valid_url:
-                # Relative Storage paths need a real bucket/access policy first.
-                raise HTTPException(status_code=503, detail="Preview is not available yet")
+            # Validate/create an image URL before projecting the remaining page fields.
+            # This also returns a safe 503 for malformed legacy paths.
+            preview_url = create_signed_image_url(page.ImagePath)
             previews.append(CatalogPagePreviewResponse(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 lifecycle_status=page.LifecycleStatus,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
-                preview_url=page.ImagePath,
+                preview_url=preview_url,
             ))
         return previews
 
@@ -300,18 +306,17 @@ class AdminCatalogService:
 
     async def image(self, page_id: UUID):
         page = await self.page(page_id)
+        preview_url = create_signed_image_url(page.ImagePath)
         try:
-            path = urlsplit(page.ImagePath)
-            valid_url = path.scheme in ("https", "http") and bool(path.hostname) and not path.username and not path.password
-            path.port  # Reject malformed ports without exposing the stored path.
-        except (TypeError, ValueError):
-            valid_url = False
-        if not valid_url:
-            raise HTTPException(status_code=503, detail="Image is not available yet")
-        try:
-            return AdminPageImageRead(page_id=page.Id, page_number=page.PageNumber, preview_url=page.ImagePath, width=page.Width, height=page.Height)
+            return AdminPageImageRead(
+                page_id=page.Id,
+                page_number=page.PageNumber,
+                preview_url=preview_url,
+                width=page.Width,
+                height=page.Height,
+            )
         except ValidationError:
-            raise HTTPException(status_code=501, detail="Image contract is not available yet") from None
+            raise HTTPException(status_code=501, detail="Image metadata does not match the admin contract") from None
 
     async def revisions(self, page_id: UUID):
         page = await self.page(page_id)
@@ -332,22 +337,45 @@ class AdminCatalogService:
         words = []
         for word in await self.repository.words(revision_id):
             box = word.BoundingBox
-            if not isinstance(box, dict) or not all(key in box for key in ("x", "y", "width", "height")):
+            # New writes use [x, y, width, height]. Legacy object rows are read-only compatibility.
+            if isinstance(box, dict):
+                box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
+            if not isinstance(box, list) or len(box) != 4:
                 raise HTTPException(status_code=501, detail="Word bounding box contract is not available yet")
-            bbox = tuple(box[key] for key in ("x", "y", "width", "height"))
-            if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1 for value in bbox):
+            if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in box):
                 raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
-            words.append({"word_index": word.WordIndex, "line_index": word.LineIndex, "text": word.Text,
-                          "normalized_text": word.NormalizedText, "bbox": bbox, "ocr_confidence": word.OCRConfidence})
+            x, y, width, height = [float(value) for value in box]
+            if (any(value < 0 or value > 1 for value in (x, y, width, height))
+                or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
+                raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
+            words.append({
+                "word_index": word.WordIndex,
+                "line_index": word.LineIndex,
+                "text": word.Text,
+                "normalized_text": word.NormalizedText,
+                "bbox": (x, y, width, height),
+                "ocr_confidence": word.OCRConfidence,
+            })
+        raw_revision = str(revision.RevisionNo)
+        if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
+            raise HTTPException(status_code=501, detail="Revision number contract is not available yet")
         try:
             return AdminRevisionDetailRead(
-                page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
-                verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                draft_text=revision.VerifiedText, words=words, ocr_metadata={}, created_at=revision.CreatedAt,
-                verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
+                page_id=page.Id,
+                page_revision_id=revision.Id,
+                revision_no=int(raw_revision),
+                verification_status=revision.VerificationStatus,
+                lifecycle_status=page.LifecycleStatus,
+                draft_text=getattr(revision, "DraftText", None) if getattr(revision, "DraftText", None) is not None else revision.VerifiedText,
+                words=words,
+                # Only explicitly approved fields should be exposed by this public DTO.
+                ocr_metadata={},
+                created_at=revision.CreatedAt,
+                verified_at=revision.VerifiedAt,
+                verified_by=revision.VerifiedBy,
             )
         except ValidationError:
-            raise HTTPException(status_code=501, detail="Revision detail contract is not available yet") from None
+            raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
 
 
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])

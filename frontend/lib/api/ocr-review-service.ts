@@ -3,7 +3,7 @@ import type {
   AdminRevisionWordDTO,
 } from "@/types/admin";
 import { z } from "zod";
-import { requestApi, unavailableOperation } from "@/lib/api/api-client";
+import { requestApi } from "@/lib/api/api-client";
 
 export interface OcrReviewService {
   getRevision(
@@ -18,7 +18,7 @@ export interface OcrReviewService {
   ): Promise<AdminPageRevisionDetailDTO>;
 }
 
-const revisionSchema = z.object({
+export const adminRevisionDetailSchema = z.object({
   page_id: z.uuid(),
   page_revision_id: z.uuid(),
   revision_no: z.number().int().positive(),
@@ -51,11 +51,33 @@ export function createOcrReviewService(): OcrReviewService {
     getRevision: (pageId, revisionId) =>
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}`,
-        revisionSchema.refine(
+        adminRevisionDetailSchema.refine(
           (item) =>
             item.page_id === pageId && item.page_revision_id === revisionId,
         ),
       ),
-    saveDraft: unavailableOperation,
+    saveDraft: (pageId, revisionId, draftText, words) =>
+      requestApi(
+        `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}/draft`,
+        adminRevisionDetailSchema.refine(
+          (item) =>
+            item.page_id === pageId && item.page_revision_id === revisionId,
+        ),
+        undefined,
+        {
+          method: "PUT",
+          body: {
+            draft_text: draftText,
+            words: words.map((word) => ({
+              word_index: word.word_index,
+              line_index: word.line_index,
+              text: word.text,
+              normalized_text: word.normalized_text,
+              bbox: [...word.bbox],
+              ocr_confidence: word.ocr_confidence,
+            })),
+          },
+        },
+      ),
   };
 }

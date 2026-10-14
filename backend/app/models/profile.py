@@ -13,6 +13,7 @@ class Profile(Base):
     Role = Column("role", String, nullable=False)
     DisplayName = Column("displayname", String)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    Active = Column("active", SmallInteger, nullable=False, server_default=text("1"))
 
     children = relationship("ChildProfile", back_populates="parent", cascade="all, delete-orphan")
 

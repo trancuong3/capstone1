@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminNewBookScreen } from "@/components/admin/admin-new-book-screen";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
@@ -9,6 +8,11 @@ import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => ({ push: vi.fn() }) };
+});
 
 vi.mock("@/lib/supabase/admin-auth-service", () => ({
   createSupabaseAdminAuthService: () => ({}),
@@ -103,7 +107,7 @@ describe("Phase 5 real-data runtime cleanup", () => {
       );
     }
   });
-  it("read-only admin components contain no write handlers or fabricated words", () => {
+  it("Admin Books OCR components use real services without fabricated OCR output", () => {
     for (const path of [
       "components/admin/admin-book-detail-screen.tsx",
       "components/admin/admin-ocr-review-screen.tsx",
@@ -111,48 +115,70 @@ describe("Phase 5 real-data runtime cleanup", () => {
       "components/admin/admin-page-uploader.tsx",
     ]) {
       expect(source(path), path).not.toMatch(
-        /wordsFromText|OCR mock|(?:books|pages|ocr|revisions)\.(?:create|update|updateStatus|upload|saveDraft|verify|reprocess)\s*\(/,
+        /wordsFromText|OCR mock|fake OCR|mock OCR/i,
       );
     }
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /ocr\.saveDraft\(/,
+    );
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /revisions\.verify\(/,
+    );
+    expect(source("components/admin/admin-ocr-review-screen.tsx")).toMatch(
+      /revisions\.reprocess\(/,
+    );
+    expect(source("components/admin/admin-new-book-screen.tsx")).toMatch(
+      /books\.create\(/,
+    );
+    expect(source("components/admin/admin-page-uploader.tsx")).toMatch(
+      /pages\.upload\(/,
+    );
   });
-  it("new-book route shows unavailable without a form, provider or write request", () => {
-    render(<AdminNewBookScreen />);
+  it("new-book screen exposes a validated form and waits for submit before writing", () => {
+    render(
+      <AdminServicesProvider>
+        <AdminNewBookScreen />
+      </AdminServicesProvider>,
+    );
     expect(
       screen.getByRole("heading", { name: "Tạo sách mới" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/API tạo sách chưa được triển khai/),
+      screen.getByRole("textbox", { name: "Tên sách" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Tạo sách" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /quay lại/ })).toHaveAttribute(
-      "href",
-      "/admin/books",
-    );
+      screen.getByRole("textbox", { name: /Tác giả/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Khối lớp nhỏ nhất" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Khối lớp lớn nhất" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tạo sách" })).toBeEnabled();
+    expect(
+      screen.getByRole("link", { name: /Hủy và quay lại/ }),
+    ).toHaveAttribute("href", "/admin/books");
     expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("compatibility uploader cannot accept files, create progress or invoke a completion callback", async () => {
+  it("uploader accepts multiple page images and exposes the real upload action", () => {
     const onUploaded = vi.fn();
-    const user = userEvent.setup();
     render(
-      <AdminPageUploader
-        bookId={bookId}
-        nextPageNumber={1}
-        onUploaded={onUploaded}
-      />,
+      <AdminServicesProvider>
+        <AdminPageUploader
+          bookId={bookId}
+          nextPageNumber={1}
+          onUploaded={onUploaded}
+        />
+      </AdminServicesProvider>,
     );
-    const input = screen.getByLabelText(/Chọn ảnh trang sách/);
-    expect(input).toBeDisabled();
-    await user.upload(
-      input,
-      new File(["isolated test"], "page.png", { type: "image/png" }),
-    );
+    const input = screen.getByLabelText(/Chọn một hoặc nhiều ảnh trang sách/);
+    expect(input).toBeEnabled();
+    expect(input).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    expect(input).toHaveAttribute("multiple");
     expect(
-      screen.getByRole("button", { name: "Tải trang lên" }),
-    ).toBeDisabled();
-    expect(screen.queryByLabelText("Hàng đợi tải lên")).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Upload và chạy OCR" }),
+    ).toBeEnabled();
     expect(onUploaded).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });

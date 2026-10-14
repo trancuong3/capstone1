@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ResetPasswordScreen } from "@/components/auth/reset-password-screen";
@@ -71,10 +71,9 @@ describe("ResetPasswordScreen", () => {
     expect(service.resetPassword).toHaveBeenCalledWith({
       newPassword: "matkhau123",
     });
-    expect(screen.getByRole("link", { name: /Đăng nhập/ })).toHaveAttribute(
-      "href",
-      "/login",
-    );
+    expect(
+      within(screen.getByRole("main")).getByRole("link", { name: /Đăng nhập/ }),
+    ).toHaveAttribute("href", "/login");
   });
 
   it.each([
