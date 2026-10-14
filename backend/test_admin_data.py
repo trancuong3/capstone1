@@ -199,10 +199,16 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_health_reports_only_services_actually_checked(self):
         repo = MagicMock(probe_database=AsyncMock(return_value=True))
-        result = await AdminSystemService(repo).health()
+        voice = MagicMock(
+            probe_tts=AsyncMock(return_value=("HEALTHY", "ElevenLabs TTS kết nối bình thường")),
+            probe_stt=AsyncMock(return_value=("HEALTHY", "ElevenLabs STT kết nối bình thường")),
+        )
+        result = await AdminSystemService(repo, voice).health()
         self.assertEqual(result.overall_status, "HEALTHY")
-        self.assertEqual([item.id for item in result.services], ["api", "database"])
+        self.assertEqual([item.id for item in result.services], ["api", "database", "tts", "stt"])
         repo.probe_database.assert_awaited_once()
+        voice.probe_tts.assert_awaited_once()
+        voice.probe_stt.assert_awaited_once()
 
     async def test_probe_uses_select_not_write(self):
         db = MagicMock(scalar=AsyncMock(return_value=1))
@@ -214,10 +220,28 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
     async def test_probe_failure_is_degraded_without_private_error(self):
         for failure in (TimeoutError("private"), SQLAlchemyError("private"), OSError("private")):
             repo = MagicMock(probe_database=AsyncMock(side_effect=failure))
-            result = await AdminSystemService(repo).health()
+            voice = MagicMock(
+                probe_tts=AsyncMock(return_value=("HEALTHY", "ok")),
+                probe_stt=AsyncMock(return_value=("HEALTHY", "ok")),
+            )
+            result = await AdminSystemService(repo, voice).health()
             self.assertEqual(result.overall_status, "DEGRADED")
             self.assertEqual(result.services[1].status, "UNAVAILABLE")
             self.assertNotIn("private", result.model_dump_json())
+
+    async def test_voice_probe_failure_is_degraded_without_private_error(self):
+        repo = MagicMock(probe_database=AsyncMock(return_value=True))
+        voice = MagicMock(
+            probe_tts=AsyncMock(return_value=("UNAVAILABLE", "Không thể kết nối dịch vụ TTS.")),
+            probe_stt=AsyncMock(return_value=("HEALTHY", "ElevenLabs STT kết nối bình thường")),
+        )
+        result = await AdminSystemService(repo, voice).health()
+        self.assertEqual(result.overall_status, "DEGRADED")
+        self.assertEqual(result.services[2].id, "tts")
+        self.assertEqual(result.services[2].status, "UNAVAILABLE")
+        self.assertEqual(result.services[3].id, "stt")
+        self.assertEqual(result.services[3].status, "HEALTHY")
+
 
 
 class AdminHttpTests(unittest.TestCase):

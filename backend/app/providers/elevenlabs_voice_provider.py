@@ -166,3 +166,61 @@ class ElevenLabsVoiceProvider:
             return self._transcription_from_payload(response.json())
         except ValueError as error:
             raise VoiceProviderError() from error
+
+    async def probe_tts(self) -> tuple[str, str]:
+        """
+        Probe ElevenLabs TTS service health without spending character quota.
+        Returns (status: "HEALTHY" | "DEGRADED" | "UNAVAILABLE", safe_message: str).
+        """
+        if not self._api_key:
+            return "UNAVAILABLE", "Chưa cấu hình ELEVENLABS_API_KEY trong hệ thống."
+        voice_id = quote(self._voice_id(None), safe="")
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=3.0)) as client:
+                response = await client.get(
+                    f"{ELEVENLABS_API_BASE_URL}/voices/{voice_id}",
+                    headers=self._headers(),
+                )
+            if response.status_code == 200:
+                voice_name = response.json().get("name", "Giọng đọc")
+                return "HEALTHY", f"ElevenLabs TTS sẵn sàng (Giọng: {voice_name})."
+            elif response.status_code in (401, 403):
+                return "UNAVAILABLE", "Khóa API ElevenLabs không hợp lệ hoặc không có quyền truy cập."
+            elif response.status_code == 429:
+                return "DEGRADED", "ElevenLabs TTS bị giới hạn tần suất yêu cầu (Rate limit)."
+            else:
+                return "UNAVAILABLE", f"Máy chủ ElevenLabs TTS phản hồi mã lỗi {response.status_code}."
+        except (httpx.TimeoutException, TimeoutError):
+            return "UNAVAILABLE", "Hết thời gian chờ phản hồi từ máy chủ ElevenLabs TTS."
+        except Exception:
+            return "UNAVAILABLE", "Không thể kết nối tới dịch vụ ElevenLabs TTS."
+
+    async def probe_stt(self) -> tuple[str, str]:
+        """
+        Probe ElevenLabs STT service health without spending quota.
+        Returns (status: "HEALTHY" | "DEGRADED" | "UNAVAILABLE", safe_message: str).
+        """
+        if not self._api_key:
+            return "UNAVAILABLE", "Chưa cấu hình ELEVENLABS_API_KEY trong hệ thống."
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=3.0)) as client:
+                response = await client.get(
+                    f"{ELEVENLABS_API_BASE_URL}/models",
+                    headers=self._headers(),
+                )
+            if response.status_code == 200:
+                models = response.json()
+                has_scribe = any(m.get("model_id") == "scribe_v2" for m in models) if isinstance(models, list) else True
+                model_label = "Scribe v2" if has_scribe else "Mặc định"
+                return "HEALTHY", f"ElevenLabs STT sẵn sàng (Model: {model_label} tiếng Việt)."
+            elif response.status_code in (401, 403):
+                return "UNAVAILABLE", "Khóa API ElevenLabs không hợp lệ hoặc không có quyền truy cập."
+            elif response.status_code == 429:
+                return "DEGRADED", "ElevenLabs STT bị giới hạn tần suất yêu cầu (Rate limit)."
+            else:
+                return "UNAVAILABLE", f"Máy chủ ElevenLabs STT phản hồi mã lỗi {response.status_code}."
+        except (httpx.TimeoutException, TimeoutError):
+            return "UNAVAILABLE", "Hết thời gian chờ phản hồi từ máy chủ ElevenLabs STT."
+        except Exception:
+            return "UNAVAILABLE", "Không thể kết nối tới dịch vụ ElevenLabs STT."
+

@@ -43,7 +43,7 @@ export function AdminHealthScreen() {
       <AdminPageHeader
         eyebrow="Operational review"
         title="Tình trạng vận hành"
-        description="Backend kiểm tra API và kết nối database thật. Chưa kiểm tra Auth, OCR, STT hoặc TTS."
+        description="Backend kiểm tra FastAPI, Database, và trạng thái kết nối các API dịch vụ TTS và STT (ElevenLabs)."
         actions={
           <Button
             disabled={!snapshot && !error}

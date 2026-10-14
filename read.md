@@ -63,11 +63,32 @@ This document summarizes all features, technical improvements, and bug fixes tha
 
 ---
 
-## 4. Testing & Quality Assurance Results
+## 4. Operational Review Health Probes for TTS & STT APIs (Vận hành hệ thống)
+
+- **Previous state**:
+  - The Operational Review screen (`/admin/health`) only verified FastAPI and Database connectivity.
+  - Description stated: *"Backend kiểm tra API và kết nối database thật. Chưa kiểm tra Auth, OCR, STT hoặc TTS."*
+- **Solutions & improvements**:
+  - **Zero-Credit Live Service Probes**:
+    - **ElevenLabs TTS Probe**: Implemented `probe_tts()` in `ElevenLabsVoiceProvider` querying `GET /v1/voices/{voice_id}`. Verifies valid API key authentication, voice configuration ("Jessica"), and network availability without consuming any character quotas or synthesizing audio.
+    - **ElevenLabs STT Probe**: Implemented `probe_stt()` in `ElevenLabsVoiceProvider` querying `GET /v1/models`. Verifies API key authentication and Scribe v2 model availability without consuming audio transcription quotas.
+    - Safe diagnostics: Intelligently handles 401/403 (unauthorized / invalid key $\to$ `UNAVAILABLE`), 429 (rate-limited $\to$ `DEGRADED`), and connection timeouts (4s max) without leaking sensitive keys, tokens, or raw tracebacks to logs or UI.
+  - **Admin System Health Service Integration**:
+    - Updated `AdminSystemService.health()` to concurrently probe database, TTS, and STT services.
+    - Delivers 4 structured health cards adhering to the schema contract: `FastAPI`, `Database`, `Text-to-Speech (TTS)`, and `Speech-to-Text (STT)`.
+    - Overall system status dynamically evaluates to `HEALTHY` or `DEGRADED` based on live probe results.
+  - **Frontend Operational UI Enhancements**:
+    - Updated `AdminHealthScreen` header description: *"Backend kiểm tra FastAPI, Database, và trạng thái kết nối các API dịch vụ TTS và STT (ElevenLabs)."*
+    - Automatically renders the 4 service status cards in the responsive 2x2 grid with status badges, safe user messages, and localized timestamps.
+    - Unit tests in `backend/test_admin_data.py` verify all 4 monitored services and graceful degradation.
+
+---
+
+## 5. Testing & Quality Assurance Results
 
 - **Backend Unit & Integration Tests**:
-  - Ran `pytest`: **126 / 126 tests passed** (100%).
-  - Added test cases for the Vietnamese model fallback, metadata, and noise filtering.
+  - Ran `pytest`: **127 / 127 tests passed** (100%).
+  - Added unit tests for TTS & STT health probes and graceful degradation in `test_admin_data.py`.
 - **Frontend Unit & Component Tests**:
   - Ran `npm test`: **417 / 417 tests passed** (100%).
 - **Production Build**:
@@ -75,7 +96,8 @@ This document summarizes all features, technical improvements, and bug fixes tha
 
 ---
 
-## 5. Git Branch Workflow
+## 6. Git Branch Workflow
 
 - All commits have been pushed exclusively to branch: **`tu`**.
 - Never merged into `main`.
+
