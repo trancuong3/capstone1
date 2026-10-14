@@ -14,6 +14,63 @@ class AdminOcrRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def rollback(self) -> None:
+        """Roll back the current unit of work after a failed persistence operation."""
+        await self.db.rollback()
+
+    async def commit_and_refresh(self, *entities: object) -> None:
+        """Commit pending changes and refresh the returned ORM entities."""
+        await self.db.commit()
+        for entity in entities:
+            await self.db.refresh(entity)
+
+    async def persist_book(self, book: Book) -> Book:
+        """Persist a Book model; business validation remains in the service."""
+        self.db.add(book)
+        await self.commit_and_refresh(book)
+        return book
+
+    @staticmethod
+    def _word_rows(
+        revision_id: UUID,
+        words: list[dict[str, object]],
+    ) -> list[PageRevisionWord]:
+        """Map validated OCR word data to ORM rows without applying business rules."""
+        return [
+            PageRevisionWord(
+                PageRevisionId=revision_id,
+                WordIndex=int(word["word_index"]),
+                LineIndex=int(word["line_index"]),
+                Text=str(word["text"]),
+                NormalizedText=str(word["normalized_text"]),
+                BoundingBox=list(word["bbox"]),
+                OCRConfidence=word.get("ocr_confidence"),
+            )
+            for word in words
+        ]
+
+    async def persist_page_revision(
+        self,
+        page: BookPage,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+    ) -> tuple[BookPage, PageRevision]:
+        """Persist a new page, its initial revision, and OCR word rows atomically."""
+        self.db.add_all([page, revision, *self._word_rows(revision.Id, words)])
+        await self.commit_and_refresh(page, revision)
+        return page, revision
+
+    async def persist_revision(
+        self,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+        *refresh_entities: object,
+    ) -> PageRevision:
+        """Persist a new revision and its word rows as one database unit of work."""
+        self.db.add_all([revision, *self._word_rows(revision.Id, words)])
+        await self.commit_and_refresh(revision, *refresh_entities)
+        return revision
+
     async def role(self, profile_id: UUID) -> str | None:
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
 
