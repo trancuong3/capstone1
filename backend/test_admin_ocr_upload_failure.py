@@ -25,6 +25,8 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service.repo.role = AsyncMock(return_value="admin")
         service.repo.book = AsyncMock(return_value=SimpleNamespace(LifecycleStatus="ACTIVE"))
         service.repo.page_number_exists = AsyncMock(return_value=False)
+        service.repo.persist_page_revision = AsyncMock()
+        service.repo.rollback = AsyncMock()
         service._read_validate_image = AsyncMock(
             return_value=(b"valid-image-data", "image/png", "png", 100, 100)
         )
@@ -49,7 +51,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         cleanup.assert_not_awaited()
         self.assertTrue(any('"stage":"storage_upload"' in line for line in captured.output))
         self.assertTrue(any('"book_id":"' + str(BOOK_ID) + '"' in line for line in captured.output))
-        service.db.add_all.assert_not_called()
+        service.repo.persist_page_revision.assert_not_awaited()
 
     async def test_ambiguous_storage_upload_failure_attempts_best_effort_cleanup(self):
         service = self.make_service()
@@ -69,15 +71,14 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         cleanup.assert_awaited_once()
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
-        service.db.add_all.assert_not_called()
+        service.repo.persist_page_revision.assert_not_awaited()
 
     async def test_database_commit_failure_rolls_back_and_attempts_cleanup(self):
         service = self.make_service()
-        service.db.commit = AsyncMock(side_effect=RuntimeError("private database details"))
-        service.db.refresh = AsyncMock()
-        service.db.rollback = AsyncMock()
-        service.db.add_all = MagicMock()
-        service.db.add = MagicMock()
+        service.repo.persist_page_revision = AsyncMock(
+            side_effect=RuntimeError("private database details")
+        )
+        service.repo.rollback = AsyncMock()
         cleanup = AsyncMock()
         ocr_result = {
             "text": "Chú mèo",
@@ -102,18 +103,15 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "private database details"):
                 await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
 
-        service.db.rollback.assert_awaited_once()
+        service.repo.rollback.assert_awaited_once()
         cleanup.assert_awaited_once()
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
 
     async def test_success_creates_unverified_revision_and_stores_real_ocr_boxes(self):
         service = self.make_service()
-        service.db.commit = AsyncMock()
-        service.db.refresh = AsyncMock()
-        service.db.rollback = AsyncMock()
-        service.db.add_all = MagicMock()
-        service.db.add = MagicMock()
+        service.repo.persist_page_revision = AsyncMock()
+        service.repo.rollback = AsyncMock()
         service.repo.words = AsyncMock(return_value=[])
         expected_response = object()
         service.revision_detail = AsyncMock(return_value=expected_response)
@@ -140,14 +138,14 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()
-        service.db.commit.assert_awaited_once()
-        page, revision = service.db.add_all.call_args.args[0]
+        service.repo.persist_page_revision.assert_awaited_once()
+        service.repo.rollback.assert_not_awaited()
+        page, revision, words = service.repo.persist_page_revision.await_args.args
         self.assertEqual(page.ImagePath.split("/")[-1].split(".")[-1], "png")
         self.assertEqual(revision.VerificationStatus, "NEEDS_REVIEW")
         self.assertEqual(revision.DraftText, "Chú mèo")
-        word_row = service.db.add.call_args.args[0]
-        self.assertEqual(word_row.BoundingBox, [0.1, 0.2, 0.1, 0.05])
-        self.assertEqual(word_row.OCRConfidence, 0.9)
+        self.assertEqual(words[0]["bbox"], [0.1, 0.2, 0.1, 0.05])
+        self.assertEqual(words[0]["ocr_confidence"], 0.9)
 
 
 if __name__ == "__main__":
