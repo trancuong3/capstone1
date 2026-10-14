@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import unicodedata
-from collections.abc import Iterable
 from statistics import mean
 
 import cv2
@@ -206,12 +205,17 @@ def _run_tesseract(
     image: np.ndarray,
     psm: int,
     timeout_seconds: int,
+    *,
+    preserve_interword_spaces: bool = True,
 ) -> dict[str, object]:
     processed_height, processed_width = image.shape[:2]
+    config = f"--oem 1 --psm {psm}"
+    if preserve_interword_spaces:
+        config += " -c preserve_interword_spaces=1"
     result = pytesseract.image_to_data(
         image,
         lang="vie",
-        config=f"--oem 1 --psm {psm} -c preserve_interword_spaces=1",
+        config=config,
         output_type=Output.DICT,
         timeout=timeout_seconds,
     )
@@ -270,7 +274,12 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
 
     for name, processed_image, psm, preprocessing in candidates:
         try:
-            candidate = _run_tesseract(processed_image, psm, timeout_seconds)
+            candidate = _run_tesseract(
+                processed_image,
+                psm,
+                timeout_seconds,
+                preserve_interword_spaces=strategy != "baseline",
+            )
             words = candidate["words"]
             assert isinstance(words, list)
             confidence_values = [

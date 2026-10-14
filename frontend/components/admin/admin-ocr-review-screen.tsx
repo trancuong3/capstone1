@@ -253,8 +253,14 @@ export function AdminOcrReviewScreen({
   }
 
   const verified = detail?.verification_status === "VERIFIED";
+  const confidenceThreshold =
+    typeof detail?.ocr_metadata.low_confidence_threshold === "number"
+      ? detail.ocr_metadata.low_confidence_threshold
+      : 0.65;
   const wordsNeedingReview = words.filter(
-    (word) => word.ocr_confidence === null || word.ocr_confidence < 0.65,
+    (word) =>
+      word.ocr_confidence === null ||
+      word.ocr_confidence < confidenceThreshold,
   );
   if (error) {
     return (
@@ -351,7 +357,7 @@ export function AdminOcrReviewScreen({
                   className={
                     word.word_index === selectedWord
                       ? "absolute border-2 border-orange-500 bg-orange-300/30"
-                      : word.ocr_confidence === null || word.ocr_confidence < 0.65
+                      : word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
                         ? "absolute border-2 border-red-500 bg-red-300/30"
                         : "absolute border border-primary bg-highlight/20"
                   }
@@ -436,7 +442,7 @@ export function AdminOcrReviewScreen({
                   className={
                     word.word_index === selectedWord
                       ? "rounded-control border-2 border-orange-500 p-3"
-                      : word.ocr_confidence === null || word.ocr_confidence < 0.65
+                      : word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
                         ? "rounded-control border border-red-400 bg-red-50 p-3"
                         : "rounded-control border border-border p-3"
                   }
@@ -499,7 +505,7 @@ export function AdminOcrReviewScreen({
                     {word.ocr_confidence === null
                       ? "không có"
                       : word.ocr_confidence.toFixed(2)}
-                    {word.ocr_confidence === null || word.ocr_confidence < 0.65
+                    {word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
                       ? " · Cần kiểm tra"
                       : ""}
                   </p>

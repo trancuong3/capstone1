@@ -50,8 +50,22 @@ class OcrEngineTests(unittest.TestCase):
 
     def test_best_strategy_preserves_real_tsv_boxes_and_missing_confidence(self):
         patches = self._configured_tesseract()
+        def scaled_tsv(image, **_kwargs):
+            height, width = image.shape[:2]
+            return {
+                "text": ["Chú", "mèo", ""],
+                "left": [round(width * 0.25), round(width * 0.5), 0],
+                "top": [round(height * 0.25), round(height * 0.5), 0],
+                "width": [round(width * 0.1), round(width * 0.125), 0],
+                "height": [round(height * 0.1), round(height * 0.125), 0],
+                "conf": ["91.0", "-1", "-1"],
+                "block_num": [1, 1, 0],
+                "par_num": [1, 1, 0],
+                "line_num": [1, 2, 0],
+            }
+
         with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
+            ocr_engine.pytesseract, "image_to_data", side_effect=scaled_tsv
         ):
             result = ocr_engine.extract_text_and_boxes(sample_png())
 

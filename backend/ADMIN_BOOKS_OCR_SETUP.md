@@ -47,7 +47,7 @@ Migration chỉ bổ sung `public.pagerevisions.drafttext TEXT` với `IF NOT EX
 4. Cài dependencies trong `backend/requirements.txt`.
 5. OCR chạy cục bộ bằng Tesseract và OpenCV; không có fallback OCR cloud.
 
-## Chẩn đoán lỗi upload HTTP 503
+## Nâng cấp và đánh giá chất lượng OCR\n\nĐọc hướng dẫn `backend/OCR_QUALITY_GUIDE.md` để biết pipeline candidate selection, các biến cấu hình và cách benchmark với ground truth đã được con người kiểm tra.\n\nCác biến tùy chọn trong Backend:\n\n- `OCR_TESSERACT_TIMEOUT_SECONDS`: timeout mỗi lượt Tesseract (mặc định 20 giây, giới hạn 5–60).\n- `OCR_LOW_CONFIDENCE_THRESHOLD`: ngưỡng ưu tiên kiểm duyệt, từ 0 đến 1 (mặc định 0.65). Đây không phải xác suất OCR đúng.\n\nPipeline mặc định đánh giá một số cách tiền xử lý và PSM. Mỗi trang có thể cần nhiều lượt OCR hơn bản cũ; theo dõi thời gian phản hồi ở môi trường triển khai thực tế. Không coi confidence là bằng chứng thay thế cho Admin review.\n\n## Chẩn đoán lỗi upload HTTP 503
 
 Backend ghi log có cấu trúc theo giai đoạn, gồm `request_id`, `event`, `stage`, `book_id` / `page_id` khi đã có, `exception_type`, `http_status`, `error_code` khi có và `elapsed_ms`. Không ghi secret key, token, nội dung ảnh/OCR hoặc signed URL.
 
