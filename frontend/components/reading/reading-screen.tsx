@@ -88,12 +88,19 @@ export function ReadingScreen({
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       transcriptionAbortRef.current?.abort();
+      try {
+        recognitionRef.current?.abort?.();
+      } catch {
+        // Safe ignore
+      }
     };
   }, []);
 
@@ -185,6 +192,44 @@ export function ReadingScreen({
     };
   }, [loadState, page, services.pageMatchService, sessionId, uiState]);
 
+  function matchSpokenWord(spokenText: string) {
+    if (!page || !page.words.length || !spokenText) return;
+    const cleanSpoken = spokenText
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .trim();
+    const tokens = cleanSpoken.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return;
+    const lastSpoken = tokens[tokens.length - 1];
+
+    for (const w of page.words) {
+      const cleanWord = w.text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+        .trim();
+      if (cleanWord === lastSpoken) {
+        setCurrentWordId(w.word_id);
+        return;
+      }
+    }
+    for (const w of page.words) {
+      const cleanWord = w.text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+        .trim();
+      if (cleanWord.includes(lastSpoken) || lastSpoken.includes(cleanWord)) {
+        setCurrentWordId(w.word_id);
+        return;
+      }
+    }
+  }
+
   async function startListening() {
     if (
       typeof navigator === "undefined" ||
@@ -201,6 +246,41 @@ export function ReadingScreen({
         return false;
       }
       setLatestTranscript(null);
+
+      // Start browser SpeechRecognition for streaming real-time transcription if supported
+      if (
+        typeof window !== "undefined" &&
+        ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
+      ) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+          const rec = new SpeechRec();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = "vi-VN";
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rec.onresult = (event: any) => {
+            let liveText = "";
+            for (let i = 0; i < event.results.length; ++i) {
+              liveText += event.results[i][0].transcript;
+            }
+            const trimmed = liveText.trim();
+            if (trimmed && mountedRef.current) {
+              setLatestTranscript(trimmed);
+              matchSpokenWord(trimmed);
+            }
+          };
+          rec.onerror = () => {
+            // Keep running with speechRecorder
+          };
+          rec.start();
+          recognitionRef.current = rec;
+        } catch {
+          // Fallback to speechRecorder
+        }
+      }
+
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -226,7 +306,10 @@ export function ReadingScreen({
         signal: controller.signal,
       });
       if (!mountedRef.current || controller.signal.aborted) return;
-      setLatestTranscript(transcript.text);
+      if (transcript.text) {
+        setLatestTranscript(transcript.text);
+        matchSpokenWord(transcript.text);
+      }
     } catch {
       if (!mountedRef.current || controller.signal.aborted) return;
       setConnectionState("reconnecting");
@@ -239,8 +322,44 @@ export function ReadingScreen({
   }
 
   async function stopListeningAndTranscribe() {
+    try {
+      recognitionRef.current?.stop?.();
+      recognitionRef.current = null;
+    } catch {
+      // Safe ignore
+    }
     const recording = await speechRecorder.stop();
     if (recording) void transcribeRecording(recording);
+  }
+
+  async function handleReadSample() {
+    if (isBusy) return;
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+      return;
+    }
+    if (!page) return;
+    const fullText =
+      page.text || page.words.map((w) => w.text).join(" ") || "";
+    if (!fullText) return;
+
+    setIsBusy(true);
+    try {
+      await speechPlayer.play(fullText);
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
+  async function handleToggleListening() {
+    if (isBusy) return;
+    if (uiState === "reading") {
+      await pauseReading();
+    } else {
+      await resumeReading();
+    }
   }
 
   async function startReading() {
@@ -551,10 +670,14 @@ export function ReadingScreen({
         exitHref={detailHref}
         isListening={uiState === "reading"}
         isPageTransitioning={uiState === "page-turn"}
+        isPlayingSample={speechPlayer.isPlaying}
+        latestTranscript={latestTranscript}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
         onPause={() => void pauseReading()}
+        onReadSample={() => void handleReadSample()}
+        onToggleListening={() => void handleToggleListening()}
         page={page}
       >
         {uiState === "page-turn" ? (

@@ -5,25 +5,54 @@ from uuid import UUID
 
 # --- READING SESSION ---
 class ReadingSessionBase(BaseModel):
-    State: str = Field(..., example="IN_PROGRESS")
+    State: str = Field(default="CREATED")
     Mode: str = Field(default="realtime")
     ClientMeta: Dict[str, Any] = Field(default_factory=dict)
 
 class ReadingSessionCreate(ReadingSessionBase):
-    ChildId: UUID
-    BookId: UUID
+    ChildId: Optional[UUID] = None
+    child_id: Optional[UUID] = None
+    BookId: Optional[UUID] = None
+    book_id: Optional[UUID] = None
+    state: Optional[str] = None
+    mode: Optional[str] = None
     SelectedPageId: Optional[UUID] = None
+    selected_page_id: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
+    selected_page_revision_id: Optional[UUID] = None
     EndedAt: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+
+class ReadingPageWordDTO(BaseModel):
+    word_id: UUID
+    word_index: int
+    text: str
+    bbox: tuple[float, float, float, float]
+
+class ReadingPageDTO(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int
+    confidence: float = 1.0
+    width: int = 1000
+    height: int = 1000
+    image_url: Optional[str] = None
+    text: Optional[str] = None
+    words: list[ReadingPageWordDTO]
+
+class ReadingCompletionSummaryDTO(BaseModel):
+    duration_minutes: int
+    pages_explored: int
+    practiced_words: int
 
 class ReadingSessionResponse(ReadingSessionBase):
     Id: UUID
     ChildId: UUID
     BookId: UUID
-    SelectedPageId: Optional[UUID]
-    SelectedPageRevisionId: Optional[UUID]
+    SelectedPageId: Optional[UUID] = None
+    SelectedPageRevisionId: Optional[UUID] = None
     StartedAt: datetime
-    EndedAt: Optional[datetime]
+    EndedAt: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 # --- READING EVENT ---

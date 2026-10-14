@@ -1,3 +1,5 @@
+import { requestApi } from "@/lib/api/api-client";
+import { readingPageDtoSchema } from "@/lib/api/reading-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -6,4 +8,25 @@ export interface PageMatchService {
     sessionId: string,
     selectedPageId: string,
   ): Promise<ReadingPageDTO>;
+}
+
+export function createPageMatchService(): PageMatchService {
+  return {
+    async retryCurrentPage(sessionId: string): Promise<ReadingPageDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
+        readingPageDtoSchema,
+      );
+    },
+
+    async selectPage(
+      _sessionId: string,
+      selectedPageId: string,
+    ): Promise<ReadingPageDTO> {
+      return requestApi(
+        `/reading/pages/${encodeURIComponent(selectedPageId)}`,
+        readingPageDtoSchema,
+      );
+    },
+  };
 }

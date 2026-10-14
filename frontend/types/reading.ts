@@ -57,6 +57,8 @@ export interface ReadingPageDTO {
   readonly confidence: number;
   readonly width: number;
   readonly height: number;
+  readonly image_url?: string | null;
+  readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
 }
 

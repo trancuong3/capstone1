@@ -16,10 +16,14 @@ interface ReadingLayoutProps {
   exitHref: string;
   isListening: boolean;
   isPageTransitioning?: boolean;
+  isPlayingSample?: boolean;
+  latestTranscript?: string | null;
   onFinish: () => void;
   onHelp: () => void;
   onManualPage: () => void;
   onPause: () => void;
+  onReadSample?: () => void;
+  onToggleListening?: () => void;
   page: ReadingPageDTO;
 }
 
@@ -31,10 +35,14 @@ export function ReadingLayout({
   exitHref,
   isListening,
   isPageTransitioning = false,
+  isPlayingSample = false,
+  latestTranscript,
   onFinish,
   onHelp,
   onManualPage,
   onPause,
+  onReadSample,
+  onToggleListening,
   page,
 }: ReadingLayoutProps) {
   return (
@@ -64,12 +72,39 @@ export function ReadingLayout({
         />
       </CameraPreview>
 
+      {isListening ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-emerald-400 bg-emerald-50 px-4 py-3 shadow-sm transition-all">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="relative flex size-3.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex size-3.5 rounded-full bg-emerald-500" />
+            </span>
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+              Nhận diện trực tiếp:
+            </span>
+          </div>
+          <p className="min-w-0 flex-1 truncate text-base font-bold text-emerald-950">
+            {latestTranscript ? (
+              <span>&ldquo;{latestTranscript}&rdquo;</span>
+            ) : (
+              <span className="font-normal italic text-emerald-700">
+                Bé hãy đọc to các chữ trên trang sách nhé, hệ thống đang lắng nghe…
+              </span>
+            )}
+          </p>
+        </div>
+      ) : null}
+
       <ReadingControls
         disabled={controlsDisabled}
+        isListening={isListening}
+        isPlayingSample={isPlayingSample}
         onFinish={onFinish}
         onHelp={onHelp}
         onManualPage={onManualPage}
         onPause={onPause}
+        onReadSample={onReadSample}
+        onToggleListening={onToggleListening}
       />
       <ReadingProgress
         isListening={isListening}
