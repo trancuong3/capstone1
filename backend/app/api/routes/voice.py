@@ -17,7 +17,8 @@ from app.schemas.voice import SpeechToTextResponse, TextToSpeechRequest
 router = APIRouter()
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
-ALLOWED_AUDIO_PREFIXES = ("audio/", "video/")
+ALLOWED_AUDIO_PREFIXES = ("audio/", "video/", "application/octet-stream")
+ALLOWED_AUDIO_EXTENSIONS = (".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac", ".flac")
 
 
 def provider_http_exception(error: VoiceProviderError) -> HTTPException:
@@ -59,7 +60,13 @@ async def speech_to_text(
 ) -> SpeechToTextResponse:
     """Transcribe an uploaded recording without persisting the child's audio."""
 
-    if file.content_type and not file.content_type.startswith(ALLOWED_AUDIO_PREFIXES):
+    filename = (file.filename or "").lower()
+    is_valid_prefix = bool(
+        file.content_type and file.content_type.startswith(ALLOWED_AUDIO_PREFIXES)
+    )
+    is_valid_ext = any(filename.endswith(ext) for ext in ALLOWED_AUDIO_EXTENSIONS)
+
+    if file.content_type and not (is_valid_prefix or is_valid_ext):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={"code": "UNSUPPORTED_AUDIO"},
@@ -81,11 +88,15 @@ async def speech_to_text(
             detail={"code": "AUDIO_TOO_LARGE"},
         )
 
+    content_type = file.content_type
+    if not content_type or content_type == "application/octet-stream":
+        content_type = "audio/webm"
+
     try:
         transcription = await ElevenLabsVoiceProvider().transcribe(
             audio=audio,
             filename=file.filename or "recording.webm",
-            content_type=file.content_type or "application/octet-stream",
+            content_type=content_type,
             language_code=language_code,
         )
     except VoiceProviderError as error:

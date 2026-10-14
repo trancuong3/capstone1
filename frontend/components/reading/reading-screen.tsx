@@ -96,6 +96,7 @@ export function ReadingScreen({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const isListeningActiveRef = useRef(false);
+  const isUsingRecorderRef = useRef(false);
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -257,7 +258,7 @@ export function ReadingScreen({
     }
   }
 
-  async function startListening() {
+  async function startRecorderFallback(): Promise<boolean> {
     if (
       typeof navigator === "undefined" ||
       !navigator.mediaDevices?.getUserMedia ||
@@ -267,70 +268,23 @@ export function ReadingScreen({
       return true;
     }
     try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // Safe ignore
+        }
+        recognitionRef.current = null;
+      }
+      isUsingRecorderRef.current = true;
       await speechRecorder.start();
       if (!mountedRef.current) {
         speechRecorder.cancel();
         return false;
       }
-      setLatestTranscript(null);
-      isListeningActiveRef.current = true;
-
-      // Start browser SpeechRecognition for streaming real-time transcription if supported
-      if (
-        typeof window !== "undefined" &&
-        ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
-      ) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const SpeechRec =
-            (window as any).SpeechRecognition ||
-            (window as any).webkitSpeechRecognition;
-          const rec = new SpeechRec();
-          rec.continuous = true;
-          rec.interimResults = true;
-          rec.lang = "vi-VN";
-          rec.maxAlternatives = 1;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          rec.onresult = (event: any) => {
-            let liveText = "";
-            for (let i = 0; i < event.results.length; ++i) {
-              const part = event.results[i][0]?.transcript || "";
-              if (part.trim()) {
-                liveText += (liveText ? " " : "") + part.trim();
-              }
-            }
-            const trimmed = liveText.trim();
-            if (trimmed && mountedRef.current) {
-              setLatestTranscript(trimmed);
-              matchSpokenWord(trimmed);
-              recordSpokenText(trimmed);
-            }
-          };
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          rec.onerror = (event: any) => {
-            if (event?.error !== "no-speech") {
-              console.warn("Speech recognition notice:", event?.error);
-            }
-          };
-          rec.onend = () => {
-            // Auto-restart if reading session is still active
-            if (mountedRef.current && isListeningActiveRef.current) {
-              try {
-                rec.start();
-              } catch {
-                // Safe ignore if browser is in transition
-              }
-            }
-          };
-          rec.start();
-          recognitionRef.current = rec;
-        } catch {
-          // Fallback to speechRecorder
-        }
-      }
-
       return true;
     } catch (error) {
+      isUsingRecorderRef.current = false;
       const message = error instanceof Error ? error.message : "";
       if (message.includes("not supported")) {
         if (mountedRef.current) setLatestTranscript(null);
@@ -342,6 +296,89 @@ export function ReadingScreen({
       }
       return false;
     }
+  }
+
+  async function startListening(): Promise<boolean> {
+    setLatestTranscript(null);
+    isListeningActiveRef.current = true;
+    isUsingRecorderRef.current = false;
+
+    // 1. Prioritize browser SpeechRecognition for true real-time, low-latency streaming without locking the mic
+    if (
+      typeof window !== "undefined" &&
+      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
+    ) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const SpeechRec =
+          (window as any).SpeechRecognition ||
+          (window as any).webkitSpeechRecognition;
+        const rec = new SpeechRec();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = "vi-VN";
+        rec.maxAlternatives = 1;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rec.onresult = (event: any) => {
+          let liveText = "";
+          for (let i = 0; i < event.results.length; ++i) {
+            const part = event.results[i][0]?.transcript || "";
+            if (part.trim()) {
+              liveText += (liveText ? " " : "") + part.trim();
+            }
+          }
+          const trimmed = liveText.trim();
+          if (trimmed && mountedRef.current) {
+            setLatestTranscript(trimmed);
+            matchSpokenWord(trimmed);
+            recordSpokenText(trimmed);
+          }
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rec.onerror = (event: any) => {
+          const err = event?.error;
+          if (err === "no-speech") return;
+          console.warn("Speech recognition notice:", err);
+          if (err === "not-allowed" || err === "permission-denied") {
+            if (mountedRef.current) {
+              setConnectionState("reconnecting");
+              setUiState("microphone-denied");
+            }
+          } else if (
+            err === "network" ||
+            err === "audio-capture" ||
+            err === "service-not-allowed"
+          ) {
+            void startRecorderFallback();
+          }
+        };
+
+        rec.onend = () => {
+          if (
+            mountedRef.current &&
+            isListeningActiveRef.current &&
+            !isUsingRecorderRef.current
+          ) {
+            try {
+              rec.start();
+            } catch {
+              // Safe ignore
+            }
+          }
+        };
+
+        rec.start();
+        recognitionRef.current = rec;
+        return true;
+      } catch (e) {
+        console.warn("SpeechRecognition start failed, falling back to recorder:", e);
+      }
+    }
+
+    // 2. Fallback to MediaRecorder + ElevenLabs STT
+    return await startRecorderFallback();
   }
 
   async function transcribeRecording(recording: Blob) {
@@ -377,15 +414,24 @@ export function ReadingScreen({
 
   async function stopListeningAndTranscribe() {
     isListeningActiveRef.current = false;
-    try {
-      recognitionRef.current?.stop?.();
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // Safe ignore
+      }
       recognitionRef.current = null;
-    } catch {
-      // Safe ignore
     }
-    const recording = await speechRecorder.stop();
-    if (recording && recording.size > 200) {
-      await transcribeRecording(recording);
+    if (isUsingRecorderRef.current || speechRecorder.isRecording) {
+      isUsingRecorderRef.current = false;
+      try {
+        const recording = await speechRecorder.stop();
+        if (recording && recording.size > 200) {
+          await transcribeRecording(recording);
+        }
+      } catch {
+        speechRecorder.cancel();
+      }
     }
   }
 

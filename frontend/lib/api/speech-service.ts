@@ -137,8 +137,14 @@ export function createSpeechService(): SpeechService {
     async transcribe(audio, options = {}) {
       if (!audio.size) throw failure("STT_UNAVAILABLE", 422);
 
+      const mimeType = audio.type || "audio/webm";
+      const fileBlob = audio.type ? audio : new Blob([audio], { type: mimeType });
+      const filename =
+        options.filename ??
+        (mimeType.includes("ogg") ? "recording.ogg" : "recording.webm");
+
       const form = new FormData();
-      form.append("file", audio, options.filename ?? "recording.webm");
+      form.append("file", fileBlob, filename);
       if (options.languageCode)
         form.append("language_code", options.languageCode);
 
