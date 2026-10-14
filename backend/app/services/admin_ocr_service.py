@@ -621,7 +621,7 @@ class AdminOcrService:
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=dict(ocr["metadata"]),
         )
         try:
-            await self.repo.commit_and_refresh(revision, page)
+            await self.repo.persist_revision(revision, words, page)
         except IntegrityError as exc:
             await self.repo.rollback()
             raise HTTPException(status_code=409, detail="A concurrent reprocess created this revision number; retry") from exc
