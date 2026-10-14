@@ -28,6 +28,9 @@ from .reading import (
     ReadingEventResponse,
     FluencyAssessmentCreate,
     FluencyAssessmentResponse,
+    ReadingPageWordDTO,
+    ReadingPageDTO,
+    ReadingCompletionSummaryDTO,
 )
 
 from .comprehension import (

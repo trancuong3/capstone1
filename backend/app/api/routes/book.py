@@ -320,12 +320,17 @@ class AdminCatalogService:
 
     async def revisions(self, page_id: UUID):
         page = await self.page(page_id)
+        rows = await self.repository.revisions(page_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="Page has no revision yet")
         try:
             return [AdminRevisionSummaryRead(
-                page_revision_id=revision.Id, revision_no=self.revision_number(revision),
-                verification_status=revision.VerificationStatus, created_at=revision.CreatedAt,
-                is_current_verified=revision.Id == page.CurrentVerifiedRevisionId,
-            ) for revision in await self.repository.revisions(page_id)]
+                page_revision_id=revision.Id,
+                revision_no=self.revision_number(revision),
+                verification_status=revision.VerificationStatus,
+                created_at=revision.CreatedAt,
+                is_current_verified=page.CurrentVerifiedRevisionId == revision.Id,
+            ) for revision in rows]
         except ValidationError:
             raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
 

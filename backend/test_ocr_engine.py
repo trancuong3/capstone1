@@ -70,6 +70,15 @@ class OcrEngineTests(unittest.TestCase):
             with self.assertRaises(ocr_engine.OcrEngineUnavailable):
                 ocr_engine.extract_text_and_boxes(sample_png())
 
+    def test_uses_vie_best_when_vie_not_available(self):
+        with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
+            ocr_engine.pytesseract, "get_tesseract_version", return_value="5.3.0"
+        ), patch.object(ocr_engine.pytesseract, "get_languages", return_value=["eng", "vie_best"]), patch.object(
+            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+        self.assertEqual(result["metadata"]["language"], "vie_best")
+
     def test_empty_tesseract_output_does_not_return_fake_words(self):
         empty = {
             "text": ["", "  "],
@@ -94,3 +103,4 @@ class OcrEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,5 +1,14 @@
 from fastapi import APIRouter
-from app.api.routes import profile, book, reading, comprehension, system, admin_ocr
+
+from app.api.routes import (
+    admin_ocr,
+    book,
+    comprehension,
+    profile,
+    reading,
+    system,
+    voice,
+)
 
 api_router = APIRouter()
 
@@ -9,3 +18,4 @@ api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])
 api_router.include_router(reading.router, prefix="/reading", tags=["Reading"])
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])
+api_router.include_router(voice.router, prefix="/voice", tags=["Voice"])

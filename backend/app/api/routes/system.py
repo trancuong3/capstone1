@@ -142,6 +142,9 @@ from app.models import Profile
 from app.schemas.system import AdminAuditLogRead, AdminAuditPageRead, AdminHealthItemRead, AdminHealthRead
 
 
+from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+
+
 class AdminSystemRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -165,8 +168,9 @@ class AdminSystemRepository:
 
 
 class AdminSystemService:
-    def __init__(self, repository: AdminSystemRepository):
+    def __init__(self, repository: AdminSystemRepository, voice_provider: ElevenLabsVoiceProvider | None = None):
         self.repository = repository
+        self.voice_provider = voice_provider or ElevenLabsVoiceProvider()
 
     async def require_admin(self, actor_id: UUID):
         if await self.repository.role(actor_id) != "admin":
@@ -195,23 +199,46 @@ class AdminSystemService:
             raise HTTPException(status_code=501, detail="Audit contract is not available yet") from None
 
     async def health(self):
-        # This checks only this API handler and a real database round trip.
-        # Auth/OCR/STT/TTS are not probed and must not be reported healthy.
+        # Probes API, Database, and Voice Provider (TTS / STT)
         try:
-            async with asyncio.timeout(4):
-                database_ready = await self.repository.probe_database()
-        except (TimeoutError, SQLAlchemyError, OSError):
+            database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
+        except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
             database_ready = False
+
+        try:
+            tts_status, tts_message = await self.voice_provider.probe_tts()
+        except Exception:
+            tts_status, tts_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ TTS."
+
+        try:
+            stt_status, stt_message = await self.voice_provider.probe_stt()
+        except Exception:
+            stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
+
         checked_at = datetime.now(timezone.utc)
+        items = [
+            AdminHealthItemRead(id="api", label="FastAPI", status="HEALTHY", checked_at=checked_at,
+                                safe_message="API đã phản hồi yêu cầu kiểm tra."),
+            AdminHealthItemRead(id="database", label="Database", status="HEALTHY" if database_ready else "UNAVAILABLE",
+                                checked_at=checked_at, safe_message="Database đã phản hồi truy vấn đọc." if database_ready else "Chưa kiểm tra được kết nối database. Vui lòng thử lại."),
+            AdminHealthItemRead(id="tts", label="Text-to-Speech (TTS)", status=tts_status,
+                                checked_at=checked_at, safe_message=tts_message),
+            AdminHealthItemRead(id="stt", label="Speech-to-Text (STT)", status=stt_status,
+                                checked_at=checked_at, safe_message=stt_message),
+        ]
+
+        statuses = [item.status for item in items]
+        if all(s == "HEALTHY" for s in statuses):
+            overall = "HEALTHY"
+        elif not database_ready or any(s == "UNAVAILABLE" for s in statuses):
+            overall = "DEGRADED"
+        else:
+            overall = "DEGRADED"
+
         return AdminHealthRead(
-            overall_status="HEALTHY" if database_ready else "DEGRADED",
+            overall_status=overall,
             checked_at=checked_at,
-            services=[
-                AdminHealthItemRead(id="api", label="FastAPI", status="HEALTHY", checked_at=checked_at,
-                                    safe_message="API đã phản hồi yêu cầu kiểm tra."),
-                AdminHealthItemRead(id="database", label="Database", status="HEALTHY" if database_ready else "UNAVAILABLE",
-                                    checked_at=checked_at, safe_message="Database đã phản hồi truy vấn đọc." if database_ready else "Chưa kiểm tra được kết nối database. Vui lòng thử lại."),
-            ],
+            services=items,
         )
 
 
