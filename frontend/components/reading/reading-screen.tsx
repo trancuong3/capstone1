@@ -94,6 +94,7 @@ export function ReadingScreen({
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+  const isListeningActiveRef = useRef(false);
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -122,6 +123,7 @@ export function ReadingScreen({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      isListeningActiveRef.current = false;
       transcriptionAbortRef.current?.abort();
       try {
         recognitionRef.current?.abort?.();
@@ -219,43 +221,38 @@ export function ReadingScreen({
     };
   }, [loadState, page, services.pageMatchService, sessionId, uiState]);
 
-  function matchSpokenWord(spokenText: string) {
-    if (!page || !page.words.length || !spokenText) return;
-    const cleanSpoken = spokenText
+  function normalizeVietnamese(text: string): string {
+    return text
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d")
       .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
       .trim();
+  }
+
+  function matchSpokenWord(spokenText: string) {
+    if (!page || !page.words.length || !spokenText) return;
+    const cleanSpoken = normalizeVietnamese(spokenText);
     const tokens = cleanSpoken.split(/\s+/).filter(Boolean);
     if (!tokens.length) return;
-    const lastSpoken = tokens[tokens.length - 1];
 
-    for (const w of page.words) {
-      const cleanWord = w.text
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
-        .trim();
-      if (cleanWord === lastSpoken) {
-        setCurrentWordId(w.word_id);
-        spokenWordsSetRef.current.add(w.text);
-        return;
+    let matchedWordId: string | null = null;
+    for (const token of tokens) {
+      for (const w of page.words) {
+        const cleanWord = normalizeVietnamese(w.text);
+        if (
+          cleanWord === token ||
+          cleanWord.includes(token) ||
+          token.includes(cleanWord)
+        ) {
+          spokenWordsSetRef.current.add(w.text);
+          matchedWordId = w.word_id;
+        }
       }
     }
-    for (const w of page.words) {
-      const cleanWord = w.text
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
-        .trim();
-      if (cleanWord.includes(lastSpoken) || lastSpoken.includes(cleanWord)) {
-        setCurrentWordId(w.word_id);
-        spokenWordsSetRef.current.add(w.text);
-        return;
-      }
+    if (matchedWordId) {
+      setCurrentWordId(matchedWordId);
     }
   }
 
@@ -275,6 +272,7 @@ export function ReadingScreen({
         return false;
       }
       setLatestTranscript(null);
+      isListeningActiveRef.current = true;
 
       // Start browser SpeechRecognition for streaming real-time transcription if supported
       if (
@@ -283,16 +281,22 @@ export function ReadingScreen({
       ) {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+          const SpeechRec =
+            (window as any).SpeechRecognition ||
+            (window as any).webkitSpeechRecognition;
           const rec = new SpeechRec();
           rec.continuous = true;
           rec.interimResults = true;
           rec.lang = "vi-VN";
+          rec.maxAlternatives = 1;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           rec.onresult = (event: any) => {
             let liveText = "";
             for (let i = 0; i < event.results.length; ++i) {
-              liveText += event.results[i][0].transcript;
+              const part = event.results[i][0]?.transcript || "";
+              if (part.trim()) {
+                liveText += (liveText ? " " : "") + part.trim();
+              }
             }
             const trimmed = liveText.trim();
             if (trimmed && mountedRef.current) {
@@ -301,8 +305,21 @@ export function ReadingScreen({
               recordSpokenText(trimmed);
             }
           };
-          rec.onerror = () => {
-            // Keep running with speechRecorder
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rec.onerror = (event: any) => {
+            if (event?.error !== "no-speech") {
+              console.warn("Speech recognition notice:", event?.error);
+            }
+          };
+          rec.onend = () => {
+            // Auto-restart if reading session is still active
+            if (mountedRef.current && isListeningActiveRef.current) {
+              try {
+                rec.start();
+              } catch {
+                // Safe ignore if browser is in transition
+              }
+            }
           };
           rec.start();
           recognitionRef.current = rec;
@@ -342,7 +359,12 @@ export function ReadingScreen({
         recordSpokenText(transcript.text);
       }
     } catch {
-      if (!mountedRef.current || controller.signal.aborted) return;
+      if (
+        !mountedRef.current ||
+        controller.signal.aborted ||
+        finishStartedRef.current
+      )
+        return;
       setConnectionState("reconnecting");
       setUiState("stt-error");
     } finally {
@@ -353,6 +375,7 @@ export function ReadingScreen({
   }
 
   async function stopListeningAndTranscribe() {
+    isListeningActiveRef.current = false;
     try {
       recognitionRef.current?.stop?.();
       recognitionRef.current = null;
@@ -360,7 +383,9 @@ export function ReadingScreen({
       // Safe ignore
     }
     const recording = await speechRecorder.stop();
-    if (recording) void transcribeRecording(recording);
+    if (recording && recording.size > 200) {
+      await transcribeRecording(recording);
+    }
   }
 
   async function handleReadSample() {
@@ -597,10 +622,7 @@ export function ReadingScreen({
     const updatedSummary: ReadingCompletionSummaryUI = {
       duration_minutes: existingSummary?.duration_minutes ?? 1,
       pages_explored: existingSummary?.pages_explored ?? 1,
-      practiced_words: Math.max(
-        wordsList.length,
-        existingSummary?.practiced_words ?? 0,
-      ),
+      practiced_words: wordsList.length,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
     };

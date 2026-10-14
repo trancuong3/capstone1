@@ -242,7 +242,7 @@ async def get_session_completion_summary(session_id: UUID, db: AsyncSession = De
     return ReadingCompletionSummaryDTO(
         duration_minutes=duration_min,
         pages_explored=1,
-        practiced_words=20,
+        practiced_words=0,
         spoken_words=[],
         transcripts=[],
     )
