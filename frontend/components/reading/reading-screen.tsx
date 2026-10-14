@@ -321,18 +321,28 @@ export function ReadingScreen({
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         rec.onresult = (event: any) => {
-          let liveText = "";
+          let latestWord = "";
+          let fullLive = "";
+
           for (let i = 0; i < event.results.length; ++i) {
             const part = event.results[i][0]?.transcript || "";
             if (part.trim()) {
-              liveText += (liveText ? " " : "") + part.trim();
+              fullLive += (fullLive ? " " : "") + part.trim();
             }
           }
-          const trimmed = liveText.trim();
-          if (trimmed && mountedRef.current) {
-            setLatestTranscript(trimmed);
-            matchSpokenWord(trimmed);
-            recordSpokenText(trimmed);
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const part = event.results[i][0]?.transcript || "";
+            if (part.trim()) {
+              latestWord += (latestWord ? " " : "") + part.trim();
+            }
+          }
+
+          const currentWord = latestWord.trim() || fullLive.trim();
+          if (currentWord && mountedRef.current) {
+            setLatestTranscript(currentWord);
+            matchSpokenWord(currentWord);
+            recordSpokenText(currentWord);
           }
         };
 
@@ -361,11 +371,19 @@ export function ReadingScreen({
             isListeningActiveRef.current &&
             !isUsingRecorderRef.current
           ) {
-            try {
-              rec.start();
-            } catch {
-              // Safe ignore
-            }
+            setTimeout(() => {
+              if (
+                mountedRef.current &&
+                isListeningActiveRef.current &&
+                !isUsingRecorderRef.current
+              ) {
+                try {
+                  rec.start();
+                } catch {
+                  // Safe ignore if browser is in transition
+                }
+              }
+            }, 100);
           }
         };
 

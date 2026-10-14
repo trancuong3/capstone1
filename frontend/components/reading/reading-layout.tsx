@@ -75,22 +75,24 @@ export function ReadingLayout({
       </CameraPreview>
 
       {isMicRecording ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-red-400 bg-red-50/90 px-4 py-3 shadow-sm transition-all animate-in fade-in">
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm transition-all animate-in fade-in">
           <div className="flex shrink-0 items-center gap-2">
             <span className="relative flex size-3.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex size-3.5 rounded-full bg-red-500" />
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
             </span>
-            <span className="text-xs font-bold uppercase tracking-wider text-red-800">
-              Đang thu âm:
+            <span className="text-xs font-extrabold uppercase tracking-wider text-primary">
+              Bé đang đọc:
             </span>
           </div>
-          <p className="min-w-0 flex-1 truncate text-base font-bold text-red-950">
+          <p className="min-w-0 flex-1 truncate text-lg font-extrabold text-ink">
             {latestTranscript ? (
-              <span>&ldquo;{latestTranscript}&rdquo;</span>
+              <span className="text-primary underline decoration-2 underline-offset-4 animate-in zoom-in-95">
+                &ldquo;{latestTranscript}&rdquo;
+              </span>
             ) : (
-              <span className="font-normal italic text-red-700">
-                Bé hãy đọc to các chữ trên trang sách nhé, microphone đang thu âm…
+              <span className="font-medium italic text-muted text-sm">
+                Đang lắng nghe bé đọc… (bé hãy nói vào mic)
               </span>
             )}
           </p>
