@@ -1,0 +1,47 @@
+name: Format OCR quality frontend file
+
+on:
+  push:
+    branches:
+      - work/ocr-quality-completion-20261014
+    paths:
+      - ".github/workflows/format-ocr-quality-branch.yml"
+      - "frontend/components/admin/admin-ocr-review-screen.tsx"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@v4
+        with:
+          ref: work/ocr-quality-completion-20261014
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Format changed OCR component
+        run: npx prettier --write components/admin/admin-ocr-review-screen.tsx
+      - name: Commit formatting if needed
+        shell: bash
+        run: |
+          if git -C .. diff --quiet -- frontend/components/admin/admin-ocr-review-screen.tsx; then
+            echo "OCR component is already formatted."
+            exit 0
+          fi
+          git -C .. config user.name "github-actions[bot]"
+          git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C .. add frontend/components/admin/admin-ocr-review-screen.tsx
+          git -C .. commit -m "style(admin-ocr): apply Prettier formatting"
+          git -C .. push origin HEAD:work/ocr-quality-completion-20261014
