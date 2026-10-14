@@ -17,7 +17,8 @@ import httpx
 ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io/v1"
 # Public voice used in the current ElevenLabs API reference. Deployments should
 # set ELEVENLABS_VOICE_ID to choose the product's intended voice.
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
+DEFAULT_VOICE_ID = "cgSgspJ2msm6clMCkdW9"
+DEFAULT_MODEL_ID = "eleven_flash_v2_5"
 
 
 class VoiceProviderError(Exception):
@@ -97,13 +98,24 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None = None,
     ) -> SynthesizedAudio:
         voice_id = quote(self._voice_id(requested_voice_id), safe="")
+        model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
+        payload: dict[str, Any] = {
+            "text": text,
+            "model_id": model_id,
+        }
+        if "flash" in model_id or "turbo" in model_id:
+            payload["language_code"] = "vi"
+        payload["voice_settings"] = {
+            "stability": 0.6,
+            "similarity_boost": 0.8,
+        }
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
                 response = await client.post(
                     f"{ELEVENLABS_API_BASE_URL}/text-to-speech/{voice_id}",
                     headers={**self._headers(), "Accept": "audio/mpeg"},
                     params={"output_format": "mp3_44100_128"},
-                    json={"text": text, "model_id": "eleven_multilingual_v2"},
+                    json=payload,
                 )
         except httpx.TimeoutException as error:
             raise VoiceProviderUnavailable() from error

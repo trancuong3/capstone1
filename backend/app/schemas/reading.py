@@ -44,6 +44,8 @@ class ReadingCompletionSummaryDTO(BaseModel):
     duration_minutes: int
     pages_explored: int
     practiced_words: int
+    spoken_words: list[str] = Field(default_factory=list)
+    transcripts: list[str] = Field(default_factory=list)
 
 class ReadingSessionResponse(ReadingSessionBase):
     Id: UUID

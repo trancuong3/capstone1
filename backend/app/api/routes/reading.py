@@ -243,6 +243,8 @@ async def get_session_completion_summary(session_id: UUID, db: AsyncSession = De
         duration_minutes=duration_min,
         pages_explored=1,
         practiced_words=20,
+        spoken_words=[],
+        transcripts=[],
     )
 
 @router.post("/events", response_model=ReadingEventResponse)

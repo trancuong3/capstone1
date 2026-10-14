@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
@@ -85,11 +85,38 @@ export function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
+  const [sessionSummary, setSessionSummary] =
+    useState<ReadingCompletionSummaryUI | null>(null);
+  const spokenWordsSetRef = useRef<Set<string>>(new Set());
+  const transcriptsListRef = useRef<string[]>([]);
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+
+  const recordSpokenText = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const transcripts = transcriptsListRef.current;
+    if (
+      transcripts.length === 0 ||
+      transcripts[transcripts.length - 1] !== trimmed
+    ) {
+      transcripts.push(trimmed);
+    }
+
+    const words = trimmed
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0);
+
+    for (const w of words) {
+      spokenWordsSetRef.current.add(w);
+    }
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -213,6 +240,7 @@ export function ReadingScreen({
         .trim();
       if (cleanWord === lastSpoken) {
         setCurrentWordId(w.word_id);
+        spokenWordsSetRef.current.add(w.text);
         return;
       }
     }
@@ -225,6 +253,7 @@ export function ReadingScreen({
         .trim();
       if (cleanWord.includes(lastSpoken) || lastSpoken.includes(cleanWord)) {
         setCurrentWordId(w.word_id);
+        spokenWordsSetRef.current.add(w.text);
         return;
       }
     }
@@ -269,6 +298,7 @@ export function ReadingScreen({
             if (trimmed && mountedRef.current) {
               setLatestTranscript(trimmed);
               matchSpokenWord(trimmed);
+              recordSpokenText(trimmed);
             }
           };
           rec.onerror = () => {
@@ -309,6 +339,7 @@ export function ReadingScreen({
       if (transcript.text) {
         setLatestTranscript(transcript.text);
         matchSpokenWord(transcript.text);
+        recordSpokenText(transcript.text);
       }
     } catch {
       if (!mountedRef.current || controller.signal.aborted) return;
@@ -339,8 +370,9 @@ export function ReadingScreen({
       return;
     }
     if (!page) return;
-    const fullText =
+    const rawText =
       page.text || page.words.map((w) => w.text).join(" ") || "";
+    const fullText = rawText.replace(/\s+/g, " ").trim();
     if (!fullText) return;
 
     setIsBusy(true);
@@ -559,6 +591,20 @@ export function ReadingScreen({
       services.readingSocketAdapter.sendControl(sessionId, "finish"),
     ]);
     if (!mountedRef.current) return;
+    const wordsList = Array.from(spokenWordsSetRef.current);
+    const existingSummary =
+      loadState.status === "ready" ? loadState.data.completion : null;
+    const updatedSummary: ReadingCompletionSummaryUI = {
+      duration_minutes: existingSummary?.duration_minutes ?? 1,
+      pages_explored: existingSummary?.pages_explored ?? 1,
+      practiced_words: Math.max(
+        wordsList.length,
+        existingSummary?.practiced_words ?? 0,
+      ),
+      spoken_words: wordsList,
+      transcripts: transcriptsListRef.current,
+    };
+    setSessionSummary(updatedSummary);
     setCanonicalState("FINISHED");
     setConfirmFinish(false);
     setUiState("complete");
@@ -651,7 +697,7 @@ export function ReadingScreen({
         booksHref={booksHref}
         child={child}
         sessionId={sessionId}
-        summary={completion}
+        summary={sessionSummary ?? completion}
       />
     );
   }

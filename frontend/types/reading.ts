@@ -161,6 +161,8 @@ export interface ReadingCompletionSummaryUI {
   readonly duration_minutes: number;
   readonly pages_explored: number;
   readonly practiced_words: number;
+  readonly spoken_words?: readonly string[];
+  readonly transcripts?: readonly string[];
 }
 
 export type ReadingEventType =

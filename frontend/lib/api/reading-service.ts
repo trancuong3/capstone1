@@ -74,6 +74,8 @@ const completionSummarySchema = z.object({
   duration_minutes: z.number(),
   pages_explored: z.number(),
   practiced_words: z.number(),
+  spoken_words: z.array(z.string()).optional(),
+  transcripts: z.array(z.string()).optional(),
 });
 
 export function createReadingService(): ReadingService {
