@@ -2,7 +2,7 @@
 
 ## Trạng thái
 
-Các endpoint và UI OCR nằm trên nhánh `feature/admin-book-ocr-integration`. Chỉ xác nhận upload ảnh thật thành công sau khi cấu hình Backend, bucket, khóa server-side, migration và dữ liệu đã được kiểm tra trực tiếp trên Supabase project tương ứng.
+Các endpoint và UI OCR nền tảng nằm trên nhánh `feature/admin-book-ocr-integration`; pipeline OCR nâng cấp nằm trên nhánh `feature/vietnamese-ocr-quality`. Chỉ xác nhận upload ảnh thật thành công sau khi cấu hình Backend, bucket, khóa server-side, migration và dữ liệu đã được kiểm tra trực tiếp trên Supabase project tương ứng.
 
 ## Cấu hình Backend
 

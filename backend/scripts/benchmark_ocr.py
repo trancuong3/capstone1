@@ -6,7 +6,7 @@ Manifest format:
 ]
 Paths are resolved relative to the manifest. No book scans or ground-truth data are
 bundled in the repository. Run from the backend directory:
-    python scripts/benchmark_ocr.py --manifest path/to/manifest.json
+    python -m scripts.benchmark_ocr --manifest path/to/manifest.json
 """
 from __future__ import annotations
 

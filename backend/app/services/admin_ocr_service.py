@@ -9,7 +9,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -109,7 +109,9 @@ class AdminOcrService:
                 image.verify()
             with Image.open(BytesIO(data)) as image:
                 image_format = image.format or ""
-                width, height = image.size
+                # Use display orientation (EXIF-transposed dimensions) so overlays and
+                # OCR-normalized bounding boxes align with the visual page in the browser.
+                width, height = ImageOps.exif_transpose(image).size
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid image") from exc
         actual = ALLOWED_FORMATS.get(image_format)

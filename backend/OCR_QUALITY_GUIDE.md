@@ -31,7 +31,7 @@ Image paths are relative to the manifest file unless absolute. Ground truth must
 
 From the backend directory, run:
 
-    python scripts/benchmark_ocr.py --manifest path/to/manifest.json
+    python -m scripts.benchmark_ocr --manifest path/to/manifest.json
 
 The script reports per-image and mean CER/WER for the old baseline and current multi-candidate mode. It preserves Vietnamese diacritics by applying Unicode NFC and whitespace normalization only. Lower CER/WER is better. The benchmark does not measure latency and does not prove improvement unless representative images and verified ground truth are provided.
 

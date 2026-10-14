@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import unicodedata
+from collections.abc import Iterable
 from statistics import mean
 
 import cv2
@@ -68,26 +69,18 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     return image
 
 
-def _build_candidates(gray: np.ndarray) -> list[tuple[str, np.ndarray, int, str]]:
-    """Create a bounded set of candidates that preserve the page geometry."""
+def _build_candidates(gray: np.ndarray) -> Iterable[tuple[str, np.ndarray, int, str]]:
+    """Yield a bounded candidate set without retaining every full-page image in memory."""
     height, width = gray.shape[:2]
-    max_dimension = max(width, height)
-    # Upscale only small inputs. Pure uniform scaling keeps normalized coordinates valid.
-    scale = min(2.0, 1800.0 / max_dimension) if max_dimension < 1200 else 1.0
-    if scale > 1.01:
-        target = (max(1, round(width * scale)), max(1, round(height * scale)))
-        gray = cv2.resize(gray, target, interpolation=cv2.INTER_CUBIC)
-
     enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    candidates: list[tuple[str, np.ndarray, int, str]] = [
-        ("clahe_psm3", enhanced, 3, "grayscale+clahe"),
-        ("grayscale_psm3", gray, 3, "grayscale"),
-    ]
+    yield "clahe_psm3", enhanced, 3, "grayscale+clahe"
+    yield "grayscale_psm3", gray, 3, "grayscale"
 
     _, otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    candidates.append(("otsu_psm4", otsu, 4, "grayscale+clahe+otsu"))
+    yield "otsu_psm4", otsu, 4, "grayscale+clahe+otsu"
+    del otsu
 
-    min_dimension = min(gray.shape[:2])
+    min_dimension = min(height, width)
     if min_dimension >= 15:
         block_size = min(41, min_dimension if min_dimension % 2 else min_dimension - 1)
         block_size = max(15, block_size)
@@ -101,9 +94,8 @@ def _build_candidates(gray: np.ndarray) -> list[tuple[str, np.ndarray, int, str]
             block_size,
             11,
         )
-        candidates.append(("adaptive_psm6", adaptive, 6, "grayscale+clahe+adaptive_threshold"))
-
-    return candidates
+        yield "adaptive_psm6", adaptive, 6, "grayscale+clahe+adaptive_threshold"
+        del adaptive
 
 
 def _parse_tsv(
@@ -261,18 +253,29 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
 
     if strategy == "baseline":
         enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-        candidates = [("baseline_clahe_psm3", enhanced, 3, "grayscale+clahe")]
+        candidates: Iterable[tuple[str, np.ndarray, int, str]] = [
+            ("baseline_clahe_psm3", enhanced, 3, "grayscale+clahe")
+        ]
         upscale_factor = 1.0
     else:
         max_dimension = max(source_width, source_height)
         upscale_factor = min(2.0, 1800.0 / max_dimension) if max_dimension < 1200 else 1.0
+        if upscale_factor > 1.01:
+            target = (
+                max(1, round(source_width * upscale_factor)),
+                max(1, round(source_height * upscale_factor)),
+            )
+            gray = cv2.resize(gray, target, interpolation=cv2.INTER_CUBIC)
         candidates = _build_candidates(gray)
 
+    processed_height, processed_width = gray.shape[:2]
     completed: list[dict[str, object]] = []
     diagnostics: list[dict[str, object]] = []
     engine_errors = 0
+    attempted_count = 0
 
     for name, processed_image, psm, preprocessing in candidates:
+        attempted_count += 1
         try:
             candidate = _run_tesseract(
                 processed_image,
@@ -320,7 +323,7 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
 
     usable = [item for item in completed if item["words"]]
     if not usable:
-        if engine_errors == len(candidates):
+        if attempted_count > 0 and engine_errors == attempted_count:
             raise OcrEngineUnavailable("Tesseract failed to process the image using the configured Vietnamese data")
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
@@ -369,13 +372,13 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
             "selected_candidate": selected["candidate"],
             "selected_psm": selected["psm"],
             "preprocessing": selected["preprocessing"],
-            "candidate_count": len(candidates),
+            "candidate_count": attempted_count,
             "candidate_diagnostics": diagnostics,
             "coordinate_space": "normalized_original_dimensions",
             "source_width": source_width,
             "source_height": source_height,
-            "processed_width": candidates[0][1].shape[1],
-            "processed_height": candidates[0][1].shape[0],
+            "processed_width": processed_width,
+            "processed_height": processed_height,
             "upscale_factor": round(upscale_factor, 3),
             "word_count": len(words),
             "mean_confidence": round(mean_confidence, 4) if mean_confidence is not None else None,
