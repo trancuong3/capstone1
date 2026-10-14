@@ -23,10 +23,10 @@ class OcrNoTextDetected(RuntimeError):
 def normalize_word(value: str) -> str:
     """Canonical Vietnamese normalization shared by OCR output and reviewed words."""
     value = unicodedata.normalize("NFC", value).strip().lower()
-    # Trim surrounding punctuation but retain internal apostrophes and hyphens.
-    while value and unicodedata.category(value[0]).startswith("P") and value[0] not in {"'", "-"}:
+    # Trim surrounding punctuation and symbols but retain internal apostrophes and hyphens.
+    while value and (unicodedata.category(value[0]).startswith(("P", "S")) and value[0] not in {"'", "-"}):
         value = value[1:]
-    while value and unicodedata.category(value[-1]).startswith("P") and value[-1] not in {"'", "-"}:
+    while value and (unicodedata.category(value[-1]).startswith(("P", "S")) and value[-1] not in {"'", "-"}):
         value = value[:-1]
     return re.sub(r"\s+", " ", value).strip()
 
@@ -37,7 +37,8 @@ def normalize_text_tokens(value: str) -> list[str]:
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     """
-    Run local Tesseract OCR with adaptive image scaling and Otsu binarization.
+    Run local Tesseract OCR with adaptive image scaling, Otsu binarization,
+    and single-column layout analysis (PSM 4).
     Bounding boxes come from Tesseract's real TSV output and are normalized to [0, 1]
     so they overlay the original image with high precision.
     """
@@ -62,12 +63,14 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if not version.startswith(("5", "6")):
         raise OcrEngineUnavailable("Tesseract OCR 5.x or newer is required")
 
-    target_lang = os.getenv("TESSERACT_LANG", "vie")
+    target_lang = os.getenv("TESSERACT_LANG")
+    if not target_lang:
+        target_lang = "vie_best" if "vie_best" in languages else "vie"
     if target_lang not in languages:
-        if "vie" in languages:
-            target_lang = "vie"
-        elif "vie_best" in languages:
+        if "vie_best" in languages:
             target_lang = "vie_best"
+        elif "vie" in languages:
+            target_lang = "vie"
         else:
             raise OcrEngineUnavailable("Tesseract language data vie.traineddata is missing")
 
@@ -102,11 +105,12 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if processed is None or np.mean(processed) < 5 or np.mean(processed) > 250:
         processed = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
 
+    psm = os.getenv("TESSERACT_PSM", "4")
     try:
         result = pytesseract.image_to_data(
             processed,
             lang=target_lang,
-            config="--oem 1 --psm 3",
+            config=f"--oem 1 --psm {psm}",
             output_type=Output.DICT,
         )
     except Exception as exc:
@@ -116,7 +120,8 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     words: list[dict[str, object]] = []
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
-        if not token:
+        # Drop empty tokens or non-text symbols
+        if not token or not any(c.isalnum() for c in token):
             continue
         try:
             left = int(result["left"][index])
@@ -129,6 +134,11 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
             line = int(result["line_num"][index])
         except (KeyError, TypeError, ValueError, IndexError):
             continue
+
+        # Filter out obvious OCR noise artifacts (zero or negative confidence on 1-2 char fragments)
+        if raw_confidence <= 0 and (len(token) <= 2 or not any(c.isalpha() for c in token)):
+            continue
+
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
         box_width = min(max(box_width, 0), scaled_w - left)
