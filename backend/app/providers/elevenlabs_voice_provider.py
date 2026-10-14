@@ -142,7 +142,8 @@ class ElevenLabsVoiceProvider:
     ) -> Transcription:
         form: dict[str, str] = {"model_id": "scribe_v2"}
         if language_code:
-            form["language_code"] = language_code
+            lang = "vie" if language_code.lower() in ("vi", "vie", "vi-vn") else language_code
+            form["language_code"] = lang
 
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:

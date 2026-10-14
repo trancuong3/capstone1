@@ -6,7 +6,7 @@ export interface SpeechRecorder {
   readonly isRecording: boolean;
   readonly isSpeaking: boolean;
   readonly audioLevel: number;
-  start(): Promise<void>;
+  start(onUtterance?: (blob: Blob) => void): Promise<void>;
   stop(): Promise<Blob | null>;
   cancel(): void;
   getStream(): MediaStream | null;
@@ -22,11 +22,16 @@ function stopTracks(stream: MediaStream) {
   for (const track of stream.getTracks()) track.stop();
 }
 
-/** Captures one browser microphone segment without retaining it after upload. */
+/** Captures browser microphone with live utterance segmentation for continuous STT. */
 export function useSpeechRecorder(): SpeechRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const allChunksRef = useRef<Blob[]>([]);
+  const onUtteranceRef = useRef<((blob: Blob) => void) | null>(null);
+  const isRotatingRef = useRef(false);
+  const isRecordingRef = useRef(false);
+
   const resolveStopRef = useRef<((recording: Blob | null) => void) | null>(
     null,
   );
@@ -41,6 +46,9 @@ export function useSpeechRecorder(): SpeechRecorder {
   const [audioLevel, setAudioLevel] = useState(0);
 
   const cleanupAudioNodes = useCallback(() => {
+    isRecordingRef.current = false;
+    isRotatingRef.current = false;
+    onUtteranceRef.current = null;
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -68,6 +76,7 @@ export function useSpeechRecorder(): SpeechRecorder {
       const recorder = recorderRef.current;
       recorderRef.current = null;
       chunksRef.current = [];
+      allChunksRef.current = [];
       if (recorder) stopTracks(recorder.stream);
       cleanupAudioNodes();
       setIsRecording(false);
@@ -87,122 +96,197 @@ export function useSpeechRecorder(): SpeechRecorder {
 
   const cancel = useCallback(() => {
     const recorder = recorderRef.current;
-    if (!recorder) return;
+    if (!recorder) {
+      cleanupAudioNodes();
+      setIsRecording(false);
+      return;
+    }
     recorder.ondataavailable = null;
     recorder.onstop = null;
     recorder.onerror = null;
     if (recorder.state !== "inactive") recorder.stop();
     finish(null);
-  }, [finish]);
+  }, [cleanupAudioNodes, finish]);
 
-  const start = useCallback(async () => {
-    cancel();
-    if (
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === "undefined"
-    ) {
-      throw new Error("Microphone recording is not supported in this browser.");
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-
-    try {
-      // Set up Web Audio Analyser for 0ms latency voice activity detection
+  const start = useCallback(
+    async (onUtterance?: (blob: Blob) => void) => {
+      cancel();
       if (
-        typeof window !== "undefined" &&
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (window.AudioContext || (window as any).webkitAudioContext)
+        !navigator.mediaDevices?.getUserMedia ||
+        typeof MediaRecorder === "undefined"
       ) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const AudioCtx =
-            window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioCtx();
-          audioContextRef.current = ctx;
-          if (ctx.state === "suspended") {
-            void ctx.resume();
-          }
-          const source = ctx.createMediaStreamSource(stream);
-          sourceRef.current = source;
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 256;
-          analyser.smoothingTimeConstant = 0.5;
-          source.connect(analyser);
-          analyserRef.current = analyser;
-
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          let speakingFrames = 0;
-          let silentFrames = 0;
-
-          const checkAudio = () => {
-            if (!analyserRef.current) return;
-            analyserRef.current.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const avg = sum / dataArray.length;
-            const normalized = Math.min(100, Math.round((avg / 128) * 100));
-            setAudioLevel(normalized);
-
-            // VAD: avg > 10 corresponds to audible human speech in room
-            if (avg > 10) {
-              speakingFrames++;
-              silentFrames = 0;
-              if (speakingFrames >= 2) {
-                setIsSpeaking(true);
-              }
-            } else {
-              silentFrames++;
-              if (silentFrames >= 6) {
-                speakingFrames = 0;
-                setIsSpeaking(false);
-              }
-            }
-            animFrameRef.current = requestAnimationFrame(checkAudio);
-          };
-          animFrameRef.current = requestAnimationFrame(checkAudio);
-        } catch {
-          // AudioContext gracefully skipped if disabled by browser policy
-        }
+        throw new Error(
+          "Microphone recording is not supported in this browser.",
+        );
       }
+
+      onUtteranceRef.current = onUtterance ?? null;
+      chunksRef.current = [];
+      allChunksRef.current = [];
+      isRecordingRef.current = true;
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
       const mimeType = preferredMimeTypes.find((candidate) =>
         MediaRecorder.isTypeSupported(candidate),
       );
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      recorderRef.current = recorder;
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunksRef.current.push(event.data);
+
+      const createRecorder = () => {
+        if (!streamRef.current || !streamRef.current.active) return null;
+        const rec = mimeType
+          ? new MediaRecorder(streamRef.current, { mimeType })
+          : new MediaRecorder(streamRef.current);
+        rec.ondataavailable = (event) => {
+          if (event.data.size) {
+            chunksRef.current.push(event.data);
+            allChunksRef.current.push(event.data);
+          }
+        };
+        rec.onerror = () => {};
+        rec.start(150);
+        return rec;
       };
-      recorder.onerror = () =>
-        finish(null, new Error("Microphone recording failed."));
-      recorder.onstop = () => {
-        const contentType = recorder.mimeType || "audio/webm";
-        const chunks = chunksRef.current;
-        finish(chunks.length ? new Blob(chunks, { type: contentType }) : null);
-      };
-      recorder.start(250);
-      setIsRecording(true);
-    } catch (error) {
-      stopTracks(stream);
-      cleanupAudioNodes();
-      throw error;
-    }
-  }, [cancel, cleanupAudioNodes, finish]);
+
+      try {
+        // Set up Web Audio Analyser for 0ms latency voice activity detection & utterance segmentation
+        if (
+          typeof window !== "undefined" &&
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window.AudioContext || (window as any).webkitAudioContext)
+        ) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const AudioCtx =
+              window.AudioContext || (window as any).webkitAudioContext;
+            const ctx = new AudioCtx();
+            audioContextRef.current = ctx;
+            if (ctx.state === "suspended") {
+              void ctx.resume();
+            }
+            const source = ctx.createMediaStreamSource(stream);
+            sourceRef.current = source;
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.5;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            let speakingFrames = 0;
+            let silentFrames = 0;
+            let hasSpokenInUtterance = false;
+            let utteranceDurationFrames = 0;
+
+            const checkAudio = () => {
+              if (!analyserRef.current || !isRecordingRef.current) return;
+              analyserRef.current.getByteFrequencyData(dataArray);
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+              const avg = sum / dataArray.length;
+              const normalized = Math.min(100, Math.round((avg / 128) * 100));
+              setAudioLevel(normalized);
+
+              // VAD: avg > 10 corresponds to audible human speech
+              if (avg > 10) {
+                speakingFrames++;
+                hasSpokenInUtterance = true;
+                utteranceDurationFrames++;
+                silentFrames = 0;
+                if (speakingFrames >= 2) {
+                  setIsSpeaking(true);
+                }
+              } else {
+                silentFrames++;
+                if (silentFrames >= 5) {
+                  speakingFrames = 0;
+                  setIsSpeaking(false);
+                }
+              }
+
+              // Automatic live utterance segmentation:
+              // When child vocalized and pauses for ~500ms (silentFrames >= 15) OR spoke for > 2.5s:
+              if (
+                onUtteranceRef.current &&
+                hasSpokenInUtterance &&
+                (silentFrames >= 15 || utteranceDurationFrames >= 70) &&
+                !isRotatingRef.current
+              ) {
+                hasSpokenInUtterance = false;
+                utteranceDurationFrames = 0;
+                silentFrames = 0;
+                speakingFrames = 0;
+
+                const activeRecorder = recorderRef.current;
+                if (activeRecorder && activeRecorder.state === "recording") {
+                  isRotatingRef.current = true;
+                  const currentUtteranceChunks = [...chunksRef.current];
+                  chunksRef.current = [];
+
+                  activeRecorder.onstop = () => {
+                    isRotatingRef.current = false;
+                    const contentType = activeRecorder.mimeType || "audio/webm";
+                    if (currentUtteranceChunks.length) {
+                      const blob = new Blob(currentUtteranceChunks, {
+                        type: contentType,
+                      });
+                      if (blob.size > 800) {
+                        onUtteranceRef.current?.(blob);
+                      }
+                    }
+                  };
+
+                  try {
+                    activeRecorder.stop();
+                    recorderRef.current = createRecorder();
+                  } catch {
+                    isRotatingRef.current = false;
+                  }
+                }
+              }
+
+              animFrameRef.current = requestAnimationFrame(checkAudio);
+            };
+            animFrameRef.current = requestAnimationFrame(checkAudio);
+          } catch {
+            // AudioContext gracefully skipped if disabled by browser policy
+          }
+        }
+
+        recorderRef.current = createRecorder();
+        setIsRecording(true);
+      } catch (error) {
+        stopTracks(stream);
+        cleanupAudioNodes();
+        throw error;
+      }
+    },
+    [cancel, cleanupAudioNodes],
+  );
 
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive")
-      return Promise.resolve(null);
+    if (!recorder || recorder.state === "inactive") {
+      cleanupAudioNodes();
+      setIsRecording(false);
+      const finalBlob = allChunksRef.current.length
+        ? new Blob(allChunksRef.current, { type: "audio/webm" })
+        : null;
+      return Promise.resolve(finalBlob);
+    }
 
     return new Promise<Blob | null>((resolve, reject) => {
       resolveStopRef.current = resolve;
       rejectStopRef.current = reject;
+      recorder.onstop = () => {
+        const contentType = recorder.mimeType || "audio/webm";
+        const finalBlob = allChunksRef.current.length
+          ? new Blob(allChunksRef.current, { type: contentType })
+          : null;
+        finish(finalBlob);
+      };
       try {
         recorder.stop();
       } catch (error) {
@@ -214,7 +298,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         );
       }
     });
-  }, [finish]);
+  }, [cleanupAudioNodes, finish]);
 
   useEffect(() => cancel, [cancel]);
 

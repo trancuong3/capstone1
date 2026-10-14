@@ -131,42 +131,6 @@ export function ReadingScreen({
     [recordSpokenText],
   );
 
-  const wasSpeakingRef = useRef(false);
-  useEffect(() => {
-    if (!isMicRecording || !page || !page.words.length) {
-      wasSpeakingRef.current = false;
-      return;
-    }
-
-    if (speechRecorder.isSpeaking && !wasSpeakingRef.current) {
-      const currentIndex = page.words.findIndex(
-        (w) => w.word_id === currentWordId,
-      );
-      let nextIndex = currentIndex >= 0 ? currentIndex : 0;
-      if (
-        currentIndex >= 0 &&
-        spokenWordsSetRef.current.has(page.words[currentIndex].text)
-      ) {
-        if (currentIndex + 1 < page.words.length) {
-          nextIndex = currentIndex + 1;
-        }
-      }
-      const activeWord = page.words[nextIndex];
-      if (activeWord && mountedRef.current) {
-        setCurrentWordId(activeWord.word_id);
-        setLatestTranscript(activeWord.text);
-        recordSpokenText(activeWord.text);
-      }
-    }
-    wasSpeakingRef.current = speechRecorder.isSpeaking;
-  }, [
-    speechRecorder.isSpeaking,
-    isMicRecording,
-    page,
-    currentWordId,
-    recordSpokenText,
-  ]);
-
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -308,9 +272,25 @@ export function ReadingScreen({
     setLatestTranscript(null);
     isListeningActiveRef.current = true;
 
-    // 1. Always start MediaRecorder so the child's microphone is actively recorded for ElevenLabs STT
+    // 1. Always start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
     try {
-      await speechRecorder.start();
+      await speechRecorder.start(async (utteranceBlob) => {
+        if (!mountedRef.current || !isListeningActiveRef.current) return;
+        try {
+          const transcript = await speechService.transcribe(utteranceBlob, {
+            languageCode: "vi",
+          });
+          if (!mountedRef.current || !transcript.text) return;
+          const cleanText = transcript.text.trim();
+          if (cleanText) {
+            setLatestTranscript(cleanText);
+            matchSpokenWord(cleanText);
+            recordSpokenText(cleanText);
+          }
+        } catch (e) {
+          console.warn("Live ElevenLabs STT utterance notice:", e);
+        }
+      });
       isUsingRecorderRef.current = true;
     } catch (error) {
       isUsingRecorderRef.current = false;
