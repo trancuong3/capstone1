@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import unicodedata
 from pathlib import Path
 from typing import Sequence
@@ -64,6 +65,8 @@ def run_benchmark(manifest_path: Path) -> dict[str, object]:
     for index, item in enumerate(manifest):
         if not isinstance(item, dict) or not isinstance(item.get("image"), str) or not isinstance(item.get("ground_truth"), str):
             raise ValueError(f"Manifest item {index} must have image and ground_truth strings")
+        if not item["image"].strip() or not item["ground_truth"].strip():
+            raise ValueError(f"Manifest item {index} must have a non-empty image path and verified ground_truth")
         image_path = Path(item["image"])
         if not image_path.is_absolute():
             image_path = base_dir / image_path
@@ -71,15 +74,20 @@ def run_benchmark(manifest_path: Path) -> dict[str, object]:
         row: dict[str, object] = {"image": str(image_path), "ground_truth_chars": len(ground_truth)}
         try:
             image_bytes = image_path.read_bytes()
+            baseline_started = time.perf_counter()
             baseline = extract_text_and_boxes(image_bytes, strategy="baseline")
+            baseline_elapsed_ms = round((time.perf_counter() - baseline_started) * 1000, 3)
+            best_started = time.perf_counter()
             improved = extract_text_and_boxes(image_bytes, strategy="best")
+            best_elapsed_ms = round((time.perf_counter() - best_started) * 1000, 3)
             row.update(
                 {
                     "baseline_cer": round(error_rate(ground_truth, baseline["text"], words=False), 6),
                     "baseline_wer": round(error_rate(ground_truth, baseline["text"], words=True), 6),
                     "best_cer": round(error_rate(ground_truth, improved["text"], words=False), 6),
                     "best_wer": round(error_rate(ground_truth, improved["text"], words=True), 6),
-                    "baseline_elapsed_note": "not measured by this script",
+                    "baseline_elapsed_ms": baseline_elapsed_ms,
+                    "best_elapsed_ms": best_elapsed_ms,
                     "best_candidate": improved["metadata"].get("selected_candidate"),
                     "best_candidate_count": improved["metadata"].get("candidate_count"),
                 }
@@ -87,6 +95,7 @@ def run_benchmark(manifest_path: Path) -> dict[str, object]:
         except Exception as exc:
             failed += 1
             row["error"] = type(exc).__name__
+            row["error_message"] = str(exc)
         results.append(row)
 
     successful = [row for row in results if "best_cer" in row]
@@ -99,7 +108,14 @@ def run_benchmark(manifest_path: Path) -> dict[str, object]:
         "results": results,
     }
     if successful:
-        for key in ("baseline_cer", "baseline_wer", "best_cer", "best_wer"):
+        for key in (
+            "baseline_cer",
+            "baseline_wer",
+            "best_cer",
+            "best_wer",
+            "baseline_elapsed_ms",
+            "best_elapsed_ms",
+        ):
             summary[f"mean_{key}"] = round(
                 sum(float(row[key]) for row in successful) / len(successful), 6
             )

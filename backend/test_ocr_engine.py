@@ -93,6 +93,8 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["text"], "Chú\nmèo")
         self.assertEqual(result["metadata"]["candidate_count"], 1)
         self.assertEqual(result["metadata"]["selected_candidate"], "baseline_clahe_psm3")
+        self.assertIsNone(result["metadata"]["candidate_score_margin"])
+        self.assertNotIn("candidate_scores_ambiguous", result["metadata"]["warnings"])
 
     def test_best_strategy_selects_candidate_with_stronger_confidence(self):
         patches = self._configured_tesseract()
@@ -110,6 +112,19 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["metadata"]["selected_candidate"], "grayscale_psm3")
         self.assertAlmostEqual(result["metadata"]["mean_confidence"], 0.975)
         self.assertEqual(result["metadata"]["low_confidence_word_count"], 0)
+
+    def test_close_candidate_scores_add_ambiguity_warning(self):
+        patches = self._configured_tesseract()
+        scores = [(0.90, 0.90), (0.89, 0.89), (0.70, 0.70), (0.60, 0.60)]
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
+        ), patch.object(ocr_engine, "_candidate_score", side_effect=scores):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        metadata = result["metadata"]
+        self.assertIn("candidate_scores_ambiguous", metadata["warnings"])
+        self.assertAlmostEqual(metadata["candidate_score_margin"], 0.01)
+        self.assertEqual(metadata["candidate_score_ambiguity_margin"], 0.025)
 
     def test_missing_vietnamese_language_data_fails_closed(self):
         with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(

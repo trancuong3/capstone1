@@ -4,7 +4,7 @@
 
 The Admin OCR endpoint continues to use the local Tesseract engine. The default production strategy now evaluates a bounded set of candidates: CLAHE with PSM 3, grayscale with PSM 3, Otsu thresholding with PSM 4, and adaptive thresholding with PSM 6 when the image is large enough for a safe adaptive threshold window. On small source images, candidates use uniform upscale capped at 2x / 1800 px maximum side target. Uniform scaling preserves normalized box coordinates.
 
-The ranking heuristic combines valid Tesseract confidence, confidence coverage, the number of detected words relative to the candidate with the most words, printable text ratio, and replacement-character penalty. It is a candidate-ranking heuristic, not a calibrated probability of correctness. An admin must still review and verify the revision.
+The ranking heuristic combines valid Tesseract confidence, confidence coverage, the number of detected words relative to the candidate with the most words, printable text ratio, and replacement-character penalty. It is a candidate-ranking heuristic, not a calibrated probability of correctness. If the top two candidate scores differ by no more than `0.025`, metadata includes `candidate_scores_ambiguous` and the Admin screen asks for an explicit review. This warning means the candidates are difficult to distinguish by the heuristic; it does not establish that the selected text is right or wrong. An admin must still review and verify the revision.
 
 The old single-pass CLAHE + PSM 3 strategy remains available for comparison using the engine's baseline mode.
 
@@ -33,7 +33,7 @@ From the backend directory, run:
 
     python -m scripts.benchmark_ocr --manifest path/to/manifest.json
 
-The script reports per-image and mean CER/WER for the old baseline and current multi-candidate mode. It preserves Vietnamese diacritics by applying Unicode NFC and whitespace normalization only. Lower CER/WER is better. The benchmark does not measure latency and does not prove improvement unless representative images and verified ground truth are provided.
+The script reports per-image and mean CER/WER plus per-image and mean elapsed milliseconds for the old baseline and current multi-candidate mode. Timing measures the OCR calls on the same machine and environment; use it for comparison, not as a universal latency guarantee. It preserves Vietnamese diacritics by applying Unicode NFC and whitespace normalization only. Lower CER/WER is better. The benchmark does not prove improvement unless representative images and verified ground truth are provided. Image paths are resolved relative to the manifest, and each item must contain a non-empty image path and human-verified ground-truth text.
 
 ## Coordinate contract
 

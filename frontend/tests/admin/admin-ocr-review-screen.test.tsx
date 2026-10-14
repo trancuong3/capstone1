@@ -80,4 +80,45 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
+
+  it("warns when the OCR candidate ranking is ambiguous", async () => {
+    const services = createAdminServiceFixture();
+    services.ocr.getRevision.mockResolvedValueOnce({
+      ...adminR2Fixture,
+      ocr_metadata: { warnings: ["candidate_scores_ambiguous"] },
+    });
+
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    expect(
+      await screen.findByText(/điểm đánh giá gần nhau/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show the ambiguity warning when metadata has no such warning", async () => {
+    const services = createAdminServiceFixture();
+    services.ocr.getRevision.mockResolvedValueOnce({
+      ...adminR2Fixture,
+      ocr_metadata: { warnings: [] },
+    });
+
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/điểm đánh giá gần nhau/i),
+    ).not.toBeInTheDocument();
+  });
 });

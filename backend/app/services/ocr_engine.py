@@ -14,6 +14,10 @@ import pytesseract
 from pytesseract import Output
 
 
+# A small score gap is an uncertainty signal, not a calibrated probability.
+CANDIDATE_SCORE_AMBIGUITY_MARGIN = 0.025
+
+
 class OcrEngineUnavailable(RuntimeError):
     """Local Tesseract or the Vietnamese language data is not configured."""
 
@@ -337,7 +341,14 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
                 diagnostic["score"] = round(score, 4)
                 break
 
-    best_score, selected, mean_confidence = max(scored, key=lambda entry: entry[0])
+    scored.sort(key=lambda entry: entry[0], reverse=True)
+    best_score, selected, mean_confidence = scored[0]
+    second_best_score = scored[1][0] if len(scored) > 1 else None
+    score_margin = (
+        round(max(0.0, best_score - second_best_score), 4)
+        if second_best_score is not None
+        else None
+    )
     words = selected["words"]
     text = str(selected["text"])
     threshold = _configured_threshold()
@@ -354,6 +365,8 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
         warnings.append("low_mean_confidence")
     if low_confidence_count:
         warnings.append("words_need_review")
+    if score_margin is not None and score_margin <= CANDIDATE_SCORE_AMBIGUITY_MARGIN:
+        warnings.append("candidate_scores_ambiguous")
 
     selected_diagnostics = next(
         (item for item in diagnostics if item["candidate"] == selected["candidate"]),
@@ -370,6 +383,8 @@ def extract_text_and_boxes(image_bytes: bytes, *, strategy: str = "best") -> dic
             "language": "vie",
             "strategy": strategy,
             "selected_candidate": selected["candidate"],
+            "candidate_score_margin": score_margin,
+            "candidate_score_ambiguity_margin": CANDIDATE_SCORE_AMBIGUITY_MARGIN,
             "selected_psm": selected["psm"],
             "preprocessing": selected["preprocessing"],
             "candidate_count": attempted_count,

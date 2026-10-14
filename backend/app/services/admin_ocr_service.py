@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import Book, BookPage, PageRevision, PageRevisionWord
+from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
 from app.schemas.book import AdminRevisionDetailRead, CatalogBookResponse
@@ -37,7 +37,6 @@ ALLOWED_FORMATS = {
 
 class AdminOcrService:
     def __init__(self, db: AsyncSession):
-        self.db = db
         self.repo = AdminOcrRepository(db)
 
     async def _cleanup_uploaded_object(
@@ -81,15 +80,13 @@ class AdminOcrService:
             LifecycleStatus="ACTIVE",
             CreatedBy=actor_id,
         )
-        self.db.add(row)
         try:
-            await self.db.commit()
-            await self.db.refresh(row)
+            await self.repo.persist_book(row)
         except IntegrityError as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=409, detail="Could not create book with the current database constraints") from exc
         except Exception:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise
         return CatalogBookResponse.model_validate(row)
 
@@ -405,13 +402,6 @@ class AdminOcrService:
             Id=revision_id, PageId=page_id, RevisionNo="1", VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=metadata,
         )
-        self.db.add_all([page, revision])
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
         try:
             log_diagnostic(
                 logger,
@@ -422,9 +412,7 @@ class AdminOcrService:
                 page_id=str(page_id),
                 word_count=len(words),
             )
-            await self.db.commit()
-            await self.db.refresh(page)
-            await self.db.refresh(revision)
+            await self.repo.persist_page_revision(page, revision, words)
             log_diagnostic(
                 logger,
                 logging.INFO,
@@ -445,7 +433,7 @@ class AdminOcrService:
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            await self.db.rollback()
+            await self.repo.rollback()
             await self._cleanup_uploaded_object(
                 object_path,
                 object_may_exist=storage_uploaded,
@@ -465,7 +453,7 @@ class AdminOcrService:
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
-            await self.db.rollback()
+            await self.repo.rollback()
             await self._cleanup_uploaded_object(
                 object_path,
                 object_may_exist=storage_uploaded,
@@ -558,11 +546,9 @@ class AdminOcrService:
             json.dumps({"text": revision.DraftText, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
-            await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
+            await self.repo.commit_and_refresh(revision, page)
         except Exception:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise
         return await self.revision_detail(page, revision)
 
@@ -596,11 +582,9 @@ class AdminOcrService:
         if page.LifecycleStatus == "ACTIVE":
             page.CurrentVerifiedRevisionId = revision.Id
         try:
-            await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
+            await self.repo.commit_and_refresh(revision, page)
         except Exception:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise
         return await self.revision_detail(page, revision)
 
@@ -613,20 +597,20 @@ class AdminOcrService:
             image_bytes = await run_in_threadpool(download_object, page.ImagePath)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except OcrNoTextDetected as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=422, detail="No usable text was detected during reprocessing") from exc
         except ValueError as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=422, detail="Stored image could not be decoded") from exc
         words = self._word_data(ocr["words"])
         text_value = str(ocr["text"]).strip()
         try:
             next_number = await self.repo.next_revision_number(page.Id)
         except ValueError as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
         revision_id = uuid4()
         content_hash = hashlib.sha256(
@@ -636,22 +620,13 @@ class AdminOcrService:
             Id=revision_id, PageId=page.Id, RevisionNo=str(next_number), VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=dict(ocr["metadata"]),
         )
-        self.db.add(revision)
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
         try:
-            await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
+            await self.repo.persist_revision(revision, words, page)
         except IntegrityError as exc:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise HTTPException(status_code=409, detail="A concurrent reprocess created this revision number; retry") from exc
         except Exception:
-            await self.db.rollback()
+            await self.repo.rollback()
             raise
         # The current verified pointer and all historical session/event references remain untouched.
         return await self.revision_detail(page, revision)
