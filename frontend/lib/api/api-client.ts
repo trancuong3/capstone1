@@ -71,8 +71,7 @@ const safeBackendMessages: Record<string, string> = {
     "Số trang này đã tồn tại trong sách.",
   "Cannot upload pages to a retired book":
     "Không thể upload trang cho sách đã bị RETIRED.",
-  "Book not found":
-    "Không tìm thấy sách được yêu cầu.",
+  "Book not found": "Không tìm thấy sách được yêu cầu.",
   "Only revisions with status NEEDS_REVIEW can be verified":
     "Chỉ revision ở trạng thái NEEDS_REVIEW mới có thể được xác minh.",
   "Only revisions with status NEEDS_REVIEW can be edited":
@@ -83,10 +82,8 @@ const safeBackendMessages: Record<string, string> = {
     "Chỉ có thể chạy lại OCR từ revision mới nhất. Hãy tải lại lịch sử trang.",
   "page_number is out of range":
     "Số trang vượt ngoài phạm vi hợp lệ (1-32767).",
-  "Image decoding failed":
-    "Không đọc được file ảnh gửi lên.",
-  "Image dimensions are invalid":
-    "Kích thước ảnh không hợp lệ.",
+  "Image decoding failed": "Không đọc được file ảnh gửi lên.",
+  "Image dimensions are invalid": "Kích thước ảnh không hợp lệ.",
 };
 
 function errorCode(status: number): ServiceErrorCode {

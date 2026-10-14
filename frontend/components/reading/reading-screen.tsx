@@ -54,6 +54,39 @@ type LoadState =
   | { status: "ready"; data: ReadingScreenData }
   | { status: "not-found" }
   | { status: "error" };
+interface BrowserSpeechEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
+interface BrowserSpeechErrorEvent {
+  error?: string;
+}
+
+interface BrowserSpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: BrowserSpeechEvent) => void) | null;
+  onerror: ((event: BrowserSpeechErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort?: () => void;
+}
+
+interface WindowWithSpeech {
+  SpeechRecognition?: new () => BrowserSpeechRecognition;
+  webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+}
 
 export function ReadingScreen({
   initialPageId,
@@ -94,8 +127,7 @@ export function ReadingScreen({
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
   const isUsingRecorderRef = useRef(false);
 
@@ -307,74 +339,69 @@ export function ReadingScreen({
     }
 
     // 2. Concurrently attempt Web Speech API for low-latency streaming text if supported by browser
-    if (
-      typeof window !== "undefined" &&
-      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
-    ) {
+    if (typeof window !== "undefined") {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const SpeechRec =
-          (window as any).SpeechRecognition ||
-          (window as any).webkitSpeechRecognition;
-        const rec = new SpeechRec();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = "vi-VN";
-        rec.maxAlternatives = 1;
+        const win = window as unknown as WindowWithSpeech;
+        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        if (SpeechRec) {
+          const rec = new SpeechRec();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = "vi-VN";
+          rec.maxAlternatives = 1;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        rec.onresult = (event: any) => {
-          let latestWord = "";
-          let fullLive = "";
+          rec.onresult = (event: BrowserSpeechEvent) => {
+            let latestWord = "";
+            let fullLive = "";
 
-          for (let i = 0; i < event.results.length; ++i) {
-            const part = event.results[i][0]?.transcript || "";
-            if (part.trim()) {
-              fullLive += (fullLive ? " " : "") + part.trim();
-            }
-          }
-
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
-            const part = event.results[i][0]?.transcript || "";
-            if (part.trim()) {
-              latestWord += (latestWord ? " " : "") + part.trim();
-            }
-          }
-
-          const currentWord = latestWord.trim() || fullLive.trim();
-          if (currentWord && mountedRef.current) {
-            setLatestTranscript(currentWord);
-            matchSpokenWord(currentWord);
-            recordSpokenText(currentWord);
-          }
-        };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        rec.onerror = (event: any) => {
-          // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
-          // and ElevenLabs STT will transcribe the full audio upon pause/finish.
-          console.warn("Browser SpeechRecognition notice:", event?.error);
-        };
-
-        rec.onend = () => {
-          if (mountedRef.current && isListeningActiveRef.current) {
-            setTimeout(() => {
-              if (mountedRef.current && isListeningActiveRef.current) {
-                try {
-                  rec.start();
-                } catch {
-                  // Safe ignore
-                }
+            for (let i = 0; i < event.results.length; ++i) {
+              const part = event.results[i][0]?.transcript || "";
+              if (part.trim()) {
+                fullLive += (fullLive ? " " : "") + part.trim();
               }
-            }, 200);
-          }
-        };
+            }
 
-        try {
-          rec.start();
-          recognitionRef.current = rec;
-        } catch {
-          // Safe ignore if browser blocks concurrent audio capture
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              const part = event.results[i][0]?.transcript || "";
+              if (part.trim()) {
+                latestWord += (latestWord ? " " : "") + part.trim();
+              }
+            }
+
+            const currentWord = latestWord.trim() || fullLive.trim();
+            if (currentWord && mountedRef.current) {
+              setLatestTranscript(currentWord);
+              matchSpokenWord(currentWord);
+              recordSpokenText(currentWord);
+            }
+          };
+
+          rec.onerror = (event: BrowserSpeechErrorEvent) => {
+            // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
+            // and ElevenLabs STT will transcribe the full audio upon pause/finish.
+            console.warn("Browser SpeechRecognition notice:", event?.error);
+          };
+
+          rec.onend = () => {
+            if (mountedRef.current && isListeningActiveRef.current) {
+              setTimeout(() => {
+                if (mountedRef.current && isListeningActiveRef.current) {
+                  try {
+                    rec.start();
+                  } catch {
+                    // Safe ignore
+                  }
+                }
+              }, 200);
+            }
+          };
+
+          try {
+            rec.start();
+            recognitionRef.current = rec;
+          } catch {
+            // Safe ignore if browser blocks concurrent audio capture
+          }
         }
       } catch (e) {
         console.warn("SpeechRecognition initialization skipped:", e);
@@ -454,8 +481,7 @@ export function ReadingScreen({
       return;
     }
     if (!page) return;
-    const rawText =
-      page.text || page.words.map((w) => w.text).join(" ") || "";
+    const rawText = page.text || page.words.map((w) => w.text).join(" ") || "";
     const fullText = rawText.replace(/\s+/g, " ").trim();
     if (!fullText) return;
 

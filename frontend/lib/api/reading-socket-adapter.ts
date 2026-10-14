@@ -27,7 +27,10 @@ export interface ReadingSocketAdapter {
 
 export function createReadingSocketAdapter(): ReadingSocketAdapter {
   return {
-    subscribe(_sessionId: string, _onState: (state: ReadingSessionState) => void): ReadingSocketUnsubscribe {
+    subscribe(
+      _sessionId: string,
+      _onState: (state: ReadingSessionState) => void,
+    ): ReadingSocketUnsubscribe {
       return () => {};
     },
 

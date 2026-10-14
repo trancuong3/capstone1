@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { SessionComplete } from "@/components/reading/session-complete";
-import { childFixture, TEST_SESSION_ID } from "@/test/fixtures/report-data-fixture";
+import {
+  childFixture,
+  TEST_SESSION_ID,
+} from "@/test/fixtures/report-data-fixture";
 
 describe("SessionComplete component", () => {
   const baseSummary = {
@@ -30,7 +33,9 @@ describe("SessionComplete component", () => {
     expect(screen.getByText("3 từ")).toBeInTheDocument();
 
     // Spoken words list is collapsed initially
-    expect(screen.queryByTestId("spoken-words-container")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("spoken-words-container"),
+    ).not.toBeInTheDocument();
 
     // Click on the result box ("ô kết quả")
     const resultBox = screen.getByRole("button", { name: /3 từ/i });
@@ -39,7 +44,9 @@ describe("SessionComplete component", () => {
     // Now words container is visible
     expect(screen.getByTestId("spoken-words-container")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Kết quả nhận diện giọng nói của bé (STT)" }),
+      screen.getByRole("heading", {
+        name: "Kết quả nhận diện giọng nói của bé (STT)",
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText("3 từ nhận diện")).toBeInTheDocument();
     expect(screen.getByText("mèo")).toBeInTheDocument();
@@ -49,7 +56,9 @@ describe("SessionComplete component", () => {
 
     // Click again to collapse
     await user.click(resultBox);
-    expect(screen.queryByTestId("spoken-words-container")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("spoken-words-container"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders helpful message when no words were captured by STT", async () => {

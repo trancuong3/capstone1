@@ -150,15 +150,17 @@ export function useSpeechRecorder(): SpeechRecorder {
 
       try {
         // Set up Web Audio Analyser for 0ms latency voice activity detection & utterance segmentation
-        if (
-          typeof window !== "undefined" &&
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window.AudioContext || (window as any).webkitAudioContext)
-        ) {
+        interface WindowWithAudio {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        }
+        const winAudio =
+          typeof window !== "undefined"
+            ? (window as unknown as WindowWithAudio)
+            : null;
+        const AudioCtx = winAudio?.AudioContext || winAudio?.webkitAudioContext;
+        if (AudioCtx) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const AudioCtx =
-              window.AudioContext || (window as any).webkitAudioContext;
             const ctx = new AudioCtx();
             audioContextRef.current = ctx;
             if (ctx.state === "suspended") {
@@ -304,5 +306,13 @@ export function useSpeechRecorder(): SpeechRecorder {
 
   const getStream = useCallback(() => streamRef.current, []);
 
-  return { isRecording, isSpeaking, audioLevel, start, stop, cancel, getStream };
+  return {
+    isRecording,
+    isSpeaking,
+    audioLevel,
+    start,
+    stop,
+    cancel,
+    getStream,
+  };
 }

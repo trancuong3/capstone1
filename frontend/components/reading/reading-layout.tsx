@@ -32,7 +32,6 @@ interface ReadingLayoutProps {
 }
 
 export function ReadingLayout({
-  audioLevel = 0,
   bookTitle,
   children,
   controlsDisabled = false,

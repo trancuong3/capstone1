@@ -38,7 +38,9 @@ export function BookPageViewer({
             <span className="size-2 rounded-full bg-emerald-500" />
             Nội dung OCR đã xác minh
           </span>
-          <span className="text-label text-muted">Trang {page.page_number}</span>
+          <span className="text-label text-muted">
+            Trang {page.page_number}
+          </span>
         </header>
 
         {page.image_url ? (
@@ -102,7 +104,9 @@ export function BookPageViewer({
           )}
         </div>
 
-        <p className="mt-2 text-right text-label text-muted">{page.page_number}</p>
+        <p className="mt-2 text-right text-label text-muted">
+          {page.page_number}
+        </p>
       </div>
 
       <span className="sr-only" aria-live="polite">

@@ -103,7 +103,8 @@ export function SessionComplete({
                 </>
               ) : (
                 <>
-                  Xem từ bé đọc <ChevronDown aria-hidden="true" className="size-3.5" />
+                  Xem từ bé đọc{" "}
+                  <ChevronDown aria-hidden="true" className="size-3.5" />
                 </>
               )}
             </span>
@@ -173,7 +174,8 @@ export function SessionComplete({
                   Chưa ghi nhận từ nào trong lượt đọc này.
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  Bé hãy bấm nút &ldquo;Đọc&rdquo; và nói to, rõ ràng vào microphone để hệ thống ghi nhận nhé!
+                  Bé hãy bấm nút &ldquo;Đọc&rdquo; và nói to, rõ ràng vào
+                  microphone để hệ thống ghi nhận nhé!
                 </p>
               </div>
             )}

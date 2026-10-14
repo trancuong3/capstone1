@@ -138,7 +138,9 @@ export function createSpeechService(): SpeechService {
       if (!audio.size) throw failure("STT_UNAVAILABLE", 422);
 
       const mimeType = audio.type || "audio/webm";
-      const fileBlob = audio.type ? audio : new Blob([audio], { type: mimeType });
+      const fileBlob = audio.type
+        ? audio
+        : new Blob([audio], { type: mimeType });
       const filename =
         options.filename ??
         (mimeType.includes("ogg") ? "recording.ogg" : "recording.webm");
