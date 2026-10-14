@@ -27,6 +27,7 @@ import type {
   ReadingCompletionSummaryUI,
   ReadingConnectionState,
   ReadingPageDTO,
+  ReadingPageWordDTO,
   ReadingReconnectDemoMode,
   ReadingSessionState,
   ReadingUiState,
@@ -120,6 +121,51 @@ export function ReadingScreen({
       spokenWordsSetRef.current.add(w);
     }
   }, []);
+
+  const handleWordClick = useCallback(
+    (word: ReadingPageWordDTO) => {
+      setCurrentWordId(word.word_id);
+      setLatestTranscript(word.text);
+      recordSpokenText(word.text);
+    },
+    [recordSpokenText],
+  );
+
+  const wasSpeakingRef = useRef(false);
+  useEffect(() => {
+    if (!isMicRecording || !page || !page.words.length) {
+      wasSpeakingRef.current = false;
+      return;
+    }
+
+    if (speechRecorder.isSpeaking && !wasSpeakingRef.current) {
+      const currentIndex = page.words.findIndex(
+        (w) => w.word_id === currentWordId,
+      );
+      let nextIndex = currentIndex >= 0 ? currentIndex : 0;
+      if (
+        currentIndex >= 0 &&
+        spokenWordsSetRef.current.has(page.words[currentIndex].text)
+      ) {
+        if (currentIndex + 1 < page.words.length) {
+          nextIndex = currentIndex + 1;
+        }
+      }
+      const activeWord = page.words[nextIndex];
+      if (activeWord && mountedRef.current) {
+        setCurrentWordId(activeWord.word_id);
+        setLatestTranscript(activeWord.text);
+        recordSpokenText(activeWord.text);
+      }
+    }
+    wasSpeakingRef.current = speechRecorder.isSpeaking;
+  }, [
+    speechRecorder.isSpeaking,
+    isMicRecording,
+    page,
+    currentWordId,
+    recordSpokenText,
+  ]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -258,31 +304,14 @@ export function ReadingScreen({
     }
   }
 
-  async function startRecorderFallback(): Promise<boolean> {
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === "undefined"
-    ) {
-      if (mountedRef.current) setLatestTranscript(null);
-      return true;
-    }
+  async function startListening(): Promise<boolean> {
+    setLatestTranscript(null);
+    isListeningActiveRef.current = true;
+
+    // 1. Always start MediaRecorder so the child's microphone is actively recorded for ElevenLabs STT
     try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // Safe ignore
-        }
-        recognitionRef.current = null;
-      }
-      isUsingRecorderRef.current = true;
       await speechRecorder.start();
-      if (!mountedRef.current) {
-        speechRecorder.cancel();
-        return false;
-      }
-      return true;
+      isUsingRecorderRef.current = true;
     } catch (error) {
       isUsingRecorderRef.current = false;
       const message = error instanceof Error ? error.message : "";
@@ -296,14 +325,8 @@ export function ReadingScreen({
       }
       return false;
     }
-  }
 
-  async function startListening(): Promise<boolean> {
-    setLatestTranscript(null);
-    isListeningActiveRef.current = true;
-    isUsingRecorderRef.current = false;
-
-    // 1. Prioritize browser SpeechRecognition for true real-time, low-latency streaming without locking the mic
+    // 2. Concurrently attempt Web Speech API for low-latency streaming text if supported by browser
     if (
       typeof window !== "undefined" &&
       ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
@@ -348,55 +371,37 @@ export function ReadingScreen({
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         rec.onerror = (event: any) => {
-          const err = event?.error;
-          if (err === "no-speech") return;
-          console.warn("Speech recognition notice:", err);
-          if (err === "not-allowed" || err === "permission-denied") {
-            if (mountedRef.current) {
-              setConnectionState("reconnecting");
-              setUiState("microphone-denied");
-            }
-          } else if (
-            err === "network" ||
-            err === "audio-capture" ||
-            err === "service-not-allowed"
-          ) {
-            void startRecorderFallback();
-          }
+          // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
+          // and ElevenLabs STT will transcribe the full audio upon pause/finish.
+          console.warn("Browser SpeechRecognition notice:", event?.error);
         };
 
         rec.onend = () => {
-          if (
-            mountedRef.current &&
-            isListeningActiveRef.current &&
-            !isUsingRecorderRef.current
-          ) {
+          if (mountedRef.current && isListeningActiveRef.current) {
             setTimeout(() => {
-              if (
-                mountedRef.current &&
-                isListeningActiveRef.current &&
-                !isUsingRecorderRef.current
-              ) {
+              if (mountedRef.current && isListeningActiveRef.current) {
                 try {
                   rec.start();
                 } catch {
-                  // Safe ignore if browser is in transition
+                  // Safe ignore
                 }
               }
-            }, 100);
+            }, 200);
           }
         };
 
-        rec.start();
-        recognitionRef.current = rec;
-        return true;
+        try {
+          rec.start();
+          recognitionRef.current = rec;
+        } catch {
+          // Safe ignore if browser blocks concurrent audio capture
+        }
       } catch (e) {
-        console.warn("SpeechRecognition start failed, falling back to recorder:", e);
+        console.warn("SpeechRecognition initialization skipped:", e);
       }
     }
 
-    // 2. Fallback to MediaRecorder + ElevenLabs STT
-    return await startRecorderFallback();
+    return true;
   }
 
   async function transcribeRecording(recording: Blob) {
@@ -414,15 +419,18 @@ export function ReadingScreen({
         matchSpokenWord(transcript.text);
         recordSpokenText(transcript.text);
       }
-    } catch {
+    } catch (err) {
+      console.warn("ElevenLabs STT transcription notice:", err);
       if (
         !mountedRef.current ||
         controller.signal.aborted ||
         finishStartedRef.current
       )
         return;
-      setConnectionState("reconnecting");
-      setUiState("stt-error");
+      if (spokenWordsSetRef.current.size === 0) {
+        setConnectionState("reconnecting");
+        setUiState("stt-error");
+      }
     } finally {
       if (transcriptionAbortRef.current === controller) {
         transcriptionAbortRef.current = null;
@@ -440,16 +448,14 @@ export function ReadingScreen({
       }
       recognitionRef.current = null;
     }
-    if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-      isUsingRecorderRef.current = false;
-      try {
-        const recording = await speechRecorder.stop();
-        if (recording && recording.size > 200) {
-          await transcribeRecording(recording);
-        }
-      } catch {
-        speechRecorder.cancel();
+    isUsingRecorderRef.current = false;
+    try {
+      const recording = await speechRecorder.stop();
+      if (recording && recording.size > 200) {
+        await transcribeRecording(recording);
       }
+    } catch {
+      speechRecorder.cancel();
     }
   }
 
@@ -823,6 +829,7 @@ export function ReadingScreen({
       data-scoring-active={safety.scoring_active}
     >
       <ReadingLayout
+        audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
         controlsDisabled={uiState !== "reading" || isBusy}
         currentWordId={currentWordId}
@@ -831,6 +838,7 @@ export function ReadingScreen({
         isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
         isPlayingSample={speechPlayer.isPlaying}
+        isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
@@ -838,6 +846,7 @@ export function ReadingScreen({
         onPause={() => void pauseReading()}
         onReadSample={() => void handleReadSample()}
         onToggleListening={() => void handleToggleListening()}
+        onWordClick={handleWordClick}
         page={page}
       >
         {uiState === "page-turn" ? (

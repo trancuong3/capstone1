@@ -2,17 +2,19 @@ import Image from "next/image";
 
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
-import type { ReadingPageDTO } from "@/types/reading";
+import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 
 interface BookPageViewerProps {
   currentWordId: string | null;
   isTransitioning?: boolean;
+  onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
 }
 
 export function BookPageViewer({
   currentWordId,
   isTransitioning = false,
+  onWordClick,
   page,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
@@ -67,7 +69,7 @@ export function BookPageViewer({
               {page.words.map((word) => (
                 <span
                   className={cn(
-                    "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150",
+                    "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
                     word.word_id === currentWordId &&
                       "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
                   )}
@@ -75,6 +77,15 @@ export function BookPageViewer({
                   data-page-revision-id={page.page_revision_id}
                   data-word-id={word.word_id}
                   key={word.word_id}
+                  onClick={() => onWordClick?.(word)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onWordClick?.(word);
+                    }
+                  }}
                 >
                   {word.text}
                 </span>
