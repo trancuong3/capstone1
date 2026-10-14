@@ -78,7 +78,7 @@ This document summarizes all features, technical improvements, and bug fixes tha
     - Delivers 4 structured health cards adhering to the schema contract: `FastAPI`, `Database`, `Text-to-Speech (TTS)`, and `Speech-to-Text (STT)`.
     - Overall system status dynamically evaluates to `HEALTHY` or `DEGRADED` based on live probe results.
   - **Frontend Operational UI Enhancements**:
-    - Updated `AdminHealthScreen` header description: *"Backend kiểm tra FastAPI, Database, và trạng thái kết nối các API dịch vụ TTS và STT (ElevenLabs)."*
+    - Updated `AdminHealthScreen` header description: *"Backend kiểm tra trạng thái kết nối FastAPI, Database, TTS và STT"*
     - Automatically renders the 4 service status cards in the responsive 2x2 grid with status badges, safe user messages, and localized timestamps.
     - Unit tests in `backend/test_admin_data.py` verify all 4 monitored services and graceful degradation.
 
