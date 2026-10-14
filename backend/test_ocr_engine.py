@@ -1,4 +1,4 @@
-"""Local Tesseract adapter tests using mocked engine output (no live OCR or Supabase)."""
+"""OCR adapter tests. Tesseract and Supabase are mocked; no live OCR is required."""
 import os
 import unittest
 from unittest.mock import patch
@@ -13,22 +13,27 @@ import numpy as np
 from app.services import ocr_engine
 
 
-def sample_png() -> bytes:
-    image = np.full((200, 400, 3), 255, dtype=np.uint8)
+def sample_png(width: int = 400, height: int = 200) -> bytes:
+    image = np.full((height, width, 3), 255, dtype=np.uint8)
     success, encoded = cv2.imencode(".png", image)
     if not success:
         raise AssertionError("Could not encode test image")
     return encoded.tobytes()
 
 
-def tesseract_tsv() -> dict[str, list[object]]:
+def tesseract_tsv(
+    first_confidence: str = "91.0",
+    second_confidence: str = "-1",
+    first_text: str = "Chú",
+    second_text: str = "mèo",
+) -> dict[str, list[object]]:
     return {
-        "text": ["Chú", "mèo", ""],
+        "text": [first_text, second_text, ""],
         "left": [100, 200, 0],
         "top": [50, 100, 0],
         "width": [40, 50, 0],
         "height": [20, 25, 0],
-        "conf": ["91.0", "-1", "-1"],
+        "conf": [first_confidence, second_confidence, "-1"],
         "block_num": [1, 1, 0],
         "par_num": [1, 1, 0],
         "line_num": [1, 2, 0],
@@ -43,16 +48,14 @@ class OcrEngineTests(unittest.TestCase):
             patch.object(ocr_engine.pytesseract, "get_languages", return_value=["eng", "vie"]),
         )
 
-    def test_uses_real_tsv_boxes_and_never_invents_confidence(self):
+    def test_best_strategy_preserves_real_tsv_boxes_and_missing_confidence(self):
         patches = self._configured_tesseract()
         with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=tesseract_tsv(),
+            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
         ):
             result = ocr_engine.extract_text_and_boxes(sample_png())
 
-        self.assertEqual(result["text"], "Chú mèo")
+        self.assertEqual(result["text"], "Chú\nmèo")
         self.assertEqual(result["words"][0]["text"], "Chú")
         first_bbox = result["words"][0]["bbox"]
         for actual, expected in zip(first_bbox, (0.25, 0.25, 0.1, 0.1)):
@@ -62,6 +65,37 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["words"][0]["line_index"], 0)
         self.assertEqual(result["words"][1]["line_index"], 1)
         self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
+        self.assertEqual(result["metadata"]["candidate_count"], 4)
+        self.assertIn("words_need_review", result["metadata"]["warnings"])
+
+    def test_baseline_keeps_old_single_candidate_behavior_for_benchmarking(self):
+        patches = self._configured_tesseract()
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
+        ) as run_ocr:
+            result = ocr_engine.extract_text_and_boxes(sample_png(), strategy="baseline")
+
+        self.assertEqual(run_ocr.call_count, 1)
+        self.assertEqual(result["text"], "Chú\nmèo")
+        self.assertEqual(result["metadata"]["candidate_count"], 1)
+        self.assertEqual(result["metadata"]["selected_candidate"], "baseline_clahe_psm3")
+
+    def test_best_strategy_selects_candidate_with_stronger_confidence(self):
+        patches = self._configured_tesseract()
+        outputs = [
+            tesseract_tsv("20.0", "18.0"),
+            tesseract_tsv("98.0", "97.0"),
+            tesseract_tsv("40.0", "42.0"),
+            tesseract_tsv("30.0", "32.0"),
+        ]
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract, "image_to_data", side_effect=outputs
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertEqual(result["metadata"]["selected_candidate"], "grayscale_psm3")
+        self.assertAlmostEqual(result["metadata"]["mean_confidence"], 0.975)
+        self.assertEqual(result["metadata"]["low_confidence_word_count"], 0)
 
     def test_missing_vietnamese_language_data_fails_closed(self):
         with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
@@ -70,7 +104,7 @@ class OcrEngineTests(unittest.TestCase):
             with self.assertRaises(ocr_engine.OcrEngineUnavailable):
                 ocr_engine.extract_text_and_boxes(sample_png())
 
-    def test_empty_tesseract_output_does_not_return_fake_words(self):
+    def test_empty_output_does_not_return_fake_words(self):
         empty = {
             "text": ["", "  "],
             "left": [0, 0],
@@ -84,12 +118,19 @@ class OcrEngineTests(unittest.TestCase):
         }
         patches = self._configured_tesseract()
         with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=empty,
+            ocr_engine.pytesseract, "image_to_data", return_value=empty
         ):
             with self.assertRaises(ocr_engine.OcrNoTextDetected):
                 ocr_engine.extract_text_and_boxes(sample_png())
+
+    def test_unicode_nfc_is_used_without_removing_vietnamese_diacritics(self):
+        decomposed = "a\u0306"
+        self.assertEqual(ocr_engine.normalize_word(decomposed), "ă")
+        self.assertEqual(ocr_engine.normalize_text_tokens("TIE\u0302\u0301NG Vie\u0323\u0302t"), ["tiếng", "việt"])
+
+    def test_unsupported_strategy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            ocr_engine.extract_text_and_boxes(sample_png(), strategy="unknown")
 
 
 if __name__ == "__main__":
