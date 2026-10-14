@@ -259,8 +259,7 @@ export function AdminOcrReviewScreen({
       : 0.65;
   const wordsNeedingReview = words.filter(
     (word) =>
-      word.ocr_confidence === null ||
-      word.ocr_confidence < confidenceThreshold,
+      word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold,
   );
   const ocrWarnings = detail?.ocr_metadata.warnings;
   const hasAmbiguousCandidates =
@@ -327,13 +326,15 @@ export function AdminOcrReviewScreen({
       ) : null}
       {hasAmbiguousCandidates ? (
         <StatusMessage className="mb-6" tone="info">
-          Các kết quả OCR có điểm đánh giá gần nhau. Vui lòng kiểm tra kỹ
-          nội dung trước khi xác minh.
+          Các kết quả OCR có điểm đánh giá gần nhau. Vui lòng kiểm tra kỹ nội
+          dung trước khi xác minh.
         </StatusMessage>
       ) : null}
       {wordsNeedingReview.length ? (
         <StatusMessage className="mb-6" tone="info">
-          Có {wordsNeedingReview.length} từ có confidence thấp hoặc chưa có confidence. Các vùng này được đánh dấu đỏ trên ảnh; hãy kiểm tra với trang gốc trước khi xác minh.
+          Có {wordsNeedingReview.length} từ có confidence thấp hoặc chưa có
+          confidence. Các vùng này được đánh dấu đỏ trên ảnh; hãy kiểm tra với
+          trang gốc trước khi xác minh.
         </StatusMessage>
       ) : null}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,1fr)]">
@@ -367,7 +368,8 @@ export function AdminOcrReviewScreen({
                   className={
                     word.word_index === selectedWord
                       ? "absolute border-2 border-orange-500 bg-orange-300/30"
-                      : word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
+                      : word.ocr_confidence === null ||
+                          word.ocr_confidence < confidenceThreshold
                         ? "absolute border-2 border-red-500 bg-red-300/30"
                         : "absolute border border-primary bg-highlight/20"
                   }
@@ -452,7 +454,8 @@ export function AdminOcrReviewScreen({
                   className={
                     word.word_index === selectedWord
                       ? "rounded-control border-2 border-orange-500 p-3"
-                      : word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
+                      : word.ocr_confidence === null ||
+                          word.ocr_confidence < confidenceThreshold
                         ? "rounded-control border border-red-400 bg-red-50 p-3"
                         : "rounded-control border border-border p-3"
                   }
@@ -515,7 +518,8 @@ export function AdminOcrReviewScreen({
                     {word.ocr_confidence === null
                       ? "không có"
                       : word.ocr_confidence.toFixed(2)}
-                    {word.ocr_confidence === null || word.ocr_confidence < confidenceThreshold
+                    {word.ocr_confidence === null ||
+                    word.ocr_confidence < confidenceThreshold
                       ? " · Cần kiểm tra"
                       : ""}
                   </p>
