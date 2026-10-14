@@ -85,6 +85,7 @@ export function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
+  const [isMicRecording, setIsMicRecording] = useState(false);
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
@@ -390,6 +391,14 @@ export function ReadingScreen({
 
   async function handleReadSample() {
     if (isBusy) return;
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
+      }
+      if (mountedRef.current) setIsMicRecording(false);
+    }
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
       return;
@@ -412,10 +421,31 @@ export function ReadingScreen({
 
   async function handleToggleListening() {
     if (isBusy) return;
-    if (uiState === "reading") {
-      await pauseReading();
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+    }
+    if (isMicRecording) {
+      setIsBusy(true);
+      try {
+        await stopListeningAndTranscribe();
+      } finally {
+        if (mountedRef.current) {
+          setIsMicRecording(false);
+          setIsBusy(false);
+        }
+      }
     } else {
-      await resumeReading();
+      setIsBusy(true);
+      try {
+        const ok = await startListening();
+        if (mountedRef.current && ok) {
+          setIsMicRecording(true);
+        }
+      } finally {
+        if (mountedRef.current) {
+          setIsBusy(false);
+        }
+      }
     }
   }
 
@@ -427,13 +457,10 @@ export function ReadingScreen({
       "start",
     );
     if (!mountedRef.current) return;
-    if (!(await startListening())) {
-      if (mountedRef.current) setIsBusy(false);
-      return;
-    }
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
+    setIsMicRecording(false);
     setIsBusy(false);
   }
 
@@ -445,28 +472,25 @@ export function ReadingScreen({
       "resume",
     );
     if (!mountedRef.current) return;
-    if (!(await startListening())) {
-      if (mountedRef.current) setIsBusy(false);
-      return;
-    }
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
+    setIsMicRecording(false);
     setIsBusy(false);
   }
 
   async function pauseReading() {
     if (isBusy) return;
     setIsBusy(true);
-    try {
-      await stopListeningAndTranscribe();
-    } catch {
-      if (mountedRef.current) {
-        setConnectionState("reconnecting");
-        setUiState("stt-error");
-        setIsBusy(false);
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
       }
-      return;
+      if (mountedRef.current) {
+        setIsMicRecording(false);
+      }
     }
     if (!mountedRef.current) return;
     setCanonicalState("PAUSED");
@@ -606,10 +630,13 @@ export function ReadingScreen({
     finishStartedRef.current = true;
     setIsBusy(true);
     speechPlayer.stop();
-    try {
-      await stopListeningAndTranscribe();
-    } catch {
-      speechRecorder.cancel();
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
+      }
+      if (mountedRef.current) setIsMicRecording(false);
     }
     await Promise.all([
       services.readingService.finish(sessionId),
@@ -737,6 +764,7 @@ export function ReadingScreen({
         currentWordId={currentWordId}
         exitHref={detailHref}
         isListening={uiState === "reading"}
+        isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
         isPlayingSample={speechPlayer.isPlaying}
         latestTranscript={latestTranscript}
@@ -751,11 +779,6 @@ export function ReadingScreen({
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
-          </StatusBanner>
-        ) : null}
-        {latestTranscript ? (
-          <StatusBanner className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
-            Mình nghe được: {latestTranscript}
           </StatusBanner>
         ) : null}
       </ReadingLayout>

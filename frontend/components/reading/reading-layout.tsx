@@ -15,6 +15,7 @@ interface ReadingLayoutProps {
   currentWordId: string | null;
   exitHref: string;
   isListening: boolean;
+  isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   isPlayingSample?: boolean;
   latestTranscript?: string | null;
@@ -34,6 +35,7 @@ export function ReadingLayout({
   currentWordId,
   exitHref,
   isListening,
+  isMicRecording = false,
   isPageTransitioning = false,
   isPlayingSample = false,
   latestTranscript,
@@ -72,32 +74,41 @@ export function ReadingLayout({
         />
       </CameraPreview>
 
-      {isListening ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-emerald-400 bg-emerald-50 px-4 py-3 shadow-sm transition-all">
+      {isMicRecording ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-red-400 bg-red-50/90 px-4 py-3 shadow-sm transition-all animate-in fade-in">
           <div className="flex shrink-0 items-center gap-2">
             <span className="relative flex size-3.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex size-3.5 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex size-3.5 rounded-full bg-red-500" />
             </span>
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-              Nhận diện trực tiếp:
+            <span className="text-xs font-bold uppercase tracking-wider text-red-800">
+              Đang thu âm:
             </span>
           </div>
-          <p className="min-w-0 flex-1 truncate text-base font-bold text-emerald-950">
+          <p className="min-w-0 flex-1 truncate text-base font-bold text-red-950">
             {latestTranscript ? (
               <span>&ldquo;{latestTranscript}&rdquo;</span>
             ) : (
-              <span className="font-normal italic text-emerald-700">
-                Bé hãy đọc to các chữ trên trang sách nhé, hệ thống đang lắng nghe…
+              <span className="font-normal italic text-red-700">
+                Bé hãy đọc to các chữ trên trang sách nhé, microphone đang thu âm…
               </span>
             )}
+          </p>
+        </div>
+      ) : latestTranscript ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5 shadow-sm">
+          <span className="text-xs font-bold uppercase tracking-wider text-purple-ink">
+            Bé vừa đọc:
+          </span>
+          <p className="min-w-0 flex-1 truncate text-sm font-bold text-ink italic">
+            &ldquo;{latestTranscript}&rdquo;
           </p>
         </div>
       ) : null}
 
       <ReadingControls
         disabled={controlsDisabled}
-        isListening={isListening}
+        isListening={isMicRecording}
         isPlayingSample={isPlayingSample}
         onFinish={onFinish}
         onHelp={onHelp}
