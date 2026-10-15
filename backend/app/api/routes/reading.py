@@ -13,12 +13,10 @@ from app.schemas import (
 )
 
 from datetime import datetime, timezone
-from app.models import BookPage, PageRevision, PageRevisionWord
-from app.services.storage_service import create_signed_image_url
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
 from app.schemas.reading import (
-    ReadingPageDTO, ReadingPageWordDTO, ReadingCompletionSummaryDTO,
+    ReadingPageDTO, ReadingCompletionSummaryDTO,
     SessionSummaryRead,
 )
 
@@ -136,7 +134,6 @@ async def create_fluency_assessment(assessment_in: FluencyAssessmentCreate, db: 
 from fastapi import Query
 import re
 from pydantic import ValidationError
-from app.api.deps import get_current_parent_id
 from app.models import Book, ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
 from app.schemas.book import CatalogBookResponse
 from app.schemas.reading import (
