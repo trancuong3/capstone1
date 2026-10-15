@@ -381,15 +381,14 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             ImagePath="books/test/page.png",
         )
         revision = SimpleNamespace(Id=REVISION_ID, VerifiedText="Chú mèo")
-        repo.revision_words.return_value = [
-            SimpleNamespace(
-                Id=UUID("66666666-6666-4666-8666-666666666666"),
-                WordIndex=0,
-                Text="Chú",
-                BoundingBox=[0.1, 0.2, 0.12, 0.04],
-                OCRConfidence=0.93,
-            )
-        ]
+        word_row = SimpleNamespace(
+            Id=UUID("66666666-6666-4666-8666-666666666666"),
+            WordIndex=0,
+            Text="Chú",
+            BoundingBox=[0.1, 0.2, 0.12, 0.04],
+            OCRConfidence=0.93,
+        )
+        repo.revision_words.return_value = [word_row]
 
         from unittest.mock import patch
         with patch(
@@ -402,6 +401,11 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dto.height, 800)
         self.assertEqual(dto.confidence, 0.93)
         self.assertEqual(dto.words[0].bbox, (0.1, 0.2, 0.12, 0.04))
+
+        word_row.OCRConfidence = None
+        repo.revision_words.return_value = [word_row]
+        incomplete_confidence_dto = await service._build_page_dto(page, revision)
+        self.assertIsNone(incomplete_confidence_dto.confidence)
 
         repo.revision_words.return_value = []
         with self.assertRaises(HTTPException) as raised:
