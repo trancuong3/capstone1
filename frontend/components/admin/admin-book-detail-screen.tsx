@@ -95,7 +95,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setPageActionNotice({
         tone: "error",
         title: "Không thể xóa trang",
-        message: "Không thể ngừng sử dụng trang lúc này. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+        message:
+          "Không thể ngừng sử dụng trang lúc này. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
       });
     } finally {
       if (requestId === requestIdRef.current) setRetiringPageId(null);
@@ -218,7 +219,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                       />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black">Trang {item.page_number}</h3>
+                      <h3 className="text-xl font-black">
+                        Trang {item.page_number}
+                      </h3>
                       <p className="mt-1 text-sm text-muted">
                         Revision R{item.processing.revision_no}
                       </p>
@@ -273,8 +276,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </h2>
             <p className="mt-3 text-sm leading-6 text-muted">
               Trang sẽ được ngừng sử dụng và không còn xuất hiện trong các lượt
-              đọc mới. Ảnh nguồn, các revision và lịch sử đọc cũ vẫn được giữ
-              để bảo toàn dữ liệu.
+              đọc mới. Ảnh nguồn, các revision và lịch sử đọc cũ vẫn được giữ để
+              bảo toàn dữ liệu.
             </p>
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <Button
