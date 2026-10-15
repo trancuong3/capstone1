@@ -20,9 +20,11 @@ export interface ReadingService {
 }
 
 const sessionCreateResponseSchema = z.object({
-  Id: z.guid(),
-  State: z.string(),
-  StartedAt: z.string(),
+  Id: z.uuid(),
+  State: z.literal("IN_PROGRESS"),
+  SelectedPageId: z.uuid(),
+  SelectedPageRevisionId: z.uuid(),
+  StartedAt: z.iso.datetime({ offset: true }),
 });
 
 const sessionSummarySchema = z.object({
@@ -93,15 +95,18 @@ export function createReadingService(): ReadingService {
             child_id: input.child_id,
             book_id: input.book_id,
             mode: input.mode,
-            State: "CREATED",
+            state: "CREATED",
+            selected_page_id: input.selected_page_id,
+            selected_page_revision_id: input.selected_page_revision_id,
           },
         },
       );
       return {
         session_id: response.Id,
-        state: "CREATED",
-        session_token: "active-session-token",
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
+        state: "PAGE_READY",
+        selected_page_id: response.SelectedPageId,
+        selected_page_revision_id: response.SelectedPageRevisionId,
+        started_at: response.StartedAt,
       };
     },
 
