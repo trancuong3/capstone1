@@ -727,16 +727,11 @@ export function ReadingScreen({
     ]);
     if (!mountedRef.current) return;
     const wordsList = Array.from(spokenWordsSetRef.current);
-    const durationMs = finishedSession.duration_ms;
+    const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
+    const pagesExplored = exploredPageIdsRef.current.size || null;
     const updatedSummary: ReadingCompletionSummaryUI = {
-      duration_minutes:
-        durationMs === null
-          ? null
-          : Math.ceil(Math.max(0, durationMs) / 60000),
-      pages_explored:
-        exploredPageIdsRef.current.size > 0
-          ? exploredPageIdsRef.current.size
-          : null,
+      duration_minutes: durationMinutes,
+      pages_explored: pagesExplored,
       practiced_words: wordsList.length,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
@@ -1028,6 +1023,11 @@ export function ReadingScreen({
       </span>
     </div>
   );
+}
+
+function getDurationMinutes(durationMs: number | null): number | null {
+  if (durationMs === null) return null;
+  return Math.ceil(Math.max(0, durationMs) / 60000);
 }
 
 function connectionLabel(state: ReadingConnectionState): string {
