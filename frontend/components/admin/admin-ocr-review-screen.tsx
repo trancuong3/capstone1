@@ -391,8 +391,19 @@ export function AdminOcrReviewScreen({
                   word.ocr_confidence === null
                     ? "chưa xác định"
                     : word.ocr_confidence.toFixed(2);
-                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. Confidence OCR: ${confidenceText}. Mức ${getOcrConfidenceLabel(level)}`;
-                const boxTitle = `${word.text} · ${getOcrConfidenceLabel(level)} · ${word.ocr_confidence === null ? "confidence không có" : word.ocr_confidence.toFixed(2)}`;
+                const confidenceLabel = getOcrConfidenceLabel(level);
+                const boxLabel = [
+                  `Từ ${word.word_index + 1}: ${word.text}.`,
+                  `Confidence OCR: ${confidenceText}.`,
+                  `Mức ${confidenceLabel}`,
+                ].join(" ");
+                const boxTitle = [
+                  word.text,
+                  confidenceLabel,
+                  word.ocr_confidence === null
+                    ? "confidence không có"
+                    : word.ocr_confidence.toFixed(2),
+                ].join(" · ");
                 return (
                   <button
                     aria-label={boxLabel}
