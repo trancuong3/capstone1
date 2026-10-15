@@ -141,13 +141,14 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()
         service.db.commit.assert_awaited_once()
-        page, revision = service.db.add_all.call_args.args[0]
+        page, revision, word_data = service.repo.stage_page_revision_bundle.call_args.args
         self.assertEqual(page.ImagePath.split("/")[-1].split(".")[-1], "png")
         self.assertEqual(revision.VerificationStatus, "NEEDS_REVIEW")
         self.assertEqual(revision.DraftText, "Chú mèo")
-        word_row = service.db.add.call_args.args[0]
-        self.assertEqual(word_row.BoundingBox, [0.1, 0.2, 0.1, 0.05])
-        self.assertEqual(word_row.OCRConfidence, 0.9)
+        self.assertEqual(word_data[0]["bbox"], [0.1, 0.2, 0.1, 0.05])
+        self.assertEqual(word_data[0]["ocr_confidence"], 0.9)
+        service.db.add_all.assert_not_called()
+        service.db.add.assert_not_called()
 
 
 if __name__ == "__main__":
