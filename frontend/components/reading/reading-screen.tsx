@@ -733,7 +733,10 @@ export function ReadingScreen({
         durationMs === null
           ? null
           : Math.ceil(Math.max(0, durationMs) / 60000),
-      pages_explored: exploredPageIdsRef.current.size || null,
+      pages_explored:
+        exploredPageIdsRef.current.size > 0
+          ? exploredPageIdsRef.current.size
+          : null,
       practiced_words: wordsList.length,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
