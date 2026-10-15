@@ -28,6 +28,7 @@ vi.mock("@/lib/supabase/config", () => ({
 const bookId = "22222222-2222-4222-8222-222222222222";
 const pageId = "33333333-3333-4333-8333-333333333333";
 const revisionId = "44444444-4444-4444-8444-444444444444";
+const newRevisionId = "55555555-5555-4555-8555-555555555555";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
@@ -58,6 +59,8 @@ const auditItem = {
   metadata: {},
 };
 const fetchMock = vi.fn();
+let pageRetired = false;
+let manualDraftCreated = false;
 
 function readyResponse(url: string): Response {
   if (url.endsWith("/image"))
@@ -79,6 +82,15 @@ function readyResponse(url: string): Response {
     });
   if (url.endsWith("/revisions"))
     return Response.json([
+      ...(manualDraftCreated
+        ? [{
+            page_revision_id: newRevisionId,
+            revision_no: 3,
+            verification_status: "NEEDS_REVIEW",
+            created_at: timestamp,
+            is_current_verified: false,
+          }]
+        : []),
       {
         page_revision_id: revisionId,
         revision_no: 2,
@@ -88,7 +100,12 @@ function readyResponse(url: string): Response {
       },
     ]);
   if (url.endsWith("/pages"))
-    return Response.json([{ book_id: bookId, page_number: 2, processing }]);
+    return Response.json([{
+      book_id: bookId,
+      page_number: 2,
+      processing: { ...processing, lifecycle_status: pageRetired ? "RETIRED" : "ACTIVE" },
+      text_preview: "Nội dung OCR hiển thị cho Admin",
+    }]);
   if (url.endsWith(`/catalog/${bookId}`)) return Response.json(book);
   if (url.includes("/books/admin/catalog"))
     return Response.json([
@@ -121,8 +138,37 @@ function readyResponse(url: string): Response {
 }
 
 beforeEach(() => {
+  pageRetired = false;
+  manualDraftCreated = false;
   fetchMock.mockReset();
-  fetchMock.mockImplementation(async (url: string) => readyResponse(url));
+  fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+    const target = String(url);
+    if (target.endsWith(`/admin/pages/${pageId}`) && options?.method === "DELETE") {
+      pageRetired = true;
+      return Response.json({
+        page_id: pageId,
+        book_id: bookId,
+        page_number: 2,
+        lifecycle_status: "RETIRED",
+      });
+    }
+    if (target.endsWith("/revisions/draft") && options?.method === "POST") {
+      manualDraftCreated = true;
+      return Response.json({
+        ...processing,
+        page_revision_id: newRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Văn bản đã lưu thật",
+        words: [],
+        ocr_metadata: {},
+        created_at: timestamp,
+        verified_at: null,
+        verified_by: null,
+      }, { status: 201 });
+    }
+    return readyResponse(target);
+  });
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -236,6 +282,49 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       await screen.findByRole("heading", { name: "Trang 2" }),
     ).toBeInTheDocument();
   });
+  it("previews OCR text and only retires a page after confirmation", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminBookDetailScreen bookId={bookId} />
+      </AdminServicesProvider>,
+    );
+    expect(await screen.findByText("Nội dung OCR hiển thị cho Admin")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Xóa trang" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Xóa Trang 2?");
+    await user.click(within(dialog).getByRole("button", { name: "Hủy" }));
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith(`/admin/pages/${pageId}`) && (init as RequestInit | undefined)?.method === "DELETE",
+    )).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Xóa trang" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Xóa trang" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith(`/admin/pages/${pageId}`) && (init as RequestInit | undefined)?.method === "DELETE",
+    )).toBe(true));
+    expect(await screen.findByRole("heading", { name: "Trang đã ngừng sử dụng" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Xóa trang" })).not.toBeInTheDocument();
+  });
+
+  it("creates an editable revision from verified text without rerunning OCR", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+      </AdminServicesProvider>,
+    );
+    await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+    expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
+      String(url).endsWith("/revisions/draft") && (init as RequestInit | undefined)?.method === "POST",
+    )).toBe(true));
+    expect(await screen.findByLabelText("Nội dung trang")).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "Kiểm tra OCR · R3" })).toBeInTheDocument();
+    expect(await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/)).toBeInTheDocument();
+  });
+
   it("shows true empty pages with the upload workflow available", async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith("/pages") ? Response.json([]) : readyResponse(url),
