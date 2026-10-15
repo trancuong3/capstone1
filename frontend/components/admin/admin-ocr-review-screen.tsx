@@ -31,6 +31,27 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 
+const OCR_CONFIDENCE_HIGH = 0.9;
+const OCR_CONFIDENCE_MEDIUM = 0.7;
+
+type OcrConfidenceLevel = "high" | "medium" | "low" | "unknown";
+
+function getOcrConfidenceLevel(confidence: number | null): OcrConfidenceLevel {
+  if (confidence === null || !Number.isFinite(confidence)) return "unknown";
+  if (confidence >= OCR_CONFIDENCE_HIGH) return "high";
+  if (confidence >= OCR_CONFIDENCE_MEDIUM) return "medium";
+  return "low";
+}
+
+function getOcrConfidenceLabel(level: OcrConfidenceLevel): string {
+  return {
+    high: "Cao",
+    medium: "Trung bình",
+    low: "Thấp · cần kiểm tra",
+    unknown: "Chưa xác định · cần kiểm tra",
+  }[level];
+}
+
 export function AdminOcrReviewScreen({
   bookId,
   pageId,
@@ -253,6 +274,17 @@ export function AdminOcrReviewScreen({
   }
 
   const verified = detail?.verification_status === "VERIFIED";
+  const confidenceCounts = words.reduce(
+    (counts, word) => {
+      counts[getOcrConfidenceLevel(word.ocr_confidence)] += 1;
+      return counts;
+    },
+    { high: 0, medium: 0, low: 0, unknown: 0 } as Record<OcrConfidenceLevel, number>,
+  );
+  const firstWordToReview = words.find(
+    (word) => getOcrConfidenceLevel(word.ocr_confidence) === "low"
+      || getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
+  );
   if (error) {
     return (
       <EmptyState
@@ -334,32 +366,65 @@ export function AdminOcrReviewScreen({
             />
             <div
               aria-label={`Bounding box từ OCR: ${words.length} từ`}
-              className="pointer-events-none absolute inset-0"
-              role="img"
+              className="absolute inset-0"
+              role="group"
             >
-              {words.map((word) => (
-                <span
-                  aria-hidden="true"
-                  className={
-                    word.word_index === selectedWord
-                      ? "absolute border-2 border-orange-500 bg-orange-300/30"
-                      : "absolute border border-primary bg-highlight/20"
-                  }
-                  key={`${word.line_index}-${word.word_index}`}
-                  style={{
-                    height: `${word.bbox[3] * 100}%`,
-                    left: `${word.bbox[0] * 100}%`,
-                    top: `${word.bbox[1] * 100}%`,
-                    width: `${word.bbox[2] * 100}%`,
-                  }}
-                />
-              ))}
+              {words.map((word) => {
+                const level = getOcrConfidenceLevel(word.ocr_confidence);
+                const colorClass = {
+                  high: "border-green-600 bg-green-400/20",
+                  medium: "border-yellow-500 bg-yellow-300/25",
+                  low: "border-red-600 bg-red-400/30",
+                  unknown: "border-orange-600 bg-orange-300/30",
+                }[level];
+                const selectedClass =
+                  word.word_index === selectedWord
+                    ? "z-10 border-2 border-orange-700 bg-orange-300/50 ring-2 ring-white"
+                    : "border";
+                return (
+                  <button
+                    aria-label={`Từ ${word.word_index + 1}: ${word.text}. Confidence OCR: ${word.ocr_confidence === null ? "chưa xác định" : word.ocr_confidence.toFixed(2)}. Mức ${getOcrConfidenceLabel(level)}`}
+                    className={`absolute cursor-pointer p-0 ${colorClass} ${selectedClass}`}
+                    key={`${word.line_index}-${word.word_index}`}
+                    onClick={() => setSelectedWord(word.word_index)}
+                    style={{
+                      height: `${word.bbox[3] * 100}%`,
+                      left: `${word.bbox[0] * 100}%`,
+                      top: `${word.bbox[1] * 100}%`,
+                      width: `${word.bbox[2] * 100}%`,
+                    }}
+                    title={`${word.text} · ${getOcrConfidenceLabel(level)} · ${word.ocr_confidence === null ? "confidence không có" : word.ocr_confidence.toFixed(2)}`}
+                    type="button"
+                  />
+                );
+              })}
             </div>
           </div>
           <p className="mt-3 text-sm text-muted">
             Ảnh được cấp URL có thời hạn từ Supabase Storage; tọa độ bbox dùng
-            hệ quy chiếu chuẩn hóa 0–1.
+            hệ quy chiếu chuẩn hóa 0–1. Confidence là điểm ước lượng của OCR,
+            không phải xác suất chắc chắn nhận diện đúng.
           </p>
+          <div aria-label="Chú giải confidence OCR" className="mt-3 flex flex-wrap gap-3 text-xs">
+            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-green-600 bg-green-400/30" /> Cao</span>
+            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" /> Trung bình</span>
+            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-red-600 bg-red-400/30" /> Thấp</span>
+            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" /> Chưa xác định</span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Thống kê confidence OCR">
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm"><strong>{confidenceCounts.high}</strong><div>Cao</div></div>
+            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm"><strong>{confidenceCounts.medium}</strong><div>Trung bình</div></div>
+            <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm"><strong>{confidenceCounts.low}</strong><div>Thấp</div></div>
+            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2 text-sm"><strong>{confidenceCounts.unknown}</strong><div>Chưa xác định</div></div>
+          </div>
+          <button
+            className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!firstWordToReview}
+            onClick={() => setSelectedWord(firstWordToReview?.word_index ?? null)}
+            type="button"
+          >
+            Đi tới từ cần kiểm tra
+          </button>
         </Card>
 
         <div className="grid content-start gap-6">
@@ -483,10 +548,12 @@ export function AdminOcrReviewScreen({
                     )}
                   </div>
                   <p className="mt-2 text-xs text-muted">
-                    OCR confidence:{" "}
+                    Confidence OCR:{" "}
                     {word.ocr_confidence === null
-                      ? "không có"
+                      ? "chưa xác định"
                       : word.ocr_confidence.toFixed(2)}
+                    {" · "}
+                    {getOcrConfidenceLabel(getOcrConfidenceLevel(word.ocr_confidence))}
                   </p>
                 </div>
               ))}
