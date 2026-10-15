@@ -36,12 +36,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Temporary formatter output probe
-        continue-on-error: true
-        run: |
-          npx prettier --write components/admin/admin-book-detail-screen.tsx components/admin/admin-ocr-review-screen.tsx test/real-admin-ui.test.tsx
-          git -C .. diff --color=never -- frontend/components/admin/admin-book-detail-screen.tsx frontend/components/admin/admin-ocr-review-screen.tsx frontend/test/real-admin-ui.test.tsx
-
       - name: Format check (changed frontend files)
         id: format
         continue-on-error: true
