@@ -146,8 +146,16 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(medium).toHaveClass("border-yellow-500");
     expect(low).toHaveClass("border-red-600");
     expect(unknown).toHaveClass("border-orange-600");
-    expect(screen.getByText("2").closest("div")).not.toBeNull();
-    expect(screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ })).toBeEnabled();
+    const stats = screen.getByRole("group", {
+      name: "Thống kê confidence OCR",
+    });
+    expect(stats).toHaveTextContent(/1\s*Cao/);
+    expect(stats).toHaveTextContent(/1\s*Trung bình/);
+    expect(stats).toHaveTextContent(/1\s*Thấp/);
+    expect(stats).toHaveTextContent(/1\s*Chưa xác định/);
+    expect(
+      screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
+    ).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
     expect(medium).toHaveAttribute("aria-pressed", "true");
