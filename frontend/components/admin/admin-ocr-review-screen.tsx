@@ -567,7 +567,9 @@ export function AdminOcrReviewScreen({
                 <>
                   <Button
                     className="sm:w-auto"
-                    disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
+                    disabled={
+                      busy !== null || detail.lifecycle_status !== "ACTIVE"
+                    }
                     isLoading={busy === "save"}
                     onClick={() => void saveDraft()}
                     variant="secondary"
