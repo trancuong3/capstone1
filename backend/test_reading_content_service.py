@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -40,6 +41,13 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
                 VerifiedText="Chú",
             )),
             create_session=AsyncMock(side_effect=lambda session: session),
+            save_session=AsyncMock(side_effect=lambda session: session),
+            update_session_state=MagicMock(
+                side_effect=lambda session, *, state, ended_at: (
+                    setattr(session, "State", state),
+                    setattr(session, "EndedAt", ended_at),
+                )
+            ),
             session=AsyncMock(),
             revision_words=AsyncMock(
                 return_value=[
@@ -130,6 +138,48 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 403)
         repo.child_belongs_to_parent.assert_not_awaited()
         repo.create_session.assert_not_awaited()
+
+    async def test_finish_session_checks_owner_and_persists_session_state(self):
+        service, repo = self.make_service()
+        session = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            StartedAt=datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        repo.session.return_value = session
+
+        result = await service.finish_session(
+            session.Id,
+            PARENT_ID,
+        )
+
+        self.assertEqual(result.state, "FINISHED")
+        self.assertIsNotNone(result.ended_at)
+        repo.update_session_state.assert_called_once()
+        repo.save_session.assert_awaited_once_with(session)
+
+    async def test_finish_session_is_idempotent_after_completion(self):
+        service, repo = self.make_service()
+        ended_at = datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc)
+        session = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="COMPLETED",
+            StartedAt=datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc),
+            EndedAt=ended_at,
+        )
+        repo.session.return_value = session
+
+        result = await service.finish_session(session.Id, PARENT_ID)
+
+        self.assertEqual(result.state, "FINISHED")
+        self.assertEqual(result.ended_at, ended_at)
+        repo.update_session_state.assert_not_called()
+        repo.save_session.assert_not_awaited()
 
     async def test_selected_page_must_belong_to_owned_reading_session_book(self):
         service, repo = self.make_service()
