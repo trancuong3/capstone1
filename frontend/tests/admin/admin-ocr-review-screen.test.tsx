@@ -97,7 +97,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: Nội\. Confidence OCR: 0\.95\. Mức Cao/,
     });
     expect(overlay).toContainElement(wordBox);
-    expect(wordBox).toHaveAttribute("title", expect.stringContaining("Cao"));
+    expect(wordBox.getAttribute("title")).toContain("Cao");
 
     await user.click(wordBox);
     expect(wordBox).toHaveClass("ring-2");
