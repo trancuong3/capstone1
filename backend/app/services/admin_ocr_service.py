@@ -564,6 +564,72 @@ class AdminOcrService:
             item["bbox"] = list(item["bbox"])
         return raw
 
+    async def create_edit_draft(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
+        """Start a new editable revision from the current verified text without rerunning OCR."""
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot edit a retired page")
+        if page.CurrentVerifiedRevisionId is None:
+            raise HTTPException(status_code=409, detail="Page has no current verified revision")
+
+        source = await self.repo.revision(page_id, page.CurrentVerifiedRevisionId, lock=True)
+        if source is None or source.VerificationStatus != "VERIFIED" or not (source.VerifiedText or "").strip():
+            raise HTTPException(status_code=409, detail="Current verified revision is not available")
+        source_words = await self.repo.words(source.Id)
+        if not source_words:
+            raise HTTPException(status_code=409, detail="Current verified revision has no editable word data")
+
+        candidates = []
+        for row in source_words:
+            bbox = row.BoundingBox
+            if isinstance(bbox, dict):
+                bbox = [bbox.get("x"), bbox.get("y"), bbox.get("width"), bbox.get("height")]
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                raise HTTPException(status_code=409, detail="Stored word coordinates cannot be copied safely")
+            candidates.append({
+                "text": row.Text,
+                "line_index": row.LineIndex,
+                "bbox": bbox,
+                "ocr_confidence": row.OCRConfidence,
+            })
+        words = self._word_data(candidates)
+        text_value = source.VerifiedText.strip()
+        if normalize_text_tokens(text_value) != [str(item["normalized_text"]) for item in words]:
+            raise HTTPException(status_code=409, detail="Current verified text and word data are inconsistent")
+
+        try:
+            next_number = await self.repo.next_revision_number(page.Id)
+        except ValueError as exc:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
+        revision = PageRevision(
+            Id=uuid4(),
+            PageId=page.Id,
+            RevisionNo=str(next_number),
+            VerificationStatus="NEEDS_REVIEW",
+            VerifiedText=None,
+            DraftText=text_value,
+            ContentHash=hashlib.sha256(
+                json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+            ProcessingMeta={"source_revision_id": str(source.Id), "creation_reason": "manual_edit"},
+        )
+        self.repo.stage_revision_bundle(revision, words)
+        try:
+            await self.db.commit()
+            await self.db.refresh(revision)
+            await self.db.refresh(page)
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="A concurrent edit created this revision number; retry") from exc
+        except Exception:
+            await self.db.rollback()
+            raise
+        return await self.revision_detail(page, revision)
+
     async def save_draft(self, actor_id: UUID, page_id: UUID, revision_id: UUID, payload: AdminOcrDraftRequest) -> AdminRevisionDetailRead:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
@@ -641,6 +707,8 @@ class AdminOcrService:
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot reprocess a retired page")
         try:
             image_bytes = await run_in_threadpool(download_object, page.ImagePath)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
