@@ -543,7 +543,7 @@ export function AdminOcrReviewScreen({
               <textarea
                 aria-describedby="ocr-help"
                 className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
-                disabled={verified}
+                disabled={verified || detail.lifecycle_status !== "ACTIVE"}
                 id="ocr-text"
                 onChange={(event) => setDraftText(event.target.value)}
                 value={draftText}
