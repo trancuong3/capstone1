@@ -5,7 +5,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, BookPage, ChildProfile, PageRevision, PageRevisionWord, Profile, ReadingSession
+from app.models import (
+    Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
+    PageRevisionWord, Profile, ReadingEvent, ReadingSession,
+)
 
 
 class ReadingContentRepository:
@@ -86,6 +89,55 @@ class ReadingContentRepository:
         return await self.db.scalar(
             select(ReadingSession).where(ReadingSession.Id == session_id)
         )
+
+    async def sessions_for_parent(self, parent_id: UUID) -> list[ReadingSession]:
+        result = await self.db.execute(
+            select(ReadingSession)
+            .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .where(ChildProfile.ParentId == parent_id)
+            .order_by(ReadingSession.StartedAt.desc(), ReadingSession.Id.desc())
+        )
+        return list(result.scalars().all())
+
+    async def revision_word_exists(self, revision_id: UUID, word_id: UUID) -> bool:
+        found = await self.db.scalar(
+            select(PageRevisionWord.Id).where(
+                PageRevisionWord.Id == word_id,
+                PageRevisionWord.PageRevisionId == revision_id,
+            )
+        )
+        return found is not None
+
+    async def events_for_session(self, session_id: UUID) -> list[ReadingEvent]:
+        result = await self.db.execute(
+            select(ReadingEvent)
+            .where(ReadingEvent.SessionId == session_id)
+            .order_by(ReadingEvent.StartMs, ReadingEvent.Id)
+        )
+        return list(result.scalars().all())
+
+    async def create_reading_event(self, event: ReadingEvent) -> ReadingEvent:
+        self.db.add(event)
+        try:
+            await self.db.commit()
+            await self.db.refresh(event)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return event
+
+    async def create_fluency_assessment(
+        self,
+        assessment: FluencyAssessment,
+    ) -> FluencyAssessment:
+        self.db.add(assessment)
+        try:
+            await self.db.commit()
+            await self.db.refresh(assessment)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return assessment
 
     def update_session_state(
         self,
