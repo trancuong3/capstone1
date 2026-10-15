@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real PageMatchService", () => {
-  it("scopes manual page selection to the current session", async () => {
+  it("scopes page selection to a session", async () => {
     fetchMock.mockResolvedValue(Response.json(page));
 
     expect(
@@ -70,7 +70,7 @@ describe("real PageMatchService", () => {
     });
   });
 
-  it("retries through the session page endpoint", async () => {
+  it("retries the current session page", async () => {
     fetchMock.mockResolvedValue(Response.json(page));
 
     expect(
