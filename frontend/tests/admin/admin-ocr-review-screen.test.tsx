@@ -81,6 +81,85 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
 
+  it("classifies confidence levels and synchronizes word-list and image selection", async () => {
+    const services = createAdminServiceFixture();
+    const reviewDetail = {
+      ...adminR2Fixture,
+      words: [
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 0,
+          text: "Cao",
+          normalized_text: "cao",
+          bbox: [0.05, 0.1, 0.1, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.95,
+        },
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 1,
+          text: "Vừa",
+          normalized_text: "vừa",
+          bbox: [0.2, 0.1, 0.1, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.8,
+        },
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 2,
+          text: "Thấp",
+          normalized_text: "thấp",
+          bbox: [0.35, 0.1, 0.1, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.5,
+        },
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 3,
+          text: "Chưa rõ",
+          normalized_text: "chưa rõ",
+          bbox: [0.5, 0.1, 0.1, 0.04] as [number, number, number, number],
+          ocr_confidence: null,
+        },
+      ],
+    };
+    services.ocr.getRevision.mockResolvedValue(reviewDetail);
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const high = await screen.findByRole("button", {
+      name: /Từ 1: Cao.*Mức Cao/,
+    });
+    const medium = screen.getByRole("button", {
+      name: /Từ 2: Vừa.*Mức Trung bình/,
+    });
+    const low = screen.getByRole("button", {
+      name: /Từ 3: Thấp.*Mức Thấp/,
+    });
+    const unknown = screen.getByRole("button", {
+      name: /Từ 4: Chưa rõ.*Mức Chưa xác định/,
+    });
+
+    expect(high).toHaveClass("border-green-600");
+    expect(medium).toHaveClass("border-yellow-500");
+    expect(low).toHaveClass("border-red-600");
+    expect(unknown).toHaveClass("border-orange-600");
+    expect(screen.getByText("2").closest("div")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
+    expect(medium).toHaveAttribute("aria-pressed", "true");
+    expect(high).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(unknown);
+    expect(unknown).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: "Từ #3 · Dòng 0" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("shows confidence-coded boxes and selects a word", async () => {
     const services = createAdminServiceFixture();
     const user = userEvent.setup();
