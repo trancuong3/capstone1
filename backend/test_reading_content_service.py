@@ -37,6 +37,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
                 Id=REVISION_ID,
                 PageId=PAGE_ID,
                 VerificationStatus="VERIFIED",
+                VerifiedText="Chú",
             )),
             create_session=AsyncMock(side_effect=lambda session: session),
             session=AsyncMock(),
