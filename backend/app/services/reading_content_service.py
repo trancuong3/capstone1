@@ -247,6 +247,7 @@ class ReadingContentService:
 
         word_rows = await self.repository.revision_words(revision.Id)
         words: list[ReadingPageWordDTO] = []
+        confidence_scores: list[float] = []
         for row in word_rows:
             box = row.BoundingBox
             if not isinstance(box, (list, tuple)) or len(box) != 4:
@@ -263,6 +264,14 @@ class ReadingContentService:
                 continue
             if not row.Text.strip():
                 continue
+            raw_confidence = row.OCRConfidence
+            if raw_confidence is not None:
+                try:
+                    numeric_confidence = float(raw_confidence)
+                except (TypeError, ValueError):
+                    numeric_confidence = float("nan")
+                if math.isfinite(numeric_confidence) and 0.0 <= numeric_confidence <= 1.0:
+                    confidence_scores.append(numeric_confidence)
             words.append(
                 ReadingPageWordDTO(
                     word_id=row.Id,
@@ -294,7 +303,7 @@ class ReadingContentService:
             page_id=page.Id,
             page_revision_id=revision.Id,
             page_number=page.PageNumber,
-            confidence=1.0,
+            confidence=(sum(confidence_scores) / len(confidence_scores)) if confidence_scores else None,
             width=int(page.Width),
             height=int(page.Height),
             image_url=image_url,
