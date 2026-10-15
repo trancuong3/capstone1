@@ -66,7 +66,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByRole("button", { name: /Chạy lại OCR/ })).toBeEnabled();
     expect(
-      screen.getByRole("img", { name: /Bounding box từ OCR: 1 từ/ }),
+      screen.getByRole("group", { name: /Bounding box từ OCR: 1 từ/ }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Chạy lại OCR/ }));
     expect(services.revisions.reprocess).toHaveBeenCalledWith(
@@ -80,4 +80,31 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
+  it("shows confidence-coded word boxes and lets Admin select a word on the image", async () => {
+    const services = createAdminServiceFixture();
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const overlay = await screen.findByRole("group", {
+      name: /Bounding box từ OCR: 1 từ/,
+    });
+    const wordBox = await screen.findByRole("button", {
+      name: /Từ 1: Nội\. Confidence OCR: 0\.95\. Mức Cao/,
+    });
+    expect(overlay).toContainElement(wordBox);
+    expect(wordBox).toHaveAttribute("title", expect.stringContaining("Cao"));
+
+    await user.click(wordBox);
+    expect(wordBox).toHaveClass("ring-2");
+    expect(screen.getByRole("group", { name: "Thống kê confidence OCR" }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Confidence OCR:/)).toBeInTheDocument();
+    expect(screen.getByText(/0\.95/)).toBeInTheDocument();
+  });
+
 });
