@@ -80,7 +80,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
-  it("shows confidence-coded word boxes and lets Admin select a word on the image", async () => {
+
+  it("shows confidence-coded boxes and selects a word", async () => {
     const services = createAdminServiceFixture();
     const user = userEvent.setup();
     render(
@@ -101,10 +102,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     await user.click(wordBox);
     expect(wordBox).toHaveClass("ring-2");
-    expect(screen.getByRole("group", { name: "Thống kê confidence OCR" }))
-      .toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "Thống kê confidence OCR" }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Confidence OCR:/)).toBeInTheDocument();
     expect(screen.getByText(/0\.95/)).toBeInTheDocument();
   });
-
 });
