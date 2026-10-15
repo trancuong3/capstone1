@@ -36,6 +36,28 @@ class ReadingContentService:
             # another parent so this endpoint cannot enumerate child profiles.
             raise HTTPException(status_code=404, detail="Child profile not found")
 
+    @staticmethod
+    def _valid_bbox(
+        bbox: object,
+    ) -> tuple[float, float, float, float] | None:
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            return None
+        try:
+            x, y, width, height = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if (
+            not all(math.isfinite(value) for value in (x, y, width, height))
+            or x < 0
+            or y < 0
+            or width <= 0
+            or height <= 0
+            or x + width > 1.000001
+            or y + height > 1.000001
+        ):
+            return None
+        return x, y, width, height
+
     async def create_session(
         self,
         actor_id: UUID,
@@ -97,6 +119,26 @@ class ReadingContentService:
                 detail={
                     "code": "CONTENT_NOT_READY",
                     "message": "The page's verified revision is unavailable.",
+                },
+            )
+        if not (revision.VerifiedText or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTENT_NOT_READY",
+                    "message": "The verified revision does not contain reading text.",
+                },
+            )
+        revision_words = await self.repository.revision_words(revision.Id)
+        if not any(
+            row.Text.strip() and self._valid_bbox(row.BoundingBox) is not None
+            for row in revision_words
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTENT_NOT_READY",
+                    "message": "The verified revision has no valid word-position data.",
                 },
             )
 
@@ -249,21 +291,10 @@ class ReadingContentService:
         words: list[ReadingPageWordDTO] = []
         confidence_scores: list[float] = []
         for row in word_rows:
-            box = row.BoundingBox
-            if not isinstance(box, (list, tuple)) or len(box) != 4:
+            box = self._valid_bbox(row.BoundingBox)
+            if box is None or not row.Text.strip():
                 continue
-            try:
-                x, y, width, height = (float(value) for value in box)
-            except (TypeError, ValueError):
-                continue
-            if (
-                not all(math.isfinite(value) for value in (x, y, width, height))
-                or x < 0 or y < 0 or width <= 0 or height <= 0
-                or x + width > 1.000001 or y + height > 1.000001
-            ):
-                continue
-            if not row.Text.strip():
-                continue
+            x, y, width, height = box
             raw_confidence = row.OCRConfidence
             if raw_confidence is not None:
                 try:
