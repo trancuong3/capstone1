@@ -75,25 +75,13 @@ async def get_reading_page(
 
 
 @router.post("/sessions/{session_id}/finish", response_model=SessionSummaryRead)
-async def finish_session(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    session = await db.scalar(select(ReadingSession).where(ReadingSession.Id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Reading session not found")
-    session.State = "COMPLETED"
-    session.EndedAt = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(session)
-    duration = None
-    if session.EndedAt and session.StartedAt:
-        duration = int((session.EndedAt - session.StartedAt).total_seconds() * 1000)
-    return SessionSummaryRead(
-        id=session.Id,
-        child_id=session.ChildId,
-        book_id=session.BookId,
-        state="FINISHED",
-        started_at=session.StartedAt,
-        ended_at=session.EndedAt,
-        duration_ms=duration,
+async def finish_session(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).finish_session(
+        session_id, actor_id
     )
 
 
