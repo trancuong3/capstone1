@@ -12,6 +12,7 @@ vi.mock("@/lib/supabase/client", () => ({
     },
   }),
 }));
+
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
