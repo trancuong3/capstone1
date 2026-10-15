@@ -32,6 +32,33 @@ class AdminOcrRepository:
         )
         return value is not None
 
+    def stage_page_revision_bundle(
+        self,
+        page: BookPage,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+    ) -> None:
+        """Stage the Admin-uploaded page, initial OCR revision and word boxes.
+
+        The Service owns the surrounding Storage/Database transaction because it
+        must also clean up the uploaded Storage object if the commit fails.
+        This method performs persistence staging only; it does not decide whether
+        the page should be created or verified.
+        """
+        self.db.add_all([page, revision])
+        for word in words:
+            self.db.add(
+                PageRevisionWord(
+                    PageRevisionId=revision.Id,
+                    WordIndex=int(word["word_index"]),
+                    LineIndex=int(word["line_index"]),
+                    Text=str(word["text"]),
+                    NormalizedText=str(word["normalized_text"]),
+                    BoundingBox=list(word["bbox"]),
+                    OCRConfidence=word.get("ocr_confidence"),
+                )
+            )
+
     async def revisions(self, page_id: UUID) -> list[PageRevision]:
         result = await self.db.execute(
             select(PageRevision)
