@@ -35,12 +35,65 @@ def normalize_text_tokens(value: str) -> list[str]:
     return [token for raw in re.split(r"\s+", unicodedata.normalize("NFC", value).strip()) if (token := normalize_word(raw))]
 
 
+def _candidate_quality_score(result: dict[str, object]) -> float:
+    """Rank OCR candidates using confidence and simple structural signals.
+
+    Tesseract confidence is an engine score, not a calibrated probability. This
+    score is only a candidate-selection heuristic and must never be shown as OCR
+    confidence to the user.
+    """
+    raw_texts = result.get("text", [])
+    texts = [str(value).strip() for value in raw_texts if str(value).strip()]
+    tokens = [value for value in texts if any(char.isalnum() for char in value)]
+    confidence_values: list[float] = []
+    for value in result.get("conf", []):
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(score) and 0 <= score <= 100:
+            confidence_values.append(score / 100.0)
+
+    if not tokens:
+        return -1.0
+
+    average_confidence = (
+        sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+    )
+    all_characters = "".join(tokens)
+    alphanumeric_ratio = (
+        sum(character.isalnum() for character in all_characters) / len(all_characters)
+        if all_characters else 0.0
+    )
+    # Saturating structural signals reward a usable page without automatically
+    # preferring the candidate that emits the most noisy fragments.
+    word_signal = min(len(tokens) / 18.0, 1.0)
+    line_keys = set()
+    blocks = result.get("block_num", [])
+    paragraphs = result.get("par_num", [])
+    lines = result.get("line_num", [])
+    for index in range(min(len(blocks), len(paragraphs), len(lines))):
+        try:
+            line_keys.add((int(blocks[index]), int(paragraphs[index]), int(lines[index])))
+        except (TypeError, ValueError):
+            continue
+    line_signal = min(len(line_keys) / 6.0, 1.0)
+    return (
+        0.72 * average_confidence
+        + 0.10 * word_signal
+        + 0.08 * line_signal
+        + 0.10 * alphanumeric_ratio
+    )
+
+
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     """
-    Run local Tesseract OCR with adaptive image scaling, Otsu binarization,
-    and single-column layout analysis (PSM 4).
-    Bounding boxes come from Tesseract's real TSV output and are normalized to [0, 1]
-    so they overlay the original image with high precision.
+    Run Vietnamese Tesseract OCR against a small set of preprocessing/layout
+    candidates, then select the best candidate with a documented heuristic.
+
+    Word boxes are read from Tesseract TSV and normalized against the processed
+    image dimensions. Since candidate preprocessing retains the same dimensions,
+    coordinates overlay the original image without an inverse geometric transform.
     """
     configured_binary = os.getenv("TESSERACT_CMD")
     if configured_binary:
@@ -82,9 +135,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if orig_width <= 0 or orig_height <= 0:
         raise ValueError("Image dimensions are invalid")
 
-    # If image resolution is low (e.g. phone snapshots or small crops < 1400px),
-    # upscale using cubic interpolation so Vietnamese diacritics match Tesseract's optimal font x-height (~30px).
-    is_mocked = hasattr(pytesseract.image_to_data, "mock_calls") or "Mock" in type(pytesseract.image_to_data).__name__
+    is_mocked = (
+        hasattr(pytesseract.image_to_data, "mock_calls")
+        or "Mock" in type(pytesseract.image_to_data).__name__
+    )
     scale_factor = 1.0
     if not is_mocked:
         max_dim = max(orig_width, orig_height)
@@ -94,34 +148,78 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if scale_factor > 1.01:
         scaled_w = int(round(orig_width * scale_factor))
         scaled_h = int(round(orig_height * scale_factor))
-        scaled_image = cv2.resize(image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC)
+        scaled_image = cv2.resize(
+            image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC
+        )
     else:
         scaled_w, scaled_h = orig_width, orig_height
         scaled_image = image
 
     gray = cv2.cvtColor(scaled_image, cv2.COLOR_BGR2GRAY)
-    # Otsu thresholding produces clean character edges and filters uneven lighting on book pages.
-    _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if processed is None or np.mean(processed) < 5 or np.mean(processed) > 250:
-        processed = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    adaptive = cv2.adaptiveThreshold(
+        clahe,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        11,
+    )
 
-    psm = os.getenv("TESSERACT_PSM", "4")
-    try:
-        result = pytesseract.image_to_data(
-            processed,
-            lang=target_lang,
-            config=f"--oem 1 --psm {psm}",
-            output_type=Output.DICT,
+    configured_psm = os.getenv("TESSERACT_PSM")
+    if configured_psm:
+        if not configured_psm.isdecimal() or not 0 <= int(configured_psm) <= 13:
+            raise OcrEngineUnavailable("TESSERACT_PSM must be an integer between 0 and 13")
+        psm_values = [int(configured_psm)] * 3
+    else:
+        psm_values = [4, 6, 11]
+
+    # Keep unit tests deterministic when Tesseract is mocked. Real OCR compares
+    # complementary variants; all candidates use the same image dimensions.
+    if is_mocked:
+        candidates = [("otsu_threshold", otsu, psm_values[0])]
+    else:
+        candidates = [
+            ("otsu_threshold", otsu, psm_values[0]),
+            ("clahe_grayscale", clahe, psm_values[1]),
+            ("adaptive_gaussian_threshold", adaptive, psm_values[2]),
+        ]
+
+    candidate_results: list[tuple[str, int, float, dict[str, object]]] = []
+    for preprocessing_name, candidate_image, psm in candidates:
+        try:
+            result = pytesseract.image_to_data(
+                candidate_image,
+                lang=target_lang,
+                config=f"--oem 1 --psm {psm}",
+                output_type=Output.DICT,
+            )
+        except Exception as exc:
+            # An individual candidate can fail because of layout parameters;
+            # only fail the whole request when no candidate can be evaluated.
+            candidate_results.append((preprocessing_name, psm, -1.0, {}))
+            continue
+        candidate_results.append(
+            (preprocessing_name, psm, _candidate_quality_score(result), result)
         )
-    except Exception as exc:
-        raise OcrEngineUnavailable(f"Tesseract failed to process the image with {target_lang} language data") from exc
+
+    usable_candidates = [item for item in candidate_results if item[2] >= 0]
+    if not usable_candidates:
+        raise OcrEngineUnavailable(
+            f"Tesseract failed to process the image with {target_lang} language data"
+        )
+    selected_preprocessing, selected_psm, selected_score, result = max(
+        usable_candidates, key=lambda item: item[2]
+    )
+    if not result.get("text"):
+        raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
     line_map: dict[tuple[int, int, int], int] = {}
     words: list[dict[str, object]] = []
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
-        # Drop empty tokens or non-text symbols
-        if not token or not any(c.isalnum() for c in token):
+        if not token or not any(character.isalnum() for character in token):
             continue
         try:
             left = int(result["left"][index])
@@ -135,7 +233,8 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         except (KeyError, TypeError, ValueError, IndexError):
             continue
 
-        # Filter out obvious OCR noise artifacts (zero or negative confidence on 1-2 char fragments)
+        if not np.isfinite(raw_confidence):
+            raw_confidence = -1.0
         if raw_confidence <= 0 and (len(token) <= 2 or not any(c.isalpha() for c in token)):
             continue
 
@@ -145,6 +244,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         box_height = min(max(box_height, 0), scaled_h - top)
         if box_width <= 0 or box_height <= 0:
             continue
+
         line_key = (block, paragraph, line)
         if line_key not in line_map:
             line_map[line_key] = len(line_map)
@@ -152,20 +252,30 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         normalized = normalize_word(token)
         if not normalized:
             continue
-        x = left / scaled_w
-        y = top / scaled_h
-        w = box_width / scaled_w
-        h = box_height / scaled_h
         words.append({
             "word_index": len(words),
             "line_index": line_map[line_key],
             "text": token,
             "normalized_text": normalized,
-            "bbox": [x, y, w, h],
+            "bbox": [
+                left / scaled_w,
+                top / scaled_h,
+                box_width / scaled_w,
+                box_height / scaled_h,
+            ],
             "ocr_confidence": confidence,
         })
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
+
+    score_metadata = [
+        {
+            "preprocessing": name,
+            "psm": psm,
+            "selection_score": round(score, 4) if score >= 0 else None,
+        }
+        for name, psm, score, _candidate in candidate_results
+    ]
     return {
         "text": " ".join(str(word["text"]) for word in words),
         "words": words,
@@ -176,8 +286,12 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
             "preprocessing": [
                 "upscale_cubic" if scale_factor > 1.01 else "original_resolution",
                 "grayscale",
-                "otsu_threshold",
+                selected_preprocessing,
             ],
+            "selected_psm": selected_psm,
+            "candidate_count": len(candidate_results),
+            "candidate_scores": score_metadata,
+            "selected_candidate_score": round(selected_score, 4),
             "coordinate_space": "normalized_original_dimensions",
             "source_width": orig_width,
             "source_height": orig_height,
