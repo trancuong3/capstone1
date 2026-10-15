@@ -297,10 +297,31 @@ class AdminCatalogService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Page contract is not available yet") from None
 
+    async def page_text_preview(self, page) -> str | None:
+        revisions = await self.repository.revisions(page.Id)
+        if not revisions:
+            return None
+        revision = revisions[0]
+        text_value = getattr(revision, "DraftText", None) or getattr(revision, "VerifiedText", None)
+        if not isinstance(text_value, str) or not text_value.strip():
+            return None
+        compact = " ".join(text_value.split())
+        return compact[:240] + ("…" if len(compact) > 240 else "")
+
     async def pages(self, book_id: UUID):
         await self.book(book_id)
         try:
-            return [AdminPageListRead(book_id=page.BookId, page_number=page.PageNumber, processing=await self.processing(page)) for page in await self.repository.pages(book_id)]
+            output = []
+            for page in await self.repository.pages(book_id):
+                output.append(
+                    AdminPageListRead(
+                        book_id=page.BookId,
+                        page_number=page.PageNumber,
+                        processing=await self.processing(page),
+                        text_preview=await self.page_text_preview(page),
+                    )
+                )
+            return output
         except ValidationError:
             raise HTTPException(status_code=501, detail="Page list contract is not available yet") from None
 
