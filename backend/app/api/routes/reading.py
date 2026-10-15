@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_parent_id
 from app.models import ReadingSession, ReadingEvent, FluencyAssessment
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
@@ -15,6 +15,8 @@ from app.schemas import (
 from datetime import datetime, timezone
 from app.models import BookPage, PageRevision, PageRevisionWord
 from app.services.storage_service import create_signed_image_url
+from app.repositories.reading_content_repository import ReadingContentRepository
+from app.services.reading_content_service import ReadingContentService
 from app.schemas.reading import (
     ReadingPageDTO, ReadingPageWordDTO, ReadingCompletionSummaryDTO,
     SessionSummaryRead,
@@ -29,183 +31,48 @@ async def get_sessions(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 @router.post("/sessions", response_model=ReadingSessionResponse)
-async def create_session(session_in: ReadingSessionCreate, db: AsyncSession = Depends(get_db)):
-    """Tạo phiên đọc mới khi bé bắt đầu đọc sách"""
-    child_id = session_in.ChildId or session_in.child_id
-    book_id = session_in.BookId or session_in.book_id
-    if not child_id or not book_id:
-        raise HTTPException(status_code=422, detail="ChildId and BookId are required")
-
-    state = session_in.state or session_in.State or "IN_PROGRESS"
-    db_state = "IN_PROGRESS" if state in ("CREATED", "PAGE_READY", "LISTENING", "IN_PROGRESS") else ("COMPLETED" if state in ("FINISHED", "COMPLETED") else state)
-    mode = session_in.mode or session_in.Mode or "realtime"
-    page_id = session_in.SelectedPageId or session_in.selected_page_id
-    rev_id = session_in.SelectedPageRevisionId or session_in.selected_page_revision_id
-
-    if not page_id:
-        first_page = await db.scalar(
-            select(BookPage).where(
-                BookPage.BookId == book_id,
-                BookPage.LifecycleStatus == "ACTIVE",
-                BookPage.CurrentVerifiedRevisionId.isnot(None),
-            ).order_by(BookPage.PageNumber, BookPage.Id).limit(1)
-        )
-        if not first_page:
-            first_page = await db.scalar(
-                select(BookPage).where(
-                    BookPage.BookId == book_id,
-                ).order_by(BookPage.PageNumber, BookPage.Id).limit(1)
-            )
-        if first_page:
-            page_id = first_page.Id
-            rev_id = first_page.CurrentVerifiedRevisionId
-
-    new_session = ReadingSession(
-        ChildId=child_id,
-        BookId=book_id,
-        SelectedPageId=page_id,
-        SelectedPageRevisionId=rev_id,
-        State=db_state,
-        Mode=mode,
-        ClientMeta=session_in.ClientMeta,
-    )
-    db.add(new_session)
-    await db.commit()
-    await db.refresh(new_session)
-    return new_session
-
-
-async def _build_reading_page_dto(page: BookPage, db: AsyncSession) -> ReadingPageDTO:
-    rev_id = page.CurrentVerifiedRevisionId
-    revision = None
-    if rev_id:
-        revision = await db.scalar(select(PageRevision).where(PageRevision.Id == rev_id))
-    if not revision:
-        revision = await db.scalar(
-            select(PageRevision).where(
-                PageRevision.PageId == page.Id,
-                PageRevision.VerificationStatus == "VERIFIED",
-            ).order_by(PageRevision.CreatedAt.desc()).limit(1)
-        )
-    if not revision:
-        revision = await db.scalar(
-            select(PageRevision).where(
-                PageRevision.PageId == page.Id,
-            ).order_by(PageRevision.CreatedAt.desc()).limit(1)
-        )
-
-    words: list[ReadingPageWordDTO] = []
-    text_content = ""
-    if revision:
-        text_content = revision.VerifiedText or getattr(revision, "DraftText", None) or ""
-        word_rows = (await db.execute(
-            select(PageRevisionWord).where(
-                PageRevisionWord.PageRevisionId == revision.Id
-            ).order_by(PageRevisionWord.WordIndex)
-        )).scalars().all()
-        for w in word_rows:
-            box = (0.1, 0.1, 0.1, 0.05)
-            if isinstance(w.BoundingBox, (list, tuple)) and len(w.BoundingBox) == 4:
-                try:
-                    box = (float(w.BoundingBox[0]), float(w.BoundingBox[1]), float(w.BoundingBox[2]), float(w.BoundingBox[3]))
-                except (ValueError, TypeError):
-                    pass
-            words.append(ReadingPageWordDTO(
-                word_id=w.Id,
-                word_index=w.WordIndex,
-                text=w.Text,
-                bbox=box,
-            ))
-
-    if not words and text_content:
-        for idx, token in enumerate(text_content.split()):
-            words.append(ReadingPageWordDTO(
-                word_id=UUID(int=idx + 1),
-                word_index=idx,
-                text=token,
-                bbox=(0.05 + (idx % 8) * 0.1, 0.1 + (idx // 8) * 0.08, 0.08, 0.05),
-            ))
-
-    image_url = None
-    if page.ImagePath:
-        try:
-            image_url = create_signed_image_url(page.ImagePath)
-        except Exception:
-            pass
-
-    return ReadingPageDTO(
-        page_id=page.Id,
-        page_revision_id=revision.Id if revision else page.Id,
-        page_number=page.PageNumber,
-        confidence=1.0,
-        width=1000,
-        height=1000,
-        image_url=image_url,
-        text=text_content,
-        words=words,
+async def create_session(
+    session_in: ReadingSessionCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a session referencing an existing page verified by Admin."""
+    return await ReadingContentService(ReadingContentRepository(db)).create_session(
+        actor_id, session_in
     )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionSummaryRead)
-async def get_session(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    session = await db.scalar(select(ReadingSession).where(ReadingSession.Id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Reading session not found")
-    duration = None
-    if session.EndedAt and session.StartedAt:
-        duration = int((session.EndedAt - session.StartedAt).total_seconds() * 1000)
-    wire_state = "PAGE_READY"
-    if session.State == "COMPLETED":
-        wire_state = "FINISHED"
-    elif session.State == "PAUSED":
-        wire_state = "PAUSED"
-    elif session.State == "ABORTED":
-        wire_state = "ABORTED"
-    elif session.State in ("CREATED", "PAGE_READY", "LISTENING"):
-        wire_state = session.State
-    return SessionSummaryRead(
-        id=session.Id,
-        child_id=session.ChildId,
-        book_id=session.BookId,
-        state=wire_state,
-        started_at=session.StartedAt,
-        ended_at=session.EndedAt,
-        duration_ms=duration,
+async def get_session(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_summary(
+        session_id, actor_id
     )
 
 
 @router.get("/sessions/{session_id}/page", response_model=ReadingPageDTO)
-async def get_session_current_page(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    session = await db.scalar(select(ReadingSession).where(ReadingSession.Id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Reading session not found")
-
-    page = None
-    if session.SelectedPageId:
-        page = await db.scalar(select(BookPage).where(BookPage.Id == session.SelectedPageId))
-    if not page:
-        page = await db.scalar(
-            select(BookPage).where(
-                BookPage.BookId == session.BookId,
-                BookPage.LifecycleStatus == "ACTIVE",
-                BookPage.CurrentVerifiedRevisionId.isnot(None),
-            ).order_by(BookPage.PageNumber, BookPage.Id).limit(1)
-        )
-    if not page:
-        page = await db.scalar(
-            select(BookPage).where(BookPage.BookId == session.BookId).order_by(BookPage.PageNumber).limit(1)
-        )
-    if not page:
-        raise HTTPException(status_code=404, detail="No pages available for this book")
-    return await _build_reading_page_dto(page, db)
+async def get_session_current_page(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_page(
+        session_id, actor_id
+    )
 
 
 @router.get("/pages/{page_id}", response_model=ReadingPageDTO)
-async def get_reading_page(page_id: UUID, db: AsyncSession = Depends(get_db)):
-    page = await db.scalar(select(BookPage).where(BookPage.Id == page_id))
-    if not page:
-        raise HTTPException(status_code=404, detail="Page not found")
-    return await _build_reading_page_dto(page, db)
+async def get_reading_page(
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_page(
+        page_id, actor_id
+    )
 
 
 @router.post("/sessions/{session_id}/finish", response_model=SessionSummaryRead)
