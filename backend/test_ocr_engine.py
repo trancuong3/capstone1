@@ -63,6 +63,28 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["words"][1]["line_index"], 1)
         self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
 
+    def test_invalid_tesseract_confidence_is_null(self):
+        invalid_confidence = {
+            "text": ["Chú"],
+            "left": [100],
+            "top": [50],
+            "width": [40],
+            "height": [20],
+            "conf": ["150"],
+            "block_num": [1],
+            "par_num": [1],
+            "line_num": [1],
+        }
+        patches = self._configured_tesseract()
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract,
+            "image_to_data",
+            return_value=invalid_confidence,
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertIsNone(result["words"][0]["ocr_confidence"])
+
     def test_keeps_short_low_confidence_vietnamese_words_for_admin_review(self):
         uncertain = {
             "text": ["là"],
