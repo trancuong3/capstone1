@@ -565,10 +565,15 @@ class AdminOcrService:
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
         words = self._validated_words(payload.words)
         await self.repo.sync_words(revision.Id, words)
-        revision.DraftText = payload.draft_text.strip()
-        revision.ContentHash = hashlib.sha256(
-            json.dumps({"text": revision.DraftText, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        draft_text = payload.draft_text.strip()
+        content_hash = hashlib.sha256(
+            json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        self.repo.update_revision_draft(
+            revision,
+            draft_text=draft_text,
+            content_hash=content_hash,
+        )
         try:
             await self.db.commit()
             await self.db.refresh(revision)
@@ -597,16 +602,18 @@ class AdminOcrService:
         if text_tokens != word_tokens:
             raise HTTPException(status_code=422, detail="Corrected text must match the ordered word list; edit the word entries before verifying")
         await self.repo.sync_words(revision.Id, words)
-        revision.DraftText = corrected_text
-        revision.VerifiedText = corrected_text
-        revision.VerificationStatus = "VERIFIED"
-        revision.VerifiedAt = datetime.now(timezone.utc)
-        revision.VerifiedBy = actor_id
-        revision.ContentHash = hashlib.sha256(
+        content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        self.repo.update_revision_verification(
+            revision,
+            corrected_text=corrected_text,
+            content_hash=content_hash,
+            verified_by=actor_id,
+            verified_at=datetime.now(timezone.utc),
+        )
         if page.LifecycleStatus == "ACTIVE":
-            page.CurrentVerifiedRevisionId = revision.Id
+            self.repo.set_current_verified_revision(page, revision.Id)
         try:
             await self.db.commit()
             await self.db.refresh(revision)
