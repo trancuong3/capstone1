@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import Book, BookPage, PageRevision, PageRevisionWord
+from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
 from app.schemas.book import AdminRevisionDetailRead, CatalogBookResponse
