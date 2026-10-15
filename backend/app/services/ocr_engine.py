@@ -235,8 +235,9 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
 
         if not np.isfinite(raw_confidence):
             raw_confidence = -1.0
-        if raw_confidence <= 0 and (len(token) <= 2 or not any(c.isalpha() for c in token)):
-            continue
+        # Keep short, low-confidence Vietnamese words (for example "là", "và")
+        # so Admin can review them. Invalid/punctuation-only tokens are filtered above;
+        # confidence affects review status, not whether a real word is silently dropped.
 
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
