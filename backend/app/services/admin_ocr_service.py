@@ -81,7 +81,7 @@ class AdminOcrService:
             LifecycleStatus="ACTIVE",
             CreatedBy=actor_id,
         )
-        self.db.add(row)
+        self.repo.stage_book(row)
         try:
             await self.db.commit()
             await self.db.refresh(row)
@@ -628,13 +628,7 @@ class AdminOcrService:
             Id=revision_id, PageId=page.Id, RevisionNo=str(next_number), VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=dict(ocr["metadata"]),
         )
-        self.db.add(revision)
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
+        self.repo.stage_revision_bundle(revision, words)
         try:
             await self.db.commit()
             await self.db.refresh(revision)
