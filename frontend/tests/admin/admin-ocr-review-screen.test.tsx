@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
 import {
   ADMIN_BOOK_ID,
@@ -195,4 +195,59 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getByText(/Confidence OCR:/)).toBeInTheDocument();
     expect(screen.getByText(/0\.95/)).toBeInTheDocument();
   });
+  it("scrolls the word list to the first uncertain OCR word", async () => {
+    const services = createAdminServiceFixture();
+    services.ocr.getRevision.mockResolvedValue({
+      ...adminR2Fixture,
+      words: adminR2Fixture.words.map((word) => ({
+        ...word,
+        ocr_confidence: null,
+      })),
+    });
+    const user = userEvent.setup();
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrollSpy = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollSpy,
+    });
+
+    try {
+      render(
+        withAdminFixture(
+          <AdminOcrReviewScreen
+            bookId={ADMIN_BOOK_ID}
+            pageId={ADMIN_PAGE_ID}
+          />,
+          services,
+        ),
+      );
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+      await user.click(
+        screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
+      );
+
+      expect(scrollSpy).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center",
+      });
+      expect(
+        screen.getByRole("button", { name: "Từ #0 · Dòng 0" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          originalDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
+  });
+
 });
