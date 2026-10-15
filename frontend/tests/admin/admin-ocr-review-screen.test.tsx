@@ -195,6 +195,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getByText(/Confidence OCR:/)).toBeInTheDocument();
     expect(screen.getByText(/0\.95/)).toBeInTheDocument();
   });
+
   it("scrolls the word list to the first uncertain OCR word", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
@@ -249,5 +250,4 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       }
     }
   });
-
 });
