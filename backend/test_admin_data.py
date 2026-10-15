@@ -84,6 +84,12 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
 
+    async def test_admin_page_list_includes_persisted_text_preview(self):
+        repo = catalog_repo()
+        result = await AdminCatalogService(repo).pages(BOOK)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].text_preview, "Stored verified text")
+
     async def test_processing_and_history_use_latest_created_order_without_renumbering(self):
         repo = catalog_repo()
         repo.revisions.return_value = [revision_row(RevisionNo="2"), revision_row(Id=ACTOR, RevisionNo="9")]
