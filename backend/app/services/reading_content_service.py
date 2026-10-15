@@ -76,10 +76,10 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        # Preserve the existing response shape while keeping the endpoint scoped.
-        # Persisted speech transcripts/complete practice counts are not available
-        # in the current ReadingSession schema; do not fabricate transcript strings.
-        duration_min = 1
+        # Report only metrics that are actually persisted. The current schema
+        # does not persist a complete page-visit log, recognized words, or audio
+        # transcripts, so those fields remain null rather than fabricated zeroes.
+        duration_min = None
         if session.EndedAt and session.StartedAt:
             start = session.StartedAt
             end = session.EndedAt
@@ -87,13 +87,13 @@ class ReadingContentService:
                 start = start.replace(tzinfo=timezone.utc)
             if end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
-            duration_min = max(1, int((end - start).total_seconds() // 60))
+            duration_min = max(0, int((end - start).total_seconds() // 60))
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
-            pages_explored=1 if session.SelectedPageId else 0,
-            practiced_words=0,
-            spoken_words=[],
-            transcripts=[],
+            pages_explored=None,
+            practiced_words=None,
+            spoken_words=None,
+            transcripts=None,
         )
 
     async def create_reading_event(
