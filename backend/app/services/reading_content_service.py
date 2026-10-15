@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import timezone
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -197,6 +197,27 @@ class ReadingContentService:
             ended_at=session.EndedAt,
             duration_ms=duration_ms,
         )
+
+    async def finish_session(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+    ) -> SessionSummaryRead:
+        await self.require_parent(actor_id)
+        session = await self.repository.session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+
+        # Keep finish idempotent so retries do not rewrite the original end time.
+        if session.State not in ("COMPLETED", "FINISHED"):
+            self.repository.update_session_state(
+                session,
+                state="COMPLETED",
+                ended_at=datetime.now(timezone.utc),
+            )
+            session = await self.repository.save_session(session)
+        return self._summary(session)
 
     async def get_session_summary(
         self,
