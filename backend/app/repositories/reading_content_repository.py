@@ -87,7 +87,20 @@ class ReadingContentRepository:
             select(ReadingSession).where(ReadingSession.Id == session_id)
         )
 
-    async def create_session(self, session: ReadingSession) -> ReadingSession:
+    def update_session_state(
+        self,
+        session: ReadingSession,
+        *,
+        state: str,
+        ended_at,
+    ) -> ReadingSession:
+        """Stage a session-state change chosen by the Service."""
+        session.State = state
+        session.EndedAt = ended_at
+        return session
+
+    async def save_session(self, session: ReadingSession) -> ReadingSession:
+        """Persist a session insert/update and keep the session transaction atomic."""
         self.db.add(session)
         try:
             await self.db.commit()
@@ -96,3 +109,6 @@ class ReadingContentRepository:
             await self.db.rollback()
             raise
         return session
+
+    async def create_session(self, session: ReadingSession) -> ReadingSession:
+        return await self.save_session(session)
