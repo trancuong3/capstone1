@@ -33,6 +33,15 @@ async def upload_admin_page(
     return await AdminOcrService(db).upload_page(actor_id, book_id, page_number, image)
 
 
+@router.post("/admin/pages/{page_id}/revisions/draft", response_model=AdminRevisionDetailRead, status_code=201)
+async def create_admin_page_edit_draft(
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).create_edit_draft(actor_id, page_id)
+
+
 @router.put("/admin/pages/{page_id}/revisions/{revision_id}/draft", response_model=AdminRevisionDetailRead)
 async def save_admin_page_draft(
     page_id: UUID,
