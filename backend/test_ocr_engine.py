@@ -88,6 +88,57 @@ class OcrEngineTests(unittest.TestCase):
         self.assertIsNone(result["words"][0]["ocr_confidence"])
         self.assertEqual(result["words"][0]["normalized_text"], "là")
 
+    def test_uses_candidate_score_to_select_between_real_preprocessing_variants(self):
+        def result_for(token: str, confidence: str) -> dict[str, list[object]]:
+            return {
+                "text": [token],
+                "left": [200],
+                "top": [100],
+                "width": [50],
+                "height": [25],
+                "conf": [confidence],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+            }
+
+        candidates = iter([
+            result_for("Chú", "35"),
+            result_for("mèo", "95"),
+            result_for("và", "80"),
+        ])
+
+        def fake_image_to_data(*_args, **_kwargs):
+            return next(candidates)
+
+        patches = self._configured_tesseract()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patch.dict(os.environ, {"TESSERACT_PSM": "", "TESSERACT_LANG": ""}),
+            patch.object(
+                ocr_engine.pytesseract,
+                "image_to_data",
+                new=fake_image_to_data,
+            ),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertEqual(result["text"], "mèo")
+        self.assertEqual(result["metadata"]["selected_psm"], 6)
+        self.assertEqual(result["metadata"]["candidate_count"], 3)
+        self.assertEqual(
+            [candidate["preprocessing"] for candidate in result["metadata"]["candidate_scores"]],
+            [
+                "otsu_threshold",
+                "clahe_grayscale",
+                "adaptive_gaussian_threshold",
+            ],
+        )
+        for actual, expected in zip(result["words"][0]["bbox"], (0.2, 0.2, 0.05, 0.05)):
+            self.assertAlmostEqual(actual, expected)
+
     def test_candidate_score_rejects_empty_or_non_text_output(self):
         self.assertEqual(
             ocr_engine._candidate_quality_score({"text": ["", "   "], "conf": ["-1"]}),
