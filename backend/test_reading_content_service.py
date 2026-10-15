@@ -190,6 +190,24 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.create_session.assert_awaited_once()
         repo.first_verified_page.assert_not_awaited()
 
+    async def test_create_session_rejects_stale_verified_revision(self):
+        service, repo = self.make_service()
+        old_revision_id = UUID("99999999-9999-4999-8999-999999999999")
+        payload = ReadingSessionCreate(
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="CREATED",
+            SelectedPageId=PAGE_ID,
+            SelectedPageRevisionId=old_revision_id,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_session(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "CONTENT_NOT_READY")
+        repo.create_session.assert_not_awaited()
+
     async def test_create_session_fails_before_persistence_when_verified_revision_has_no_word_boxes(self):
         service, repo = self.make_service()
         repo.revision_words.return_value = []
