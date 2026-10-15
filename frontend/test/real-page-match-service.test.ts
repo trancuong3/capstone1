@@ -59,7 +59,7 @@ describe("real PageMatchService", () => {
 
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.origin).toBe("http://127.0.0.1:8000");
-    expect(url.pathname).toBe(\`/reading/pages/\${pageId}\`);
+    expect(url.pathname).toBe(`/reading/pages/${pageId}`);
     expect(url.searchParams.get("session_id")).toBe(sessionId);
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "GET",
@@ -78,7 +78,7 @@ describe("real PageMatchService", () => {
     ).toEqual(page);
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      \`http://127.0.0.1:8000/reading/sessions/\${sessionId}/page\`,
+      `http://127.0.0.1:8000/reading/sessions/${sessionId}/page`,
     );
   });
 });
