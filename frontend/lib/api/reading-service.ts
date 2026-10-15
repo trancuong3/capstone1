@@ -64,7 +64,7 @@ export const readingPageDtoSchema = z.object({
   page_id: z.guid(),
   page_revision_id: z.guid(),
   page_number: z.number().int(),
-  confidence: z.number(),
+  confidence: z.number().min(0).max(1).nullable(),
   width: z.number(),
   height: z.number(),
   image_url: z.string().nullable().optional(),
