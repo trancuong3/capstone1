@@ -18,6 +18,7 @@ artifacts/
 # Environment files: never commit real values
 .env*
 !.env.example
+!.env.*.example
 
 # Logs
 *.log
@@ -47,18 +48,34 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
-#Test files
+# Test files
 tests/
 
-# Python Virtual Environments
+# Python virtual environments
 venv/
 .venv/
-env/.env.*
+env/
+**/venv/
+**/.venv/
+
+# Local environment secrets
+.env
+.env.*
 **/.env
 **/.env.*
+!.env.example
 !**/.env.example
+!.env.*.example
+!**/.env.*.example
+
+# Frontend local configuration
+frontend/.env.local
+frontend/.env.*.local
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/.next/
 
 # Local OCR language models
 tessdata/
 **/tessdata/
-

@@ -20,11 +20,12 @@ export function createPageMatchService(): PageMatchService {
     },
 
     async selectPage(
-      _sessionId: string,
+      sessionId: string,
       selectedPageId: string,
     ): Promise<ReadingPageDTO> {
+      const query = new URLSearchParams({ session_id: sessionId });
       return requestApi(
-        `/reading/pages/${encodeURIComponent(selectedPageId)}`,
+        `/reading/pages/${encodeURIComponent(selectedPageId)}?${query.toString()}`,
         readingPageDtoSchema,
       );
     },

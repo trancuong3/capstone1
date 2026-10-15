@@ -66,9 +66,11 @@ export function SessionComplete({
               className="mx-auto size-7 text-purple-ink"
             />
             <p className="mt-3 text-[26px] font-extrabold">
-              {summary.duration_minutes} phút
+              {summary.duration_minutes === null
+                ? "Chưa ghi nhận"
+                : `${summary.duration_minutes} phút`}
             </p>
-            <p className="text-label text-muted">cùng trang sách</p>
+            <p className="text-label text-muted">thời lượng buổi đọc</p>
           </div>
           <div className="rounded-card bg-cream p-5 text-center">
             <BookOpen
@@ -76,9 +78,11 @@ export function SessionComplete({
               className="mx-auto size-7 text-purple-ink"
             />
             <p className="mt-3 text-[26px] font-extrabold">
-              {summary.pages_explored} trang
+              {summary.pages_explored === null
+                ? "Chưa ghi nhận"
+                : `${summary.pages_explored} trang`}
             </p>
-            <p className="text-label text-muted">đã khám phá</p>
+            <p className="text-label text-muted">đã mở trong buổi đọc</p>
           </div>
           <button
             type="button"
@@ -92,7 +96,9 @@ export function SessionComplete({
                 className="mx-auto size-7 text-purple-ink transition-transform group-hover:scale-110"
               />
               <p className="mt-3 text-[26px] font-extrabold text-ink">
-                {summary.practiced_words} từ
+                {summary.practiced_words === null
+                  ? "Chưa ghi nhận"
+                  : `${summary.practiced_words} từ`}
               </p>
               <p className="text-label text-muted">đã luyện thêm</p>
             </div>

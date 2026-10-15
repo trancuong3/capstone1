@@ -17,7 +17,7 @@ describe("SessionComplete component", () => {
     transcripts: ["mèo nhỏ đang chạy"],
   };
 
-  it("renders summary cards and toggles spoken words list when clicking the result box", async () => {
+  it("renders summary cards and toggles the spoken-words list", async () => {
     const user = userEvent.setup();
     render(
       <SessionComplete
@@ -84,6 +84,28 @@ describe("SessionComplete component", () => {
     expect(screen.getByTestId("spoken-words-container")).toBeInTheDocument();
     expect(
       screen.getByText(/Chưa ghi nhận từ nào trong lượt đọc này/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not display missing completion metrics as invented zeroes", () => {
+    render(
+      <SessionComplete
+        booksHref="/books"
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          duration_minutes: null,
+          pages_explored: null,
+          practiced_words: null,
+          spoken_words: null,
+          transcripts: null,
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("Chưa ghi nhận")).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: /Chưa ghi nhận/i }),
     ).toBeInTheDocument();
   });
 });

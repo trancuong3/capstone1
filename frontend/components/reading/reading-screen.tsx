@@ -124,6 +124,7 @@ export function ReadingScreen({
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
+  const exploredPageIdsRef = useRef<Set<string>>(new Set());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -176,6 +177,12 @@ export function ReadingScreen({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (page?.page_id) {
+      exploredPageIdsRef.current.add(page.page_id);
+    }
+  }, [page?.page_id]);
 
   useEffect(() => {
     let active = true;
@@ -714,17 +721,17 @@ export function ReadingScreen({
       }
       if (mountedRef.current) setIsMicRecording(false);
     }
-    await Promise.all([
+    const [finishedSession] = await Promise.all([
       services.readingService.finish(sessionId),
       services.readingSocketAdapter.sendControl(sessionId, "finish"),
     ]);
     if (!mountedRef.current) return;
     const wordsList = Array.from(spokenWordsSetRef.current);
-    const existingSummary =
-      loadState.status === "ready" ? loadState.data.completion : null;
+    const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
+    const pagesExplored = exploredPageIdsRef.current.size || null;
     const updatedSummary: ReadingCompletionSummaryUI = {
-      duration_minutes: existingSummary?.duration_minutes ?? 1,
-      pages_explored: existingSummary?.pages_explored ?? 1,
+      duration_minutes: durationMinutes,
+      pages_explored: pagesExplored,
       practiced_words: wordsList.length,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
@@ -1016,6 +1023,11 @@ export function ReadingScreen({
       </span>
     </div>
   );
+}
+
+function getDurationMinutes(durationMs: number | null): number | null {
+  if (durationMs === null) return null;
+  return Math.ceil(Math.max(0, durationMs) / 60000);
 }
 
 function connectionLabel(state: ReadingConnectionState): string {

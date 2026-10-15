@@ -20,6 +20,69 @@ class AdminOcrRepository:
     async def book(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
 
+    def stage_book(self, book: Book) -> None:
+        """Stage a validated Admin-created book for the service transaction."""
+        self.db.add(book)
+
+    def stage_revision_bundle(
+        self,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+    ) -> None:
+        """Stage a new OCR revision and its word boxes without committing."""
+        self.db.add(revision)
+        for word in words:
+            self.db.add(
+                PageRevisionWord(
+                    PageRevisionId=revision.Id,
+                    WordIndex=int(word["word_index"]),
+                    LineIndex=int(word["line_index"]),
+                    Text=str(word["text"]),
+                    NormalizedText=str(word["normalized_text"]),
+                    BoundingBox=list(word["bbox"]),
+                    OCRConfidence=word.get("ocr_confidence"),
+                )
+            )
+
+    @staticmethod
+    def update_revision_draft(
+        revision: PageRevision,
+        *,
+        draft_text: str,
+        content_hash: str,
+    ) -> PageRevision:
+        """Apply already-validated Admin draft values to the ORM entity."""
+        revision.DraftText = draft_text
+        revision.ContentHash = content_hash
+        return revision
+
+    @staticmethod
+    def update_revision_verification(
+        revision: PageRevision,
+        *,
+        corrected_text: str,
+        content_hash: str,
+        verified_by: UUID,
+        verified_at,
+    ) -> PageRevision:
+        """Persist verification values after the Service authorizes the transition."""
+        revision.DraftText = corrected_text
+        revision.VerifiedText = corrected_text
+        revision.VerificationStatus = "VERIFIED"
+        revision.VerifiedAt = verified_at
+        revision.VerifiedBy = verified_by
+        revision.ContentHash = content_hash
+        return revision
+
+    @staticmethod
+    def set_current_verified_revision(
+        page: BookPage,
+        revision_id: UUID,
+    ) -> BookPage:
+        """Update the page's current verified pointer when the Service permits it."""
+        page.CurrentVerifiedRevisionId = revision_id
+        return page
+
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
         query = select(BookPage).where(BookPage.Id == page_id)
         if lock:
@@ -31,6 +94,33 @@ class AdminOcrRepository:
             select(BookPage.Id).where(BookPage.BookId == book_id, BookPage.PageNumber == page_number)
         )
         return value is not None
+
+    def stage_page_revision_bundle(
+        self,
+        page: BookPage,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+    ) -> None:
+        """Stage the Admin-uploaded page, initial OCR revision and word boxes.
+
+        The Service owns the surrounding Storage/Database transaction because it
+        must also clean up the uploaded Storage object if the commit fails.
+        This method performs persistence staging only; it does not decide whether
+        the page should be created or verified.
+        """
+        self.db.add_all([page, revision])
+        for word in words:
+            self.db.add(
+                PageRevisionWord(
+                    PageRevisionId=revision.Id,
+                    WordIndex=int(word["word_index"]),
+                    LineIndex=int(word["line_index"]),
+                    Text=str(word["text"]),
+                    NormalizedText=str(word["normalized_text"]),
+                    BoundingBox=list(word["bbox"]),
+                    OCRConfidence=word.get("ocr_confidence"),
+                )
+            )
 
     async def revisions(self, page_id: UUID) -> list[PageRevision]:
         result = await self.db.execute(

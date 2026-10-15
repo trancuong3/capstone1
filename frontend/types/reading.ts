@@ -27,13 +27,16 @@ export interface ReadingSessionCreateDTO {
   readonly child_id: UUID;
   readonly book_id: UUID;
   readonly mode: "realtime";
+  readonly selected_page_id?: UUID;
+  readonly selected_page_revision_id?: UUID;
 }
 
 export interface ReadingSessionCreateResponseDTO {
   readonly session_id: UUID;
-  readonly state: "CREATED";
-  readonly session_token: string;
-  readonly expires_at: ISODateTime;
+  readonly state: "PAGE_READY";
+  readonly selected_page_id: UUID;
+  readonly selected_page_revision_id: UUID;
+  readonly started_at: ISODateTime;
 }
 
 export type WordBoundingBox = readonly [
@@ -54,7 +57,7 @@ export interface ReadingPageDTO {
   readonly page_id: UUID;
   readonly page_revision_id: UUID;
   readonly page_number: number;
-  readonly confidence: number;
+  readonly confidence: number | null;
   readonly width: number;
   readonly height: number;
   readonly image_url?: string | null;
@@ -158,11 +161,11 @@ export interface ReadingRealtimeSnapshotUI {
 }
 
 export interface ReadingCompletionSummaryUI {
-  readonly duration_minutes: number;
-  readonly pages_explored: number;
-  readonly practiced_words: number;
-  readonly spoken_words?: readonly string[];
-  readonly transcripts?: readonly string[];
+  readonly duration_minutes: number | null;
+  readonly pages_explored: number | null;
+  readonly practiced_words: number | null;
+  readonly spoken_words?: readonly string[] | null;
+  readonly transcripts?: readonly string[] | null;
 }
 
 export type ReadingEventType =
