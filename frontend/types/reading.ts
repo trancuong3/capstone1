@@ -27,13 +27,16 @@ export interface ReadingSessionCreateDTO {
   readonly child_id: UUID;
   readonly book_id: UUID;
   readonly mode: "realtime";
+  readonly selected_page_id?: UUID;
+  readonly selected_page_revision_id?: UUID;
 }
 
 export interface ReadingSessionCreateResponseDTO {
   readonly session_id: UUID;
-  readonly state: "CREATED";
-  readonly session_token: string;
-  readonly expires_at: ISODateTime;
+  readonly state: "PAGE_READY";
+  readonly selected_page_id: UUID;
+  readonly selected_page_revision_id: UUID;
+  readonly started_at: ISODateTime;
 }
 
 export type WordBoundingBox = readonly [
