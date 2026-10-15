@@ -33,7 +33,8 @@ class ReadingPageDTO(BaseModel):
     page_id: UUID
     page_revision_id: UUID
     page_number: int
-    confidence: float = 1.0
+    # Optional because legacy OCR rows may not have a genuine confidence score.
+    confidence: Optional[float] = None
     width: int = 1000
     height: int = 1000
     image_url: Optional[str] = None
