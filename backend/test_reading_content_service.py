@@ -40,7 +40,14 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             )),
             create_session=AsyncMock(side_effect=lambda session: session),
             session=AsyncMock(),
-            revision_words=AsyncMock(return_value=[]),
+            revision_words=AsyncMock(
+                return_value=[
+                    SimpleNamespace(
+                        Text="Chú",
+                        BoundingBox=[0.1, 0.2, 0.12, 0.04],
+                    )
+                ]
+            ),
         )
         return ReadingContentService(repo), repo
 
@@ -63,6 +70,24 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.State, "IN_PROGRESS")
         repo.create_session.assert_awaited_once()
         repo.first_verified_page.assert_not_awaited()
+
+    async def test_create_session_fails_before_persistence_when_verified_revision_has_no_word_boxes(self):
+        service, repo = self.make_service()
+        repo.revision_words.return_value = []
+        payload = ReadingSessionCreate(
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="CREATED",
+            SelectedPageId=PAGE_ID,
+            SelectedPageRevisionId=REVISION_ID,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_session(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "CONTENT_NOT_READY")
+        repo.create_session.assert_not_awaited()
 
     async def test_create_session_fails_before_persistence_when_book_has_no_verified_page(self):
         service, repo = self.make_service()
