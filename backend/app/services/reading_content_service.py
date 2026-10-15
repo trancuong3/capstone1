@@ -6,9 +6,12 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.models import BookPage, ReadingSession
+from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
+    FluencyAssessmentCreate,
+    ReadingCompletionSummaryDTO,
+    ReadingEventCreate,
     ReadingPageDTO,
     ReadingPageWordDTO,
     ReadingSessionCreate,
@@ -57,6 +60,96 @@ class ReadingContentService:
         ):
             return None
         return x, y, width, height
+
+    async def list_sessions(self, actor_id: UUID) -> list[ReadingSession]:
+        await self.require_parent(actor_id)
+        return await self.repository.sessions_for_parent(actor_id)
+
+    async def get_completion_summary(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+    ) -> ReadingCompletionSummaryDTO:
+        await self.require_parent(actor_id)
+        session = await self.repository.session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+
+        # Preserve the existing response shape while keeping the endpoint scoped.
+        # Persisted speech transcripts/complete practice counts are not available
+        # in the current ReadingSession schema; do not fabricate transcript strings.
+        duration_min = 1
+        if session.EndedAt and session.StartedAt:
+            start = session.StartedAt
+            end = session.EndedAt
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            duration_min = max(1, int((end - start).total_seconds() // 60))
+        return ReadingCompletionSummaryDTO(
+            duration_minutes=duration_min,
+            pages_explored=1 if session.SelectedPageId else 0,
+            practiced_words=0,
+            spoken_words=[],
+            transcripts=[],
+        )
+
+    async def create_reading_event(
+        self,
+        actor_id: UUID,
+        payload: ReadingEventCreate,
+    ) -> ReadingEvent:
+        await self.require_parent(actor_id)
+        session = await self.repository.session(payload.SessionId)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+
+        page = await self.repository.verified_page(payload.PageId, session.BookId)
+        if page is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTENT_NOT_READY",
+                    "message": "Reading events must reference an active verified page in this session's book.",
+                },
+            )
+        revision = await self.repository.verified_revision(
+            page.Id,
+            payload.PageRevisionId,
+        )
+        if revision is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CONTENT_NOT_READY",
+                    "message": "Reading events must reference a verified revision of the selected page.",
+                },
+            )
+        if payload.WordId is not None and not await self.repository.revision_word_exists(
+            revision.Id,
+            payload.WordId,
+        ):
+            raise HTTPException(status_code=422, detail="Word does not belong to the referenced page revision")
+
+        event = ReadingEvent(**payload.model_dump())
+        return await self.repository.create_reading_event(event)
+
+    async def create_fluency_assessment(
+        self,
+        actor_id: UUID,
+        payload: FluencyAssessmentCreate,
+    ) -> FluencyAssessment:
+        await self.require_parent(actor_id)
+        session = await self.repository.session(payload.SessionId)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+
+        assessment = FluencyAssessment(**payload.model_dump())
+        return await self.repository.create_fluency_assessment(assessment)
 
     async def create_session(
         self,
