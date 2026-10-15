@@ -181,9 +181,17 @@ class ReadingContentService:
                 session.SelectedPageId,
                 session.BookId,
             )
-        if page is None:
-            # Legacy sessions without a valid selection may read the first
-            # verified page; do not select an arbitrary unverified page.
+            if page is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": "The selected page is no longer an active, verified reading page.",
+                    },
+                )
+        else:
+            # Legacy sessions without a selection may use the first verified
+            # page; never fall back to an arbitrary unverified page.
             page = await self.repository.first_verified_page(session.BookId)
         if page is None:
             raise HTTPException(
