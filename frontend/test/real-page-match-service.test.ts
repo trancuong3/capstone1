@@ -70,7 +70,7 @@ describe("real PageMatchService", () => {
     });
   });
 
-  it("uses the session-bound current page endpoint when retrying", async () => {
+  it("retries through the session page endpoint", async () => {
     fetchMock.mockResolvedValue(Response.json(page));
 
     expect(
