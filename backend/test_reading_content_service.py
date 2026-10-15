@@ -122,6 +122,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
                 WordIndex=0,
                 Text="Chú",
                 BoundingBox=[0.1, 0.2, 0.12, 0.04],
+                OCRConfidence=0.93,
             )
         ]
 
@@ -134,6 +135,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dto.width, 600)
         self.assertEqual(dto.height, 800)
+        self.assertEqual(dto.confidence, 0.93)
         self.assertEqual(dto.words[0].bbox, (0.1, 0.2, 0.12, 0.04))
 
         repo.revision_words.return_value = []
