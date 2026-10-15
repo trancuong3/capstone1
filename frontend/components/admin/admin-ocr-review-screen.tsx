@@ -69,6 +69,7 @@ export function AdminOcrReviewScreen({
   const [draftText, setDraftText] = useState("");
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
+  const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "verify" | "reprocess" | null>(
@@ -193,6 +194,14 @@ export function AdminOcrReviewScreen({
         return { ...word, bbox: next };
       }),
     );
+  }
+
+  function goToWordForReview(index: number) {
+    setSelectedWord(index);
+    wordRowRefs.current.get(index)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
   }
 
   function syncTextFromWords() {
@@ -475,9 +484,11 @@ export function AdminOcrReviewScreen({
           <button
             className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!firstWordToReview}
-            onClick={() =>
-              setSelectedWord(firstWordToReview?.word_index ?? null)
-            }
+            onClick={() => {
+              if (firstWordToReview) {
+                goToWordForReview(firstWordToReview.word_index);
+              }
+            }}
             type="button"
           >
             Đi tới từ cần kiểm tra
@@ -551,6 +562,13 @@ export function AdminOcrReviewScreen({
                       : "rounded-control border border-border p-3"
                   }
                   key={word.word_index}
+                  ref={(element) => {
+                    if (element) {
+                      wordRowRefs.current.set(word.word_index, element);
+                    } else {
+                      wordRowRefs.current.delete(word.word_index);
+                    }
+                  }}
                 >
                   <button
                     aria-pressed={word.word_index === selectedWord}
