@@ -63,6 +63,46 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["words"][1]["line_index"], 1)
         self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
 
+    def test_keeps_short_low_confidence_vietnamese_words_for_admin_review(self):
+        uncertain = {
+            "text": ["là"],
+            "left": [100],
+            "top": [50],
+            "width": [25],
+            "height": [20],
+            "conf": ["-1"],
+            "block_num": [1],
+            "par_num": [1],
+            "line_num": [1],
+        }
+        patches = self._configured_tesseract()
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract,
+            "image_to_data",
+            return_value=uncertain,
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertEqual(result["text"], "là")
+        self.assertEqual(len(result["words"]), 1)
+        self.assertIsNone(result["words"][0]["ocr_confidence"])
+        self.assertEqual(result["words"][0]["normalized_text"], "là")
+
+    def test_candidate_score_rejects_empty_or_non_text_output(self):
+        self.assertEqual(
+            ocr_engine._candidate_quality_score({"text": ["", "   "], "conf": ["-1"]}),
+            -1.0,
+        )
+        score = ocr_engine._candidate_quality_score({
+            "text": ["Chú", "mèo"],
+            "conf": ["92", "88"],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+        })
+        self.assertGreater(score, 0.75)
+        self.assertLessEqual(score, 1.0)
+
     def test_missing_vietnamese_language_data_fails_closed(self):
         with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
             ocr_engine.pytesseract, "get_tesseract_version", return_value="5.3.0"
