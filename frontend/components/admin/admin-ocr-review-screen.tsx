@@ -407,6 +407,7 @@ export function AdminOcrReviewScreen({
                 return (
                   <button
                     aria-label={boxLabel}
+                    aria-pressed={word.word_index === selectedWord}
                     className={`absolute cursor-pointer p-0 ${colorClass} ${selectedClass}`}
                     key={`${word.line_index}-${word.word_index}`}
                     onClick={() => setSelectedWord(word.word_index)}
@@ -550,6 +551,7 @@ export function AdminOcrReviewScreen({
                   key={word.word_index}
                 >
                   <button
+                    aria-pressed={word.word_index === selectedWord}
                     className="mb-3 text-left text-sm font-bold text-primary underline"
                     onClick={() => setSelectedWord(word.word_index)}
                     type="button"
