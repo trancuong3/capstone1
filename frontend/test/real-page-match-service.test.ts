@@ -74,9 +74,9 @@ describe("real PageMatchService", () => {
   it("retries the current session page", async () => {
     fetchMock.mockResolvedValue(Response.json(page));
 
-    expect(
-      await createPageMatchService().retryCurrentPage(sessionId),
-    ).toEqual(page);
+    expect(await createPageMatchService().retryCurrentPage(sessionId)).toEqual(
+      page,
+    );
 
     expect(fetchMock.mock.calls[0][0]).toBe(
       `http://127.0.0.1:8000/reading/sessions/${sessionId}/page`,
