@@ -83,13 +83,15 @@ function readyResponse(url: string): Response {
   if (url.endsWith("/revisions"))
     return Response.json([
       ...(manualDraftCreated
-        ? [{
-            page_revision_id: newRevisionId,
-            revision_no: 3,
-            verification_status: "NEEDS_REVIEW",
-            created_at: timestamp,
-            is_current_verified: false,
-          }]
+        ? [
+            {
+              page_revision_id: newRevisionId,
+              revision_no: 3,
+              verification_status: "NEEDS_REVIEW",
+              created_at: timestamp,
+              is_current_verified: false,
+            },
+          ]
         : []),
       {
         page_revision_id: revisionId,
@@ -148,7 +150,10 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
     const target = String(url);
-    if (target.endsWith(`/admin/pages/${pageId}`) && options?.method === "DELETE") {
+    if (
+      target.endsWith(`/admin/pages/${pageId}`) &&
+      options?.method === "DELETE"
+    ) {
       pageRetired = true;
       return Response.json({
         page_id: pageId,
@@ -330,7 +335,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       await screen.findByText("Trang đã ngừng sử dụng"),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Xóa trang" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Xóa trang" }),
+    ).not.toBeInTheDocument();
   });
 
   it("creates an editable revision from verified text without rerunning OCR", async () => {
@@ -355,7 +362,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       ).toBe(true),
     );
     expect(await screen.findByLabelText("Nội dung trang")).toBeEnabled();
-    expect(screen.getByRole("heading", { name: "Kiểm tra OCR · R3" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Kiểm tra OCR · R3" }),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/),
     ).toBeInTheDocument();
