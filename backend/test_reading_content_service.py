@@ -131,6 +131,47 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.child_belongs_to_parent.assert_not_awaited()
         repo.create_session.assert_not_awaited()
 
+    async def test_selected_page_must_belong_to_owned_reading_session_book(self):
+        service, repo = self.make_service()
+        repo.session.return_value = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID,
+            SelectedPageRevisionId=REVISION_ID,
+        )
+        repo.verified_page.return_value = None
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.get_page(
+                UUID("88888888-8888-4888-8888-888888888888"),
+                UUID("77777777-7777-4777-8777-777777777777"),
+                PARENT_ID,
+            )
+
+        self.assertEqual(raised.exception.status_code, 404)
+        repo.verified_page.assert_awaited_once_with(
+            UUID("88888888-8888-4888-8888-888888888888"),
+            BOOK_ID,
+        )
+
+    async def test_selected_page_request_checks_session_ownership_first(self):
+        service, repo = self.make_service()
+        repo.session.return_value = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID,
+            SelectedPageRevisionId=REVISION_ID,
+        )
+        repo.child_belongs_to_parent.return_value = False
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.get_page(PAGE_ID, UUID("77777777-7777-4777-8777-777777777777"), PARENT_ID)
+
+        self.assertEqual(raised.exception.status_code, 404)
+        repo.verified_page.assert_not_awaited()
+
     async def test_page_dto_does_not_invent_bounding_boxes(self):
         service, repo = self.make_service()
         page = SimpleNamespace(
