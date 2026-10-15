@@ -214,7 +214,11 @@ export function AdminOcrReviewScreen({
   }
 
   async function createEditDraft() {
-    if (!detail || detail.verification_status !== "VERIFIED" || busy !== null) {
+    if (
+      !detail ||
+      detail.verification_status !== "VERIFIED" ||
+      busy !== null
+    ) {
       return;
     }
     setBusy("edit");
@@ -573,7 +577,11 @@ export function AdminOcrReviewScreen({
                   </Button>
                   <Button
                     className="sm:w-auto"
-                    disabled={busy !== null || detail.lifecycle_status !== "ACTIVE" || words.length === 0}
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      words.length === 0
+                    }
                     isLoading={busy === "verify"}
                     onClick={() => void verifyRevision()}
                   >
