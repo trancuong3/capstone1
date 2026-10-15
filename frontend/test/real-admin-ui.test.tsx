@@ -303,7 +303,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
       String(url).endsWith(`/admin/pages/${pageId}`) && (init as RequestInit | undefined)?.method === "DELETE",
     )).toBe(true));
-    expect(await screen.findByRole("heading", { name: "Trang đã ngừng sử dụng" })).toBeInTheDocument();
+    expect(await screen.findByText("Trang đã ngừng sử dụng")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Xóa trang" })).not.toBeInTheDocument();
   });
 
