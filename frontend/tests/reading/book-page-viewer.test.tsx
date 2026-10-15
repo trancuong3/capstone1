@@ -17,12 +17,7 @@ const page: ReadingPageDTO = {
 
 describe("BookPageViewer", () => {
   it("shows stored page text and does not render scanned or fallback imagery", () => {
-    render(
-      <BookPageViewer
-        currentWordId={null}
-        page={page}
-      />,
-    );
+    render(<BookPageViewer currentWordId={null} page={page} />);
 
     expect(screen.getByText("Mẹ đưa bé đến trường.")).toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
