@@ -57,7 +57,7 @@ export interface ReadingPageDTO {
   readonly page_id: UUID;
   readonly page_revision_id: UUID;
   readonly page_number: number;
-  readonly confidence: number;
+  readonly confidence: number | null;
   readonly width: number;
   readonly height: number;
   readonly image_url?: string | null;
