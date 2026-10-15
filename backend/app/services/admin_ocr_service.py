@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from io import BytesIO
@@ -140,6 +141,18 @@ class AdminOcrService:
         return data, actual[0], actual[1], width, height
 
     @staticmethod
+    def _normalize_confidence(value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            return None
+        return confidence
+
+    @staticmethod
     def _word_data(words: list[dict[str, object]]) -> list[dict[str, object]]:
         normalized: list[dict[str, object]] = []
         for position, item in enumerate(words):
@@ -154,11 +167,9 @@ class AdminOcrService:
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
                 raise HTTPException(status_code=422, detail="OCR engine returned a bounding box outside the image")
-            confidence = item.get("ocr_confidence")
-            if confidence is not None:
-                confidence = float(confidence)
-                if not 0 <= confidence <= 1:
-                    confidence = None
+            confidence = AdminOcrService._normalize_confidence(
+                item.get("ocr_confidence")
+            )
             normalized.append({
                 "word_index": len(normalized),
                 "line_index": max(0, int(item["line_index"])),
@@ -526,7 +537,9 @@ class AdminOcrService:
                 raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": row.Text,
-                "normalized_text": row.NormalizedText, "bbox": tuple(box), "ocr_confidence": row.OCRConfidence,
+                "normalized_text": row.NormalizedText,
+                "bbox": tuple(box),
+                "ocr_confidence": self._normalize_confidence(row.OCRConfidence),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
