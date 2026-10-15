@@ -19,7 +19,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
-from app.schemas.book import AdminRevisionDetailRead, CatalogBookResponse
+from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead, CatalogBookResponse
 from app.services.ocr_engine import (
     OcrEngineUnavailable, OcrNoTextDetected, extract_text_and_boxes, normalize_text_tokens, normalize_word,
 )
@@ -681,6 +681,29 @@ class AdminOcrService:
             raise
         # The current verified pointer and all historical session/event references remain untouched.
         return await self.revision_detail(page, revision)
+
+    async def retire_page(self, actor_id: UUID, page_id: UUID) -> AdminPageLifecycleRead:
+        """Hide a page from new reading sessions while preserving all historical references."""
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus not in ("ACTIVE", "RETIRED"):
+            raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
+        if page.LifecycleStatus != "RETIRED":
+            self.repo.set_page_lifecycle_status(page, "RETIRED")
+            try:
+                await self.db.commit()
+                await self.db.refresh(page)
+            except Exception:
+                await self.db.rollback()
+                raise
+        return AdminPageLifecycleRead(
+            page_id=page.Id,
+            book_id=page.BookId,
+            page_number=page.PageNumber,
+            lifecycle_status="RETIRED",
+        )
 
     async def image_url(self, page: BookPage) -> str:
         return create_signed_image_url(page.ImagePath)
