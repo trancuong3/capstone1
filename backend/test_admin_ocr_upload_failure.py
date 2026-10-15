@@ -107,6 +107,16 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
 
+    async def test_invalid_legacy_ocr_confidence_normalizes_to_null(self):
+        from app.services.admin_ocr_service import AdminOcrService
+
+        self.assertIsNone(AdminOcrService._normalize_confidence(None))
+        self.assertIsNone(AdminOcrService._normalize_confidence(-0.1))
+        self.assertIsNone(AdminOcrService._normalize_confidence(1.1))
+        self.assertIsNone(AdminOcrService._normalize_confidence(float("nan")))
+        self.assertIsNone(AdminOcrService._normalize_confidence("invalid"))
+        self.assertEqual(AdminOcrService._normalize_confidence(0.91), 0.91)
+
     async def test_success_creates_unverified_revision_and_stores_real_ocr_boxes(self):
         service = self.make_service()
         service.db.commit = AsyncMock()
