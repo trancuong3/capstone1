@@ -434,19 +434,19 @@ export function AdminOcrReviewScreen({
             className="mt-3 flex flex-wrap gap-3 text-xs"
           >
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />{" "}
+              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />
               Cao
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />{" "}
+              <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />
               Trung bình
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />{" "}
+              <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />
               Thấp
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />{" "}
+              <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />
               Chưa xác định
             </span>
           </div>
@@ -475,7 +475,9 @@ export function AdminOcrReviewScreen({
           <button
             className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!firstWordToReview}
-            onClick={() => setSelectedWord(firstWordToReview?.word_index ?? null)}
+            onClick={() =>
+              setSelectedWord(firstWordToReview?.word_index ?? null)
+            }
             type="button"
           >
             Đi tới từ cần kiểm tra
@@ -609,7 +611,9 @@ export function AdminOcrReviewScreen({
                       ? "chưa xác định"
                       : word.ocr_confidence.toFixed(2)}
                     {" · "}
-                    {getOcrConfidenceLabel(getOcrConfidenceLevel(word.ocr_confidence))}
+                    {getOcrConfidenceLabel(
+                      getOcrConfidenceLevel(word.ocr_confidence),
+                    )}
                   </p>
                 </div>
               ))}
