@@ -63,6 +63,8 @@ jobs:
           echo "Checking formatting for changed frontend files:"
           printf '%s\n' "$changed_files"
           cd frontend
+          echo "TEMPORARY FORMAT DIAGNOSTIC OUTPUT:"
+          npx prettier test/real-page-match-service.test.ts
           printf '%s\n' "$changed_files" | xargs -r npx prettier --check --
 
       - name: Lint all frontend files
