@@ -149,6 +149,9 @@ export function createAdminServiceFixture() {
       updateStatus: vi
         .fn<AdminServices["pages"]["updateStatus"]>()
         .mockRejectedValue(unavailable()),
+      retire: vi
+        .fn<AdminServices["pages"]["retire"]>()
+        .mockRejectedValue(unavailable()),
     },
     parents: {
       list: vi
@@ -189,6 +192,9 @@ export function createAdminServiceFixture() {
       list: vi
         .fn<AdminServices["revisions"]["list"]>()
         .mockResolvedValue(revisionHistory),
+      createDraft: vi
+        .fn<AdminServices["revisions"]["createDraft"]>()
+        .mockRejectedValue(unavailable()),
       verify: vi
         .fn<AdminServices["revisions"]["verify"]>()
         .mockRejectedValue(unavailable()),
