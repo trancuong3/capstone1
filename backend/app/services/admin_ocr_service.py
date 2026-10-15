@@ -403,13 +403,7 @@ class AdminOcrService:
             Id=revision_id, PageId=page_id, RevisionNo="1", VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=metadata,
         )
-        self.db.add_all([page, revision])
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
+        self.repo.stage_page_revision_bundle(page, revision, words)
         try:
             log_diagnostic(
                 logger,
