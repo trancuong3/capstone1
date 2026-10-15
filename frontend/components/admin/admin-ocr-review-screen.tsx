@@ -72,9 +72,9 @@ export function AdminOcrReviewScreen({
   const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"edit" | "save" | "verify" | "reprocess" | null>(
-    null,
-  );
+  const [busy, setBusy] = useState<
+    "edit" | "save" | "verify" | "reprocess" | null
+  >(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
@@ -214,11 +214,7 @@ export function AdminOcrReviewScreen({
   }
 
   async function createEditDraft() {
-    if (
-      !detail ||
-      detail.verification_status !== "VERIFIED" ||
-      busy !== null
-    ) {
+    if (!detail || detail.verification_status !== "VERIFIED" || busy !== null) {
       return;
     }
     setBusy("edit");
@@ -557,12 +553,15 @@ export function AdminOcrReviewScreen({
               {verified ? (
                 <Button
                   className="sm:w-auto"
-                  disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
+                  disabled={
+                    busy !== null || detail.lifecycle_status !== "ACTIVE"
+                  }
                   isLoading={busy === "edit"}
                   onClick={() => void createEditDraft()}
                   variant="secondary"
                 >
-                  <Save aria-hidden className="size-4" /> Tạo bản nháp để sửa nội dung
+                  <Save aria-hidden className="size-4" /> Tạo bản nháp để sửa
+                  nội dung
                 </Button>
               ) : (
                 <>
@@ -585,7 +584,8 @@ export function AdminOcrReviewScreen({
                     isLoading={busy === "verify"}
                     onClick={() => void verifyRevision()}
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác minh trang
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác minh
+                    trang
                   </Button>
                 </>
               )}
