@@ -1,6 +1,7 @@
 import type {
   AdminPageImageUI,
   AdminPageListItemUI,
+  AdminPageLifecycleDTO,
   AdminPageProcessingDTO,
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -24,6 +25,7 @@ export interface AdminPageService {
     pageId: string,
     request: StatusPatchDTO,
   ): Promise<AdminPageProcessingDTO>;
+  retire(pageId: string): Promise<AdminPageLifecycleDTO>;
 }
 
 export const adminProcessingSchema = z.object({
@@ -48,6 +50,7 @@ export function createAdminPageService(): AdminPageService {
               book_id: z.uuid(),
               page_number: z.number().int().positive(),
               processing: adminProcessingSchema,
+              text_preview: z.string().nullable().optional(),
             }),
           )
           .refine((items) => items.every((item) => item.book_id === bookId)),
@@ -129,5 +132,19 @@ export function createAdminPageService(): AdminPageService {
       );
     },
     updateStatus: unavailableOperation,
+    retire: (pageId) =>
+      requestApi(
+        `/books/admin/pages/${encodeURIComponent(pageId)}`,
+        z
+          .object({
+            page_id: z.uuid(),
+            book_id: z.uuid(),
+            page_number: z.number().int().positive(),
+            lifecycle_status: z.literal("RETIRED"),
+          })
+          .refine((item) => item.page_id === pageId),
+        undefined,
+        { method: "DELETE" },
+      ),
   };
 }
