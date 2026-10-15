@@ -23,10 +23,11 @@ from app.schemas.reading import (
 router = APIRouter()
 
 @router.get("/sessions", response_model=List[ReadingSessionResponse])
-async def get_sessions(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách các phiên đọc"""
-    result = await db.execute(select(ReadingSession))
-    return result.scalars().all()
+async def get_sessions(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
 
 @router.post("/sessions", response_model=ReadingSessionResponse)
 async def create_session(
@@ -86,38 +87,34 @@ async def finish_session(
 
 
 @router.get("/sessions/{session_id}/completion-summary", response_model=ReadingCompletionSummaryDTO)
-async def get_session_completion_summary(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    session = await db.scalar(select(ReadingSession).where(ReadingSession.Id == session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail="Reading session not found")
-    duration_min = 1
-    if session.EndedAt and session.StartedAt:
-        duration_min = max(1, int((session.EndedAt - session.StartedAt).total_seconds() // 60))
-    return ReadingCompletionSummaryDTO(
-        duration_minutes=duration_min,
-        pages_explored=1,
-        practiced_words=0,
-        spoken_words=[],
-        transcripts=[],
+async def get_session_completion_summary(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_completion_summary(
+        session_id, actor_id
     )
 
 @router.post("/events", response_model=ReadingEventResponse)
-async def create_reading_event(event_in: ReadingEventCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi nhận một lỗi phát âm hoặc sự kiện đọc"""
-    new_event = ReadingEvent(**event_in.model_dump())
-    db.add(new_event)
-    await db.commit()
-    await db.refresh(new_event)
-    return new_event
+async def create_reading_event(
+    event_in: ReadingEventCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).create_reading_event(
+        actor_id, event_in
+    )
 
 @router.post("/fluency", response_model=FluencyAssessmentResponse)
-async def create_fluency_assessment(assessment_in: FluencyAssessmentCreate, db: AsyncSession = Depends(get_db)):
-    """Lưu đánh giá độ trôi chảy sau khi kết thúc phiên đọc"""
-    new_assessment = FluencyAssessment(**assessment_in.model_dump())
-    db.add(new_assessment)
-    await db.commit()
-    await db.refresh(new_assessment)
-    return new_assessment
+async def create_fluency_assessment(
+    assessment_in: FluencyAssessmentCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).create_fluency_assessment(
+        actor_id, assessment_in
+    )
 
 
 import re
