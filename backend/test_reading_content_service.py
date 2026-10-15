@@ -96,6 +96,26 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.status_code, 404)
 
+    async def test_completion_summary_uses_null_for_metrics_not_persisted(self):
+        service, repo = self.make_service()
+        session = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID,
+            StartedAt=datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        repo.session.return_value = session
+
+        result = await service.get_completion_summary(session.Id, PARENT_ID)
+
+        self.assertIsNone(result.duration_minutes)
+        self.assertIsNone(result.pages_explored)
+        self.assertIsNone(result.practiced_words)
+        self.assertIsNone(result.spoken_words)
+        self.assertIsNone(result.transcripts)
+
     async def test_reading_event_requires_owned_session_and_verified_page_revision(self):
         service, repo = self.make_service()
         session_id = UUID("77777777-7777-4777-8777-777777777777")
