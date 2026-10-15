@@ -36,12 +36,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Temporary OCR formatting probe
-        continue-on-error: true
-        run: |
-          npx prettier --write components/admin/admin-ocr-review-screen.tsx
-          git -C .. diff --color=never -- frontend/components/admin/admin-ocr-review-screen.tsx
-
       - name: Format check (changed frontend files)
         id: format
         continue-on-error: true
