@@ -36,23 +36,42 @@ def normalize_text_tokens(value: str) -> list[str]:
 
 
 def _candidate_quality_score(result: dict[str, object]) -> float:
-    """Rank OCR candidates using confidence and simple structural signals.
+    """Rank OCR candidates using token-linked confidence and layout signals.
 
     Tesseract confidence is an engine score, not a calibrated probability. This
     score is only a candidate-selection heuristic and must never be shown as OCR
     confidence to the user.
     """
     raw_texts = result.get("text", [])
-    texts = [str(value).strip() for value in raw_texts if str(value).strip()]
-    tokens = [value for value in texts if any(char.isalnum() for char in value)]
+    raw_confidences = result.get("conf", [])
+    tokens: list[str] = []
     confidence_values: list[float] = []
-    for value in result.get("conf", []):
-        try:
-            score = float(value)
-        except (TypeError, ValueError):
+    populated_lines: set[tuple[int, int, int]] = set()
+    all_characters = ""
+
+    for index, raw_text in enumerate(raw_texts):
+        token = str(raw_text).strip()
+        if not token or not any(char.isalnum() for char in token):
             continue
-        if np.isfinite(score) and 0 <= score <= 100:
-            confidence_values.append(score / 100.0)
+        tokens.append(token)
+        all_characters += token
+
+        if index < len(raw_confidences):
+            try:
+                confidence = float(raw_confidences[index])
+            except (TypeError, ValueError):
+                confidence = float("nan")
+            if np.isfinite(confidence) and 0 <= confidence <= 100:
+                confidence_values.append(confidence / 100.0)
+
+        try:
+            populated_lines.add((
+                int(result.get("block_num", [])[index]),
+                int(result.get("par_num", [])[index]),
+                int(result.get("line_num", [])[index]),
+            ))
+        except (TypeError, ValueError, IndexError):
+            continue
 
     if not tokens:
         return -1.0
@@ -60,7 +79,6 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     average_confidence = (
         sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
     )
-    all_characters = "".join(tokens)
     alphanumeric_ratio = (
         sum(character.isalnum() for character in all_characters) / len(all_characters)
         if all_characters else 0.0
@@ -68,23 +86,13 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     # Saturating structural signals reward a usable page without automatically
     # preferring the candidate that emits the most noisy fragments.
     word_signal = min(len(tokens) / 18.0, 1.0)
-    line_keys = set()
-    blocks = result.get("block_num", [])
-    paragraphs = result.get("par_num", [])
-    lines = result.get("line_num", [])
-    for index in range(min(len(blocks), len(paragraphs), len(lines))):
-        try:
-            line_keys.add((int(blocks[index]), int(paragraphs[index]), int(lines[index])))
-        except (TypeError, ValueError):
-            continue
-    line_signal = min(len(line_keys) / 6.0, 1.0)
+    line_signal = min(len(populated_lines) / 6.0, 1.0)
     return (
         0.72 * average_confidence
         + 0.10 * word_signal
         + 0.08 * line_signal
         + 0.10 * alphanumeric_ratio
     )
-
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     """
@@ -158,14 +166,18 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     gray = cv2.cvtColor(scaled_image, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    adaptive = cv2.adaptiveThreshold(
-        clahe,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        11,
-    )
+    # OpenCV requires dimensions at least as large as blockSize. Tiny or
+    # strip-like images still have Otsu/CLAHE candidates available.
+    adaptive = None
+    if min(scaled_w, scaled_h) >= 31:
+        adaptive = cv2.adaptiveThreshold(
+            clahe,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            11,
+        )
 
     configured_psm = os.getenv("TESSERACT_PSM")
     if configured_psm:
@@ -183,8 +195,9 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         candidates = [
             ("otsu_threshold", otsu, psm_values[0]),
             ("clahe_grayscale", clahe, psm_values[1]),
-            ("adaptive_gaussian_threshold", adaptive, psm_values[2]),
         ]
+        if adaptive is not None:
+            candidates.append(("adaptive_gaussian_threshold", adaptive, psm_values[2]))
 
     candidate_results: list[tuple[str, int, float, dict[str, object]]] = []
     successful_evaluations = 0
