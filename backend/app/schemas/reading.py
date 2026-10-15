@@ -42,11 +42,12 @@ class ReadingPageDTO(BaseModel):
     words: list[ReadingPageWordDTO]
 
 class ReadingCompletionSummaryDTO(BaseModel):
-    duration_minutes: int
-    pages_explored: int
-    practiced_words: int
-    spoken_words: list[str] = Field(default_factory=list)
-    transcripts: list[str] = Field(default_factory=list)
+    # Null means the current database schema has no persisted evidence for this metric.
+    duration_minutes: int | None = Field(default=None, ge=0)
+    pages_explored: int | None = Field(default=None, ge=0)
+    practiced_words: int | None = Field(default=None, ge=0)
+    spoken_words: list[str] | None = None
+    transcripts: list[str] | None = None
 
 class ReadingSessionResponse(ReadingSessionBase):
     Id: UUID
