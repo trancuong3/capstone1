@@ -187,6 +187,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         ]
 
     candidate_results: list[tuple[str, int, float, dict[str, object]]] = []
+    successful_evaluations = 0
     for preprocessing_name, candidate_image, psm in candidates:
         try:
             result = pytesseract.image_to_data(
@@ -195,7 +196,8 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
                 config=f"--oem 1 --psm {psm}",
                 output_type=Output.DICT,
             )
-        except Exception as exc:
+            successful_evaluations += 1
+        except Exception:
             # An individual candidate can fail because of layout parameters;
             # only fail the whole request when no candidate can be evaluated.
             candidate_results.append((preprocessing_name, psm, -1.0, {}))
@@ -206,6 +208,8 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
 
     usable_candidates = [item for item in candidate_results if item[2] >= 0]
     if not usable_candidates:
+        if successful_evaluations:
+            raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
         raise OcrEngineUnavailable(
             f"Tesseract failed to process the image with {target_lang} language data"
         )
