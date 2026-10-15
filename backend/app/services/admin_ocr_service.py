@@ -9,7 +9,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -109,7 +109,25 @@ class AdminOcrService:
                 image.verify()
             with Image.open(BytesIO(data)) as image:
                 image_format = image.format or ""
-                width, height = image.size
+                orientation = image.getexif().get(274, 1)
+                canonical_image = ImageOps.exif_transpose(image)
+                width, height = canonical_image.size
+                if orientation not in (None, 1):
+                    # Store physical pixels in display orientation so the browser,
+                    # OpenCV and persisted normalized bounding boxes share a frame.
+                    output = BytesIO()
+                    save_image = canonical_image
+                    save_options: dict[str, object] = {}
+                    if image_format == "JPEG":
+                        if save_image.mode not in ("RGB", "L"):
+                            save_image = save_image.convert("RGB")
+                        save_options = {"quality": 95, "optimize": True}
+                    elif image_format == "WEBP":
+                        save_options = {"quality": 95, "method": 4}
+                    elif image_format == "PNG":
+                        save_options = {"optimize": True}
+                    save_image.save(output, format=image_format, **save_options)
+                    data = output.getvalue()
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid image") from exc
         actual = ALLOWED_FORMATS.get(image_format)
@@ -117,6 +135,8 @@ class AdminOcrService:
             raise HTTPException(status_code=415, detail="File content does not match the declared image type")
         if width <= 0 or height <= 0 or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
             raise HTTPException(status_code=413, detail="Image dimensions must not exceed 6000 by 6000 pixels")
+        if not data or len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Normalized image exceeds the 12 MB limit")
         return data, actual[0], actual[1], width, height
 
     @staticmethod
