@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
@@ -65,11 +65,12 @@ async def get_session_current_page(
 @router.get("/pages/{page_id}", response_model=ReadingPageDTO)
 async def get_reading_page(
     page_id: UUID,
+    session_id: UUID = Query(...),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
-        page_id, actor_id
+        page_id, session_id, actor_id
     )
 
 
@@ -131,7 +132,6 @@ async def create_fluency_assessment(assessment_in: FluencyAssessmentCreate, db: 
     return new_assessment
 
 
-from fastapi import Query
 import re
 from pydantic import ValidationError
 from app.models import Book, ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
