@@ -50,9 +50,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real PageMatchService", () => {
-  it(
-    "scopes selected page requests to the existing reading session",
-    async () => {
+  it("scopes selected page requests to the existing reading session", async () => {
       fetchMock.mockResolvedValue(Response.json(page));
 
       expect(
@@ -70,8 +68,7 @@ describe("real PageMatchService", () => {
           Accept: "application/json",
         },
       });
-    },
-  );
+  });
 
   it("uses the session-bound current page endpoint when retrying", async () => {
     fetchMock.mockResolvedValue(Response.json(page));
