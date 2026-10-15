@@ -394,7 +394,14 @@ export function AdminOcrReviewScreen({
                 }[level];
                 const selectedClass =
                   word.word_index === selectedWord
-                    ? "z-10 border-2 border-orange-700 bg-orange-300/50 ring-2 ring-white"
+                    ? [
+                        "z-10",
+                        "border-2",
+                        "border-orange-700",
+                        "bg-orange-300/50",
+                        "ring-2",
+                        "ring-white",
+                      ].join(" ")
                     : "border";
                 const confidenceText =
                   word.ocr_confidence === null
@@ -417,7 +424,11 @@ export function AdminOcrReviewScreen({
                   <button
                     aria-label={boxLabel}
                     aria-pressed={word.word_index === selectedWord}
-                    className={`absolute cursor-pointer p-0 ${colorClass} ${selectedClass}`}
+                    className={[
+                      "absolute cursor-pointer p-0",
+                      colorClass,
+                      selectedClass,
+                    ].join(" ")}
                     key={`${word.line_index}-${word.word_index}`}
                     onClick={() => setSelectedWord(word.word_index)}
                     style={{
