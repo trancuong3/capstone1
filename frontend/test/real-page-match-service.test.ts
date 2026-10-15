@@ -51,23 +51,23 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("real PageMatchService", () => {
   it("scopes selected page requests to the existing reading session", async () => {
-      fetchMock.mockResolvedValue(Response.json(page));
+    fetchMock.mockResolvedValue(Response.json(page));
 
-      expect(
-        await createPageMatchService().selectPage(sessionId, pageId),
-      ).toEqual(page);
+    expect(
+      await createPageMatchService().selectPage(sessionId, pageId),
+    ).toEqual(page);
 
-      const url = new URL(String(fetchMock.mock.calls[0][0]));
-      expect(url.origin).toBe("http://127.0.0.1:8000");
-      expect(url.pathname).toBe(`/reading/pages/${pageId}`);
-      expect(url.searchParams.get("session_id")).toBe(sessionId);
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({
-        method: "GET",
-        headers: {
-          Authorization: "Bearer test-token",
-          Accept: "application/json",
-        },
-      });
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.origin).toBe("http://127.0.0.1:8000");
+    expect(url.pathname).toBe(`/reading/pages/${pageId}`);
+    expect(url.searchParams.get("session_id")).toBe(sessionId);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: "GET",
+      headers: {
+        Authorization: "Bearer test-token",
+        Accept: "application/json",
+      },
+    });
   });
 
   it("uses the session-bound current page endpoint when retrying", async () => {
