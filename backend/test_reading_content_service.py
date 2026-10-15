@@ -11,7 +11,11 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import HTTPException
 
-from app.schemas.reading import ReadingSessionCreate
+from app.schemas.reading import (
+    FluencyAssessmentCreate,
+    ReadingEventCreate,
+    ReadingSessionCreate,
+)
 from app.services.reading_content_service import ReadingContentService
 
 
@@ -26,6 +30,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
     def make_service(self):
         repo = SimpleNamespace(
             profile_role=AsyncMock(return_value="parent"),
+            sessions_for_parent=AsyncMock(return_value=[]),
             child_belongs_to_parent=AsyncMock(return_value=True),
             verified_page=AsyncMock(return_value=SimpleNamespace(
                 Id=PAGE_ID,
@@ -49,6 +54,10 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
             session=AsyncMock(),
+            revision_word_exists=AsyncMock(return_value=True),
+            create_reading_event=AsyncMock(side_effect=lambda row: row),
+            create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
+            events_for_session=AsyncMock(return_value=[]),
             revision_words=AsyncMock(
                 return_value=[
                     SimpleNamespace(
@@ -59,6 +68,107 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         return ReadingContentService(repo), repo
+
+    async def test_list_sessions_is_scoped_to_authenticated_parent(self):
+        service, repo = self.make_service()
+        repo.sessions_for_parent.return_value = ["owned-session"]
+
+        result = await service.list_sessions(PARENT_ID)
+
+        self.assertEqual(result, ["owned-session"])
+        repo.sessions_for_parent.assert_awaited_once_with(PARENT_ID)
+
+    async def test_completion_summary_checks_parent_ownership(self):
+        service, repo = self.make_service()
+        session = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID,
+            StartedAt=datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        repo.session.return_value = session
+        repo.child_belongs_to_parent.return_value = False
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.get_completion_summary(session.Id, PARENT_ID)
+
+        self.assertEqual(raised.exception.status_code, 404)
+
+    async def test_reading_event_requires_owned_session_and_verified_page_revision(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            Type="MISPRONUNCIATION",
+            StartMs=100,
+            EndMs=200,
+            Confidence=0.8,
+            Status="DETECTED",
+            Metadata={},
+        )
+
+        event = await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(event.SessionId, session_id)
+        self.assertEqual(event.PageId, PAGE_ID)
+        repo.verified_page.assert_awaited_once_with(PAGE_ID, BOOK_ID)
+        repo.verified_revision.assert_awaited_once_with(PAGE_ID, REVISION_ID)
+        repo.create_reading_event.assert_awaited_once_with(event)
+
+    async def test_reading_event_cannot_reference_unverified_or_foreign_page(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        repo.verified_page.return_value = None
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            Type="MISPRONUNCIATION",
+            StartMs=100,
+            Status="DETECTED",
+            Metadata={},
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_fluency_assessment_is_written_only_for_owned_session(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        payload = FluencyAssessmentCreate(
+            SessionId=session_id,
+            Metrics={"Accuracy": 0.9},
+            Score=0.85,
+            Uncertainty=0.1,
+            ModelVersion="test-v1",
+        )
+
+        assessment = await service.create_fluency_assessment(PARENT_ID, payload)
+
+        self.assertEqual(assessment.SessionId, session_id)
+        repo.create_fluency_assessment.assert_awaited_once_with(assessment)
 
     async def test_create_session_references_existing_verified_page_only(self):
         service, repo = self.make_service()
