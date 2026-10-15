@@ -44,6 +44,45 @@ class AdminOcrRepository:
                 )
             )
 
+    @staticmethod
+    def update_revision_draft(
+        revision: PageRevision,
+        *,
+        draft_text: str,
+        content_hash: str,
+    ) -> PageRevision:
+        """Apply already-validated Admin draft values to the ORM entity."""
+        revision.DraftText = draft_text
+        revision.ContentHash = content_hash
+        return revision
+
+    @staticmethod
+    def update_revision_verification(
+        revision: PageRevision,
+        *,
+        corrected_text: str,
+        content_hash: str,
+        verified_by: UUID,
+        verified_at,
+    ) -> PageRevision:
+        """Persist verification values after the Service authorizes the transition."""
+        revision.DraftText = corrected_text
+        revision.VerifiedText = corrected_text
+        revision.VerificationStatus = "VERIFIED"
+        revision.VerifiedAt = verified_at
+        revision.VerifiedBy = verified_by
+        revision.ContentHash = content_hash
+        return revision
+
+    @staticmethod
+    def set_current_verified_revision(
+        page: BookPage,
+        revision_id: UUID,
+    ) -> BookPage:
+        """Update the page's current verified pointer when the Service permits it."""
+        page.CurrentVerifiedRevisionId = revision_id
+        return page
+
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
         query = select(BookPage).where(BookPage.Id == page_id)
         if lock:
