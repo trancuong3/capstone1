@@ -20,6 +20,30 @@ class AdminOcrRepository:
     async def book(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
 
+    def stage_book(self, book: Book) -> None:
+        """Stage a validated Admin-created book for the service transaction."""
+        self.db.add(book)
+
+    def stage_revision_bundle(
+        self,
+        revision: PageRevision,
+        words: list[dict[str, object]],
+    ) -> None:
+        """Stage a new OCR revision and its word boxes without committing."""
+        self.db.add(revision)
+        for word in words:
+            self.db.add(
+                PageRevisionWord(
+                    PageRevisionId=revision.Id,
+                    WordIndex=int(word["word_index"]),
+                    LineIndex=int(word["line_index"]),
+                    Text=str(word["text"]),
+                    NormalizedText=str(word["normalized_text"]),
+                    BoundingBox=list(word["bbox"]),
+                    OCRConfidence=word.get("ocr_confidence"),
+                )
+            )
+
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
         query = select(BookPage).where(BookPage.Id == page_id)
         if lock:
