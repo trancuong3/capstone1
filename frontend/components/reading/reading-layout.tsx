@@ -6,20 +6,28 @@ import { BookPageViewer } from "@/components/reading/book-page-viewer";
 import { CameraPreview } from "@/components/reading/camera-preview";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
-import type { ReadingPageDTO } from "@/types/reading";
+import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 
 interface ReadingLayoutProps {
+  audioLevel?: number;
   bookTitle: string;
   children?: ReactNode;
   controlsDisabled?: boolean;
   currentWordId: string | null;
   exitHref: string;
   isListening: boolean;
+  isMicRecording?: boolean;
   isPageTransitioning?: boolean;
+  isPlayingSample?: boolean;
+  isSpeaking?: boolean;
+  latestTranscript?: string | null;
   onFinish: () => void;
   onHelp: () => void;
   onManualPage: () => void;
   onPause: () => void;
+  onReadSample?: () => void;
+  onToggleListening?: () => void;
+  onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
 }
 
@@ -30,11 +38,18 @@ export function ReadingLayout({
   currentWordId,
   exitHref,
   isListening,
+  isMicRecording = false,
   isPageTransitioning = false,
+  isPlayingSample = false,
+  isSpeaking = false,
+  latestTranscript,
   onFinish,
   onHelp,
   onManualPage,
   onPause,
+  onReadSample,
+  onToggleListening,
+  onWordClick,
   page,
 }: ReadingLayoutProps) {
   return (
@@ -60,16 +75,67 @@ export function ReadingLayout({
         <BookPageViewer
           currentWordId={currentWordId}
           isTransitioning={isPageTransitioning}
+          onWordClick={onWordClick}
           page={page}
         />
       </CameraPreview>
 
+      {isMicRecording ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm transition-all animate-in fade-in">
+          <div className="flex shrink-0 items-center gap-2">
+            {isSpeaking ? (
+              <span className="flex items-center gap-1" aria-hidden="true">
+                <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-500" />
+                <span className="h-6 w-1 animate-pulse rounded-full bg-emerald-500 delay-75" />
+                <span className="h-3 w-1 animate-pulse rounded-full bg-emerald-500 delay-150" />
+              </span>
+            ) : (
+              <span className="relative flex size-3.5">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
+              </span>
+            )}
+            <span className="text-xs font-extrabold uppercase tracking-wider text-primary">
+              Bé đang đọc:
+            </span>
+          </div>
+          <p className="min-w-0 flex-1 truncate text-lg font-extrabold text-ink">
+            {latestTranscript ? (
+              <span className="text-primary underline decoration-2 underline-offset-4 animate-in zoom-in-95">
+                &ldquo;{latestTranscript}&rdquo;
+              </span>
+            ) : isSpeaking ? (
+              <span className="font-bold text-emerald-600 animate-pulse">
+                Đang nhận diện giọng bé… (bé đọc tiếp đi nào)
+              </span>
+            ) : (
+              <span className="font-medium italic text-muted text-sm">
+                Đang lắng nghe bé đọc… (bé hãy nói vào mic)
+              </span>
+            )}
+          </p>
+        </div>
+      ) : latestTranscript ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5 shadow-sm">
+          <span className="text-xs font-bold uppercase tracking-wider text-purple-ink">
+            Bé vừa đọc:
+          </span>
+          <p className="min-w-0 flex-1 truncate text-sm font-bold text-ink italic">
+            &ldquo;{latestTranscript}&rdquo;
+          </p>
+        </div>
+      ) : null}
+
       <ReadingControls
         disabled={controlsDisabled}
+        isListening={isMicRecording}
+        isPlayingSample={isPlayingSample}
         onFinish={onFinish}
         onHelp={onHelp}
         onManualPage={onManualPage}
         onPause={onPause}
+        onReadSample={onReadSample}
+        onToggleListening={onToggleListening}
       />
       <ReadingProgress
         isListening={isListening}

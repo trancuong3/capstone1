@@ -3,19 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from io import BytesIO
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import Book, BookPage, PageRevision, PageRevisionWord
+from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
 from app.schemas.book import AdminRevisionDetailRead, CatalogBookResponse
@@ -81,7 +82,7 @@ class AdminOcrService:
             LifecycleStatus="ACTIVE",
             CreatedBy=actor_id,
         )
-        self.db.add(row)
+        self.repo.stage_book(row)
         try:
             await self.db.commit()
             await self.db.refresh(row)
@@ -109,7 +110,25 @@ class AdminOcrService:
                 image.verify()
             with Image.open(BytesIO(data)) as image:
                 image_format = image.format or ""
-                width, height = image.size
+                orientation = image.getexif().get(274, 1)
+                canonical_image = ImageOps.exif_transpose(image)
+                width, height = canonical_image.size
+                if orientation not in (None, 1):
+                    # Store physical pixels in display orientation so the browser,
+                    # OpenCV and persisted normalized bounding boxes share a frame.
+                    output = BytesIO()
+                    save_image = canonical_image
+                    save_options: dict[str, object] = {}
+                    if image_format == "JPEG":
+                        if save_image.mode not in ("RGB", "L"):
+                            save_image = save_image.convert("RGB")
+                        save_options = {"quality": 95, "optimize": True}
+                    elif image_format == "WEBP":
+                        save_options = {"quality": 95, "method": 4}
+                    elif image_format == "PNG":
+                        save_options = {"optimize": True}
+                    save_image.save(output, format=image_format, **save_options)
+                    data = output.getvalue()
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid image") from exc
         actual = ALLOWED_FORMATS.get(image_format)
@@ -117,7 +136,21 @@ class AdminOcrService:
             raise HTTPException(status_code=415, detail="File content does not match the declared image type")
         if width <= 0 or height <= 0 or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
             raise HTTPException(status_code=413, detail="Image dimensions must not exceed 6000 by 6000 pixels")
+        if not data or len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Normalized image exceeds the 12 MB limit")
         return data, actual[0], actual[1], width, height
+
+    @staticmethod
+    def _normalize_confidence(value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            return None
+        return confidence
 
     @staticmethod
     def _word_data(words: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -134,11 +167,9 @@ class AdminOcrService:
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
                 raise HTTPException(status_code=422, detail="OCR engine returned a bounding box outside the image")
-            confidence = item.get("ocr_confidence")
-            if confidence is not None:
-                confidence = float(confidence)
-                if not 0 <= confidence <= 1:
-                    confidence = None
+            confidence = AdminOcrService._normalize_confidence(
+                item.get("ocr_confidence")
+            )
             normalized.append({
                 "word_index": len(normalized),
                 "line_index": max(0, int(item["line_index"])),
@@ -403,13 +434,7 @@ class AdminOcrService:
             Id=revision_id, PageId=page_id, RevisionNo="1", VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=metadata,
         )
-        self.db.add_all([page, revision])
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
+        self.repo.stage_page_revision_bundle(page, revision, words)
         try:
             log_diagnostic(
                 logger,
@@ -512,7 +537,9 @@ class AdminOcrService:
                 raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": row.Text,
-                "normalized_text": row.NormalizedText, "bbox": tuple(box), "ocr_confidence": row.OCRConfidence,
+                "normalized_text": row.NormalizedText,
+                "bbox": tuple(box),
+                "ocr_confidence": self._normalize_confidence(row.OCRConfidence),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
@@ -551,10 +578,15 @@ class AdminOcrService:
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
         words = self._validated_words(payload.words)
         await self.repo.sync_words(revision.Id, words)
-        revision.DraftText = payload.draft_text.strip()
-        revision.ContentHash = hashlib.sha256(
-            json.dumps({"text": revision.DraftText, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        draft_text = payload.draft_text.strip()
+        content_hash = hashlib.sha256(
+            json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        self.repo.update_revision_draft(
+            revision,
+            draft_text=draft_text,
+            content_hash=content_hash,
+        )
         try:
             await self.db.commit()
             await self.db.refresh(revision)
@@ -583,16 +615,18 @@ class AdminOcrService:
         if text_tokens != word_tokens:
             raise HTTPException(status_code=422, detail="Corrected text must match the ordered word list; edit the word entries before verifying")
         await self.repo.sync_words(revision.Id, words)
-        revision.DraftText = corrected_text
-        revision.VerifiedText = corrected_text
-        revision.VerificationStatus = "VERIFIED"
-        revision.VerifiedAt = datetime.now(timezone.utc)
-        revision.VerifiedBy = actor_id
-        revision.ContentHash = hashlib.sha256(
+        content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        self.repo.update_revision_verification(
+            revision,
+            corrected_text=corrected_text,
+            content_hash=content_hash,
+            verified_by=actor_id,
+            verified_at=datetime.now(timezone.utc),
+        )
         if page.LifecycleStatus == "ACTIVE":
-            page.CurrentVerifiedRevisionId = revision.Id
+            self.repo.set_current_verified_revision(page, revision.Id)
         try:
             await self.db.commit()
             await self.db.refresh(revision)
@@ -634,13 +668,7 @@ class AdminOcrService:
             Id=revision_id, PageId=page.Id, RevisionNo=str(next_number), VerificationStatus="NEEDS_REVIEW",
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=dict(ocr["metadata"]),
         )
-        self.db.add(revision)
-        for word in words:
-            self.db.add(PageRevisionWord(
-                PageRevisionId=revision_id, WordIndex=word["word_index"], LineIndex=word["line_index"],
-                Text=word["text"], NormalizedText=word["normalized_text"], BoundingBox=word["bbox"],
-                OCRConfidence=word["ocr_confidence"],
-            ))
+        self.repo.stage_revision_bundle(revision, words)
         try:
             await self.db.commit()
             await self.db.refresh(revision)

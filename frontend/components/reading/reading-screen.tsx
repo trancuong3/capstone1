@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
@@ -15,7 +15,10 @@ import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { isServiceError } from "@/lib/api/service-error";
+import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -24,6 +27,7 @@ import type {
   ReadingCompletionSummaryUI,
   ReadingConnectionState,
   ReadingPageDTO,
+  ReadingPageWordDTO,
   ReadingReconnectDemoMode,
   ReadingSessionState,
   ReadingUiState,
@@ -50,6 +54,39 @@ type LoadState =
   | { status: "ready"; data: ReadingScreenData }
   | { status: "not-found" }
   | { status: "error" };
+interface BrowserSpeechEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
+interface BrowserSpeechErrorEvent {
+  error?: string;
+}
+
+interface BrowserSpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: BrowserSpeechEvent) => void) | null;
+  onerror: ((event: BrowserSpeechErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort?: () => void;
+}
+
+interface WindowWithSpeech {
+  SpeechRecognition?: new () => BrowserSpeechRecognition;
+  webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+}
 
 export function ReadingScreen({
   initialPageId,
@@ -58,6 +95,9 @@ export function ReadingScreen({
   sessionId,
 }: ReadingScreenProps) {
   const services = useReadingServices();
+  const speechService = useMemo(() => createSpeechService(), []);
+  const speechPlayer = useSpeechPlayer();
+  const speechRecorder = useSpeechRecorder();
   const [loadKey, setLoadKey] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [uiState, setUiState] = useState<ReadingUiState>(initialUiState);
@@ -78,15 +118,71 @@ export function ReadingScreen({
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
+  const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
+  const [isMicRecording, setIsMicRecording] = useState(false);
+  const [sessionSummary, setSessionSummary] =
+    useState<ReadingCompletionSummaryUI | null>(null);
+  const spokenWordsSetRef = useRef<Set<string>>(new Set());
+  const transcriptsListRef = useRef<string[]>([]);
+  const exploredPageIdsRef = useRef<Set<string>>(new Set());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
+  const transcriptionAbortRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const isListeningActiveRef = useRef(false);
+  const isUsingRecorderRef = useRef(false);
+
+  const recordSpokenText = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const transcripts = transcriptsListRef.current;
+    if (
+      transcripts.length === 0 ||
+      transcripts[transcripts.length - 1] !== trimmed
+    ) {
+      transcripts.push(trimmed);
+    }
+
+    const words = trimmed
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0);
+
+    for (const w of words) {
+      spokenWordsSetRef.current.add(w);
+    }
+  }, []);
+
+  const handleWordClick = useCallback(
+    (word: ReadingPageWordDTO) => {
+      setCurrentWordId(word.word_id);
+      setLatestTranscript(word.text);
+      recordSpokenText(word.text);
+    },
+    [recordSpokenText],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      isListeningActiveRef.current = false;
+      transcriptionAbortRef.current?.abort();
+      try {
+        recognitionRef.current?.abort?.();
+      } catch {
+        // Safe ignore
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (page?.page_id) {
+      exploredPageIdsRef.current.add(page.page_id);
+    }
+  }, [page?.page_id]);
 
   useEffect(() => {
     let active = true;
@@ -176,6 +272,266 @@ export function ReadingScreen({
     };
   }, [loadState, page, services.pageMatchService, sessionId, uiState]);
 
+  function normalizeVietnamese(text: string): string {
+    return text
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d")
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .trim();
+  }
+
+  function matchSpokenWord(spokenText: string) {
+    if (!page || !page.words.length || !spokenText) return;
+    const cleanSpoken = normalizeVietnamese(spokenText);
+    const tokens = cleanSpoken.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return;
+
+    let matchedWordId: string | null = null;
+    for (const token of tokens) {
+      for (const w of page.words) {
+        const cleanWord = normalizeVietnamese(w.text);
+        if (
+          cleanWord === token ||
+          cleanWord.includes(token) ||
+          token.includes(cleanWord)
+        ) {
+          spokenWordsSetRef.current.add(w.text);
+          matchedWordId = w.word_id;
+        }
+      }
+    }
+    if (matchedWordId) {
+      setCurrentWordId(matchedWordId);
+    }
+  }
+
+  async function startListening(): Promise<boolean> {
+    setLatestTranscript(null);
+    isListeningActiveRef.current = true;
+
+    // 1. Always start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
+    try {
+      await speechRecorder.start(async (utteranceBlob) => {
+        if (!mountedRef.current || !isListeningActiveRef.current) return;
+        try {
+          const transcript = await speechService.transcribe(utteranceBlob, {
+            languageCode: "vi",
+          });
+          if (!mountedRef.current || !transcript.text) return;
+          const cleanText = transcript.text.trim();
+          if (cleanText) {
+            setLatestTranscript(cleanText);
+            matchSpokenWord(cleanText);
+            recordSpokenText(cleanText);
+          }
+        } catch (e) {
+          console.warn("Live ElevenLabs STT utterance notice:", e);
+        }
+      });
+      isUsingRecorderRef.current = true;
+    } catch (error) {
+      isUsingRecorderRef.current = false;
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("not supported")) {
+        if (mountedRef.current) setLatestTranscript(null);
+        return true;
+      }
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("microphone-denied");
+      }
+      return false;
+    }
+
+    // 2. Concurrently attempt Web Speech API for low-latency streaming text if supported by browser
+    if (typeof window !== "undefined") {
+      try {
+        const win = window as unknown as WindowWithSpeech;
+        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        if (SpeechRec) {
+          const rec = new SpeechRec();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = "vi-VN";
+          rec.maxAlternatives = 1;
+
+          rec.onresult = (event: BrowserSpeechEvent) => {
+            let latestWord = "";
+            let fullLive = "";
+
+            for (let i = 0; i < event.results.length; ++i) {
+              const part = event.results[i][0]?.transcript || "";
+              if (part.trim()) {
+                fullLive += (fullLive ? " " : "") + part.trim();
+              }
+            }
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              const part = event.results[i][0]?.transcript || "";
+              if (part.trim()) {
+                latestWord += (latestWord ? " " : "") + part.trim();
+              }
+            }
+
+            const currentWord = latestWord.trim() || fullLive.trim();
+            if (currentWord && mountedRef.current) {
+              setLatestTranscript(currentWord);
+              matchSpokenWord(currentWord);
+              recordSpokenText(currentWord);
+            }
+          };
+
+          rec.onerror = (event: BrowserSpeechErrorEvent) => {
+            // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
+            // and ElevenLabs STT will transcribe the full audio upon pause/finish.
+            console.warn("Browser SpeechRecognition notice:", event?.error);
+          };
+
+          rec.onend = () => {
+            if (mountedRef.current && isListeningActiveRef.current) {
+              setTimeout(() => {
+                if (mountedRef.current && isListeningActiveRef.current) {
+                  try {
+                    rec.start();
+                  } catch {
+                    // Safe ignore
+                  }
+                }
+              }, 200);
+            }
+          };
+
+          try {
+            rec.start();
+            recognitionRef.current = rec;
+          } catch {
+            // Safe ignore if browser blocks concurrent audio capture
+          }
+        }
+      } catch (e) {
+        console.warn("SpeechRecognition initialization skipped:", e);
+      }
+    }
+
+    return true;
+  }
+
+  async function transcribeRecording(recording: Blob) {
+    transcriptionAbortRef.current?.abort();
+    const controller = new AbortController();
+    transcriptionAbortRef.current = controller;
+    try {
+      const transcript = await speechService.transcribe(recording, {
+        languageCode: "vi",
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (transcript.text) {
+        setLatestTranscript(transcript.text);
+        matchSpokenWord(transcript.text);
+        recordSpokenText(transcript.text);
+      }
+    } catch (err) {
+      console.warn("ElevenLabs STT transcription notice:", err);
+      if (
+        !mountedRef.current ||
+        controller.signal.aborted ||
+        finishStartedRef.current
+      )
+        return;
+      if (spokenWordsSetRef.current.size === 0) {
+        setConnectionState("reconnecting");
+        setUiState("stt-error");
+      }
+    } finally {
+      if (transcriptionAbortRef.current === controller) {
+        transcriptionAbortRef.current = null;
+      }
+    }
+  }
+
+  async function stopListeningAndTranscribe() {
+    isListeningActiveRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // Safe ignore
+      }
+      recognitionRef.current = null;
+    }
+    isUsingRecorderRef.current = false;
+    try {
+      const recording = await speechRecorder.stop();
+      if (recording && recording.size > 200) {
+        await transcribeRecording(recording);
+      }
+    } catch {
+      speechRecorder.cancel();
+    }
+  }
+
+  async function handleReadSample() {
+    if (isBusy) return;
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
+      }
+      if (mountedRef.current) setIsMicRecording(false);
+    }
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+      return;
+    }
+    if (!page) return;
+    const rawText = page.text || page.words.map((w) => w.text).join(" ") || "";
+    const fullText = rawText.replace(/\s+/g, " ").trim();
+    if (!fullText) return;
+
+    setIsBusy(true);
+    try {
+      await speechPlayer.play(fullText);
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
+  async function handleToggleListening() {
+    if (isBusy) return;
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+    }
+    if (isMicRecording) {
+      setIsBusy(true);
+      try {
+        await stopListeningAndTranscribe();
+      } finally {
+        if (mountedRef.current) {
+          setIsMicRecording(false);
+          setIsBusy(false);
+        }
+      }
+    } else {
+      setIsBusy(true);
+      try {
+        const ok = await startListening();
+        if (mountedRef.current && ok) {
+          setIsMicRecording(true);
+        }
+      } finally {
+        if (mountedRef.current) {
+          setIsBusy(false);
+        }
+      }
+    }
+  }
+
   async function startReading() {
     if (isBusy) return;
     setIsBusy(true);
@@ -187,6 +543,7 @@ export function ReadingScreen({
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
+    setIsMicRecording(false);
     setIsBusy(false);
   }
 
@@ -201,6 +558,26 @@ export function ReadingScreen({
     setCanonicalState(nextState);
     setConnectionState("connected");
     setUiState("reading");
+    setIsMicRecording(false);
+    setIsBusy(false);
+  }
+
+  async function pauseReading() {
+    if (isBusy) return;
+    setIsBusy(true);
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
+      }
+      if (mountedRef.current) {
+        setIsMicRecording(false);
+      }
+    }
+    if (!mountedRef.current) return;
+    setCanonicalState("PAUSED");
+    setUiState("paused");
     setIsBusy(false);
   }
 
@@ -209,6 +586,10 @@ export function ReadingScreen({
     setIsBusy(true);
     await services.devicePermissionService.retry(kind);
     if (!mountedRef.current) return;
+    if (kind === "microphone" && !(await startListening())) {
+      if (mountedRef.current) setIsBusy(false);
+      return;
+    }
     setConnectionState("connected");
     setUiState("reading");
     setCanonicalState("LISTENING");
@@ -248,6 +629,7 @@ export function ReadingScreen({
 
   async function reconnect(mode: ReadingReconnectDemoMode) {
     if (isBusy) return;
+    const resumeMicrophone = uiState === "stt-error";
     setIsBusy(true);
     setConnectionState("reconnecting");
     const nextConnection = await services.readingSocketAdapter.reconnect(
@@ -257,6 +639,10 @@ export function ReadingScreen({
     if (!mountedRef.current) return;
     setConnectionState(nextConnection);
     if (nextConnection === "recovered") {
+      if (resumeMicrophone && !(await startListening())) {
+        if (mountedRef.current) setIsBusy(false);
+        return;
+      }
       setCanonicalState("LISTENING");
       setUiState("reading");
     }
@@ -265,42 +651,92 @@ export function ReadingScreen({
 
   async function requestTutor() {
     if (!page || !currentWordId || isBusy) return;
+    const word = page.words.find(
+      (item) => item.word_id === currentWordId,
+    )?.text;
+    if (!word) return;
     setTutorOpen(true);
     setIsBusy(true);
-    const action = await services.tutorService.requestReadExample(
-      sessionId,
-      currentWordId,
-    );
-    if (!mountedRef.current) return;
-    setTutorAction(action);
-    setIsBusy(false);
+    try {
+      let action: TutorAction | null = null;
+      try {
+        action = await services.tutorService.requestReadExample(
+          sessionId,
+          currentWordId,
+        );
+      } catch {
+        // Audio assistance remains available while the separate tutor-event API
+        // is being connected by the reading-session owner.
+      }
+      await speechPlayer.play(action?.tts_text ?? word);
+      if (mountedRef.current) setTutorAction(action);
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function retryTutor() {
     if (!page || !currentWordId || isBusy) return;
+    const word = page.words.find(
+      (item) => item.word_id === currentWordId,
+    )?.text;
+    if (!word) return;
     setIsBusy(true);
-    const baseAction =
-      tutorAction ??
-      (await services.tutorService.requestReadExample(
-        sessionId,
-        currentWordId,
-      ));
-    if (!mountedRef.current) return;
-    const nextAction = await services.tutorService.retryReadExample(baseAction);
-    if (!mountedRef.current) return;
-    setTutorAction(nextAction);
-    setIsBusy(false);
+    try {
+      let nextAction = tutorAction;
+      try {
+        nextAction = nextAction
+          ? await services.tutorService.retryReadExample(nextAction)
+          : await services.tutorService.requestReadExample(
+              sessionId,
+              currentWordId,
+            );
+      } catch {
+        // A retry must still replay the word even if tutor-event persistence is unavailable.
+      }
+      await speechPlayer.play(nextAction?.tts_text ?? word);
+      if (mountedRef.current) {
+        setTutorAction(nextAction);
+        setUiState("reading");
+      }
+    } catch {
+      if (mountedRef.current) setUiState("tts-error");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function finishReading() {
     if (finishStartedRef.current) return;
     finishStartedRef.current = true;
     setIsBusy(true);
-    await Promise.all([
+    speechPlayer.stop();
+    if (isMicRecording) {
+      try {
+        await stopListeningAndTranscribe();
+      } catch {
+        speechRecorder.cancel();
+      }
+      if (mountedRef.current) setIsMicRecording(false);
+    }
+    const [finishedSession] = await Promise.all([
       services.readingService.finish(sessionId),
       services.readingSocketAdapter.sendControl(sessionId, "finish"),
     ]);
     if (!mountedRef.current) return;
+    const wordsList = Array.from(spokenWordsSetRef.current);
+    const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
+    const pagesExplored = exploredPageIdsRef.current.size || null;
+    const updatedSummary: ReadingCompletionSummaryUI = {
+      duration_minutes: durationMinutes,
+      pages_explored: pagesExplored,
+      practiced_words: wordsList.length,
+      spoken_words: wordsList,
+      transcripts: transcriptsListRef.current,
+    };
+    setSessionSummary(updatedSummary);
     setCanonicalState("FINISHED");
     setConfirmFinish(false);
     setUiState("complete");
@@ -393,7 +829,7 @@ export function ReadingScreen({
         booksHref={booksHref}
         child={child}
         sessionId={sessionId}
-        summary={completion}
+        summary={sessionSummary ?? completion}
       />
     );
   }
@@ -406,19 +842,24 @@ export function ReadingScreen({
       data-scoring-active={safety.scoring_active}
     >
       <ReadingLayout
+        audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
         controlsDisabled={uiState !== "reading" || isBusy}
         currentWordId={currentWordId}
         exitHref={detailHref}
         isListening={uiState === "reading"}
+        isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
+        isPlayingSample={speechPlayer.isPlaying}
+        isSpeaking={speechRecorder.isSpeaking}
+        latestTranscript={latestTranscript}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
-        onPause={() => {
-          setCanonicalState("PAUSED");
-          setUiState("paused");
-        }}
+        onPause={() => void pauseReading()}
+        onReadSample={() => void handleReadSample()}
+        onToggleListening={() => void handleToggleListening()}
+        onWordClick={handleWordClick}
         page={page}
       >
         {uiState === "page-turn" ? (
@@ -563,8 +1004,10 @@ export function ReadingScreen({
       {uiState === "tts-error" || tutorOpen ? (
         <TutorMessage
           action={tutorAction}
+          isPlaying={speechPlayer.isPlaying}
           isRetrying={isBusy}
           onClose={() => {
+            speechPlayer.stop();
             setTutorOpen(false);
             setUiState("reading");
           }}
@@ -580,6 +1023,11 @@ export function ReadingScreen({
       </span>
     </div>
   );
+}
+
+function getDurationMinutes(durationMs: number | null): number | null {
+  if (durationMs === null) return null;
+  return Math.ceil(Math.max(0, durationMs) / 60000);
 }
 
 function connectionLabel(state: ReadingConnectionState): string {

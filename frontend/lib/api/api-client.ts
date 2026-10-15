@@ -39,6 +39,51 @@ const safeBackendMessages: Record<string, string> = {
     "Không đọc được ảnh từ Supabase Storage. Hãy kiểm tra object path và quyền truy cập.",
   "Could not create an image preview URL":
     "Không tạo được URL xem trước ảnh từ Supabase Storage.",
+  "Page has no revision yet":
+    "Trang này chưa có revision nào. Hãy upload ảnh và chạy OCR cho trang ở sách.",
+  "Stored image reference is invalid":
+    "Tham chiếu ảnh trong DB không hợp lệ với bucket hiện tại (thường là dữ liệu legacy).",
+  "Image metadata does not match the admin contract":
+    "Metadata ảnh của trang không khớp contract hiện tại.",
+  "Page list contract is not available yet":
+    "Danh sách trang chưa khớp contract hiện tại.",
+  "Revision contract is not available yet":
+    "Revision của trang chưa khớp contract hiện tại.",
+  "Page contract is not available yet":
+    "Dữ liệu revision của trang chưa khớp contract hiện tại.",
+  "Page status contract is not available yet":
+    "Trạng thái trang chưa khớp contract hiện tại.",
+  "Revision number contract is not available yet":
+    "Số revision trong DB chưa hợp lệ theo contract hiện tại.",
+  "Book contract is not available yet":
+    "Dữ liệu sách chưa khớp contract hiện tại.",
+  "Catalog contract is not available yet":
+    "Dữ liệu catalog chưa khớp contract hiện tại.",
+  "The stored image is not a Storage object path":
+    "ImagePath đã lưu không phải object path của Supabase Storage.",
+  "OCR did not produce any valid word":
+    "OCR không tạo ra từ hợp lệ nào. Ảnh có thể thiếu chữ hoặc quá mờ.",
+  "OCR engine returned an invalid bounding box":
+    "OCR trả về bounding box không hợp lệ.",
+  "OCR engine returned a bounding box outside the image":
+    "OCR trả về bounding box nằm ngoài phạm vi ảnh.",
+  "This page number already exists for the book":
+    "Số trang này đã tồn tại trong sách.",
+  "Cannot upload pages to a retired book":
+    "Không thể upload trang cho sách đã bị RETIRED.",
+  "Book not found": "Không tìm thấy sách được yêu cầu.",
+  "Only revisions with status NEEDS_REVIEW can be verified":
+    "Chỉ revision ở trạng thái NEEDS_REVIEW mới có thể được xác minh.",
+  "Only revisions with status NEEDS_REVIEW can be edited":
+    "Chỉ revision ở NEEDS_REVIEW mới có thể được chỉnh sửa.",
+  "Page has no revision to reprocess":
+    "Trang chưa có revision để chạy lại OCR.",
+  "Reprocess requires the latest revision; refresh the page history":
+    "Chỉ có thể chạy lại OCR từ revision mới nhất. Hãy tải lại lịch sử trang.",
+  "page_number is out of range":
+    "Số trang vượt ngoài phạm vi hợp lệ (1-32767).",
+  "Image decoding failed": "Không đọc được file ảnh gửi lên.",
+  "Image dimensions are invalid": "Kích thước ảnh không hợp lệ.",
 };
 
 function errorCode(status: number): ServiceErrorCode {

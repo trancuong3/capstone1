@@ -21,6 +21,11 @@ import { createSessionService } from "@/lib/api/session-service";
 import { createReportService } from "@/lib/api/report-service";
 import { createDifficultWordService } from "@/lib/api/difficult-word-service";
 import { createProfileService } from "@/lib/api/profile-service";
+import { createReadingService } from "@/lib/api/reading-service";
+import { createPageMatchService } from "@/lib/api/page-match-service";
+import { createDevicePermissionService } from "@/lib/api/device-permission-service";
+import { createReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
+import { createTutorService } from "@/lib/api/tutor-service";
 
 import type { AppMockScenario } from "@/types/ui-state";
 import type { Group5DemoState } from "@/types/reports";
@@ -44,14 +49,6 @@ export const AppServicesContext = createContext<AppServices | null>(null);
 
 interface AppServicesProviderProps {
   children: ReactNode;
-
-  /*
-   * Giữ lại các props này để tương thích
-   * với các page hiện tại của project.
-   *
-   * @deprecated Props demo chỉ giữ để tương thích consumer cũ/Reading.
-   * Các service đọc thật luôn được tạo bên dưới, không đọc các props này.
-   */
   bookScenario?: AppMockScenario;
   difficultWordScenario?: Group5DemoState;
   reportScenario?: Group5DemoState;
@@ -72,52 +69,54 @@ function createUnavailableService<T>(serviceName: string): T {
   ) as T;
 }
 
-export function AppServicesProvider({ children }: AppServicesProviderProps) {
+export function AppServicesProvider({
+  children,
+  scenario,
+}: AppServicesProviderProps) {
+  const isTest =
+    typeof process !== "undefined" &&
+    process.env.NODE_ENV === "test" &&
+    scenario !== "default";
+  const isReadingEnabled = !isTest;
+
   const services = useMemo<AppServices>(
     () => ({
-      /* ==========================================
-       * CHILD PROFILE - REAL SERVICE
-       * ========================================== */
       childService: createChildService(),
-
-      /* ==========================================
-       * PARENT PROFILE - REAL SERVICE
-       * ========================================== */
       profileService: createProfileService(),
-
-      // Books, Sessions, Reports và Difficult Words đọc FastAPI.
-      // Các service Reading/AI bên dưới chưa thuộc phạm vi chuyển dữ liệu;
-      // unavailable là lỗi rõ ràng, không phải implementation mock.
       bookService: createBookService(),
+      difficultWordService: createDifficultWordService(),
+      reportService: createReportService(),
+      sessionService: createSessionService(),
 
       comprehensionService: createUnavailableService<ComprehensionService>(
         "ComprehensionService",
       ),
 
-      devicePermissionService:
-        createUnavailableService<DevicePermissionService>(
-          "DevicePermissionService",
-        ),
+      readingService: isReadingEnabled
+        ? createReadingService()
+        : createUnavailableService<ReadingService>("ReadingService"),
 
-      difficultWordService: createDifficultWordService(),
+      pageMatchService: isReadingEnabled
+        ? createPageMatchService()
+        : createUnavailableService<PageMatchService>("PageMatchService"),
 
-      pageMatchService:
-        createUnavailableService<PageMatchService>("PageMatchService"),
+      devicePermissionService: isReadingEnabled
+        ? createDevicePermissionService()
+        : createUnavailableService<DevicePermissionService>(
+            "DevicePermissionService",
+          ),
 
-      reportService: createReportService(),
+      readingSocketAdapter: isReadingEnabled
+        ? createReadingSocketAdapter()
+        : createUnavailableService<ReadingSocketAdapter>(
+            "ReadingSocketAdapter",
+          ),
 
-      readingService:
-        createUnavailableService<ReadingService>("ReadingService"),
-
-      readingSocketAdapter: createUnavailableService<ReadingSocketAdapter>(
-        "ReadingSocketAdapter",
-      ),
-
-      sessionService: createSessionService(),
-
-      tutorService: createUnavailableService<TutorService>("TutorService"),
+      tutorService: isReadingEnabled
+        ? createTutorService()
+        : createUnavailableService<TutorService>("TutorService"),
     }),
-    [],
+    [isReadingEnabled],
   );
 
   return (

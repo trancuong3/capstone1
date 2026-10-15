@@ -145,6 +145,8 @@ export function BookDetailScreen({
         book_id: state.book.id,
         child_id: state.child.id,
         mode: "realtime",
+        selected_page_id: selectedPage.page_id,
+        selected_page_revision_id: selectedPage.current_verified_revision_id,
       });
       router.push(
         `/reading/${encodeURIComponent(session.session_id)}?state=ready&pageId=${encodeURIComponent(selectedPage.page_id)}`,

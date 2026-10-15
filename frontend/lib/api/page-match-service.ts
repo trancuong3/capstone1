@@ -1,6 +1,11 @@
+<<<<<<< HEAD
 // Kadepham
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
+=======
+import { requestApi } from "@/lib/api/api-client";
+import { readingPageDtoSchema } from "@/lib/api/reading-service";
+>>>>>>> 2804956a8eba6d933f7f15e1123fe90733a81328
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -11,6 +16,7 @@ export interface PageMatchService {
   ): Promise<ReadingPageDTO>;
 }
 
+<<<<<<< HEAD
 const readingPageWordSchema = z.object({
   word_id: z.string(),
   word_index: z.number().int().min(0),
@@ -69,3 +75,26 @@ export async function scanCameraFrameForBook(
     },
   );
 }
+=======
+export function createPageMatchService(): PageMatchService {
+  return {
+    async retryCurrentPage(sessionId: string): Promise<ReadingPageDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
+        readingPageDtoSchema,
+      );
+    },
+
+    async selectPage(
+      sessionId: string,
+      selectedPageId: string,
+    ): Promise<ReadingPageDTO> {
+      const query = new URLSearchParams({ session_id: sessionId });
+      return requestApi(
+        `/reading/pages/${encodeURIComponent(selectedPageId)}?${query.toString()}`,
+        readingPageDtoSchema,
+      );
+    },
+  };
+}
+>>>>>>> 2804956a8eba6d933f7f15e1123fe90733a81328

@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_parent_id
 from app.models import ReadingSession, ReadingEvent, FluencyAssessment
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
@@ -12,46 +12,113 @@ from app.schemas import (
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
 
+from datetime import datetime, timezone
+from app.repositories.reading_content_repository import ReadingContentRepository
+from app.services.reading_content_service import ReadingContentService
+from app.schemas.reading import (
+    ReadingPageDTO, ReadingCompletionSummaryDTO,
+    SessionSummaryRead,
+)
+
 router = APIRouter()
 
 @router.get("/sessions", response_model=List[ReadingSessionResponse])
-async def get_sessions(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách các phiên đọc"""
-    result = await db.execute(select(ReadingSession))
-    return result.scalars().all()
+async def get_sessions(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
 
 @router.post("/sessions", response_model=ReadingSessionResponse)
-async def create_session(session_in: ReadingSessionCreate, db: AsyncSession = Depends(get_db)):
-    """Tạo phiên đọc mới khi bé bắt đầu đọc sách"""
-    new_session = ReadingSession(**session_in.model_dump())
-    db.add(new_session)
-    await db.commit()
-    await db.refresh(new_session)
-    return new_session
+async def create_session(
+    session_in: ReadingSessionCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a session referencing an existing page verified by Admin."""
+    return await ReadingContentService(ReadingContentRepository(db)).create_session(
+        actor_id, session_in
+    )
+
+
+@router.get("/sessions/{session_id}", response_model=SessionSummaryRead)
+async def get_session(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_summary(
+        session_id, actor_id
+    )
+
+
+@router.get("/sessions/{session_id}/page", response_model=ReadingPageDTO)
+async def get_session_current_page(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_page(
+        session_id, actor_id
+    )
+
+
+@router.get("/pages/{page_id}", response_model=ReadingPageDTO)
+async def get_reading_page(
+    page_id: UUID,
+    session_id: UUID = Query(...),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_page(
+        page_id, session_id, actor_id
+    )
+
+
+@router.post("/sessions/{session_id}/finish", response_model=SessionSummaryRead)
+async def finish_session(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).finish_session(
+        session_id, actor_id
+    )
+
+
+@router.get("/sessions/{session_id}/completion-summary", response_model=ReadingCompletionSummaryDTO)
+async def get_session_completion_summary(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_completion_summary(
+        session_id, actor_id
+    )
 
 @router.post("/events", response_model=ReadingEventResponse)
-async def create_reading_event(event_in: ReadingEventCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi nhận một lỗi phát âm hoặc sự kiện đọc"""
-    new_event = ReadingEvent(**event_in.model_dump())
-    db.add(new_event)
-    await db.commit()
-    await db.refresh(new_event)
-    return new_event
+async def create_reading_event(
+    event_in: ReadingEventCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).create_reading_event(
+        actor_id, event_in
+    )
 
 @router.post("/fluency", response_model=FluencyAssessmentResponse)
-async def create_fluency_assessment(assessment_in: FluencyAssessmentCreate, db: AsyncSession = Depends(get_db)):
-    """Lưu đánh giá độ trôi chảy sau khi kết thúc phiên đọc"""
-    new_assessment = FluencyAssessment(**assessment_in.model_dump())
-    db.add(new_assessment)
-    await db.commit()
-    await db.refresh(new_assessment)
-    return new_assessment
+async def create_fluency_assessment(
+    assessment_in: FluencyAssessmentCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).create_fluency_assessment(
+        actor_id, assessment_in
+    )
 
 
-from fastapi import Query
 import re
 from pydantic import ValidationError
-from app.api.deps import get_current_parent_id
 from app.models import Book, ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
 from app.schemas.book import CatalogBookResponse
 from app.schemas.reading import (

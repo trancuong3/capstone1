@@ -107,6 +107,16 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
 
+    async def test_invalid_legacy_ocr_confidence_normalizes_to_null(self):
+        from app.services.admin_ocr_service import AdminOcrService
+
+        self.assertIsNone(AdminOcrService._normalize_confidence(None))
+        self.assertIsNone(AdminOcrService._normalize_confidence(-0.1))
+        self.assertIsNone(AdminOcrService._normalize_confidence(1.1))
+        self.assertIsNone(AdminOcrService._normalize_confidence(float("nan")))
+        self.assertIsNone(AdminOcrService._normalize_confidence("invalid"))
+        self.assertEqual(AdminOcrService._normalize_confidence(0.91), 0.91)
+
     async def test_success_creates_unverified_revision_and_stores_real_ocr_boxes(self):
         service = self.make_service()
         service.db.commit = AsyncMock()
@@ -141,13 +151,14 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()
         service.db.commit.assert_awaited_once()
-        page, revision = service.db.add_all.call_args.args[0]
+        page, revision, word_data = service.repo.stage_page_revision_bundle.call_args.args
         self.assertEqual(page.ImagePath.split("/")[-1].split(".")[-1], "png")
         self.assertEqual(revision.VerificationStatus, "NEEDS_REVIEW")
         self.assertEqual(revision.DraftText, "Chú mèo")
-        word_row = service.db.add.call_args.args[0]
-        self.assertEqual(word_row.BoundingBox, [0.1, 0.2, 0.1, 0.05])
-        self.assertEqual(word_row.OCRConfidence, 0.9)
+        self.assertEqual(word_data[0]["bbox"], [0.1, 0.2, 0.1, 0.05])
+        self.assertEqual(word_data[0]["ocr_confidence"], 0.9)
+        service.db.add_all.assert_not_called()
+        service.db.add.assert_not_called()
 
 
 if __name__ == "__main__":
