@@ -279,11 +279,17 @@ export function AdminOcrReviewScreen({
       counts[getOcrConfidenceLevel(word.ocr_confidence)] += 1;
       return counts;
     },
-    { high: 0, medium: 0, low: 0, unknown: 0 } as Record<OcrConfidenceLevel, number>,
+    {
+      high: 0,
+      medium: 0,
+      low: 0,
+      unknown: 0,
+    } as Record<OcrConfidenceLevel, number>,
   );
   const firstWordToReview = words.find(
-    (word) => getOcrConfidenceLevel(word.ocr_confidence) === "low"
-      || getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
+    (word) =>
+      getOcrConfidenceLevel(word.ocr_confidence) === "low" ||
+      getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
   );
   if (error) {
     return (
@@ -381,9 +387,15 @@ export function AdminOcrReviewScreen({
                   word.word_index === selectedWord
                     ? "z-10 border-2 border-orange-700 bg-orange-300/50 ring-2 ring-white"
                     : "border";
+                const confidenceText =
+                  word.ocr_confidence === null
+                    ? "chưa xác định"
+                    : word.ocr_confidence.toFixed(2);
+                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. Confidence OCR: ${confidenceText}. Mức ${getOcrConfidenceLabel(level)}`;
+                const boxTitle = `${word.text} · ${getOcrConfidenceLabel(level)} · ${word.ocr_confidence === null ? "confidence không có" : word.ocr_confidence.toFixed(2)}`;
                 return (
                   <button
-                    aria-label={`Từ ${word.word_index + 1}: ${word.text}. Confidence OCR: ${word.ocr_confidence === null ? "chưa xác định" : word.ocr_confidence.toFixed(2)}. Mức ${getOcrConfidenceLabel(level)}`}
+                    aria-label={boxLabel}
                     className={`absolute cursor-pointer p-0 ${colorClass} ${selectedClass}`}
                     key={`${word.line_index}-${word.word_index}`}
                     onClick={() => setSelectedWord(word.word_index)}
@@ -393,7 +405,7 @@ export function AdminOcrReviewScreen({
                       top: `${word.bbox[1] * 100}%`,
                       width: `${word.bbox[2] * 100}%`,
                     }}
-                    title={`${word.text} · ${getOcrConfidenceLabel(level)} · ${word.ocr_confidence === null ? "confidence không có" : word.ocr_confidence.toFixed(2)}`}
+                    title={boxTitle}
                     type="button"
                   />
                 );
@@ -405,17 +417,48 @@ export function AdminOcrReviewScreen({
             hệ quy chiếu chuẩn hóa 0–1. Confidence là điểm ước lượng của OCR,
             không phải xác suất chắc chắn nhận diện đúng.
           </p>
-          <div aria-label="Chú giải confidence OCR" className="mt-3 flex flex-wrap gap-3 text-xs">
-            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-green-600 bg-green-400/30" /> Cao</span>
-            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" /> Trung bình</span>
-            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-red-600 bg-red-400/30" /> Thấp</span>
-            <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" /> Chưa xác định</span>
+          <div
+            aria-label="Chú giải confidence OCR"
+            className="mt-3 flex flex-wrap gap-3 text-xs"
+          >
+            <span className="inline-flex items-center gap-1">
+              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />{" "}
+              Cao
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />{" "}
+              Trung bình
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />{" "}
+              Thấp
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />{" "}
+              Chưa xác định
+            </span>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Thống kê confidence OCR" role="group">
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm"><strong>{confidenceCounts.high}</strong><div>Cao</div></div>
-            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm"><strong>{confidenceCounts.medium}</strong><div>Trung bình</div></div>
-            <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm"><strong>{confidenceCounts.low}</strong><div>Thấp</div></div>
-            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2 text-sm"><strong>{confidenceCounts.unknown}</strong><div>Chưa xác định</div></div>
+          <div
+            aria-label="Thống kê confidence OCR"
+            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            role="group"
+          >
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm">
+              <strong>{confidenceCounts.high}</strong>
+              <div>Cao</div>
+            </div>
+            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm">
+              <strong>{confidenceCounts.medium}</strong>
+              <div>Trung bình</div>
+            </div>
+            <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm">
+              <strong>{confidenceCounts.low}</strong>
+              <div>Thấp</div>
+            </div>
+            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2 text-sm">
+              <strong>{confidenceCounts.unknown}</strong>
+              <div>Chưa xác định</div>
+            </div>
           </div>
           <button
             className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
