@@ -86,4 +86,26 @@ describe("SessionComplete component", () => {
       screen.getByText(/Chưa ghi nhận từ nào trong lượt đọc này/i),
     ).toBeInTheDocument();
   });
+  it("does not display missing completion metrics as invented zeroes", () => {
+    render(
+      <SessionComplete
+        booksHref="/books"
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          duration_minutes: null,
+          pages_explored: null,
+          practiced_words: null,
+          spoken_words: null,
+          transcripts: null,
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("Chưa ghi nhận")).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: /Chưa ghi nhận/i }),
+    ).toBeInTheDocument();
+  });
+
 });
