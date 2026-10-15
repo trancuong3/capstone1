@@ -260,13 +260,25 @@ class ReadingContentService:
             )
         return await self._build_page_dto(page, revision)
 
-    async def get_page(self, page_id: UUID, actor_id: UUID) -> ReadingPageDTO:
+    async def get_page(
+        self,
+        page_id: UUID,
+        session_id: UUID,
+        actor_id: UUID,
+    ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
-        page = await self.repository.verified_page(page_id)
+        session = await self.repository.session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+
+        # Manual page selection is scoped to the book already bound to the
+        # session. It can never redirect a child to another book's content.
+        page = await self.repository.verified_page(page_id, session.BookId)
         if page is None:
             raise HTTPException(
                 status_code=404,
-                detail="Active verified reading page not found",
+                detail="Active verified page not found in this reading session's book",
             )
         revision = await self.repository.verified_revision(
             page.Id,
