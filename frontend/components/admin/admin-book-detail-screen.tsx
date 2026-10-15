@@ -25,7 +25,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   );
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
   const [pagesUnavailable, setPagesUnavailable] = useState(false);
-  const [pendingRetire, setPendingRetire] = useState<AdminPageListItemUI | null>(null);
+  const [pendingRetire, setPendingRetire] =
+    useState<AdminPageListItemUI | null>(null);
   const [retiringPageId, setRetiringPageId] = useState<string | null>(null);
   const [pageActionNotice, setPageActionNotice] = useState<{
     tone: "error" | "info";
@@ -209,7 +210,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         <FileSearch aria-hidden />
                       </div>
                       <AdminStatusBadge
-                        status={active ? item.processing.verification_status : "RETIRED"}
+                        status={
+                          active
+                            ? item.processing.verification_status
+                            : "RETIRED"
+                        }
                       />
                     </div>
                     <div>
