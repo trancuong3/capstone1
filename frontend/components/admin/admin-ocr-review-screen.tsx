@@ -411,7 +411,7 @@ export function AdminOcrReviewScreen({
             <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-red-600 bg-red-400/30" /> Thấp</span>
             <span className="inline-flex items-center gap-1"><span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" /> Chưa xác định</span>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Thống kê confidence OCR">
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Thống kê confidence OCR" role="group">
             <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm"><strong>{confidenceCounts.high}</strong><div>Cao</div></div>
             <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm"><strong>{confidenceCounts.medium}</strong><div>Trung bình</div></div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm"><strong>{confidenceCounts.low}</strong><div>Thấp</div></div>
