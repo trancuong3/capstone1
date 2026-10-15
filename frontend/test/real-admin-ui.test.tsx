@@ -100,12 +100,17 @@ function readyResponse(url: string): Response {
       },
     ]);
   if (url.endsWith("/pages"))
-    return Response.json([{
-      book_id: bookId,
-      page_number: 2,
-      processing: { ...processing, lifecycle_status: pageRetired ? "RETIRED" : "ACTIVE" },
-      text_preview: "Nội dung OCR hiển thị cho Admin",
-    }]);
+    return Response.json([
+      {
+        book_id: bookId,
+        page_number: 2,
+        processing: {
+          ...processing,
+          lifecycle_status: pageRetired ? "RETIRED" : "ACTIVE",
+        },
+        text_preview: "Nội dung OCR hiển thị cho Admin",
+      },
+    ]);
   if (url.endsWith(`/catalog/${bookId}`)) return Response.json(book);
   if (url.includes("/books/admin/catalog"))
     return Response.json([
@@ -154,18 +159,21 @@ beforeEach(() => {
     }
     if (target.endsWith("/revisions/draft") && options?.method === "POST") {
       manualDraftCreated = true;
-      return Response.json({
-        ...processing,
-        page_revision_id: newRevisionId,
-        revision_no: 3,
-        verification_status: "NEEDS_REVIEW",
-        draft_text: "Văn bản đã lưu thật",
-        words: [],
-        ocr_metadata: {},
-        created_at: timestamp,
-        verified_at: null,
-        verified_by: null,
-      }, { status: 201 });
+      return Response.json(
+        {
+          ...processing,
+          page_revision_id: newRevisionId,
+          revision_no: 3,
+          verification_status: "NEEDS_REVIEW",
+          draft_text: "Văn bản đã lưu thật",
+          words: [],
+          ocr_metadata: {},
+          created_at: timestamp,
+          verified_at: null,
+          verified_by: null,
+        },
+        { status: 201 },
+      );
     }
     return readyResponse(target);
   });
@@ -289,21 +297,39 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         <AdminBookDetailScreen bookId={bookId} />
       </AdminServicesProvider>,
     );
-    expect(await screen.findByText("Nội dung OCR hiển thị cho Admin")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Nội dung OCR hiển thị cho Admin"),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Xóa trang" }));
     const dialog = screen.getByRole("alertdialog");
     expect(dialog).toHaveTextContent("Xóa Trang 2?");
     await user.click(within(dialog).getByRole("button", { name: "Hủy" }));
-    expect(fetchMock.mock.calls.some(([url, init]) =>
-      String(url).endsWith(`/admin/pages/${pageId}`) && (init as RequestInit | undefined)?.method === "DELETE",
-    )).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(`/admin/pages/${pageId}`) &&
+          (init as RequestInit | undefined)?.method === "DELETE",
+      ),
+    ).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Xóa trang" }));
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Xóa trang" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
-      String(url).endsWith(`/admin/pages/${pageId}`) && (init as RequestInit | undefined)?.method === "DELETE",
-    )).toBe(true));
-    expect(await screen.findByText("Trang đã ngừng sử dụng")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Xóa trang",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith(`/admin/pages/${pageId}`) &&
+            (init as RequestInit | undefined)?.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByText("Trang đã ngừng sử dụng"),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Xóa trang" })).not.toBeInTheDocument();
   });
 
@@ -316,13 +342,23 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) =>
-      String(url).endsWith("/revisions/draft") && (init as RequestInit | undefined)?.method === "POST",
-    )).toBe(true));
+    await user.click(
+      screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith("/revisions/draft") &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true),
+    );
     expect(await screen.findByLabelText("Nội dung trang")).toBeEnabled();
     expect(screen.getByRole("heading", { name: "Kiểm tra OCR · R3" })).toBeInTheDocument();
-    expect(await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/),
+    ).toBeInTheDocument();
   });
 
   it("shows true empty pages with the upload workflow available", async () => {
