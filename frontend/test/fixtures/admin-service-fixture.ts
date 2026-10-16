@@ -130,6 +130,9 @@ export function createAdminServiceFixture() {
         .mockRejectedValue(unavailable()),
     },
     pages: {
+      nextPageNumber: vi
+        .fn<AdminServices["pages"]["nextPageNumber"]>()
+        .mockResolvedValue(2),
       list: vi
         .fn<AdminServices["pages"]["list"]>()
         .mockResolvedValue([adminPageFixture]),
