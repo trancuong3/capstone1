@@ -13,6 +13,7 @@ from app.schemas.book import (
     AdminCatalogBookResponse,
     AdminPageImageRead,
     AdminPageListRead,
+    AdminNextPageNumberRead,
     AdminPageProcessingRead,
     AdminRevisionDetailRead,
     AdminRevisionSummaryRead,
@@ -103,6 +104,20 @@ async def get_admin_book(
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
     return await service.book(book_id)
+
+
+@router.get(
+    "/admin/catalog/{book_id}/next-page-number",
+    response_model=AdminNextPageNumberRead,
+)
+async def get_admin_next_page_number(
+    book_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminCatalogService(db)
+    await service.require_admin(actor_id)
+    return {"next_page_number": await service.next_page_number(book_id)}
 
 
 @router.get("/admin/catalog/{book_id}/pages", response_model=list[AdminPageListRead])
