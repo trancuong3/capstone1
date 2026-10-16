@@ -13,7 +13,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from app.api.deps import get_current_parent_id, get_db
-from app.api.routes.book import CatalogRepository, CatalogService, router
+from app.repositories.book_repository import CatalogRepository
+from app.services.book_service import CatalogService
+from app.api.routes.book import router
 from app.schemas.book import CatalogBookResponse
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -30,7 +32,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         repository = MagicMock()
         repository.role = AsyncMock(return_value="admin")
         with self.assertRaises(HTTPException) as caught:
-            await CatalogService(repository).require_parent(ACTOR)
+            await CatalogService(repository=repository).require_parent(ACTOR)
         self.assertEqual(caught.exception.status_code, 403)
         repository.role.assert_awaited_once_with(ACTOR)
 
@@ -60,7 +62,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         repository = MagicMock()
         repository.get = AsyncMock(return_value=None)
         with self.assertRaises(HTTPException) as caught:
-            await CatalogService(repository).get(BOOK)
+            await CatalogService(repository=repository).get(BOOK)
         self.assertEqual(caught.exception.status_code, 404)
 
     async def test_ineligible_book_returns_existing_content_inactive_code(self):
@@ -68,7 +70,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         repository.get = AsyncMock(return_value=book_row())
         repository.is_eligible = AsyncMock(return_value=False)
         with self.assertRaises(HTTPException) as caught:
-            await CatalogService(repository).get(BOOK)
+            await CatalogService(repository=repository).get(BOOK)
         self.assertEqual(caught.exception.status_code, 409)
         self.assertEqual(caught.exception.detail, {"code": "CONTENT_INACTIVE"})
 
@@ -78,7 +80,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         repository.is_eligible = AsyncMock(return_value=True)
         repository.previews = AsyncMock(return_value=[SimpleNamespace(ImagePath="bucket/page.png")])
         with self.assertRaises(HTTPException) as caught:
-            await CatalogService(repository).previews(BOOK)
+            await CatalogService(repository=repository).previews(BOOK)
         self.assertEqual(caught.exception.status_code, 503)
 
     async def test_absolute_preview_maps_actual_verified_revision(self):
@@ -89,7 +91,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
             Id=PAGE, PageNumber=2, ImagePath="https://example.test/page.png",
             LifecycleStatus="ACTIVE", CurrentVerifiedRevisionId=REVISION,
         )])
-        rows = await CatalogService(repository).previews(BOOK)
+        rows = await CatalogService(repository=repository).previews(BOOK)
         self.assertEqual(rows[0].current_verified_revision_id, REVISION)
         self.assertEqual(rows[0].page_number, 2)
 
@@ -101,7 +103,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
                 repository.is_eligible = AsyncMock(return_value=True)
                 repository.previews = AsyncMock(return_value=[SimpleNamespace(ImagePath=image_path)])
                 with self.assertRaises(HTTPException) as caught:
-                    await CatalogService(repository).previews(BOOK)
+                    await CatalogService(repository=repository).previews(BOOK)
                 self.assertEqual(caught.exception.status_code, 503)
 
     async def test_preview_query_filters_revision_page_and_lifecycle(self):
