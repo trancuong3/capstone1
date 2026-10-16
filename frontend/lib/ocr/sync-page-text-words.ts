@@ -81,3 +81,49 @@ export function syncPageTextToWords(
 
   return { status: "synchronized", tokens, words };
 }
+
+
+export type WordsToPageTextSyncResult =
+  | { readonly status: "synchronized"; readonly text: string }
+  | {
+      readonly status: "token-count-mismatch";
+      readonly text: string;
+      readonly expectedWordCount: number;
+      readonly actualTokenCount: number;
+    };
+
+/**
+ * Applies direct single-word edits back into the page text without flattening
+ * line breaks or other whitespace separators. It refuses word entries that
+ * have become blank or contain multiple tokens rather than guessing box mapping.
+ */
+export function syncWordsToPageText(
+  currentPageText: string,
+  words: readonly AdminRevisionWordDTO[],
+): WordsToPageTextSyncResult {
+  const segments = currentPageText.match(/\\s+|\\S+/gu) ?? [];
+  const pageTokenCount = segments.filter((segment) => !/^\\s+$/u.test(segment)).length;
+
+  const hasInvalidWord = words.some(
+    (word) => tokenizePageText(word.text).length !== 1,
+  );
+  if (pageTokenCount !== words.length || hasInvalidWord) {
+    return {
+      status: "token-count-mismatch",
+      text: currentPageText,
+      expectedWordCount: words.length,
+      actualTokenCount: pageTokenCount,
+    };
+  }
+
+  let wordIndex = 0;
+  const text = segments
+    .map((segment) => {
+      if (/^\\s+$/u.test(segment)) return segment;
+      const nextWord = words[wordIndex++];
+      return nextWord.text.trim();
+    })
+    .join("");
+
+  return { status: "synchronized", text };
+}
