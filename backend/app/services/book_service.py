@@ -121,7 +121,8 @@ class AdminCatalogService:
 
     async def page(self, page_id: UUID):
         page = await self.repository.page(page_id)
-        if page is None:
+        if page is None or page.LifecycleStatus != "ACTIVE":
+            # Treat retired pages as unavailable in the active Admin editor.
             raise HTTPException(status_code=404, detail="Resource not found")
         return page
 
