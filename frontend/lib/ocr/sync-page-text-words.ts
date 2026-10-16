@@ -82,7 +82,6 @@ export function syncPageTextToWords(
   return { status: "synchronized", tokens, words };
 }
 
-
 export type WordsToPageTextSyncResult =
   | { readonly status: "synchronized"; readonly text: string }
   | {
@@ -102,7 +101,9 @@ export function syncWordsToPageText(
   words: readonly AdminRevisionWordDTO[],
 ): WordsToPageTextSyncResult {
   const segments = currentPageText.match(/\s+|\S+/gu) ?? [];
-  const pageTokenCount = segments.filter((segment) => !/^\s+$/u.test(segment)).length;
+  const pageTokenCount = segments.filter(
+    (segment) => !/^\s+$/u.test(segment),
+  ).length;
 
   const hasInvalidWord = words.some(
     (word) => tokenizePageText(word.text).length !== 1,
