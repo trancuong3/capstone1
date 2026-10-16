@@ -197,20 +197,33 @@ export function AdminOcrReviewScreen({
   }
 
   function updateWord(index: number, patch: Partial<AdminRevisionWordDTO>) {
-    setWords((current) =>
-      current.map((word) =>
-        word.word_index === index
-          ? {
-              ...word,
-              ...patch,
-              normalized_text:
-                patch.text === undefined
-                  ? (patch.normalized_text ?? word.normalized_text)
-                  : normalizeVietnameseWord(patch.text),
-            }
-          : word,
-      ),
+    const nextWords = words.map((word) =>
+      word.word_index === index
+        ? {
+            ...word,
+            ...patch,
+            normalized_text:
+              patch.text === undefined
+                ? (patch.normalized_text ?? word.normalized_text)
+                : normalizeVietnameseWord(patch.text),
+          }
+        : word,
     );
+    setWords(nextWords);
+    const nextText = nextWords
+      .map((word) => word.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    setDraftText(nextText);
+    const result = syncPageTextToWords(nextText, nextWords);
+    if (result.status === "synchronized") {
+      setWords([...result.words]);
+      setWordSyncError(null);
+    } else {
+      setWordSyncError(
+        "Văn bản từ phải tương ứng với từng token riêng lẻ. Hãy chỉnh lại từ chứa khoảng trắng hoặc từ rỗng trước khi lưu.",
+      );
+    }
   }
 
   function updateBbox(index: number, coordinate: number, value: number) {
