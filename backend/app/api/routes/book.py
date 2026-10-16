@@ -135,7 +135,7 @@ async def get_admin_processing(
 ):
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
-    return await service.processing(await service.page(page_id))
+    return await service.processing_by_page_id(page_id)
 
 
 @router.get("/admin/pages/{page_id}/revisions", response_model=list[AdminRevisionSummaryRead])
