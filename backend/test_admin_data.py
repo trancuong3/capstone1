@@ -82,6 +82,7 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_empty_pages_differs_from_missing_revision(self):
         repo = catalog_repo()
         repo.pages.return_value = []
+        repo.active_pages.return_value = []
         self.assertEqual(await AdminCatalogService(repository=repo).pages(BOOK), [])
         repo.revisions.return_value = []
         with self.assertRaises(HTTPException) as caught:
