@@ -692,9 +692,7 @@ export function AdminOcrReviewScreen({
                       onChange={(event) =>
                         updateWord(word.word_index, {
                           text: event.target.value,
-                          normalized_text: event.target.value
-                            .trim()
-                            normalizeVietnameseWord(event.target.value),
+                          normalized_text: normalizeVietnameseWord(event.target.value),
                         })
                       }
                       value={word.text}
