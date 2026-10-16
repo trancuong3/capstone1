@@ -3,6 +3,7 @@ import type { AdminRevisionWordDTO } from "@/types/admin";
 import {
   normalizeVietnameseWord,
   syncPageTextToWords,
+  syncWordsToPageText,
   tokenizePageText,
 } from "@/lib/ocr/sync-page-text-words";
 
@@ -61,6 +62,39 @@ describe("Vietnamese OCR page text and word synchronization", () => {
   it("normalizes decomposed Vietnamese Unicode without changing display text", () => {
     expect(normalizeVietnameseWord("  TÔI, ")).toBe("tôi");
     expect(tokenizePageText("Ta\nđi   học.")).toEqual(["Ta", "đi", "học."]);
+  });
+
+  it("keeps line breaks when a single OCR word is edited directly", () => {
+    const existing = words().map((word) => ({ ...word }));
+    existing[0] = {
+      ...existing[0],
+      text: "Ta",
+      normalized_text: "ta",
+    };
+
+    const result = syncWordsToPageText("Tôi đi\\nhọc.", existing);
+
+    expect(result.status).toBe("synchronized");
+    if (result.status !== "synchronized") throw new Error("Expected sync");
+    expect(result.text).toBe("Ta đi\\nhọc.");
+  });
+
+  it("rejects a word entry that contains multiple tokens instead of flattening page layout", () => {
+    const existing = words().map((word) => ({ ...word }));
+    existing[0] = {
+      ...existing[0],
+      text: "Ta rất",
+      normalized_text: "ta rất",
+    };
+
+    const result = syncWordsToPageText("Tôi đi\\nhọc.", existing);
+
+    expect(result.status).toBe("token-count-mismatch");
+    if (result.status !== "token-count-mismatch") {
+      throw new Error("Expected token count mismatch");
+    }
+    expect(result.text).toBe("Tôi đi\\nhọc.");
+    expect(result.actualTokenCount).toBe(3);
   });
 
   it("does not invent or reassign boxes when the token count changes", () => {
