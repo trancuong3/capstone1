@@ -52,7 +52,7 @@ class OcrEngineTests(unittest.TestCase):
         ):
             result = ocr_engine.extract_text_and_boxes(sample_png())
 
-        self.assertEqual(result["text"], "Chú mèo")
+        self.assertEqual(result["text"], "Chú\nmèo")
         self.assertEqual(result["words"][0]["text"], "Chú")
         first_bbox = result["words"][0]["bbox"]
         for actual, expected in zip(first_bbox, (0.25, 0.25, 0.1, 0.1)):
@@ -62,6 +62,31 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["words"][0]["line_index"], 0)
         self.assertEqual(result["words"][1]["line_index"], 1)
         self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
+
+    def test_preserves_punctuation_and_paragraph_boundaries(self):
+        layout = {
+            "text": ["Chào", ",", "bạn", "!", "Mèo", "ngủ", "rồi", "."],
+            "left": [10, 42, 48, 76, 10, 42, 76, 98],
+            "top": [10, 10, 10, 10, 100, 100, 100, 100],
+            "width": [30, 4, 25, 4, 30, 28, 20, 4],
+            "height": [10, 10, 10, 10, 10, 10, 10, 10],
+            "conf": ["90"] * 8,
+            "block_num": [1] * 8,
+            "par_num": [1, 1, 1, 1, 2, 2, 2, 2],
+            "line_num": [1] * 8,
+        }
+        patches = self._configured_tesseract()
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract, "image_to_data", return_value=layout
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertEqual(result["text"], "Chào, bạn!\n\nMèo ngủ rồi.")
+        self.assertEqual([word["text"] for word in result["words"]], ["Chào,", "bạn!", "Mèo", "ngủ", "rồi."])
+        self.assertEqual([word["normalized_text"] for word in result["words"]], ["chào", "bạn", "mèo", "ngủ", "rồi"])
+        self.assertEqual([word["line_index"] for word in result["words"]], [0, 0, 2, 2, 2])
+        self.assertEqual(result["metadata"]["line_count"], 2)
+        self.assertEqual(result["metadata"]["paragraph_count"], 2)
 
     def test_invalid_tesseract_confidence_is_null(self):
         invalid_confidence = {
