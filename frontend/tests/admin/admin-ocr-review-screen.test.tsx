@@ -246,7 +246,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       screen.getByLabelText("Từ 0 bbox w"),
       screen.getByLabelText("Từ 0 bbox h"),
     ];
-    const originalBoxValues = boxes.map((box) => (box as HTMLInputElement).value);
+    const originalBoxValues = boxes.map(
+      (box) => (box as HTMLInputElement).value,
+    );
 
     await user.clear(pageText);
     await user.type(pageText, "Ta đi học.");
@@ -267,7 +269,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       /để không gán nhầm tọa độ/i,
     );
     expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Xác minh trang/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Xác minh trang/ }),
+    ).toBeDisabled();
 
     await user.clear(pageText);
     await user.type(pageText, "Ta đi học.");
