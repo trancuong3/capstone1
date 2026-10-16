@@ -101,8 +101,8 @@ export function syncWordsToPageText(
   currentPageText: string,
   words: readonly AdminRevisionWordDTO[],
 ): WordsToPageTextSyncResult {
-  const segments = currentPageText.match(/\\s+|\\S+/gu) ?? [];
-  const pageTokenCount = segments.filter((segment) => !/^\\s+$/u.test(segment)).length;
+  const segments = currentPageText.match(/\s+|\S+/gu) ?? [];
+  const pageTokenCount = segments.filter((segment) => !/^\s+$/u.test(segment)).length;
 
   const hasInvalidWord = words.some(
     (word) => tokenizePageText(word.text).length !== 1,
@@ -119,7 +119,7 @@ export function syncWordsToPageText(
   let wordIndex = 0;
   const text = segments
     .map((segment) => {
-      if (/^\\s+$/u.test(segment)) return segment;
+      if (/^\s+$/u.test(segment)) return segment;
       const nextWord = words[wordIndex++];
       return nextWord.text.trim();
     })
