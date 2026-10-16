@@ -48,10 +48,16 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     confidence_values: list[float] = []
     populated_lines: set[tuple[int, int, int]] = set()
     all_characters = ""
+    noise_tokens = 0
 
     for index, raw_text in enumerate(raw_texts):
         token = str(raw_text).strip()
-        if not token or not any(char.isalnum() for char in token):
+        if not token:
+            continue
+        if not any(char.isalnum() for char in token):
+            # Ignore the artifact as text, but penalize candidates that emit
+            # many non-empty punctuation/symbol fragments from illustrations.
+            noise_tokens += 1
             continue
         tokens.append(token)
         all_characters += token
@@ -87,12 +93,21 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     # preferring the candidate that emits the most noisy fragments.
     word_signal = min(len(tokens) / 18.0, 1.0)
     line_signal = min(len(populated_lines) / 6.0, 1.0)
-    return (
+    base_score = (
         0.72 * average_confidence
         + 0.10 * word_signal
         + 0.08 * line_signal
         + 0.10 * alphanumeric_ratio
     )
+    symbol_ratio = (
+        sum(unicodedata.category(character).startswith("S") for character in all_characters)
+        / len(all_characters)
+        if all_characters else 0.0
+    )
+    artifact_ratio = noise_tokens / max(len(tokens) + noise_tokens, 1)
+    # This is a ranking heuristic, not a confidence probability. Prefer candidates
+    # with fewer symbol artifacts without discarding valid short Vietnamese words.
+    return max(-1.0, base_score - 0.10 * artifact_ratio - 0.10 * symbol_ratio)
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     """
@@ -150,8 +165,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     scale_factor = 1.0
     if not is_mocked:
         max_dim = max(orig_width, orig_height)
-        if max_dim < 1400:
-            scale_factor = min(2.5, 1500.0 / max_dim)
+        if max_dim < 1800:
+            # Typical phone captures can have 8–10 px Vietnamese glyphs;
+            # upscale them enough to recover small tone marks without unbounded growth.
+            scale_factor = min(3.0, 1800.0 / max_dim)
 
     if scale_factor > 1.01:
         scaled_w = int(round(orig_width * scale_factor))
@@ -183,9 +200,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if configured_psm:
         if not configured_psm.isdecimal() or not 0 <= int(configured_psm) <= 13:
             raise OcrEngineUnavailable("TESSERACT_PSM must be an integer between 0 and 13")
-        psm_values = [int(configured_psm)] * 3
+        psm_values = [int(configured_psm)] * 4
     else:
-        psm_values = [4, 6, 11]
+        # Complementary layout modes reduce dependence on a single page segmentation.
+        psm_values = [4, 6, 6, 11]
 
     # Keep unit tests deterministic when Tesseract is mocked. Real OCR compares
     # complementary variants; all candidates use the same image dimensions.
@@ -195,9 +213,12 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         candidates = [
             ("otsu_threshold", otsu, psm_values[0]),
             ("clahe_grayscale", clahe, psm_values[1]),
+            # Raw grayscale preserves fine Vietnamese diacritics that aggressive
+            # local contrast or thresholding can sometimes distort.
+            ("grayscale", gray, psm_values[2]),
         ]
         if adaptive is not None:
-            candidates.append(("adaptive_gaussian_threshold", adaptive, psm_values[2]))
+            candidates.append(("adaptive_gaussian_threshold", adaptive, psm_values[3]))
 
     candidate_results: list[tuple[str, int, float, dict[str, object]]] = []
     successful_evaluations = 0
