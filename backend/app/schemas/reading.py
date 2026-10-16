@@ -191,7 +191,6 @@ class SessionDetailRead(SessionSummaryRead):
     comprehension: list[SessionComprehensionRead]
     report_id: UUID | None
 
-#Kadepham
 
 class ReadingPageWordRead(BaseModel):
     word_id: UUID
@@ -213,6 +212,7 @@ class ReadingPageRead(BaseModel):
 class CameraPageMatchRead(BaseModel):
     framing_valid: bool
     matched: bool
+    book_id: UUID | None = None  # Bổ sung ID cuốn sách được nhận diện
     status_code: Literal[
         "INVALID_IMAGE",
         "TOO_DARK",

@@ -1,4 +1,3 @@
-// Kadepham
 "use client";
 
 import { Camera, CheckCircle2, RefreshCw, Sparkles, VideoOff } from "lucide-react";
@@ -7,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Button } from "@/components/common/button";
 import {
   scanCameraFrameForBook,
+  scanCameraFrameGlobal,
   type CameraPageMatchDTO,
 } from "@/lib/api/page-match-service";
 import { cn } from "@/lib/utils/cn";
@@ -17,6 +17,7 @@ interface CameraPreviewProps {
   bookId?: string;
   enableScanner?: boolean;
   onPageDetected?: (page: ReadingPageDTO) => void;
+  onBookPageDetected?: (bookId: string, page: ReadingPageDTO) => void;
 }
 
 export function CameraPreview({
@@ -24,6 +25,7 @@ export function CameraPreview({
   bookId,
   enableScanner = false,
   onPageDetected,
+  onBookPageDetected,
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -34,8 +36,8 @@ export function CameraPreview({
   const [autoScan, setAutoScan] = useState(true);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
 
-  // Nếu không bật chế độ quét (mặc định của ReadingLayout cũ), giữ nguyên giao diện chuẩn
-  if (!enableScanner || !bookId) {
+  // Cho phép chạy scanner kể cả khi không có bookId (chế độ quét từ Dashboard)
+  if (!enableScanner) {
     return (
       <section
         aria-label="Bản xem trước camera mô phỏng"
@@ -89,7 +91,7 @@ export function CameraPreview({
   }, []);
 
   const captureAndScan = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || isScanning || !cameraReady || !bookId) {
+    if (!videoRef.current || !canvasRef.current || isScanning || !cameraReady) {
       return;
     }
 
@@ -116,12 +118,21 @@ export function CameraPreview({
           return;
         }
         try {
-          const response = await scanCameraFrameForBook(bookId, blob);
+          // Nếu có bookId thì quét theo sách, nếu không thì quét tổng quát toàn hệ thống
+          const response = bookId
+            ? await scanCameraFrameForBook(bookId, blob)
+            : await scanCameraFrameGlobal(blob);
+
           setScanResult(response);
 
           if (response.matched && response.matched_page) {
             setAutoScan(false);
             onPageDetected?.(response.matched_page);
+
+            const resolvedBookId = response.book_id || bookId;
+            if (resolvedBookId) {
+              onBookPageDetected?.(resolvedBookId, response.matched_page);
+            }
           }
         } catch {
           setScanResult({
@@ -139,7 +150,7 @@ export function CameraPreview({
       "image/jpeg",
       0.85,
     );
-  }, [bookId, cameraReady, isScanning, onPageDetected]);
+  }, [bookId, cameraReady, isScanning, onBookPageDetected, onPageDetected]);
 
   useEffect(() => {
     if (!autoScan || !cameraReady || scanResult?.matched) return;

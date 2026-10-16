@@ -464,6 +464,125 @@ async def match_book_page_from_camera(
     return CameraPageMatchRead(
         framing_valid=True,
         matched=True,
+        book_id=book_id,  # Gán thêm book_id
+        status_code="MATCHED",
+        message=f"Tuyệt vời! ViRead Vision đã nhận ra Trang {matched_orm.PageNumber}.",
+        confidence=match_res["confidence"],
+        matched_page=page_dto,
+    )
+
+@router.post("/match-page", response_model=CameraPageMatchRead)
+async def match_page_global_from_camera(
+    file: UploadFile = File(...),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Nhận diện sách và trang toàn cục từ Camera (dành cho Dashboard).
+    So khớp frame ảnh với toàn bộ các trang sách ACTIVE trong hệ thống để tìm cuốn sách và trang tương ứng.
+    """
+    await HistoryService(HistoryRepository(db)).require_parent(actor_id)
+
+    camera_bytes = await file.read()
+    framing = vision_page_matcher.check_framing(camera_bytes)
+
+    if not framing["framing_valid"]:
+        return CameraPageMatchRead(
+            framing_valid=False,
+            matched=False,
+            book_id=None,
+            status_code=framing["status_code"],
+            message=framing["message"],
+            confidence=0.0,
+            matched_page=None,
+        )
+
+    # Lấy toàn bộ các trang sách ACTIVE của tất cả các đầu sách
+    pages_result = await db.execute(
+        select(BookPage)
+        .where(BookPage.LifecycleStatus == "ACTIVE")
+        .order_by(BookPage.BookId, BookPage.PageNumber)
+    )
+    pages = pages_result.scalars().all()
+
+    if not pages:
+        raise HTTPException(status_code=404, detail="No active books or pages found")
+
+    candidate_pages = []
+    for p in pages:
+        img_bytes = await _fetch_stored_page_bytes(p.ImagePath)
+        if img_bytes:
+            candidate_pages.append(
+                {
+                    "page_orm": p,
+                    "image_bytes": img_bytes,
+                }
+            )
+
+    if not candidate_pages:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not read the image from Supabase Storage",
+        )
+
+    match_res = vision_page_matcher.match_page(camera_bytes, candidate_pages)
+
+    if not match_res["matched"]:
+        return CameraPageMatchRead(
+            framing_valid=True,
+            matched=False,
+            book_id=None,
+            status_code="LOW_CONFIDENCE",
+            message="Sách đã vào khung nhưng mình chưa nhận diện được trang. Bé giữ sách phẳng và gần hơn một chút nhé!",
+            confidence=match_res["confidence"],
+            matched_page=None,
+        )
+
+    matched_orm: BookPage = match_res["page"]["page_orm"]
+    revision_id = matched_orm.CurrentVerifiedRevisionId
+
+    if revision_id is None:
+        revision_id = await db.scalar(
+            select(PageRevision.Id)
+            .where(PageRevision.PageId == matched_orm.Id)
+            .order_by(PageRevision.CreatedAt.desc())
+            .limit(1)
+        )
+
+    if revision_id is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    words_result = await db.execute(
+        select(PageRevisionWord)
+        .where(PageRevisionWord.PageRevisionId == revision_id)
+        .order_by(PageRevisionWord.WordIndex)
+    )
+    words_orm = words_result.scalars().all()
+
+    words_dto = [
+        ReadingPageWordRead(
+            word_id=w.Id,
+            word_index=w.WordIndex,
+            text=w.Text,
+            bbox=_normalize_bbox_tuple(w.BoundingBox),
+        )
+        for w in words_orm
+    ]
+
+    page_dto = ReadingPageRead(
+        page_id=matched_orm.Id,
+        page_revision_id=revision_id,
+        page_number=matched_orm.PageNumber,
+        confidence=match_res["confidence"],
+        width=max(1, int(matched_orm.Width or 1000)),
+        height=max(1, int(matched_orm.Height or 1400)),
+        words=words_dto,
+    )
+
+    return CameraPageMatchRead(
+        framing_valid=True,
+        matched=True,
+        book_id=matched_orm.BookId,
         status_code="MATCHED",
         message=f"Tuyệt vời! ViRead Vision đã nhận ra Trang {matched_orm.PageNumber}.",
         confidence=match_res["confidence"],

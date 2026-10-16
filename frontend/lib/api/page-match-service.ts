@@ -1,11 +1,5 @@
-<<<<<<< HEAD
-// Kadepham
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
-=======
-import { requestApi } from "@/lib/api/api-client";
-import { readingPageDtoSchema } from "@/lib/api/reading-service";
->>>>>>> 2804956a8eba6d933f7f15e1123fe90733a81328
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -16,7 +10,6 @@ export interface PageMatchService {
   ): Promise<ReadingPageDTO>;
 }
 
-<<<<<<< HEAD
 const readingPageWordSchema = z.object({
   word_id: z.string(),
   word_index: z.number().int().min(0),
@@ -37,6 +30,7 @@ const readingPageSchema = z.object({
 export const cameraPageMatchSchema = z.object({
   framing_valid: z.boolean(),
   matched: z.boolean(),
+  book_id: z.string().optional().nullable(), // Hỗ trợ book_id trả về khi quét tổng quát
   status_code: z.enum([
     "INVALID_IMAGE",
     "TOO_DARK",
@@ -75,13 +69,31 @@ export async function scanCameraFrameForBook(
     },
   );
 }
-=======
+
+export async function scanCameraFrameGlobal(
+  imageBlob: Blob,
+  signal?: AbortSignal,
+): Promise<CameraPageMatchDTO> {
+  const formData = new FormData();
+  formData.append("file", imageBlob, "camera-frame.jpg");
+
+  return requestApi(
+    "/reading/match-page",
+    cameraPageMatchSchema,
+    signal,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
 export function createPageMatchService(): PageMatchService {
   return {
     async retryCurrentPage(sessionId: string): Promise<ReadingPageDTO> {
       return requestApi(
         `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
-        readingPageDtoSchema,
+        readingPageSchema,
       );
     },
 
@@ -92,9 +104,8 @@ export function createPageMatchService(): PageMatchService {
       const query = new URLSearchParams({ session_id: sessionId });
       return requestApi(
         `/reading/pages/${encodeURIComponent(selectedPageId)}?${query.toString()}`,
-        readingPageDtoSchema,
+        readingPageSchema,
       );
     },
   };
 }
->>>>>>> 2804956a8eba6d933f7f15e1123fe90733a81328

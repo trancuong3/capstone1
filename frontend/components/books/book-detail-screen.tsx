@@ -1,14 +1,8 @@
 "use client";
 
-// Kadepham
-import { Camera } from "lucide-react";
-import { CameraPreview } from "@/components/reading/camera-preview";
-import { BookPageViewer } from "@/components/reading/book-page-viewer";
-import type { ReadingPageDTO } from "@/types/reading";
-
 import { ArrowLeft, ArrowRight, BookX, RefreshCw } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
@@ -59,6 +53,10 @@ export function BookDetailScreen({
   const childService = useChildService();
   const { readingService } = useReadingServices();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetPageId = searchParams.get("pageId");
+  const startButtonRef = useRef<HTMLButtonElement | null>(null);
+
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [selectedPage, setSelectedPage] = useState<BookPagePreviewDTO | null>(
@@ -67,9 +65,6 @@ export function BookDetailScreen({
   const [startState, setStartState] = useState<"idle" | "starting" | "error">(
     "idle",
   );
-  // Kadepham
-  const [showCameraScanner, setShowCameraScanner] = useState(false);
-  const [detectedReadingPage, setDetectedReadingPage] = useState<ReadingPageDTO | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -102,7 +97,11 @@ export function BookDetailScreen({
 
         if (isActive) {
           setState({ status: "ready", book, child, pages, previewUnavailable });
-          setSelectedPage(pages[0] ?? null);
+          // Nếu có targetPageId truyền từ dashboard sang thì ưu tiên chọn trang đó
+          const matchedPage = targetPageId
+            ? pages.find((p) => p.page_id === targetPageId)
+            : null;
+          setSelectedPage(matchedPage ?? pages[0] ?? null);
         }
       } catch (error) {
         if (!isActive) {
@@ -129,6 +128,16 @@ export function BookDetailScreen({
     };
   }, [bookId, bookService, childService, requestKey, requestedChildId]);
 
+  useEffect(() => {
+    if (state.status === "ready" && targetPageId) {
+      const btn = document.getElementById("start-reading-button");
+      if (btn) {
+        btn.scrollIntoView({ behavior: "smooth", block: "center" });
+        btn.focus();
+      }
+    }
+  }, [state.status, targetPageId]);
+  
   async function handleStartReading() {
     if (
       state.status !== "ready" ||
@@ -275,6 +284,7 @@ export function BookDetailScreen({
           </p>
 
           <Button
+            id="start-reading-button"
             className="order-6 sm:order-none sm:w-[360px]"
             disabled={!selectedPage || !child}
             isLoading={startState === "starting"}
@@ -285,57 +295,6 @@ export function BookDetailScreen({
               <ArrowRight aria-hidden="true" className="size-5" />
             ) : null}
           </Button>
-
-          {/* Kadepham */}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              className="sm:w-[320px]"
-              disabled={!child}
-              onClick={() => {
-                setShowCameraScanner((prev) => !prev);
-                setDetectedReadingPage(null);
-              }}
-              variant="secondary"
-            >
-              <Camera aria-hidden="true" className="size-5" />
-              {showCameraScanner
-                ? "Đóng khung Camera"
-                : "Đặt sách trước Camera (ViRead Vision)"}
-            </Button>
-          </div>
-
-          {showCameraScanner ? (
-            <div className="mt-2 flex flex-col gap-4">
-              <CameraPreview
-                bookId={book.id}
-                enableScanner
-                onPageDetected={(matchedPage) => {
-                  setDetectedReadingPage(matchedPage);
-                  const foundPreview = pages.find(
-                    (p) => p.page_id === matchedPage.page_id,
-                  );
-                  if (foundPreview) {
-                    setSelectedPage(foundPreview);
-                  }
-                }}
-              />
-
-              {detectedReadingPage ? (
-                <div className="flex flex-col gap-3 rounded-card bg-cream p-4 sm:p-6">
-                  <StatusMessage
-                    title={`Đã nhận diện thành công Trang ${detectedReadingPage.page_number}!`}
-                    tone="info"
-                  >
-                    Hệ thống ViRead Vision đã xác nhận sách đặt đúng khung và tải sẵn {detectedReadingPage.words.length} từ của Trang {detectedReadingPage.page_number}. Bé có thể đọc ngay bên dưới!
-                  </StatusMessage>
-                  <BookPageViewer
-                    currentWordId={detectedReadingPage.words[0]?.word_id ?? null}
-                    page={detectedReadingPage}
-                  />
-                </div>
-              ) : null}
-            </div>
-          ) : null}
 
           <div className="order-5 sm:order-none">
             {previewUnavailable ? (
