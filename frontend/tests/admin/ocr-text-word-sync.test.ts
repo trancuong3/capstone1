@@ -76,7 +76,7 @@ describe("Vietnamese OCR page text and word synchronization", () => {
 
     expect(result.status).toBe("synchronized");
     if (result.status !== "synchronized") throw new Error("Expected sync");
-    expect(result.text).toBe("Ta đi\\nhọc.");
+    expect(result.text).toBe("Ta đi\nhọc.");
   });
 
   it("rejects a word entry that contains multiple tokens instead of flattening page layout", () => {
