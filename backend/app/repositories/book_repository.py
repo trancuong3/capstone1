@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
@@ -113,7 +113,16 @@ class AdminCatalogRepository(CatalogRepository):
         return result.scalars().all()
 
     async def pages(self, book_id: UUID):
-        # Active Admin OCR lists must never include pages that were retired.
+        """Return every persisted page for catalog totals, including retired pages."""
+        result = await self.db.execute(
+            select(BookPage)
+            .where(BookPage.BookId == book_id)
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return result.scalars().all()
+
+    async def active_pages(self, book_id: UUID):
+        """Return only active pages for the operational Admin OCR list."""
         result = await self.db.execute(
             select(BookPage)
             .where(
@@ -123,6 +132,13 @@ class AdminCatalogRepository(CatalogRepository):
             .order_by(BookPage.PageNumber, BookPage.Id)
         )
         return result.scalars().all()
+
+    async def max_page_number(self, book_id: UUID) -> int:
+        """Read the high-water mark, including retired page numbers."""
+        value = await self.db.scalar(
+            select(func.max(BookPage.PageNumber)).where(BookPage.BookId == book_id)
+        )
+        return int(value or 0)
 
     async def page(self, page_id: UUID):
         return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
