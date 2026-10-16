@@ -35,12 +35,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Parent CRUD and API client tests
+      - name: Run API, Parent CRUD, OCR reading layout and Admin page service tests
         run: >-
           npm test --
           test/api-client.test.ts
+          test/real-admin-services.test.ts
           tests/admin/admin-parents-screen.test.tsx
           tests/admin/admin-parent-detail-screen.test.tsx
+          tests/reading/book-page-viewer.test.tsx
+
+      - name: Check formatting for changed OCR and reading files
+        run: >-
+          npx prettier --check
+          components/admin/admin-book-detail-screen.tsx
+          components/admin/admin-page-uploader.tsx
+          components/reading/book-page-viewer.tsx
+          lib/api/admin-page-service.ts
+          lib/api/reading-service.ts
+          test/real-admin-services.test.ts
+          tests/reading/book-page-viewer.test.tsx
+          types/reading.ts
 
       - name: TypeScript check for Parent CRUD source
         run: npx tsc --noEmit -p tsconfig.admin-parent-crud.json
@@ -55,6 +69,14 @@ jobs:
           types/admin.ts
           "app/admin/(protected)/parents/page.tsx"
           "app/admin/(protected)/parents/[parentId]/page.tsx"
+          components/admin/admin-book-detail-screen.tsx
+          components/admin/admin-page-uploader.tsx
+          components/reading/book-page-viewer.tsx
+          lib/api/admin-page-service.ts
+          lib/api/reading-service.ts
+          test/real-admin-services.test.ts
+          tests/reading/book-page-viewer.test.tsx
+          types/reading.ts
 
       # Informational until pre-existing whole-repository TypeScript debt is resolved.
       # Parent CRUD files are gated separately by scoped typecheck, lint and tests above.
