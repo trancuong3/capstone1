@@ -113,7 +113,15 @@ class AdminCatalogRepository(CatalogRepository):
         return result.scalars().all()
 
     async def pages(self, book_id: UUID):
-        result = await self.db.execute(select(BookPage).where(BookPage.BookId == book_id).order_by(BookPage.PageNumber, BookPage.Id))
+        # Active Admin OCR lists must never include pages that were retired.
+        result = await self.db.execute(
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
         return result.scalars().all()
 
     async def page(self, page_id: UUID):
