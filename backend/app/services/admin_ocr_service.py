@@ -642,18 +642,27 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be edited")
         if not payload.draft_text.strip():
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
-        words = self._validated_words(payload.words)
-        await self.repo.sync_words(revision.Id, words)
         draft_text = payload.draft_text.strip()
+        words = self._validated_words(payload.words)
+        text_tokens = normalize_text_tokens(draft_text)
+        word_tokens = [str(item["normalized_text"]) for item in words]
+        if text_tokens != word_tokens:
+            raise HTTPException(
+                status_code=422,
+                detail="Draft text must match the ordered word list; edit the word entries before saving",
+            )
+
         content_hash = hashlib.sha256(
             json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        self.repo.update_revision_draft(
-            revision,
-            draft_text=draft_text,
-            content_hash=content_hash,
-        )
         try:
+            # Keep draft text and the corresponding word records in one transaction.
+            await self.repo.sync_words(revision.Id, words)
+            self.repo.update_revision_draft(
+                revision,
+                draft_text=draft_text,
+                content_hash=content_hash,
+            )
             await self.db.commit()
             await self.db.refresh(revision)
             await self.db.refresh(page)
