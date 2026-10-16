@@ -205,7 +205,7 @@ export function AdminOcrReviewScreen({
             ...patch,
             normalized_text:
               patch.text === undefined
-                ? (patch.normalized_text ?? word.normalized_text)
+                ? patch.normalized_text ?? word.normalized_text
                 : normalizeVietnameseWord(patch.text),
           }
         : word,
