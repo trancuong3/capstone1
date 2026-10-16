@@ -102,6 +102,7 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         for operation in ("save", "verify"):
             page = make_page(LifecycleStatus="RETIRED")
             service, db = make_service(page)
+            service.repo.revision = AsyncMock()
             with self.subTest(operation=operation):
                 with self.assertRaises(HTTPException) as caught:
                     if operation == "save":
