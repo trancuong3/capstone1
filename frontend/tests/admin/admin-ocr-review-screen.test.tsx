@@ -252,11 +252,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.type(pageText, "Ta đi học.");
 
     const wordInputs = screen.getAllByLabelText("Văn bản từ");
-    expect(wordInputs.map((input) => (input as HTMLInputElement).value)).toEqual([
-      "Ta",
-      "đi",
-      "học.",
-    ]);
+    expect(
+      wordInputs.map((input) => (input as HTMLInputElement).value),
+    ).toEqual(["Ta", "đi", "học."]);
     expect(pageText).toHaveValue("Ta đi học.");
     expect(boxes.map((box) => (box as HTMLInputElement).value)).toEqual(
       originalBoxValues,
@@ -274,11 +272,11 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.clear(pageText);
     await user.type(pageText, "Ta đi học.");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText("Văn bản từ").map((input) => (input as HTMLInputElement).value)).toEqual([
-      "Ta",
-      "đi",
-      "học.",
-    ]);
+    expect(
+      screen
+        .getAllByLabelText("Văn bản từ")
+        .map((input) => (input as HTMLInputElement).value),
+    ).toEqual(["Ta", "đi", "học."]);
   });
 
   it("scrolls the word list to the first uncertain OCR word", async () => {
