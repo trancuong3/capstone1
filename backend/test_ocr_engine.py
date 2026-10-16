@@ -159,7 +159,11 @@ class OcrEngineTests(unittest.TestCase):
                 "adaptive_gaussian_threshold",
             ],
         )
-        for actual, expected in zip(result["words"][0]["bbox"], (0.2, 0.2, 0.05, 0.05)):
+        # The test image is 400x200 and the OCR preprocessing upscale factor is 3.
+        for actual, expected in zip(
+            result["words"][0]["bbox"],
+            (200 / 1200, 100 / 600, 50 / 1200, 25 / 600),
+        ):
             self.assertAlmostEqual(actual, expected)
 
     def test_candidate_score_rejects_empty_or_non_text_output(self):
