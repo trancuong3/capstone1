@@ -98,7 +98,10 @@ export function BookPageViewer({
           ) : page.text ? (
             <div className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
               {page.text.split(/\n{2,}/u).map((paragraph, index) => (
-                <p className="mb-4 whitespace-pre-wrap indent-6 last:mb-0" key={index}>
+                <p
+                  className="mb-4 whitespace-pre-wrap indent-6 last:mb-0"
+                  key={index}
+                >
                   {paragraph}
                 </p>
               ))}
