@@ -129,6 +129,14 @@ class AdminPageListRead(BaseModel):
     book_id: UUID
     page_number: int = Field(gt=0)
     processing: AdminPageProcessingRead
+    text_preview: str | None = None
+
+
+class AdminPageLifecycleRead(BaseModel):
+    page_id: UUID
+    book_id: UUID
+    page_number: int = Field(gt=0)
+    lifecycle_status: Literal["RETIRED"]
 
 
 class AdminPageImageRead(BaseModel):

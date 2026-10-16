@@ -1,5 +1,3 @@
-import Image from "next/image";
-
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -43,29 +41,7 @@ export function BookPageViewer({
           </span>
         </header>
 
-        {page.image_url ? (
-          <div className="relative mx-auto my-2 h-[200px] w-full max-w-[420px] overflow-hidden rounded-control border border-sand bg-white p-1 shadow-sm sm:h-[42%] sm:max-w-[560px]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              alt={`Ảnh gốc trang ${page.page_number}`}
-              className="h-full w-full object-contain"
-              src={page.image_url}
-            />
-          </div>
-        ) : (
-          <div className="relative mx-auto my-2 h-[168px] w-full max-w-[294px] overflow-hidden rounded-control bg-book-orange sm:h-[34%] sm:max-w-[560px]">
-            <Image
-              alt="Minh họa trang sách"
-              className="h-full w-full object-cover"
-              fill
-              priority
-              sizes="(max-width: 767px) 294px, 560px"
-              src="/images/figma/book-cat.svg"
-            />
-          </div>
-        )}
-
-        <div className="mt-2 flex-1 overflow-y-auto rounded-card bg-white/70 p-4 shadow-inner">
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-5 shadow-inner sm:mt-6 sm:p-8">
           {hasWords ? (
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
               {page.words.map((word) => (
