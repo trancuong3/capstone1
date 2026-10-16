@@ -40,7 +40,10 @@ export function normalizeVietnameseWord(value: string): string {
   return characters.join("").replace(/\s+/gu, " ").trim();
 }
 
-/** Tokenizes like the backend: Unicode NFC, whitespace-separated words, edge punctuation ignored for comparison. */
+/**
+ * Tokenizes like the backend: Unicode NFC, whitespace-separated words, and
+ * ignores edge punctuation for comparison.
+ */
 export function tokenizePageText(value: string): string[] {
   const normalized = value.normalize("NFC").trim();
   if (!normalized) return [];
@@ -53,7 +56,7 @@ export function tokenizePageText(value: string): string[] {
  * Synchronizes page text into OCR word records only when there is a safe
  * one-to-one token mapping. Text edits never recalculate or synthesize boxes.
  * If the word count changes, preserve the existing records and require an
- * explicit reconciliation rather than attaching a stale box to a different word.
+ * explicit reconciliation instead of attaching a stale box to another word.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -75,7 +78,7 @@ export function syncPageTextToWords(
     ...word,
     text: tokens[index],
     normalized_text: normalizeVietnameseWord(tokens[index]),
-    // Deliberately preserve bbox, confidence, index and line index byte-for-byte.
+    // Preserve bbox, confidence, index and line index exactly.
     bbox: [...word.bbox] as [number, number, number, number],
   }));
 
@@ -94,7 +97,7 @@ export type WordsToPageTextSyncResult =
 /**
  * Applies direct single-word edits back into the page text without flattening
  * line breaks or other whitespace separators. It refuses word entries that
- * have become blank or contain multiple tokens rather than guessing box mapping.
+ * are blank or contain multiple tokens rather than guessing a box mapping.
  */
 export function syncWordsToPageText(
   currentPageText: string,
