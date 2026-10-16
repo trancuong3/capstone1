@@ -72,9 +72,9 @@ export function AdminOcrReviewScreen({
   const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"save" | "verify" | "reprocess" | null>(
-    null,
-  );
+  const [busy, setBusy] = useState<
+    "edit" | "save" | "verify" | "reprocess" | null
+  >(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
@@ -211,6 +211,28 @@ export function AdminOcrReviewScreen({
         .filter(Boolean)
         .join(" "),
     );
+  }
+
+  async function createEditDraft() {
+    if (!detail || detail.verification_status !== "VERIFIED" || busy !== null) {
+      return;
+    }
+    setBusy("edit");
+    setNotice(null);
+    try {
+      const created = await revisions.createDraft(pageId);
+      applyDetail(created);
+      setHistory(await revisions.list(pageId));
+      setNotice(
+        "Đã tạo revision nháp từ nội dung đã xác minh. Hãy sửa, lưu bản nháp và xác minh để áp dụng cho lượt đọc mới.",
+      );
+    } catch {
+      setNotice(
+        "Không thể tạo bản nháp chỉnh sửa. Trang có thể đã ngừng sử dụng hoặc dữ liệu revision hiện hành không hợp lệ.",
+      );
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function saveDraft() {
@@ -517,7 +539,7 @@ export function AdminOcrReviewScreen({
               <textarea
                 aria-describedby="ocr-help"
                 className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
-                disabled={verified}
+                disabled={verified || detail.lifecycle_status !== "ACTIVE"}
                 id="ocr-text"
                 onChange={(event) => setDraftText(event.target.value)}
                 value={draftText}
@@ -528,23 +550,47 @@ export function AdminOcrReviewScreen({
               nút đồng bộ trước khi xác minh.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button
-                className="sm:w-auto"
-                disabled={verified || busy !== null}
-                isLoading={busy === "save"}
-                onClick={() => void saveDraft()}
-                variant="secondary"
-              >
-                <Save aria-hidden className="size-4" /> Lưu bản nháp
-              </Button>
-              <Button
-                className="sm:w-auto"
-                disabled={verified || busy !== null || words.length === 0}
-                isLoading={busy === "verify"}
-                onClick={() => void verifyRevision()}
-              >
-                <CheckCircle2 aria-hidden className="size-4" /> Xác minh trang
-              </Button>
+              {verified ? (
+                <Button
+                  className="sm:w-auto"
+                  disabled={
+                    busy !== null || detail.lifecycle_status !== "ACTIVE"
+                  }
+                  isLoading={busy === "edit"}
+                  onClick={() => void createEditDraft()}
+                  variant="secondary"
+                >
+                  <Save aria-hidden className="size-4" /> Tạo bản nháp để sửa
+                  nội dung
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    className="sm:w-auto"
+                    disabled={
+                      busy !== null || detail.lifecycle_status !== "ACTIVE"
+                    }
+                    isLoading={busy === "save"}
+                    onClick={() => void saveDraft()}
+                    variant="secondary"
+                  >
+                    <Save aria-hidden className="size-4" /> Lưu bản nháp
+                  </Button>
+                  <Button
+                    className="sm:w-auto"
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      words.length === 0
+                    }
+                    isLoading={busy === "verify"}
+                    onClick={() => void verifyRevision()}
+                  >
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác minh
+                    trang
+                  </Button>
+                </>
+              )}
             </div>
           </Card>
 
@@ -675,7 +721,7 @@ export function AdminOcrReviewScreen({
             </div>
             <Button
               className="mt-4 sm:w-auto"
-              disabled={busy !== null}
+              disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
               isLoading={busy === "reprocess"}
               onClick={() => void reprocess()}
               variant="secondary"
