@@ -84,10 +84,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       }
       setPendingRetire(null);
       setRetiringPageId(null);
+      setItems((current) =>
+        (current ?? []).filter(
+          (entry) => entry.processing.page_id !== pageId,
+        ),
+      );
       setPageActionNotice({
         tone: "info",
-        title: "Trang đã ngừng sử dụng",
-        message: `Trang ${item.page_number} đã được ẩn khỏi nội dung đọc mới. Ảnh nguồn, các revision và lịch sử phiên đọc được giữ nguyên.`,
+        title: "Đã xóa trang khỏi danh sách OCR",
+        message: `Trang ${item.page_number} đã bị ẩn khỏi danh sách OCR đang hoạt động và các lượt đọc mới. Ảnh nguồn, revision và lịch sử đọc cũ vẫn được giữ.`,
       });
       await load();
     } catch {
