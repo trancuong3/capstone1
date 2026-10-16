@@ -98,5 +98,19 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         service.repo.set_page_lifecycle_status.assert_not_called()
 
 
+    async def test_retired_page_cannot_be_edited_or_verified(self):
+        for operation in ("save", "verify"):
+            page = make_page(LifecycleStatus="RETIRED")
+            service, db = make_service(page)
+            with self.subTest(operation=operation):
+                with self.assertRaises(HTTPException) as caught:
+                    if operation == "save":
+                        await service.save_draft(ACTOR, PAGE, REVISION, None)
+                    else:
+                        await service.verify(ACTOR, PAGE, None)
+                self.assertEqual(caught.exception.status_code, 409)
+                db.commit.assert_not_awaited()
+                service.repo.revision.assert_not_awaited()
+
 if __name__ == "__main__":
     unittest.main()
