@@ -50,6 +50,8 @@ def catalog_repo():
     repo.books = AsyncMock(return_value=[book_row()])
     repo.page = AsyncMock(return_value=page_row())
     repo.pages = AsyncMock(return_value=[page_row()])
+    repo.active_pages = AsyncMock(return_value=[page_row()])
+    repo.max_page_number = AsyncMock(return_value=2)
     repo.revisions = AsyncMock(return_value=[revision_row()])
     repo.revision = AsyncMock(return_value=revision_row())
     repo.words = AsyncMock(return_value=[])
@@ -85,6 +87,24 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as caught:
             await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
+
+    async def test_active_page_list_hides_retired_pages_but_catalog_counts_keep_history(self):
+        repo = catalog_repo()
+        retired = page_row(LifecycleStatus="RETIRED", PageNumber=7)
+        repo.pages.return_value = [page_row(), retired]
+        repo.active_pages.return_value = [page_row()]
+        catalog = await AdminCatalogService(repository=repo).list(None, None, None)
+        active = await AdminCatalogService(repository=repo).pages(BOOK)
+        self.assertEqual(catalog[0].page_count, 2)
+        self.assertEqual([item.page_number for item in active], [2])
+        repo.active_pages.assert_awaited_once_with(BOOK)
+
+    async def test_next_page_number_includes_retired_page_high_water_mark(self):
+        repo = catalog_repo()
+        repo.max_page_number.return_value = 7
+        result = await AdminCatalogService(repository=repo).next_page_number(BOOK)
+        self.assertEqual(result, 8)
+        repo.max_page_number.assert_awaited_once_with(BOOK)
 
     async def test_admin_page_list_includes_persisted_text_preview(self):
         repo = catalog_repo()
