@@ -153,6 +153,14 @@ describe("real Admin adapters", () => {
       code: "NETWORK_ERROR",
     });
   });
+  it("suggests the next page number using all stored page records", async () => {
+    fetchMock.mockResolvedValue(Response.json({ next_page_number: 8 }));
+    expect(await createAdminPageService().nextPageNumber(bookId)).toBe(8);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}/next-page-number`,
+    );
+  });
+
   it("reads pages with real processing values", async () => {
     fetchMock.mockResolvedValue(Response.json([page]));
     expect(await createAdminPageService().list(bookId)).toEqual([page]);
