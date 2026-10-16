@@ -164,6 +164,10 @@ class AdminCatalogService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Page contract is not available yet") from None
 
+    async def processing_by_page_id(self, page_id: UUID):
+        page = await self.page(page_id)
+        return await self.processing(page)
+
     async def page_text_preview(self, page) -> str | None:
         revisions = await self.repository.revisions(page.Id)
         if not revisions:
