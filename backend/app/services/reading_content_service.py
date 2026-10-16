@@ -437,6 +437,7 @@ class ReadingContentService:
                 ReadingPageWordDTO(
                     word_id=row.Id,
                     word_index=row.WordIndex,
+                    line_index=max(0, int(row.LineIndex or 0)),
                     text=row.Text,
                     bbox=(x, y, width, height),
                 )
