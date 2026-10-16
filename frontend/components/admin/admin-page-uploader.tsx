@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
@@ -26,6 +26,7 @@ export function AdminPageUploader({
   const { pages } = useAdminServices();
   const [files, setFiles] = useState<File[]>([]);
   const [startNumber, setStartNumber] = useState(String(nextPageNumber));
+  const previousSuggestedNumberRef = useRef(nextPageNumber);
   const [progress, setProgress] = useState<AdminPageUploadProgressUI[]>([]);
   const progressRef = useRef<AdminPageUploadProgressUI[]>([]);
   const [retryEntries, setRetryEntries] = useState<AdminPageUploadInputUI[]>(
@@ -33,6 +34,14 @@ export function AdminPageUploader({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const previousSuggestion = previousSuggestedNumberRef.current;
+    setStartNumber((current) =>
+      current === String(previousSuggestion) ? String(nextPageNumber) : current,
+    );
+    previousSuggestedNumberRef.current = nextPageNumber;
+  }, [nextPageNumber]);
 
   function updateProgress(item: AdminPageUploadProgressUI) {
     const current = progressRef.current;
