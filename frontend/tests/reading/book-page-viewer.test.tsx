@@ -20,19 +20,49 @@ describe("BookPageViewer", () => {
     const pageWithLayout: ReadingPageDTO = {
       ...page,
       words: [
-        { word_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", word_index: 0, line_index: 0, text: "Mèo", bbox: [0.1, 0.1, 0.1, 0.05] },
-        { word_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", word_index: 1, line_index: 0, text: "nhỏ.", bbox: [0.22, 0.1, 0.1, 0.05] },
-        { word_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", word_index: 2, line_index: 1, text: "Đang", bbox: [0.1, 0.2, 0.1, 0.05] },
-        { word_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", word_index: 3, line_index: 3, text: "ngủ.", bbox: [0.1, 0.3, 0.1, 0.05] },
+        {
+          word_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          word_index: 0,
+          line_index: 0,
+          text: "Mèo",
+          bbox: [0.1, 0.1, 0.1, 0.05],
+        },
+        {
+          word_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          word_index: 1,
+          line_index: 0,
+          text: "nhỏ.",
+          bbox: [0.22, 0.1, 0.1, 0.05],
+        },
+        {
+          word_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          word_index: 2,
+          line_index: 1,
+          text: "Đang",
+          bbox: [0.1, 0.2, 0.1, 0.05],
+        },
+        {
+          word_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          word_index: 3,
+          line_index: 3,
+          text: "ngủ.",
+          bbox: [0.1, 0.3, 0.1, 0.05],
+        },
       ],
     };
     const { container } = render(
       <BookPageViewer currentWordId={null} page={pageWithLayout} />,
     );
 
-    expect(container.querySelector('[data-line-index="0"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-line-index="1"]')).toBeInTheDocument();
-    expect(container.querySelector('[data-line-index="3"]')).toHaveClass("pl-5");
+    expect(
+      container.querySelector('[data-line-index="0"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-line-index="1"]'),
+    ).toBeInTheDocument();
+    expect(container.querySelector('[data-line-index="3"]')).toHaveClass(
+      "pl-5",
+    );
     expect(screen.getByText("Mèo")).toBeInTheDocument();
     expect(screen.getByText("ngủ.")).toBeInTheDocument();
   });
