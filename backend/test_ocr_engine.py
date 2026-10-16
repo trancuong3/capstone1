@@ -149,12 +149,13 @@ class OcrEngineTests(unittest.TestCase):
 
         self.assertEqual(result["text"], "mèo")
         self.assertEqual(result["metadata"]["selected_psm"], 6)
-        self.assertEqual(result["metadata"]["candidate_count"], 3)
+        self.assertEqual(result["metadata"]["candidate_count"], 4)
         self.assertEqual(
             [candidate["preprocessing"] for candidate in result["metadata"]["candidate_scores"]],
             [
                 "otsu_threshold",
                 "clahe_grayscale",
+                "grayscale",
                 "adaptive_gaussian_threshold",
             ],
         )
@@ -175,6 +176,27 @@ class OcrEngineTests(unittest.TestCase):
         })
         self.assertGreater(score, 0.75)
         self.assertLessEqual(score, 1.0)
+
+    def test_candidate_score_penalizes_non_text_artifacts_from_illustrations(self):
+        clean = {
+            "text": ["Chú", "mèo"],
+            "conf": ["90", "90"],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+        }
+        noisy = {
+            "text": ["Chú", "~——^", "mèo", "|"],
+            "conf": ["90", "99", "90", "99"],
+            "block_num": [1, 1, 1, 1],
+            "par_num": [1, 1, 1, 1],
+            "line_num": [1, 1, 1, 1],
+        }
+
+        self.assertLess(
+            ocr_engine._candidate_quality_score(noisy),
+            ocr_engine._candidate_quality_score(clean),
+        )
 
     def test_missing_vietnamese_language_data_fails_closed(self):
         with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
