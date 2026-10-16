@@ -333,7 +333,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       ).toBe(true),
     );
     expect(
-      await screen.findByText("Trang đã ngừng sử dụng"),
+      await screen.findByText("Đã xóa trang khỏi danh sách OCR"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Xóa trang" }),
