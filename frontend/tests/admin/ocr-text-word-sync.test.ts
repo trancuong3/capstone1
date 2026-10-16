@@ -72,7 +72,7 @@ describe("Vietnamese OCR page text and word synchronization", () => {
       normalized_text: "ta",
     };
 
-    const result = syncWordsToPageText("Tôi đi\\nhọc.", existing);
+    const result = syncWordsToPageText("Tôi đi\nhọc.", existing);
 
     expect(result.status).toBe("synchronized");
     if (result.status !== "synchronized") throw new Error("Expected sync");
@@ -87,13 +87,13 @@ describe("Vietnamese OCR page text and word synchronization", () => {
       normalized_text: "ta rất",
     };
 
-    const result = syncWordsToPageText("Tôi đi\\nhọc.", existing);
+    const result = syncWordsToPageText("Tôi đi\nhọc.", existing);
 
     expect(result.status).toBe("token-count-mismatch");
     if (result.status !== "token-count-mismatch") {
       throw new Error("Expected token count mismatch");
     }
-    expect(result.text).toBe("Tôi đi\\nhọc.");
+    expect(result.text).toBe("Tôi đi\nhọc.");
     expect(result.actualTokenCount).toBe(3);
   });
 
