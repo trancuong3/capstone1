@@ -24,6 +24,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import {
   normalizeVietnameseWord,
   syncPageTextToWords,
+  syncWordsToPageText,
 } from "@/lib/ocr/sync-page-text-words";
 import type {
   AdminBookDTO,
@@ -210,18 +211,13 @@ export function AdminOcrReviewScreen({
         : word,
     );
     setWords(nextWords);
-    const nextText = nextWords
-      .map((word) => word.text.trim())
-      .filter(Boolean)
-      .join(" ");
-    setDraftText(nextText);
-    const result = syncPageTextToWords(nextText, nextWords);
+    const result = syncWordsToPageText(draftText, nextWords);
     if (result.status === "synchronized") {
-      setWords([...result.words]);
+      setDraftText(result.text);
       setWordSyncError(null);
     } else {
       setWordSyncError(
-        "Văn bản từ phải tương ứng với từng token riêng lẻ. Hãy chỉnh lại từ chứa khoảng trắng hoặc từ rỗng trước khi lưu.",
+        `Danh sách có ${result.expectedWordCount} từ, nhưng văn bản trang có ${result.actualTokenCount} từ hoặc một mục Word chứa nhiều từ. Hãy chỉnh lại trước khi lưu.`,
       );
     }
   }
