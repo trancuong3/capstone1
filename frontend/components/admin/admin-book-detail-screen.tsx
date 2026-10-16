@@ -100,9 +100,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setPendingRetire(null);
       setRetiringPageId(null);
       setItems((current) =>
-        (current ?? []).filter(
-          (entry) => entry.processing.page_id !== pageId,
-        ),
+        (current ?? []).filter((entry) => entry.processing.page_id !== pageId),
       );
       setPageActionNotice({
         tone: "info",
