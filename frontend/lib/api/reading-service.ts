@@ -56,6 +56,7 @@ const wordBboxSchema = z.tuple([
 const wordDtoSchema = z.object({
   word_id: z.guid(),
   word_index: z.number().int(),
+  line_index: z.number().int().nonnegative().optional(),
   text: z.string(),
   bbox: wordBboxSchema,
 });

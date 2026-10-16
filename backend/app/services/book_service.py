@@ -121,7 +121,8 @@ class AdminCatalogService:
 
     async def page(self, page_id: UUID):
         page = await self.repository.page(page_id)
-        if page is None:
+        if page is None or page.LifecycleStatus != "ACTIVE":
+            # Treat retired pages as unavailable in the active Admin editor.
             raise HTTPException(status_code=404, detail="Resource not found")
         return page
 
@@ -183,7 +184,7 @@ class AdminCatalogService:
         await self.book(book_id)
         try:
             output = []
-            for page in await self.repository.pages(book_id):
+            for page in await self.repository.active_pages(book_id):
                 output.append(
                     AdminPageListRead(
                         book_id=page.BookId,
@@ -195,6 +196,14 @@ class AdminCatalogService:
             return output
         except ValidationError:
             raise HTTPException(status_code=501, detail="Page list contract is not available yet") from None
+
+    async def next_page_number(self, book_id: UUID) -> int:
+        """Suggest a page number after all existing pages, including retired ones."""
+        await self.book(book_id)
+        next_number = await self.repository.max_page_number(book_id) + 1
+        if next_number > 32767:
+            raise HTTPException(status_code=409, detail="No page number remains for this book")
+        return next_number
 
     async def image(self, page_id: UUID):
         page = await self.page(page_id)

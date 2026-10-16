@@ -35,6 +35,75 @@ def normalize_text_tokens(value: str) -> list[str]:
     return [token for raw in re.split(r"\s+", unicodedata.normalize("NFC", value).strip()) if (token := normalize_word(raw))]
 
 
+_PUNCTUATION_ONLY = frozenset(".,;:!?…%)]}»”’'\"([{«“‘-—–")
+_PUNCTUATION_NO_SPACE_BEFORE = frozenset(",.;:!?…%)]}»”’")
+_PUNCTUATION_NO_SPACE_AFTER = frozenset("([{«“‘")
+
+
+def _join_text_tokens(tokens: Iterable[str]) -> str:
+    """Rebuild a display line while keeping punctuation attached naturally."""
+    output = ""
+    for raw_token in tokens:
+        token = unicodedata.normalize("NFC", str(raw_token)).strip()
+        if not token:
+            continue
+        if not output:
+            output = token
+        elif token[0] in _PUNCTUATION_NO_SPACE_BEFORE or output[-1] in _PUNCTUATION_NO_SPACE_AFTER:
+            output += token
+        else:
+            output += " " + token
+    return output
+
+
+def _format_text_lines(
+    line_items: list[tuple[tuple[int, int, int], dict[str, object]]],
+) -> tuple[str, dict[int, int], int]:
+    """Preserve detected line order and add conservative paragraph separation."""
+    if not line_items:
+        return "", {}, 0
+
+    heights = sorted(
+        max(1, int(item["bottom"]) - int(item["top"]))
+        for _, item in line_items
+    )
+    median_height = heights[len(heights) // 2] if heights else 1
+    parts: list[str] = []
+    raw_to_display_line: dict[int, int] = {}
+    display_line_index = 0
+    paragraph_count = 0
+    previous_key: tuple[int, int, int] | None = None
+    previous_info: dict[str, object] | None = None
+
+    for line_key, info in line_items:
+        if previous_key is not None and previous_info is not None:
+            vertical_gap = int(info["top"]) - int(previous_info["bottom"])
+            previous_height = max(
+                1, int(previous_info["bottom"]) - int(previous_info["top"])
+            )
+            paragraph_break = (
+                line_key[:2] != previous_key[:2]
+                or vertical_gap > max(12, int(median_height * 1.8), int(previous_height * 1.8))
+            )
+            if paragraph_break:
+                parts.append("\n\n")
+                display_line_index += 2
+                paragraph_count += 1
+            else:
+                parts.append("\n")
+                display_line_index += 1
+        else:
+            paragraph_count = 1
+
+        raw_to_display_line[int(info["raw_line_index"])] = display_line_index
+        line_tokens = [str(token) for token in info.get("tokens", [])]
+        parts.append(_join_text_tokens(line_tokens))
+        previous_key = line_key
+        previous_info = info
+
+    return "".join(parts).strip(), raw_to_display_line, paragraph_count
+
+
 def _candidate_quality_score(result: dict[str, object]) -> float:
     """Rank OCR candidates using token-linked confidence and layout signals.
 
@@ -254,10 +323,21 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
     line_map: dict[tuple[int, int, int], int] = {}
+    line_details: dict[tuple[int, int, int], dict[str, object]] = {}
     words: list[dict[str, object]] = []
+    pending_prefix: dict[tuple[int, int, int], str] = {}
+    last_word_by_line: dict[tuple[int, int, int], int] = {}
+
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
-        if not token or not any(character.isalnum() for character in token):
+        if not token:
+            continue
+        has_alphanumeric = any(character.isalnum() for character in token)
+        is_punctuation_only = not has_alphanumeric and all(
+            character in _PUNCTUATION_ONLY for character in token
+        )
+        if not has_alphanumeric and not is_punctuation_only:
+            # Ignore isolated symbol fragments from illustrations, but retain punctuation.
             continue
         try:
             left = int(result["left"][index])
@@ -273,9 +353,6 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
 
         if not np.isfinite(raw_confidence):
             raw_confidence = -1.0
-        # Keep short, low-confidence Vietnamese words (for example "là", "và")
-        # so Admin can review them. Invalid/punctuation-only tokens are filtered above;
-        # confidence affects review status, not whether a real word is silently dropped.
 
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
@@ -287,15 +364,39 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         line_key = (block, paragraph, line)
         if line_key not in line_map:
             line_map[line_key] = len(line_map)
-        confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
+        line_info = line_details.setdefault(
+            line_key,
+            {
+                "raw_line_index": line_map[line_key],
+                "top": top,
+                "bottom": top + box_height,
+                "tokens": [],
+            },
+        )
+        line_info["top"] = min(int(line_info["top"]), top)
+        line_info["bottom"] = max(int(line_info["bottom"]), top + box_height)
+
+        if not has_alphanumeric:
+            # Keep punctuation in page text but don't fabricate a word box for it.
+            line_info["tokens"].append(token)
+            if token[0] in _PUNCTUATION_NO_SPACE_BEFORE and line_key in last_word_by_line:
+                previous_word = words[last_word_by_line[line_key]]
+                previous_word["text"] = str(previous_word["text"]) + token
+            else:
+                pending_prefix[line_key] = pending_prefix.get(line_key, "") + token
+            continue
+
+        # Short Vietnamese words remain available for Admin review even at low confidence.
         normalized = normalize_word(token)
         if not normalized:
             continue
-        words.append({
+        display_token = pending_prefix.pop(line_key, "") + token
+        confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
+        word = {
             "word_index": len(words),
             "line_index": line_map[line_key],
-            "text": token,
-            "normalized_text": normalized,
+            "text": display_token,
+            "normalized_text": normalize_word(display_token),
             "bbox": [
                 left / scaled_w,
                 top / scaled_h,
@@ -303,9 +404,23 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
                 box_height / scaled_h,
             ],
             "ocr_confidence": confidence,
-        })
+        }
+        words.append(word)
+        line_info["tokens"].append(token)
+        last_word_by_line[line_key] = len(words) - 1
+
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
+
+    line_items = [
+        (key, value)
+        for key, value in line_details.items()
+        if value.get("tokens")
+    ]
+    formatted_text, raw_to_display_line, paragraph_count = _format_text_lines(line_items)
+    for word in words:
+        raw_line_index = int(word["line_index"])
+        word["line_index"] = raw_to_display_line.get(raw_line_index, raw_line_index)
 
     score_metadata = [
         {
@@ -316,7 +431,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         for name, psm, score, _candidate in candidate_results
     ]
     return {
-        "text": " ".join(str(word["text"]) for word in words),
+        "text": formatted_text,
         "words": words,
         "metadata": {
             "engine": "tesseract",
@@ -338,5 +453,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
             "processed_height": scaled_h,
             "scale_factor": scale_factor,
             "word_count": len(words),
+            "line_count": len(line_items),
+            "paragraph_count": paragraph_count,
         },
     }

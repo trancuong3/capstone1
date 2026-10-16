@@ -13,6 +13,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 
 export interface AdminPageService {
+  nextPageNumber(bookId: string): Promise<number>;
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
   getImage(pageId: string): Promise<AdminPageImageUI>;
   upload(
@@ -41,6 +42,17 @@ export const adminProcessingSchema = z.object({
 
 export function createAdminPageService(): AdminPageService {
   return {
+    nextPageNumber: async (bookId) => {
+      const result = await requestApi(
+        `/books/admin/catalog/${encodeURIComponent(bookId)}/next-page-number`,
+        z
+          .object({
+            next_page_number: z.number().int().min(1).max(32767),
+          })
+          .refine((item) => item.next_page_number > 0),
+      );
+      return result.next_page_number;
+    },
     list: (bookId) =>
       requestApi(
         `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,

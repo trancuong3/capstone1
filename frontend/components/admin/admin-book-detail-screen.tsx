@@ -23,6 +23,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
   );
+  const [suggestedNextPageNumber, setSuggestedNextPageNumber] = useState<
+    number | null
+  >(null);
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
   const [pagesUnavailable, setPagesUnavailable] = useState(false);
   const [pendingRetire, setPendingRetire] =
@@ -56,9 +59,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         }
         throw cause;
       }
+      let nextNumber = Math.max(
+        1,
+        ...nextPages.map((item) => item.page_number + 1),
+      );
+      try {
+        // Include retired page numbers so a hidden page number is never reused.
+        nextNumber = await pages.nextPageNumber(bookId);
+      } catch {
+        // Older/unavailable backends fall back to visible pages; upload validation
+        // still rejects a duplicate number instead of overwriting historical data.
+      }
       if (requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setItems(nextPages);
+      setSuggestedNextPageNumber(nextNumber);
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
       setError(
@@ -84,10 +99,13 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       }
       setPendingRetire(null);
       setRetiringPageId(null);
+      setItems((current) =>
+        (current ?? []).filter((entry) => entry.processing.page_id !== pageId),
+      );
       setPageActionNotice({
         tone: "info",
-        title: "Trang đã ngừng sử dụng",
-        message: `Trang ${item.page_number} đã được ẩn khỏi nội dung đọc mới. Ảnh nguồn, các revision và lịch sử phiên đọc được giữ nguyên.`,
+        title: "Đã xóa trang khỏi danh sách OCR",
+        message: `Trang ${item.page_number} đã bị ẩn khỏi danh sách OCR đang hoạt động và các lượt đọc mới. Ảnh nguồn, revision và lịch sử đọc cũ vẫn được giữ.`,
       });
       await load();
     } catch {
@@ -158,10 +176,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       </div>
       <AdminPageUploader
         bookId={book.id}
-        nextPageNumber={Math.max(
-          1,
-          ...(items ?? []).map((item) => item.page_number + 1),
-        )}
+        nextPageNumber={
+          suggestedNextPageNumber ??
+          Math.max(1, ...(items ?? []).map((item) => item.page_number + 1))
+        }
         onUploaded={() => void load()}
       />
       <section className="mt-8" aria-labelledby="pages-title">

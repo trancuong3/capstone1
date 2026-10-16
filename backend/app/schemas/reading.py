@@ -26,6 +26,7 @@ class ReadingSessionCreate(ReadingSessionBase):
 class ReadingPageWordDTO(BaseModel):
     word_id: UUID
     word_index: int
+    line_index: int = Field(default=0, ge=0)
     text: str
     bbox: tuple[float, float, float, float]
 

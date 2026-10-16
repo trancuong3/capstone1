@@ -132,6 +132,10 @@ class AdminPageListRead(BaseModel):
     text_preview: str | None = None
 
 
+class AdminNextPageNumberRead(BaseModel):
+    next_page_number: int = Field(ge=1, le=32767)
+
+
 class AdminPageLifecycleRead(BaseModel):
     page_id: UUID
     book_id: UUID

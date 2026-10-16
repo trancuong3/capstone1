@@ -49,6 +49,8 @@ export type WordBoundingBox = readonly [
 export interface ReadingPageWordDTO {
   readonly word_id: UUID;
   readonly word_index: number;
+  /** Legacy API responses may omit this; new OCR responses preserve layout. */
+  readonly line_index?: number;
   readonly text: string;
   readonly bbox: WordBoundingBox;
 }

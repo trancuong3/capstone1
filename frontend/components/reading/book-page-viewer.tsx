@@ -16,6 +16,14 @@ export function BookPageViewer({
   page,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
+  const wordsByLine = new Map<number, ReadingPageWordDTO[]>();
+  for (const word of page.words) {
+    const lineIndex = word.line_index ?? 0;
+    const lineWords = wordsByLine.get(lineIndex) ?? [];
+    lineWords.push(word);
+    wordsByLine.set(lineIndex, lineWords);
+  }
+  const wordLines = Array.from(wordsByLine.entries());
 
   return (
     <article
@@ -43,36 +51,61 @@ export function BookPageViewer({
 
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-5 shadow-inner sm:mt-6 sm:p-8">
           {hasWords ? (
-            <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
-              {page.words.map((word) => (
-                <span
-                  className={cn(
-                    "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
-                    word.word_id === currentWordId &&
-                      "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
-                  )}
-                  data-bbox={word.bbox.join(",")}
-                  data-page-revision-id={page.page_revision_id}
-                  data-word-id={word.word_id}
-                  key={word.word_id}
-                  onClick={() => onWordClick?.(word)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onWordClick?.(word);
-                    }
-                  }}
-                >
-                  {word.text}
-                </span>
-              ))}
-            </p>
+            <div className="text-[22px] font-extrabold leading-[1.9] text-ink sm:text-[28px] sm:leading-[1.7]">
+              {wordLines.map(([lineIndex, lineWords], position) => {
+                const previousLineIndex = wordLines[position - 1]?.[0];
+                const startsParagraph =
+                  previousLineIndex !== undefined &&
+                  lineIndex > previousLineIndex + 1;
+                return (
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-baseline gap-x-2 gap-y-1",
+                      position > 0 && !startsParagraph && "mt-1",
+                      startsParagraph && "mt-5 pl-5",
+                    )}
+                    data-line-index={lineIndex}
+                    key={lineIndex}
+                  >
+                    {lineWords.map((word) => (
+                      <span
+                        className={cn(
+                          "inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
+                          word.word_id === currentWordId &&
+                            "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
+                        )}
+                        data-bbox={word.bbox.join(",")}
+                        data-page-revision-id={page.page_revision_id}
+                        data-word-id={word.word_id}
+                        key={word.word_id}
+                        onClick={() => onWordClick?.(word)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onWordClick?.(word);
+                          }
+                        }}
+                      >
+                        {word.text}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
           ) : page.text ? (
-            <p className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
-              {page.text}
-            </p>
+            <div className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
+              {page.text.split(/\n{2,}/u).map((paragraph, index) => (
+                <p
+                  className="mb-4 whitespace-pre-wrap indent-6 last:mb-0"
+                  key={index}
+                >
+                  {paragraph}
+                </p>
+              ))}
+            </div>
           ) : (
             <p className="text-body text-muted">
               Đang tải nội dung văn bản của trang…
