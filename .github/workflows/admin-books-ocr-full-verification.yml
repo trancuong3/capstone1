@@ -42,7 +42,7 @@ jobs:
             components/admin/admin-book-detail-screen.tsx \
             components/admin/admin-ocr-review-screen.tsx \
             lib/ocr/sync-page-text-words.ts
-          git -C .. diff -- frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/ocr/sync-page-text-words.ts
+          git -C .. diff -- frontend/components/admin/admin-book-detail-screen.tsx frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/ocr/sync-page-text-words.ts
 
       - name: Format check (changed frontend files)
         id: format
