@@ -46,7 +46,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setBook(nextBook);
       let nextPages: readonly AdminPageListItemUI[];
       try {
-        nextPages = await pages.list(bookId);
+        nextPages = (await pages.list(bookId)).filter(
+          (item) => item.processing.lifecycle_status === "ACTIVE",
+        );
       } catch (cause) {
         if (isServiceError(cause) && [501, 503].includes(cause.status)) {
           if (requestId !== requestIdRef.current) return;
@@ -79,9 +81,18 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       const result = await pages.retire(pageId);
       if (requestId !== requestIdRef.current) return;
-      if (result.lifecycle_status !== "RETIRED") {
+      if (
+        result.lifecycle_status !== "RETIRED" ||
+        result.page_id !== pageId ||
+        result.book_id !== bookId
+      ) {
         throw new Error("Unexpected page lifecycle response");
       }
+      // Remove the row immediately after Backend confirmation, then reload from
+      // PostgreSQL so the UI never relies on an optimistic-only deletion.
+      setItems((current) =>
+        current?.filter((entry) => entry.processing.page_id !== pageId) ?? [],
+      );
       setPendingRetire(null);
       setRetiringPageId(null);
       setPageActionNotice({
