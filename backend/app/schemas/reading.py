@@ -28,6 +28,8 @@ class ReadingPageWordDTO(BaseModel):
     word_index: int
     text: str
     bbox: tuple[float, float, float, float]
+    # Default keeps responses compatible with legacy rows and test fixtures.
+    line_index: int = Field(default=0, ge=0)
 
 class ReadingPageDTO(BaseModel):
     page_id: UUID
@@ -40,6 +42,8 @@ class ReadingPageDTO(BaseModel):
     image_url: Optional[str] = None
     text: Optional[str] = None
     words: list[ReadingPageWordDTO]
+    paragraph_start_line_indices: list[int] = Field(default_factory=list)
+    indented_line_indices: list[int] = Field(default_factory=list)
 
 class ReadingCompletionSummaryDTO(BaseModel):
     # Null means the current database schema has no persisted evidence for this metric.

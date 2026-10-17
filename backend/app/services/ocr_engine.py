@@ -203,7 +203,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         psm_values = [int(configured_psm)] * 4
     else:
         # Complementary layout modes reduce dependence on a single page segmentation.
-        psm_values = [4, 6, 6, 11]
+        psm_values = [4, 6, 3, 11]
 
     # Keep unit tests deterministic when Tesseract is mocked. Real OCR compares
     # complementary variants; all candidates use the same image dimensions.
@@ -254,6 +254,9 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
     line_map: dict[tuple[int, int, int], int] = {}
+    paragraph_map: dict[tuple[int, int], int] = {}
+    line_paragraph_map: dict[int, int] = {}
+    line_left_pixels: dict[int, int] = {}
     words: list[dict[str, object]] = []
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
@@ -274,8 +277,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         if not np.isfinite(raw_confidence):
             raw_confidence = -1.0
         # Keep short, low-confidence Vietnamese words (for example "là", "và")
-        # so Admin can review them. Invalid/punctuation-only tokens are filtered above;
-        # confidence affects review status, not whether a real word is silently dropped.
+        # so Admin can review them. Confidence affects review status, not inclusion.
 
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
@@ -284,16 +286,26 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         if box_width <= 0 or box_height <= 0:
             continue
 
+        paragraph_key = (block, paragraph)
+        if paragraph_key not in paragraph_map:
+            paragraph_map[paragraph_key] = len(paragraph_map)
         line_key = (block, paragraph, line)
         if line_key not in line_map:
-            line_map[line_key] = len(line_map)
+            line_index = len(line_map)
+            line_map[line_key] = line_index
+            line_paragraph_map[line_index] = paragraph_map[paragraph_key]
+        line_index = line_map[line_key]
+        line_left_pixels[line_index] = min(
+            line_left_pixels.get(line_index, left), left
+        )
+
         confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
         normalized = normalize_word(token)
         if not normalized:
             continue
         words.append({
             "word_index": len(words),
-            "line_index": line_map[line_key],
+            "line_index": line_index,
             "text": token,
             "normalized_text": normalized,
             "bbox": [
@@ -307,6 +319,54 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
+    # Reconstruct readable text from Tesseract's actual line/paragraph structure.
+    # Keep the word records as the single source of truth for text and alignment.
+    line_words: dict[int, list[str]] = {}
+    for word in words:
+        line_words.setdefault(int(word["line_index"]), []).append(str(word["text"]))
+    ordered_line_indices = sorted(line_words)
+    paragraph_start_line_indices: list[int] = []
+    previous_paragraph_index: int | None = None
+    for line_index in ordered_line_indices:
+        paragraph_index = line_paragraph_map.get(line_index, 0)
+        if previous_paragraph_index is not None and paragraph_index != previous_paragraph_index:
+            paragraph_start_line_indices.append(line_index)
+        previous_paragraph_index = paragraph_index
+
+    # Indentation is inferred conservatively from line geometry. This only adds
+    # visual indentation to paragraph starts (and the first line), never to every
+    # wrapped line. Centered headings are excluded by the maximum-indent bound.
+    baseline_left = min(line_left_pixels.values())
+    indent_threshold = max(24.0, scaled_w * 0.018)
+    maximum_indent = scaled_w * 0.15
+    paragraph_starts = set(paragraph_start_line_indices)
+    first_line_index = ordered_line_indices[0]
+    indented_line_indices = [
+        line_index
+        for line_index in ordered_line_indices
+        if (
+            line_index == first_line_index or line_index in paragraph_starts
+        )
+        and indent_threshold < line_left_pixels[line_index] - baseline_left <= maximum_indent
+    ]
+    indented_lines = set(indented_line_indices)
+
+    formatted_lines: list[str] = []
+    for line_index in ordered_line_indices:
+        line_text = " ".join(line_words[line_index]).strip()
+        if line_index in indented_lines:
+            line_text = f"    {line_text}"
+        formatted_lines.append(line_text)
+
+    formatted_parts: list[str] = []
+    for position, line_index in enumerate(ordered_line_indices):
+        if position:
+            formatted_parts.append(
+                "\n\n" if line_index in paragraph_starts else "\n"
+            )
+        formatted_parts.append(formatted_lines[position])
+    formatted_text = "".join(formatted_parts)
+
     score_metadata = [
         {
             "preprocessing": name,
@@ -316,7 +376,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         for name, psm, score, _candidate in candidate_results
     ]
     return {
-        "text": " ".join(str(word["text"]) for word in words),
+        "text": formatted_text,
         "words": words,
         "metadata": {
             "engine": "tesseract",
@@ -338,5 +398,8 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
             "processed_height": scaled_h,
             "scale_factor": scale_factor,
             "word_count": len(words),
+            "text_layout": "line_and_paragraph_preserving",
+            "paragraph_start_line_indices": paragraph_start_line_indices,
+            "indented_line_indices": indented_line_indices,
         },
     }

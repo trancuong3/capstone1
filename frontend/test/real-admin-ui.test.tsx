@@ -37,6 +37,7 @@ const book = {
   min_grade: 1,
   max_grade: 3,
   lifecycle_status: "RETIRED",
+  next_page_number: 8,
 };
 const processing = {
   page_id: pageId,
@@ -334,6 +335,14 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     expect(
       await screen.findByText("Trang đã ngừng sử dụng"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Trang 2" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Sách chưa có trang" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Xóa trang" }),

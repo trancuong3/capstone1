@@ -11,6 +11,9 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import HTTPException
 
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.book_repository import AdminCatalogRepository
 from app.services.admin_ocr_service import AdminOcrService
 
 
@@ -96,6 +99,67 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.lifecycle_status, "RETIRED")
         db.commit.assert_not_awaited()
         service.repo.set_page_lifecycle_status.assert_not_called()
+
+
+class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retired_page_cannot_create_edit_draft(self):
+        service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+        service.repo.revision = AsyncMock()
+
+        with self.assertRaises(HTTPException) as caught:
+            await service.create_edit_draft(ACTOR, PAGE)
+
+        self.assertEqual(caught.exception.status_code, 409)
+        service.repo.revision.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_retired_page_cannot_save_draft_or_verify(self):
+        for operation in ("save_draft", "verify"):
+            with self.subTest(operation=operation):
+                service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+                service.repo.revision = AsyncMock()
+                if operation == "save_draft":
+                    call = service.save_draft(ACTOR, PAGE, REVISION, None)
+                else:
+                    call = service.verify(ACTOR, PAGE, None)
+
+                with self.assertRaises(HTTPException) as caught:
+                    await call
+
+                self.assertEqual(caught.exception.status_code, 409)
+                service.repo.revision.assert_not_awaited()
+                db.commit.assert_not_awaited()
+
+
+class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_max_page_number_query_includes_retired_page_numbers(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=9)
+
+        result = await AdminCatalogRepository(db).max_page_number(BOOK)
+
+        self.assertEqual(result, 9)
+        statement = db.scalar.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("max(bookpages.pagenumber)", str(compiled))
+        self.assertIn(BOOK, compiled.params.values())
+        self.assertNotIn("lifecyclestatus", str(compiled).lower())
+
+    async def test_admin_page_list_query_excludes_retired_pages(self):
+        db = MagicMock()
+        active_page = make_page()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [active_page]
+        db.execute = AsyncMock(return_value=result)
+
+        pages = await AdminCatalogRepository(db).pages(BOOK)
+
+        self.assertEqual(pages, [active_page])
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("lifecyclestatus", str(compiled))
+        self.assertIn("ACTIVE", compiled.params.values())
+
 
 
 if __name__ == "__main__":

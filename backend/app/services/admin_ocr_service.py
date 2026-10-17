@@ -635,6 +635,8 @@ class AdminOcrService:
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot edit a retired page")
         revision = await self.repo.revision(page_id, revision_id, lock=True)
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision not found for this page")
@@ -676,6 +678,8 @@ class AdminOcrService:
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot verify a retired page")
         revision = await self.repo.revision(page_id, payload.page_revision_id, lock=True)
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision does not belong to this page")

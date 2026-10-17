@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -44,33 +45,70 @@ export function BookPageViewer({
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-5 shadow-inner sm:mt-6 sm:p-8">
           {hasWords ? (
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
-              {page.words.map((word) => (
-                <span
-                  className={cn(
-                    "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
-                    word.word_id === currentWordId &&
-                      "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
-                  )}
-                  data-bbox={word.bbox.join(",")}
-                  data-page-revision-id={page.page_revision_id}
-                  data-word-id={word.word_id}
-                  key={word.word_id}
-                  onClick={() => onWordClick?.(word)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onWordClick?.(word);
-                    }
-                  }}
-                >
-                  {word.text}
-                </span>
-              ))}
+              {page.words.map((word, index) => {
+                const previousWord = page.words[index - 1];
+                const lineIndex = word.line_index ?? 0;
+                const previousLineIndex = previousWord?.line_index ?? 0;
+                const startsLine =
+                  previousWord !== undefined &&
+                  lineIndex !== previousLineIndex;
+                const verticalGap = previousWord
+                  ? word.bbox[1] -
+                    (previousWord.bbox[1] + previousWord.bbox[3])
+                  : 0;
+                const inferredParagraphBreak =
+                  startsLine &&
+                  previousWord !== undefined &&
+                  verticalGap >
+                    Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
+                const startsParagraph =
+                  startsLine &&
+                  ((page.paragraph_start_line_indices ?? []).includes(
+                    lineIndex,
+                  ) ||
+                    inferredParagraphBreak);
+                const isIndented =
+                  (index === 0 || startsLine) &&
+                  (page.indented_line_indices ?? []).includes(lineIndex);
+
+                return (
+                  <Fragment key={word.word_id}>
+                    {startsLine ? <br /> : null}
+                    {startsParagraph ? <br /> : null}
+                    {isIndented ? (
+                      <span
+                        aria-hidden="true"
+                        className="inline-block w-[1.25em]"
+                      />
+                    ) : null}
+                    <span
+                      className={cn(
+                        "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
+                        word.word_id === currentWordId &&
+                          "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
+                      )}
+                      data-bbox={word.bbox.join(",")}
+                      data-line-index={lineIndex}
+                      data-page-revision-id={page.page_revision_id}
+                      data-word-id={word.word_id}
+                      onClick={() => onWordClick?.(word)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onWordClick?.(word);
+                        }
+                      }}
+                    >
+                      {word.text}
+                    </span>
+                  </Fragment>
+                );
+              })}
             </p>
           ) : page.text ? (
-            <p className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
+            <p className="whitespace-pre-wrap text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
               {page.text}
             </p>
           ) : (
