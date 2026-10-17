@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  AlertCircle,
   ArrowRight,
   BookOpen,
   CheckCircle2,
@@ -12,11 +13,13 @@ import {
   Mic,
   Star,
   Users,
+  XCircle,
 } from "lucide-react";
 import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { ButtonLink } from "@/components/common/button";
+import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingCompletionSummaryUI } from "@/types/reading";
 
@@ -36,6 +39,18 @@ export function SessionComplete({
   const [showWordList, setShowWordList] = useState(false);
   const spokenWords = summary.spoken_words ?? [];
   const transcripts = summary.transcripts ?? [];
+  const correctWords = summary.correct_words ?? spokenWords;
+  const mispronouncedWords = summary.mispronounced_words ?? [];
+  const score =
+    summary.score !== undefined && summary.score !== null
+      ? summary.score
+      : correctWords.length + mispronouncedWords.length > 0
+        ? Math.round(
+            (correctWords.length /
+              (correctWords.length + mispronouncedWords.length)) *
+              100,
+          )
+        : null;
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -58,6 +73,56 @@ export function SessionComplete({
             </p>
           </div>
         </div>
+
+        {score !== null && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-card bg-cream border-2 border-primary/30 p-5 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary text-2xl font-black text-white shadow-md">
+                {score}%
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-primary">
+                  Điểm số chuẩn xác
+                </p>
+                <h3 className="text-lg font-extrabold text-ink">
+                  {score >= 90
+                    ? "🌟 Xuất sắc! Bé đọc rất chuẩn"
+                    : score >= 70
+                      ? "👍 Giỏi lắm! Bé phát âm khá tốt"
+                      : "💪 Bé cố gắng thêm ở lượt đọc tới nhé"}
+                </h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Đúng {correctWords.length} từ
+                  {mispronouncedWords.length > 0
+                    ? ` · Cần chú ý ${mispronouncedWords.length} từ`
+                    : " · Không sai từ nào"}
+                </p>
+              </div>
+            </div>
+            <div
+              className="flex items-center gap-1.5"
+              aria-label={`Đánh giá: ${score >= 90 ? "3 sao" : score >= 70 ? "2 sao" : "1 sao"}`}
+            >
+              <Star className="size-7 fill-amber-400 text-amber-500" />
+              <Star
+                className={cn(
+                  "size-7",
+                  score >= 70
+                    ? "fill-amber-400 text-amber-500"
+                    : "text-amber-200 fill-amber-100",
+                )}
+              />
+              <Star
+                className={cn(
+                  "size-7",
+                  score >= 90
+                    ? "fill-amber-400 text-amber-500"
+                    : "text-amber-200 fill-amber-100",
+                )}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-card bg-cream p-5 text-center">
@@ -134,27 +199,61 @@ export function SessionComplete({
               </span>
             </div>
 
-            {spokenWords.length > 0 ? (
+            {spokenWords.length > 0 ||
+            correctWords.length > 0 ||
+            mispronouncedWords.length > 0 ? (
               <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
-                    Danh sách các từ bé đã đọc thành công:
-                  </p>
-                  <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto pr-1">
-                    {spokenWords.map((word, idx) => (
-                      <span
-                        key={`${word}-${idx}`}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-ink shadow-sm border border-purple-border/30 hover:bg-purple-surface transition-colors"
-                      >
-                        <CheckCircle2
-                          aria-hidden="true"
-                          className="size-4 text-leaf-green flex-shrink-0"
-                        />
-                        {word}
+                {correctWords.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
+                      <CheckCircle2 className="size-4 text-emerald-600" />
+                      <span>
+                        Danh sách các từ bé đã đọc thành công (
+                        {correctWords.length} từ):
                       </span>
-                    ))}
+                    </p>
+                    <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto pr-1">
+                      {correctWords.map((word, idx) => (
+                        <span
+                          key={`${word}-${idx}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-ink shadow-sm border border-emerald-200 hover:bg-emerald-50/50 transition-colors"
+                        >
+                          <CheckCircle2
+                            aria-hidden="true"
+                            className="size-4 text-leaf-green flex-shrink-0"
+                          />
+                          {word}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {mispronouncedWords.length > 0 && (
+                  <div className="rounded-card border border-rose-200 bg-rose-50/60 p-4">
+                    <p className="text-xs font-black uppercase tracking-wider text-rose-700 mb-2 flex items-center gap-1.5">
+                      <AlertCircle className="size-4 text-rose-600" />
+                      <span>
+                        Các từ bé cần chú ý phát âm lại (
+                        {mispronouncedWords.length} từ):
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1">
+                      {mispronouncedWords.map((word, idx) => (
+                        <span
+                          key={`${word}-${idx}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-rose-800 shadow-sm border border-rose-200"
+                        >
+                          <XCircle
+                            aria-hidden="true"
+                            className="size-4 text-rose-600 flex-shrink-0"
+                          />
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {transcripts.length > 0 && (
                   <div>

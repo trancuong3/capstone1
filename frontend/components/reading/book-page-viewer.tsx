@@ -4,16 +4,20 @@ import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 
 interface BookPageViewerProps {
+  correctWordIds?: Set<string>;
   currentWordId: string | null;
   isTransitioning?: boolean;
+  mispronouncedWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   spokenWords?: Set<string>;
 }
 
 export function BookPageViewer({
+  correctWordIds,
   currentWordId,
   isTransitioning = false,
+  mispronouncedWordIds,
   onWordClick,
   page,
   spokenWords,
@@ -49,7 +53,11 @@ export function BookPageViewer({
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
               {page.words.map((word, index) => {
                 const isCurrent = word.word_id === currentWordId;
-                const isSpoken = Boolean(
+                const isMispronounced = Boolean(
+                  mispronouncedWordIds?.has(word.word_id),
+                );
+                const isCorrect = Boolean(
+                  correctWordIds?.has(word.word_id) ||
                   spokenWords?.has(word.text) ||
                   spokenWords?.has(word.text.toLowerCase()),
                 );
@@ -90,11 +98,22 @@ export function BookPageViewer({
                       className={cn(
                         "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150 cursor-pointer select-none active:scale-95",
                         isCurrent &&
+                          isMispronounced &&
+                          "bg-rose-100 text-rose-700 font-black scale-105 ring-2 ring-rose-500 shadow-sm animate-pulse",
+                        isCurrent &&
+                          !isMispronounced &&
                           "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
                         !isCurrent &&
-                          isSpoken &&
+                          isMispronounced &&
+                          "bg-rose-50 text-rose-800 font-bold border-b-2 border-rose-400",
+                        !isCurrent &&
+                          !isMispronounced &&
+                          isCorrect &&
                           "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
-                        !isCurrent && !isSpoken && "hover:bg-highlight/40",
+                        !isCurrent &&
+                          !isCorrect &&
+                          !isMispronounced &&
+                          "hover:bg-highlight/40",
                       )}
                       data-bbox={word.bbox.join(",")}
                       data-line-index={lineIndex}
@@ -103,7 +122,11 @@ export function BookPageViewer({
                       onClick={() => onWordClick?.(word)}
                       role="button"
                       tabIndex={0}
-                      title={`Bấm để nghe đọc mẫu chữ: "${word.text}"`}
+                      title={
+                        isCurrent && isMispronounced
+                          ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
+                          : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();

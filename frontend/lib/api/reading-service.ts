@@ -71,7 +71,9 @@ export const readingPageDtoSchema = z.object({
   image_url: z.string().nullable().optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
-  paragraph_start_line_indices: z.array(z.number().int().nonnegative()).optional(),
+  paragraph_start_line_indices: z
+    .array(z.number().int().nonnegative())
+    .optional(),
   indented_line_indices: z.array(z.number().int().nonnegative()).optional(),
 });
 
@@ -79,8 +81,11 @@ const completionSummarySchema = z.object({
   duration_minutes: z.number().int().nonnegative().nullable(),
   pages_explored: z.number().int().nonnegative().nullable(),
   practiced_words: z.number().int().nonnegative().nullable(),
-  spoken_words: z.array(z.string()).nullable(),
-  transcripts: z.array(z.string()).nullable(),
+  spoken_words: z.array(z.string()).nullable().optional(),
+  transcripts: z.array(z.string()).nullable().optional(),
+  correct_words: z.array(z.string()).nullable().optional(),
+  mispronounced_words: z.array(z.string()).nullable().optional(),
+  score: z.number().min(0).max(100).nullable().optional(),
 });
 
 export function createReadingService(): ReadingService {

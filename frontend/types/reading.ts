@@ -172,6 +172,9 @@ export interface ReadingCompletionSummaryUI {
   readonly practiced_words: number | null;
   readonly spoken_words?: readonly string[] | null;
   readonly transcripts?: readonly string[] | null;
+  readonly correct_words?: readonly string[] | null;
+  readonly mispronounced_words?: readonly string[] | null;
+  readonly score?: number | null;
 }
 
 export type ReadingEventType =

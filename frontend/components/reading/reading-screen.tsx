@@ -123,9 +123,18 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
+  const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [mispronouncedWordIds, setMispronouncedWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
+  const correctWordIdsRef = useRef<Set<string>>(new Set());
+  const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
+  const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const exploredPageIdsRef = useRef<Set<string>>(new Set());
   const finishStartedRef = useRef(false);
@@ -334,7 +343,7 @@ export function ReadingScreen({
       .trim();
   }
 
-  function matchSpokenWord(spokenText: string) {
+  function verifySpokenWord(spokenText: string) {
     if (!page || !page.words.length || !spokenText) return;
     const cleanSpoken = normalizeVietnamese(spokenText);
     const tokens = cleanSpoken.split(/\s+/).filter((t) => t.length > 0);
@@ -342,68 +351,74 @@ export function ReadingScreen({
 
     const words = page.words;
     const currentIdx = words.findIndex((w) => w.word_id === currentWordId);
-    const searchStartIdx = currentIdx >= 0 ? currentIdx : 0;
+    const searchIdx = currentIdx >= 0 ? currentIdx : 0;
+    const targetWord = words[searchIdx];
+    if (!targetWord) return;
 
-    let matchedIdx = -1;
+    const targetClean = normalizeVietnamese(targetWord.text);
 
-    // 1. Look ahead within a forward window of 8 words from the current reading word:
+    // Look for target word match in the spoken tokens
+    let matchedTokenIdx = -1;
     for (let t = 0; t < tokens.length; t++) {
-      const token = tokens[t];
-      for (
-        let w = searchStartIdx;
-        w < Math.min(words.length, searchStartIdx + 8);
-        w++
+      const tok = tokens[t];
+      if (
+        tok === targetClean ||
+        (targetClean.length >= 2 && tok.includes(targetClean)) ||
+        (tok.length >= 2 && targetClean.includes(tok))
       ) {
-        const cleanWord = normalizeVietnamese(words[w].text);
+        matchedTokenIdx = t;
+        break;
+      }
+    }
+
+    if (matchedTokenIdx >= 0) {
+      // Correct pronunciation!
+      correctWordIdsRef.current.add(targetWord.word_id);
+      mispronouncedWordIdsRef.current.delete(targetWord.word_id);
+      spokenWordsSetRef.current.add(targetWord.text);
+
+      let nextIdx = searchIdx + 1;
+      let nextTokIdx = matchedTokenIdx + 1;
+
+      // Match subsequent words if user spoke a fluent phrase in one go
+      while (nextIdx < words.length && nextTokIdx < tokens.length) {
+        const nextTargetClean = normalizeVietnamese(words[nextIdx].text);
+        const nextTok = tokens[nextTokIdx];
         if (
-          cleanWord === token ||
-          (token.length >= 2 && cleanWord.includes(token))
+          nextTok === nextTargetClean ||
+          (nextTargetClean.length >= 2 && nextTok.includes(nextTargetClean)) ||
+          (nextTok.length >= 2 && nextTargetClean.includes(nextTok))
         ) {
-          matchedIdx = w;
-        }
-      }
-    }
-
-    // 2. If not found in the immediate forward window, search all forward words on the page:
-    if (matchedIdx < 0) {
-      for (let t = tokens.length - 1; t >= 0; t--) {
-        const token = tokens[t];
-        for (let w = searchStartIdx; w < words.length; w++) {
-          if (normalizeVietnamese(words[w].text) === token) {
-            matchedIdx = w;
-            break;
-          }
-        }
-        if (matchedIdx >= 0) break;
-      }
-    }
-
-    // 3. Fallback: search entire page (in case the child jumped or restarted from the top)
-    if (matchedIdx < 0) {
-      for (let t = tokens.length - 1; t >= 0; t--) {
-        const token = tokens[t];
-        const foundIdx = words.findIndex(
-          (w) => normalizeVietnamese(w.text) === token,
-        );
-        if (foundIdx >= 0) {
-          matchedIdx = foundIdx;
+          correctWordIdsRef.current.add(words[nextIdx].word_id);
+          mispronouncedWordIdsRef.current.delete(words[nextIdx].word_id);
+          spokenWordsSetRef.current.add(words[nextIdx].text);
+          nextIdx++;
+          nextTokIdx++;
+        } else {
+          // Child stumbled or mispronounced this subsequent word
+          mispronouncedWordIdsRef.current.add(words[nextIdx].word_id);
+          failedWordsSetRef.current.add(words[nextIdx].text);
           break;
         }
       }
+
+      // Advance yellow highlight to the next word
+      if (nextIdx < words.length) {
+        setCurrentWordId(words[nextIdx].word_id);
+      } else {
+        setCurrentWordId(words[words.length - 1].word_id);
+      }
+    } else {
+      // Child spoke, but did not pronounce the target word correctly -> Alert RED!
+      mispronouncedWordIdsRef.current.add(targetWord.word_id);
+      failedWordsSetRef.current.add(targetWord.text);
+      // Keep currentWordId on targetWord (DO NOT jump forward)
+      setCurrentWordId(targetWord.word_id);
     }
 
-    if (matchedIdx >= 0) {
-      const matched = words[matchedIdx];
-      setCurrentWordId(matched.word_id);
-      const startMark =
-        searchStartIdx >= 0 && searchStartIdx <= matchedIdx
-          ? searchStartIdx
-          : 0;
-      for (let i = startMark; i <= matchedIdx; i++) {
-        spokenWordsSetRef.current.add(words[i].text);
-      }
-      setSpokenWords(new Set(spokenWordsSetRef.current));
-    }
+    setCorrectWordIds(new Set(correctWordIdsRef.current));
+    setMispronouncedWordIds(new Set(mispronouncedWordIdsRef.current));
+    setSpokenWords(new Set(spokenWordsSetRef.current));
   }
 
   async function startListening(): Promise<boolean> {
@@ -422,7 +437,7 @@ export function ReadingScreen({
           const cleanText = transcript.text.trim();
           if (cleanText) {
             setLatestTranscript(cleanText);
-            matchSpokenWord(cleanText);
+            verifySpokenWord(cleanText);
             recordSpokenText(cleanText);
           }
         } catch (e) {
@@ -477,7 +492,7 @@ export function ReadingScreen({
             const currentWord = latestWord.trim() || fullLive.trim();
             if (currentWord && mountedRef.current) {
               setLatestTranscript(currentWord);
-              matchSpokenWord(currentWord);
+              verifySpokenWord(currentWord);
               recordSpokenText(currentWord);
             }
           };
@@ -533,7 +548,7 @@ export function ReadingScreen({
       if (!mountedRef.current || controller.signal.aborted) return;
       if (transcript.text) {
         setLatestTranscript(transcript.text);
-        matchSpokenWord(transcript.text);
+        verifySpokenWord(transcript.text);
         recordSpokenText(transcript.text);
       }
     } catch (err) {
@@ -714,6 +729,16 @@ export function ReadingScreen({
     setIsMicRecording(false);
     setIsBusy(false);
     setCountdown(3);
+    if (page && page.words.length > 0) {
+      setCurrentWordId(page.words[0].word_id);
+    }
+    correctWordIdsRef.current.clear();
+    mispronouncedWordIdsRef.current.clear();
+    failedWordsSetRef.current.clear();
+    spokenWordsSetRef.current.clear();
+    setCorrectWordIds(new Set());
+    setMispronouncedWordIds(new Set());
+    setSpokenWords(new Set());
   }
 
   async function resumeReading() {
@@ -898,10 +923,28 @@ export function ReadingScreen({
     const wordsList = Array.from(spokenWordsSetRef.current);
     const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
     const pagesExplored = exploredPageIdsRef.current.size || null;
+
+    const correctWordsList = page
+      ? page.words
+          .filter((w) => correctWordIdsRef.current.has(w.word_id))
+          .map((w) => w.text)
+      : wordsList;
+    const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
+
+    const totalTracked =
+      correctWordsList.length + mispronouncedWordsList.length;
+    const score =
+      totalTracked > 0
+        ? Math.round((correctWordsList.length / totalTracked) * 100)
+        : null;
+
     const updatedSummary: ReadingCompletionSummaryUI = {
+      correct_words: correctWordsList,
       duration_minutes: durationMinutes,
+      mispronounced_words: mispronouncedWordsList,
       pages_explored: pagesExplored,
       practiced_words: wordsList.length,
+      score,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
     };
@@ -1016,12 +1059,16 @@ export function ReadingScreen({
         controlsDisabled={
           uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
         }
+        correctWordIds={correctWordIds}
         countdown={countdown}
         currentWordId={currentWordId}
         currentWordText={
           page.words.find((w) => w.word_id === currentWordId)?.text ?? null
         }
         exitHref={detailHref}
+        isCurrentWordMispronounced={Boolean(
+          currentWordId && mispronouncedWordIds.has(currentWordId),
+        )}
         isListening={uiState === "reading"}
         isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
@@ -1029,6 +1076,7 @@ export function ReadingScreen({
         isReadingWord={isReadingWord}
         isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
+        mispronouncedWordIds={mispronouncedWordIds}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
