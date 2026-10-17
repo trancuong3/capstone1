@@ -101,6 +101,34 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         service.repo.set_page_lifecycle_status.assert_not_called()
 
 
+class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retired_page_cannot_create_edit_draft(self):
+        service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+
+        with self.assertRaises(HTTPException) as caught:
+            await service.create_edit_draft(ACTOR, PAGE)
+
+        self.assertEqual(caught.exception.status_code, 409)
+        service.repo.revision.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_retired_page_cannot_save_draft_or_verify(self):
+        for operation in ("save_draft", "verify"):
+            with self.subTest(operation=operation):
+                service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+                if operation == "save_draft":
+                    call = service.save_draft(ACTOR, PAGE, REVISION, None)
+                else:
+                    call = service.verify(ACTOR, PAGE, None)
+
+                with self.assertRaises(HTTPException) as caught:
+                    await call
+
+                self.assertEqual(caught.exception.status_code, 409)
+                service.repo.revision.assert_not_awaited()
+                db.commit.assert_not_awaited()
+
+
 class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_page_list_query_excludes_retired_pages(self):
         db = MagicMock()
