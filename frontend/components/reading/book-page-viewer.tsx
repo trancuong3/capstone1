@@ -60,7 +60,7 @@ export function BookPageViewer({
                   startsLine &&
                   previousWord !== undefined &&
                   verticalGap >
-                    Math.max(previousWord.bbox[3], word.bbox[3]) * 1.5;
+                    Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
                 const startsParagraph =
                   startsLine &&
                   ((page.paragraph_start_line_indices ?? []).includes(
