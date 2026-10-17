@@ -11,6 +11,9 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import HTTPException
 
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.book_repository import AdminCatalogRepository
 from app.services.admin_ocr_service import AdminOcrService
 
 
@@ -96,6 +99,24 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.lifecycle_status, "RETIRED")
         db.commit.assert_not_awaited()
         service.repo.set_page_lifecycle_status.assert_not_called()
+
+
+class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_page_list_query_excludes_retired_pages(self):
+        db = MagicMock()
+        active_page = make_page()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [active_page]
+        db.execute = AsyncMock(return_value=result)
+
+        pages = await AdminCatalogRepository(db).pages(BOOK)
+
+        self.assertEqual(pages, [active_page])
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("lifecycle_status", str(compiled))
+        self.assertIn("ACTIVE", compiled.params.values())
+
 
 
 if __name__ == "__main__":
