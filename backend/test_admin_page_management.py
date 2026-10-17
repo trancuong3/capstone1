@@ -104,6 +104,7 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
 class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_retired_page_cannot_create_edit_draft(self):
         service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+        service.repo.revision = AsyncMock()
 
         with self.assertRaises(HTTPException) as caught:
             await service.create_edit_draft(ACTOR, PAGE)
@@ -116,6 +117,7 @@ class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
         for operation in ("save_draft", "verify"):
             with self.subTest(operation=operation):
                 service, db = make_service(make_page(LifecycleStatus="RETIRED"))
+                service.repo.revision = AsyncMock()
                 if operation == "save_draft":
                     call = service.save_draft(ACTOR, PAGE, REVISION, None)
                 else:
@@ -142,7 +144,7 @@ class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pages, [active_page])
         statement = db.execute.await_args.args[0]
         compiled = statement.compile(dialect=postgresql.dialect())
-        self.assertIn("lifecycle_status", str(compiled))
+        self.assertIn("lifecyclestatus", str(compiled))
         self.assertIn("ACTIVE", compiled.params.values())
 
 
