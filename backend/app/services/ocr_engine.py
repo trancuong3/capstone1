@@ -203,7 +203,7 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         psm_values = [int(configured_psm)] * 4
     else:
         # Complementary layout modes reduce dependence on a single page segmentation.
-        psm_values = [4, 6, 6, 11]
+        psm_values = [4, 6, 3, 11]
 
     # Keep unit tests deterministic when Tesseract is mocked. Real OCR compares
     # complementary variants; all candidates use the same image dimensions.
