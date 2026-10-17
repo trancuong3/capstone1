@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AwareDatetime
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -119,8 +119,15 @@ class SessionSummaryRead(BaseModel):
     duration_ms: int | None = Field(ge=0)
 
 
+class HistorySessionSummaryRead(SessionSummaryRead):
+    # History understands persisted session states without changing live reading.
+    state: SessionStateRead | Literal["IN_PROGRESS"]
+    started_at: AwareDatetime
+    ended_at: AwareDatetime | None
+
+
 class SessionHistoryRead(BaseModel):
-    sessions: list[SessionSummaryRead]
+    sessions: list[HistorySessionSummaryRead]
     next_cursor: str | None
 
 
@@ -136,6 +143,13 @@ class SessionEventRead(BaseModel):
     confidence: float | None
     status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED"]
     metadata: dict[str, object]
+
+
+class HistoryEventRead(SessionEventRead):
+    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE", "MISPRONUNCIATION"]
+    status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED", "DETECTED", "FEEDBACK_GIVEN", "IGNORED_BY_GATE"]
+    end_ms: int | None = Field(ge=0)
+    confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
 
 
 class SessionFluencyMetricsRead(BaseModel):
@@ -155,6 +169,15 @@ class SessionFluencyRead(BaseModel):
     score: float | None
     uncertainty: float | None
     model_version: str
+
+
+class HistoryFluencyMetricsRead(SessionFluencyMetricsRead):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryFluencyRead(SessionFluencyRead):
+    metrics: HistoryFluencyMetricsRead | None
+    model_config = ConfigDict(allow_inf_nan=False)
 
 
 class SessionSourceSpanRead(BaseModel):
@@ -187,12 +210,37 @@ class SessionComprehensionRead(BaseModel):
     answer: SessionAnswerRead | None
 
 
-class SessionDetailRead(SessionSummaryRead):
+class HistoryQuestionRead(SessionQuestionRead):
+    source_span: SessionSourceSpanRead | None
+    difficulty: float | str | None
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryAnswerRead(SessionAnswerRead):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryComprehensionRead(BaseModel):
+    question: HistoryQuestionRead
+    answer: HistoryAnswerRead | None
+
+
+HistorySectionStatus = Literal["absent", "available", "partial", "unsupported"]
+
+
+class HistoryAvailabilityRead(BaseModel):
+    events: HistorySectionStatus
+    fluency: HistorySectionStatus
+    comprehension: HistorySectionStatus
+
+
+class SessionDetailRead(HistorySessionSummaryRead):
     selected_page_revision_ids: list[UUID]
     reference_page_revision_ids: list[UUID]
-    events: list[SessionEventRead]
-    fluency_assessment: SessionFluencyRead | None
-    comprehension: list[SessionComprehensionRead]
+    events: list[HistoryEventRead]
+    fluency_assessment: HistoryFluencyRead | None
+    comprehension: list[HistoryComprehensionRead]
+    availability: HistoryAvailabilityRead
     report_id: UUID | None
 
 

@@ -5,7 +5,7 @@ import type {
   ProgressReportDTO,
   SessionHistoryItemViewModelUI,
 } from "@/types/reports";
-import type { ReadingSessionSummaryDTO } from "@/types/reading";
+import type { HistorySessionSummaryDTO } from "@/types/reading";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("vi-VN", {
   dateStyle: "short",
@@ -24,11 +24,35 @@ export function formatPercent(value: number | null): string {
 }
 
 export function mapSessionHistoryItem(
-  session: ReadingSessionSummaryDTO,
+  session: HistorySessionSummaryDTO,
   child: ChildProfileDTO,
   book: BookListItemDTO,
 ): SessionHistoryItemViewModelUI {
-  const labels: Record<ReadingSessionSummaryDTO["state"], string> = {
+  return {
+    session,
+    book,
+    child,
+    started_label: formatHistoryDateTime(session.started_at),
+    duration_label: formatHistoryDuration(session.duration_ms),
+    state_label: historyStateLabel(session.state),
+  };
+}
+
+export function formatHistoryDuration(durationMs: number | null): string {
+  if (durationMs === null) return "Chưa có dữ liệu thời lượng";
+  if (durationMs < 60_000) return `${Math.floor(durationMs / 1000)} giây`;
+  return `${Math.floor(durationMs / 60_000)} phút ${Math.floor((durationMs % 60_000) / 1000)} giây`;
+}
+
+export function formatHistoryDateTime(value: string): string {
+  return dateTimeFormatter.format(new Date(value));
+}
+
+export function historyStateLabel(
+  state: HistorySessionSummaryDTO["state"],
+): string {
+  const labels: Record<HistorySessionSummaryDTO["state"], string> = {
+    IN_PROGRESS: "Đang thực hiện",
     CREATED: "Đang chuẩn bị",
     PAGE_READY: "Đã nhận trang",
     LISTENING: "Đang đọc",
@@ -39,14 +63,13 @@ export function mapSessionHistoryItem(
     ABORTED: "Đã dừng",
   };
 
-  return {
-    session,
-    book,
-    child,
-    started_label: dateTimeFormatter.format(new Date(session.started_at)),
-    duration_label: formatDuration(session.duration_ms),
-    state_label: labels[session.state],
-  };
+  return labels[state];
+}
+
+export function historyPageFromCursor(cursor: string): number | null {
+  if (!/^page-[1-9][0-9]{0,5}$/.test(cursor)) return null;
+  const page = Number(cursor.slice(5));
+  return page <= 100000 ? page : null;
 }
 
 export function mapReportMetrics(

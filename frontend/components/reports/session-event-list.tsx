@@ -1,6 +1,7 @@
-import type { ReadingEventDTO } from "@/types/reading";
+import type { HistoryEventDTO } from "@/types/reading";
 
-const eventLabels: Record<ReadingEventDTO["type"], string> = {
+const eventLabels: Record<HistoryEventDTO["type"], string> = {
+  MISPRONUNCIATION: "Ghi nhận phát âm",
   OMISSION: "Bỏ sót",
   REPETITION: "Lặp từ",
   LONG_PAUSE: "Dừng lâu",
@@ -9,7 +10,10 @@ const eventLabels: Record<ReadingEventDTO["type"], string> = {
   READ_EXAMPLE: "Nghe đọc mẫu",
 };
 
-const statusLabels: Record<ReadingEventDTO["status"], string> = {
+const statusLabels: Record<HistoryEventDTO["status"], string> = {
+  DETECTED: "Đã phát hiện, chưa xác nhận",
+  FEEDBACK_GIVEN: "Đã đưa phản hồi",
+  IGNORED_BY_GATE: "Không qua điều kiện xác nhận",
   CANDIDATE: "Đang xem xét",
   CONFIRMED: "Đã xác nhận",
   UNCERTAIN: "Chưa chắc chắn",
@@ -17,7 +21,7 @@ const statusLabels: Record<ReadingEventDTO["status"], string> = {
 };
 
 interface SessionEventListProps {
-  readonly events: readonly ReadingEventDTO[];
+  readonly events: readonly HistoryEventDTO[];
 }
 
 export function SessionEventList({ events }: SessionEventListProps) {

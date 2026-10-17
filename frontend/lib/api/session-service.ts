@@ -5,6 +5,7 @@ import type {
 import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { bookDtoSchema } from "@/lib/api/book-service";
+import { historyPageFromCursor } from "@/lib/utils/report-mappers";
 import type { BookDetailDTO } from "@/types/book";
 
 export interface SessionHistoryQuery {
@@ -34,6 +35,7 @@ const summarySchema = z.object({
     "QUESTIONING",
     "FINISHED",
     "ABORTED",
+    "IN_PROGRESS",
   ]),
   started_at: z.iso.datetime({ offset: true }),
   ended_at: z.iso.datetime({ offset: true }).nullable(),
@@ -56,27 +58,38 @@ const detailSchema = summarySchema.extend({
         "SUBSTITUTION",
         "SELF_CORRECTION",
         "READ_EXAMPLE",
+        "MISPRONUNCIATION",
       ]),
-      status: z.enum(["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED"]),
-      start_ms: z.number().nonnegative(),
-      end_ms: z.number().nullable(),
-      confidence: z.number().nullable(),
+      status: z.enum([
+        "CANDIDATE",
+        "CONFIRMED",
+        "UNCERTAIN",
+        "DISMISSED",
+        "DETECTED",
+        "FEEDBACK_GIVEN",
+        "IGNORED_BY_GATE",
+      ]),
+      start_ms: z.number().int().nonnegative(),
+      end_ms: z.number().int().nonnegative().nullable(),
+      confidence: z.number().min(0).max(1).nullable(),
       metadata: z.record(z.string(), z.unknown()),
     }),
   ),
   fluency_assessment: z
     .object({
-      metrics: z.object({
-        active_reading_ms: z.number().nonnegative(),
-        reference_words_attempted: z.number().nonnegative(),
-        confirmed_error_words: z.number().nonnegative(),
-        accuracy_percent: z.number().nullable(),
-        reading_wpm: z.number().nullable(),
-        repetition_rate: z.number().nullable(),
-        long_pause_rate: z.number().nullable(),
-        mean_pause_ms: z.number().nullable(),
-        median_pause_ms: z.number().nullable(),
-      }),
+      metrics: z
+        .object({
+          active_reading_ms: z.number().nonnegative(),
+          reference_words_attempted: z.number().nonnegative(),
+          confirmed_error_words: z.number().nonnegative(),
+          accuracy_percent: z.number().nullable(),
+          reading_wpm: z.number().nullable(),
+          repetition_rate: z.number().nullable(),
+          long_pause_rate: z.number().nullable(),
+          mean_pause_ms: z.number().nullable(),
+          median_pause_ms: z.number().nullable(),
+        })
+        .nullable(),
       score: z.number().nullable(),
       uncertainty: z.number().nullable(),
       model_version: z.string(),
@@ -89,12 +102,16 @@ const detailSchema = summarySchema.extend({
         type: z.enum(["FACTUAL", "CLOZE", "VOCABULARY"]),
         prompt: z.string(),
         page_revision_id: z.uuid(),
-        source_span: z.object({
-          start_word_index: z.number().int().nonnegative(),
-          end_word_index_exclusive: z.number().int().nonnegative(),
-          sentence_index: z.number().int().nullable(),
-        }),
-        difficulty: z.number(),
+        source_span: z
+          .object({
+            start_word_index: z.number().int().nonnegative(),
+            end_word_index_exclusive: z.number().int().nonnegative(),
+            sentence_index: z.number().int().nullable(),
+          })
+          .nullable(),
+        difficulty: z
+          .union([z.number(), z.string().trim().min(1).max(120)])
+          .nullable(),
         answered: z.boolean(),
       }),
       answer: z
@@ -110,6 +127,11 @@ const detailSchema = summarySchema.extend({
     }),
   ),
   report_id: z.uuid().nullable(),
+  availability: z.object({
+    events: z.enum(["absent", "available", "partial", "unsupported"]),
+    fluency: z.enum(["absent", "available", "partial", "unsupported"]),
+    comprehension: z.enum(["absent", "available", "partial", "unsupported"]),
+  }),
 });
 
 export function createSessionService(): SessionService {
@@ -121,7 +143,10 @@ export function createSessionService(): SessionService {
           sessions: z.array(
             summarySchema.refine((session) => session.child_id === childId),
           ),
-          next_cursor: z.string().nullable(),
+          next_cursor: z
+            .string()
+            .refine((cursor) => historyPageFromCursor(cursor) !== null)
+            .nullable(),
         }),
       ),
     get: (sessionId) =>
@@ -130,7 +155,11 @@ export function createSessionService(): SessionService {
         detailSchema.refine(
           (detail) =>
             detail.id === sessionId &&
-            detail.events.every((event) => event.session_id === sessionId) &&
+            detail.events.every(
+              (event) =>
+                event.session_id === sessionId &&
+                (event.end_ms === null || event.end_ms >= event.start_ms),
+            ) &&
             detail.comprehension.every(
               ({ question, answer }) =>
                 answer === null || answer.question_id === question.id,

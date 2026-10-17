@@ -63,6 +63,11 @@ const detail = {
   fluency_assessment: null,
   comprehension: [],
   report_id: null,
+  availability: {
+    events: "absent",
+    fluency: "absent",
+    comprehension: "absent",
+  },
 };
 const word = {
   normalized_word: "meo",
@@ -179,7 +184,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     expect(
       await screen.findByRole("heading", { name: book.title }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Chưa hoàn tất")).toBeInTheDocument();
+    expect(screen.getByText("Chưa có dữ liệu thời lượng")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Trang sau" })).toHaveAttribute(
       "href",
       `/sessions?childId=${childId}&page=2`,
@@ -213,7 +218,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
         <SessionDetailScreen sessionId={sessionId} />
       </AppServicesProvider>,
     );
-    await screen.findByRole("heading", { name: "Buổi đọc chưa hoàn tất" });
+    await screen.findByRole("heading", { name: "Buổi đọc đã dừng" });
     expect(screen.getByText("Chưa đánh giá")).toBeInTheDocument();
     expect(screen.getAllByText("Chưa ghi nhận")).toHaveLength(2);
     expect(

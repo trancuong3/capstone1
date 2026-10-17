@@ -225,6 +225,11 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           fluency_assessment: null,
           comprehension: [],
           report_id: null,
+          availability: {
+            events: "absent",
+            fluency: "absent",
+            comprehension: "absent",
+          },
         },
         state.historyStatus,
       );

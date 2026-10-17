@@ -38,6 +38,11 @@ const detail = {
   fluency_assessment: null,
   comprehension: [],
   report_id: null,
+  availability: {
+    events: "absent",
+    fluency: "absent",
+    comprehension: "absent",
+  },
 };
 const report = {
   child_id: childId,

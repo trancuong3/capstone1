@@ -21,6 +21,13 @@ export interface ReadingSessionSummaryDTO {
   readonly duration_ms: number | null;
 }
 
+export interface HistorySessionSummaryDTO extends Omit<
+  ReadingSessionSummaryDTO,
+  "state"
+> {
+  readonly state: ReadingSessionState | "IN_PROGRESS";
+}
+
 export type ReadingSession = ReadingSessionSummaryDTO;
 
 export interface ReadingSessionCreateDTO {
@@ -223,17 +230,52 @@ export interface SessionComprehensionResultDTO {
   readonly answer: ComprehensionAnswerResultDTO | null;
 }
 
-export interface ReadingSessionDetailDTO extends ReadingSessionSummaryDTO {
+export interface HistoryEventDTO extends Omit<
+  ReadingEventDTO,
+  "type" | "status"
+> {
+  readonly type: ReadingEventType | "MISPRONUNCIATION";
+  readonly status:
+    ReadingEventStatus | "DETECTED" | "FEEDBACK_GIVEN" | "IGNORED_BY_GATE";
+}
+
+export interface HistoryComprehensionResultDTO {
+  readonly question: Omit<
+    ComprehensionQuestionDTO,
+    "difficulty" | "source_span"
+  > & {
+    readonly difficulty: number | string | null;
+    readonly source_span: SourceSpanDTO | null;
+  };
+  readonly answer: ComprehensionAnswerResultDTO | null;
+}
+
+export type HistorySectionStatus =
+  "absent" | "available" | "partial" | "unsupported";
+
+export interface HistoryFluencyAssessmentDTO extends Omit<
+  FluencyAssessmentDTO,
+  "metrics"
+> {
+  readonly metrics: FluencyComponentMetricsDTO | null;
+}
+
+export interface ReadingSessionDetailDTO extends HistorySessionSummaryDTO {
   readonly selected_page_revision_ids: readonly UUID[];
   readonly reference_page_revision_ids: readonly UUID[];
-  readonly events: readonly ReadingEventDTO[];
-  readonly fluency_assessment: FluencyAssessmentDTO | null;
-  readonly comprehension: readonly SessionComprehensionResultDTO[];
+  readonly events: readonly HistoryEventDTO[];
+  readonly fluency_assessment: HistoryFluencyAssessmentDTO | null;
+  readonly comprehension: readonly HistoryComprehensionResultDTO[];
+  readonly availability: {
+    readonly events: HistorySectionStatus;
+    readonly fluency: HistorySectionStatus;
+    readonly comprehension: HistorySectionStatus;
+  };
   readonly report_id: UUID | null;
 }
 
 export interface SessionHistoryResponseDTO {
-  readonly sessions: readonly ReadingSessionSummaryDTO[];
+  readonly sessions: readonly HistorySessionSummaryDTO[];
   readonly next_cursor: string | null;
 }
 
