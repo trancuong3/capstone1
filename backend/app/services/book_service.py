@@ -121,7 +121,9 @@ class AdminCatalogService:
 
     async def page(self, page_id: UUID):
         page = await self.repository.page(page_id)
-        if page is None:
+        # A retired page remains stored for history but is no longer part of the
+        # active Admin OCR workflow, including when an old detail URL is opened.
+        if page is None or page.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=404, detail="Resource not found")
         return page
 
