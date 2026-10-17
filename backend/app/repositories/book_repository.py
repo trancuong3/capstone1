@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
@@ -102,6 +102,14 @@ class CatalogRepository:
         return result.scalars().all()
 
 class AdminCatalogRepository(CatalogRepository):
+    async def max_page_number(self, book_id: UUID) -> int | None:
+        # Include retired rows so the Admin upload form never suggests reusing a
+        # historical page number after retired pages are hidden from the list.
+        value = await self.db.scalar(
+            select(func.max(BookPage.PageNumber)).where(BookPage.BookId == book_id)
+        )
+        return int(value) if value is not None else None
+
     async def books(self, search: str | None, lifecycle_status: str | None):
         query = select(Book)
         if search and search.strip():
