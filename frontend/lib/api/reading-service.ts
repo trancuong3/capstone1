@@ -58,6 +58,7 @@ const wordDtoSchema = z.object({
   word_index: z.number().int(),
   text: z.string(),
   bbox: wordBboxSchema,
+  line_index: z.number().int().nonnegative().optional(),
 });
 
 export const readingPageDtoSchema = z.object({
@@ -70,6 +71,8 @@ export const readingPageDtoSchema = z.object({
   image_url: z.string().nullable().optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
+  paragraph_start_line_indices: z.array(z.number().int().nonnegative()).optional(),
+  indented_line_indices: z.array(z.number().int().nonnegative()).optional(),
 });
 
 const completionSummarySchema = z.object({
