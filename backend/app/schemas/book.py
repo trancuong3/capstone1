@@ -97,6 +97,12 @@ class CatalogBookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminCatalogBookDetailResponse(CatalogBookResponse):
+    """Admin-only book detail metadata; includes retired page numbers for safe numbering."""
+
+    next_page_number: int = Field(ge=1)
+
+
 class CatalogPagePreviewResponse(BaseModel):
     page_id: UUID
     page_number: int = Field(gt=0)
