@@ -1,7 +1,19 @@
 "use client";
 
-import { Camera, CheckCircle2, RefreshCw, Sparkles, VideoOff } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Camera,
+  CheckCircle2,
+  RefreshCw,
+  Sparkles,
+  VideoOff,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Button } from "@/components/common/button";
 import {
@@ -36,24 +48,8 @@ export function CameraPreview({
   const [autoScan, setAutoScan] = useState(true);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
 
-  // Cho phép chạy scanner kể cả khi không có bookId (chế độ quét từ Dashboard)
-  if (!enableScanner) {
-    return (
-      <section
-        aria-label="Bản xem trước camera mô phỏng"
-        className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 sm:flex-1 sm:p-8"
-      >
-        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-bold text-muted sm:right-5 sm:top-5">
-          <VideoOff aria-hidden="true" className="size-4" />
-          <span className="hidden sm:inline">Mô phỏng · không ghi hình</span>
-          <span className="sr-only sm:hidden">Mô phỏng, không ghi hình</span>
-        </div>
-        {children}
-      </section>
-    );
-  }
-
   useEffect(() => {
+    if (!enableScanner) return;
     let stream: MediaStream | null = null;
     let mounted = true;
 
@@ -88,10 +84,16 @@ export function CameraPreview({
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [enableScanner]);
 
   const captureAndScan = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || isScanning || !cameraReady) {
+    if (
+      !enableScanner ||
+      !videoRef.current ||
+      !canvasRef.current ||
+      isScanning ||
+      !cameraReady
+    ) {
       return;
     }
 
@@ -150,15 +152,46 @@ export function CameraPreview({
       "image/jpeg",
       0.85,
     );
-  }, [bookId, cameraReady, isScanning, onBookPageDetected, onPageDetected]);
+  }, [
+    bookId,
+    cameraReady,
+    enableScanner,
+    isScanning,
+    onBookPageDetected,
+    onPageDetected,
+  ]);
 
   useEffect(() => {
-    if (!autoScan || !cameraReady || scanResult?.matched) return;
+    if (!enableScanner || !autoScan || !cameraReady || scanResult?.matched) {
+      return;
+    }
     const timer = setInterval(() => {
       void captureAndScan();
     }, 2200);
     return () => clearInterval(timer);
-  }, [autoScan, cameraReady, captureAndScan, scanResult?.matched]);
+  }, [
+    autoScan,
+    cameraReady,
+    captureAndScan,
+    enableScanner,
+    scanResult?.matched,
+  ]);
+
+  if (!enableScanner) {
+    return (
+      <section
+        aria-label="Bản xem trước camera mô phỏng"
+        className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 sm:flex-1 sm:p-8"
+      >
+        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-bold text-muted sm:right-5 sm:top-5">
+          <VideoOff aria-hidden="true" className="size-4" />
+          <span className="hidden sm:inline">Mô phỏng · không ghi hình</span>
+          <span className="sr-only sm:hidden">Mô phỏng, không ghi hình</span>
+        </div>
+        {children}
+      </section>
+    );
+  }
 
   const isFrameValid = scanResult?.framing_valid ?? false;
   const isMatched = scanResult?.matched ?? false;
@@ -172,7 +205,10 @@ export function CameraPreview({
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-4 py-3">
         <p className="inline-flex items-center gap-2 text-body font-bold text-ink">
           {isMatched ? (
-            <CheckCircle2 aria-hidden="true" className="size-6 text-success-ink" />
+            <CheckCircle2
+              aria-hidden="true"
+              className="size-6 text-success-ink"
+            />
           ) : (
             <Camera aria-hidden="true" className="size-6 text-primary" />
           )}
@@ -211,7 +247,8 @@ export function CameraPreview({
               Chưa bật được Camera trên trình duyệt
             </p>
             <p className="max-w-md text-body text-white/80">
-              Ba mẹ vui lòng cấp quyền sử dụng Camera trên thanh địa chỉ trình duyệt hoặc chọn trang sách thủ công ở bên dưới nhé.
+              Ba mẹ vui lòng cấp quyền sử dụng Camera trên thanh địa chỉ trình
+              duyệt hoặc chọn trang sách thủ công ở bên dưới nhé.
             </p>
           </div>
         ) : (
@@ -243,7 +280,10 @@ export function CameraPreview({
                   </span>
                   {isScanning ? (
                     <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-bold text-white shadow">
-                      <Sparkles aria-hidden="true" className="size-4 animate-spin" />
+                      <Sparkles
+                        aria-hidden="true"
+                        className="size-4 animate-spin"
+                      />
                       ViRead Vision đang quét…
                     </span>
                   ) : null}

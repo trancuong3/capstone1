@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
+import { readingPageDtoSchema } from "@/lib/api/reading-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -9,23 +10,6 @@ export interface PageMatchService {
     selectedPageId: string,
   ): Promise<ReadingPageDTO>;
 }
-
-const readingPageWordSchema = z.object({
-  word_id: z.string(),
-  word_index: z.number().int().min(0),
-  text: z.string(),
-  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-});
-
-const readingPageSchema = z.object({
-  page_id: z.string(),
-  page_revision_id: z.string(),
-  page_number: z.number().int().positive(),
-  confidence: z.number().min(0).max(1),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-  words: z.array(readingPageWordSchema),
-});
 
 export const cameraPageMatchSchema = z.object({
   framing_valid: z.boolean(),
@@ -42,7 +26,7 @@ export const cameraPageMatchSchema = z.object({
   ]),
   message: z.string(),
   confidence: z.number().min(0).max(1),
-  matched_page: readingPageSchema.nullable(),
+  matched_page: readingPageDtoSchema.nullable(),
 });
 
 export type CameraPageMatchDTO = z.infer<typeof cameraPageMatchSchema>;
@@ -77,15 +61,10 @@ export async function scanCameraFrameGlobal(
   const formData = new FormData();
   formData.append("file", imageBlob, "camera-frame.jpg");
 
-  return requestApi(
-    "/reading/match-page",
-    cameraPageMatchSchema,
-    signal,
-    {
-      method: "POST",
-      body: formData,
-    },
-  );
+  return requestApi("/reading/match-page", cameraPageMatchSchema, signal, {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export function createPageMatchService(): PageMatchService {
@@ -93,7 +72,7 @@ export function createPageMatchService(): PageMatchService {
     async retryCurrentPage(sessionId: string): Promise<ReadingPageDTO> {
       return requestApi(
         `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
-        readingPageSchema,
+        readingPageDtoSchema,
       );
     },
 
@@ -104,7 +83,7 @@ export function createPageMatchService(): PageMatchService {
       const query = new URLSearchParams({ session_id: sessionId });
       return requestApi(
         `/reading/pages/${encodeURIComponent(selectedPageId)}?${query.toString()}`,
-        readingPageSchema,
+        readingPageDtoSchema,
       );
     },
   };
