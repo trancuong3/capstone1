@@ -113,7 +113,16 @@ class AdminCatalogRepository(CatalogRepository):
         return result.scalars().all()
 
     async def pages(self, book_id: UUID):
-        result = await self.db.execute(select(BookPage).where(BookPage.BookId == book_id).order_by(BookPage.PageNumber, BookPage.Id))
+        # The Admin page list and catalog counts represent active OCR pages only.
+        # Retired pages remain in PostgreSQL for revisions and historical reading data.
+        result = await self.db.execute(
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
         return result.scalars().all()
 
     async def page(self, page_id: UUID):
