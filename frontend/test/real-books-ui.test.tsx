@@ -6,7 +6,10 @@ import { BookDetailScreen } from "@/components/books/book-detail-screen";
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {

@@ -439,6 +439,7 @@ class ReadingContentService:
                     word_index=row.WordIndex,
                     text=row.Text,
                     bbox=(x, y, width, height),
+                    line_index=max(0, int(getattr(row, "LineIndex", 0) or 0)),
                 )
             )
 
@@ -460,6 +461,19 @@ class ReadingContentService:
                 # Keep reading text available if Storage preview URLs are temporarily unavailable.
                 image_url = None
 
+        processing_meta = getattr(revision, "ProcessingMeta", None)
+        if not isinstance(processing_meta, dict):
+            processing_meta = {}
+
+        def safe_line_indices(name: str) -> list[int]:
+            value = processing_meta.get(name, [])
+            if not isinstance(value, (list, tuple)):
+                return []
+            return sorted({
+                item for item in value
+                if isinstance(item, int) and not isinstance(item, bool) and item >= 0
+            })
+
         return ReadingPageDTO(
             page_id=page.Id,
             page_revision_id=revision.Id,
@@ -474,4 +488,6 @@ class ReadingContentService:
             image_url=image_url,
             text=text_content,
             words=words,
+            paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),
+            indented_line_indices=safe_line_indices("indented_line_indices"),
         )

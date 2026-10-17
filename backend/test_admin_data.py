@@ -15,7 +15,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import SQLAlchemyError
 from app.api.deps import get_current_parent_id, get_db
-from app.api.routes.book import AdminCatalogRepository, AdminCatalogService, router as book_router
+from app.repositories.book_repository import AdminCatalogRepository
+from app.services.book_service import AdminCatalogService
+from app.api.routes.book import router as book_router
 from app.api.routes.system import AdminSystemRepository, AdminSystemService, router as system_router
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -58,7 +60,7 @@ def catalog_repo():
 class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_can_read_retired_book_and_actual_counts(self):
         repo = catalog_repo()
-        result = await AdminCatalogService(repo).list(None, None, None)
+        result = await AdminCatalogService(repository=repo).list(None, None, None)
         self.assertEqual(result[0].book.lifecycle_status, "RETIRED")
         self.assertEqual(result[0].page_count, 1)
         self.assertEqual(result[0].verified_count, 1)
@@ -66,28 +68,54 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result[0].parent_catalog_eligible)
 
     async def test_catalog_verification_filter_checks_real_latest_status(self):
-        self.assertEqual(await AdminCatalogService(catalog_repo()).list(None, None, "PROCESSING"), [])
+        self.assertEqual(await AdminCatalogService(repository=catalog_repo()).list(None, None, "PROCESSING"), [])
 
     async def test_unknown_page_status_is_not_silently_counted_as_zero(self):
         repo = catalog_repo()
         repo.revisions.return_value = [revision_row(VerificationStatus="UNKNOWN")]
         with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repo).list(None, None, None)
+            await AdminCatalogService(repository=repo).list(None, None, None)
         self.assertEqual(caught.exception.status_code, 501)
 
     async def test_actual_empty_pages_differs_from_missing_revision(self):
         repo = catalog_repo()
         repo.pages.return_value = []
-        self.assertEqual(await AdminCatalogService(repo).pages(BOOK), [])
+        self.assertEqual(await AdminCatalogService(repository=repo).pages(BOOK), [])
         repo.revisions.return_value = []
         with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repo).processing(page_row())
+            await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
+
+    async def test_admin_book_detail_uses_max_page_number_including_retired_pages(self):
+        repo = catalog_repo()
+        repo.max_page_number = AsyncMock(return_value=7)
+
+        result = await AdminCatalogService(repository=repo).book_detail(BOOK)
+
+        self.assertEqual(result.id, BOOK)
+        self.assertEqual(result.next_page_number, 8)
+        repo.max_page_number.assert_awaited_once_with(BOOK)
+
+    async def test_retired_page_is_hidden_from_direct_admin_detail_reads(self):
+        repo = catalog_repo()
+        repo.page.return_value = page_row(LifecycleStatus="RETIRED")
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminCatalogService(repository=repo).processing_by_page_id(PAGE)
+
+        self.assertEqual(caught.exception.status_code, 404)
+        repo.revisions.assert_not_awaited()
+
+    async def test_admin_page_list_includes_persisted_text_preview(self):
+        repo = catalog_repo()
+        result = await AdminCatalogService(repository=repo).pages(BOOK)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].text_preview, "Stored verified text")
 
     async def test_processing_and_history_use_latest_created_order_without_renumbering(self):
         repo = catalog_repo()
         repo.revisions.return_value = [revision_row(RevisionNo="2"), revision_row(Id=ACTOR, RevisionNo="9")]
-        result = await AdminCatalogService(repo).processing(page_row())
+        result = await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(result.revision_no, 2)
         self.assertEqual(result.page_revision_id, REVISION)
         self.assertEqual(result.ocr_preview_metadata, {})
@@ -100,7 +128,7 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caught.exception.status_code, 501)
 
     async def test_image_uses_actual_dimensions_and_url(self):
-        result = await AdminCatalogService(catalog_repo()).image(PAGE)
+        result = await AdminCatalogService(repository=catalog_repo()).image(PAGE)
         self.assertEqual(result.width, 800)
         self.assertEqual(result.preview_url, page_row().ImagePath)
 
@@ -110,7 +138,7 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             repo.page.return_value = page_row(ImagePath=path)
             with self.subTest(path=path):
                 with self.assertRaises(HTTPException) as caught:
-                    await AdminCatalogService(repo).image(PAGE)
+                    await AdminCatalogService(repository=repo).image(PAGE)
                 self.assertEqual(caught.exception.status_code, 503)
                 self.assertNotIn("password", caught.exception.detail)
 
@@ -118,11 +146,11 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         repo = catalog_repo()
         repo.page.return_value = page_row(Width=0)
         with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repo).image(PAGE)
+            await AdminCatalogService(repository=repo).image(PAGE)
         self.assertEqual(caught.exception.status_code, 501)
         repo.get.return_value.MinGrade = -1
         with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repo).book(BOOK)
+            await AdminCatalogService(repository=repo).book(BOOK)
         self.assertEqual(caught.exception.status_code, 501)
 
     async def test_unknown_book_page_and_revision_are_404(self):
@@ -130,13 +158,13 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             repo = catalog_repo()
             getattr(repo, missing).return_value = None
             with self.assertRaises(HTTPException) as caught:
-                await getattr(AdminCatalogService(repo), method)(*args)
+                await getattr(AdminCatalogService(repository=repo), method)(*args)
             self.assertEqual(caught.exception.status_code, 404)
 
     async def test_revision_words_and_verified_text_are_real_but_metadata_is_private(self):
         repo = catalog_repo()
         repo.words.return_value = [SimpleNamespace(WordIndex=0, LineIndex=0, Text="Stored", NormalizedText="stored", BoundingBox={"x": .1, "y": .2, "width": .3, "height": .1}, OCRConfidence=.8)]
-        result = await AdminCatalogService(repo).revision(PAGE, REVISION)
+        result = await AdminCatalogService(repository=repo).revision(PAGE, REVISION)
         self.assertEqual(result.draft_text, "Stored verified text")
         self.assertEqual(result.words[0].bbox, (.1, .2, .3, .1))
         self.assertEqual(result.ocr_metadata, {})
@@ -145,7 +173,7 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         repo = catalog_repo()
         repo.words.return_value = [SimpleNamespace(BoundingBox={"x": 120, "y": 20, "width": 40, "height": 20})]
         with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repo).revision(PAGE, REVISION)
+            await AdminCatalogService(repository=repo).revision(PAGE, REVISION)
         self.assertEqual(caught.exception.status_code, 501)
 
     async def test_revision_sql_scopes_both_page_and_revision(self):

@@ -51,6 +51,8 @@ export interface ReadingPageWordDTO {
   readonly word_index: number;
   readonly text: string;
   readonly bbox: WordBoundingBox;
+  /** Optional for compatibility with older cached/API fixtures. */
+  readonly line_index?: number;
 }
 
 export interface ReadingPageDTO {
@@ -63,6 +65,10 @@ export interface ReadingPageDTO {
   readonly image_url?: string | null;
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
+  /** Zero-based line indices that begin a new paragraph. */
+  readonly paragraph_start_line_indices?: readonly number[];
+  /** Zero-based line indices with image-derived first-line indentation. */
+  readonly indented_line_indices?: readonly number[];
 }
 
 export type ReadingPage = ReadingPageDTO;

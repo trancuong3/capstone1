@@ -97,6 +97,12 @@ class CatalogBookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminCatalogBookDetailResponse(CatalogBookResponse):
+    """Admin-only book detail metadata; includes retired page numbers for safe numbering."""
+
+    next_page_number: int = Field(ge=1)
+
+
 class CatalogPagePreviewResponse(BaseModel):
     page_id: UUID
     page_number: int = Field(gt=0)
@@ -129,6 +135,14 @@ class AdminPageListRead(BaseModel):
     book_id: UUID
     page_number: int = Field(gt=0)
     processing: AdminPageProcessingRead
+    text_preview: str | None = None
+
+
+class AdminPageLifecycleRead(BaseModel):
+    page_id: UUID
+    book_id: UUID
+    page_number: int = Field(gt=0)
+    lifecycle_status: Literal["RETIRED"]
 
 
 class AdminPageImageRead(BaseModel):

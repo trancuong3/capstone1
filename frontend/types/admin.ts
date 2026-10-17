@@ -86,6 +86,14 @@ export interface AdminPageListItemUI {
   readonly book_id: UUID;
   readonly page_number: number;
   readonly processing: AdminPageProcessingDTO;
+  readonly text_preview?: string | null;
+}
+
+export interface AdminPageLifecycleDTO {
+  readonly page_id: UUID;
+  readonly book_id: UUID;
+  readonly page_number: number;
+  readonly lifecycle_status: "RETIRED";
 }
 
 export interface AdminRevisionWordDTO {
@@ -211,4 +219,7 @@ export type AdminMockScenario =
   | "degraded"
   | "unavailable";
 
-export type AdminBookDTO = BookListItemDTO;
+export type AdminBookDTO = BookListItemDTO & {
+  /** Next available page number, calculated across active and retired pages. */
+  readonly next_page_number?: number;
+};

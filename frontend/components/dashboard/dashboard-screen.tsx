@@ -11,6 +11,10 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Camera } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CameraPreview } from "@/components/reading/camera-preview";
+
 import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -55,10 +59,12 @@ function DashboardLoadingState() {
 }
 
 export function DashboardScreen() {
+  const router = useRouter();
   const childService = useChildService();
   const profileService = useProfileService();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DashboardState>({ status: "loading" });
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -193,6 +199,37 @@ export function DashboardScreen() {
               <Plus aria-hidden="true" className="size-5" />
               Tạo hồ sơ bé
             </ButtonLink>
+          </div>
+
+          <div className="mx-auto flex w-full flex-col items-center gap-4 sm:max-w-[744px]">
+            <Button
+              className="w-full sm:max-w-[400px]"
+              onClick={() => setShowCameraScanner((prev) => !prev)}
+              variant="secondary"
+            >
+              <Camera aria-hidden="true" className="size-5" />
+              {showCameraScanner
+                ? "Đóng khung Camera quét sách"
+                : "Quét sách trước Camera (ViRead Vision)"}
+            </Button>
+
+            {showCameraScanner ? (
+              <div className="w-full">
+                <CameraPreview
+                  enableScanner
+                  onBookPageDetected={(matchedBookId, matchedPage) => {
+                    const activeChildId = state.children[0]?.id;
+                    const childParam = activeChildId
+                      ? `&childId=${encodeURIComponent(activeChildId)}`
+                      : "";
+                    // Tự động chuyển tới trang chi tiết sách và mang theo pageId đã nhận diện
+                    router.push(
+                      `/books/${encodeURIComponent(matchedBookId)}?pageId=${encodeURIComponent(matchedPage.page_id)}${childParam}`,
+                    );
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="mx-auto grid w-full max-w-[744px] gap-3 sm:grid-cols-2">

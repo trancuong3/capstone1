@@ -143,9 +143,10 @@ describe("real Admin adapters", () => {
     expect(url.searchParams.get("lifecycle_status")).toBe("RETIRED");
     expect(url.searchParams.get("verification_status")).toBe("VERIFIED");
   });
-  it("reads book metadata from the admin route", async () => {
-    fetchMock.mockResolvedValue(Response.json(book));
-    expect(await createAdminBookService().get(bookId)).toEqual(book);
+  it("reads book metadata and next page number from the admin route", async () => {
+    const adminBookDetail = { ...book, next_page_number: 8 };
+    fetchMock.mockResolvedValue(Response.json(adminBookDetail));
+    expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
   });
   it("rejects a book belonging to a different requested ID", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...book, id: pageId }));

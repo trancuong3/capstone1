@@ -89,6 +89,12 @@ class AdminOcrRepository:
             query = query.with_for_update()
         return await self.db.scalar(query)
 
+    @staticmethod
+    def set_page_lifecycle_status(page: BookPage, status: str) -> BookPage:
+        """Change page availability without deleting revisions or reading history."""
+        page.LifecycleStatus = status
+        return page
+
     async def page_number_exists(self, book_id: UUID, page_number: int) -> bool:
         value = await self.db.scalar(
             select(BookPage.Id).where(BookPage.BookId == book_id, BookPage.PageNumber == page_number)

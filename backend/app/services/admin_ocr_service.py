@@ -19,7 +19,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
-from app.schemas.book import AdminRevisionDetailRead, CatalogBookResponse
+from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead, CatalogBookResponse
 from app.services.ocr_engine import (
     OcrEngineUnavailable, OcrNoTextDetected, extract_text_and_boxes, normalize_text_tokens, normalize_word,
 )
@@ -564,11 +564,79 @@ class AdminOcrService:
             item["bbox"] = list(item["bbox"])
         return raw
 
+    async def create_edit_draft(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
+        """Start a new editable revision from the current verified text without rerunning OCR."""
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot edit a retired page")
+        if page.CurrentVerifiedRevisionId is None:
+            raise HTTPException(status_code=409, detail="Page has no current verified revision")
+
+        source = await self.repo.revision(page_id, page.CurrentVerifiedRevisionId, lock=True)
+        if source is None or source.VerificationStatus != "VERIFIED" or not (source.VerifiedText or "").strip():
+            raise HTTPException(status_code=409, detail="Current verified revision is not available")
+        source_words = await self.repo.words(source.Id)
+        if not source_words:
+            raise HTTPException(status_code=409, detail="Current verified revision has no editable word data")
+
+        candidates = []
+        for row in source_words:
+            bbox = row.BoundingBox
+            if isinstance(bbox, dict):
+                bbox = [bbox.get("x"), bbox.get("y"), bbox.get("width"), bbox.get("height")]
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                raise HTTPException(status_code=409, detail="Stored word coordinates cannot be copied safely")
+            candidates.append({
+                "text": row.Text,
+                "line_index": row.LineIndex,
+                "bbox": bbox,
+                "ocr_confidence": row.OCRConfidence,
+            })
+        words = self._word_data(candidates)
+        text_value = source.VerifiedText.strip()
+        if normalize_text_tokens(text_value) != [str(item["normalized_text"]) for item in words]:
+            raise HTTPException(status_code=409, detail="Current verified text and word data are inconsistent")
+
+        try:
+            next_number = await self.repo.next_revision_number(page.Id)
+        except ValueError as exc:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
+        revision = PageRevision(
+            Id=uuid4(),
+            PageId=page.Id,
+            RevisionNo=str(next_number),
+            VerificationStatus="NEEDS_REVIEW",
+            VerifiedText=None,
+            DraftText=text_value,
+            ContentHash=hashlib.sha256(
+                json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+            ProcessingMeta={"source_revision_id": str(source.Id), "creation_reason": "manual_edit"},
+        )
+        self.repo.stage_revision_bundle(revision, words)
+        try:
+            await self.db.commit()
+            await self.db.refresh(revision)
+            await self.db.refresh(page)
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="A concurrent edit created this revision number; retry") from exc
+        except Exception:
+            await self.db.rollback()
+            raise
+        return await self.revision_detail(page, revision)
+
     async def save_draft(self, actor_id: UUID, page_id: UUID, revision_id: UUID, payload: AdminOcrDraftRequest) -> AdminRevisionDetailRead:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot edit a retired page")
         revision = await self.repo.revision(page_id, revision_id, lock=True)
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision not found for this page")
@@ -576,18 +644,27 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be edited")
         if not payload.draft_text.strip():
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
-        words = self._validated_words(payload.words)
-        await self.repo.sync_words(revision.Id, words)
         draft_text = payload.draft_text.strip()
+        words = self._validated_words(payload.words)
+        text_tokens = normalize_text_tokens(draft_text)
+        word_tokens = [str(item["normalized_text"]) for item in words]
+        if text_tokens != word_tokens:
+            raise HTTPException(
+                status_code=422,
+                detail="Draft text must match the ordered word list; edit the word entries before saving",
+            )
+
         content_hash = hashlib.sha256(
             json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        self.repo.update_revision_draft(
-            revision,
-            draft_text=draft_text,
-            content_hash=content_hash,
-        )
         try:
+            # Keep draft text and the corresponding word records in one transaction.
+            await self.repo.sync_words(revision.Id, words)
+            self.repo.update_revision_draft(
+                revision,
+                draft_text=draft_text,
+                content_hash=content_hash,
+            )
             await self.db.commit()
             await self.db.refresh(revision)
             await self.db.refresh(page)
@@ -601,6 +678,8 @@ class AdminOcrService:
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot verify a retired page")
         revision = await self.repo.revision(page_id, payload.page_revision_id, lock=True)
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision does not belong to this page")
@@ -614,20 +693,22 @@ class AdminOcrService:
         word_tokens = [str(item["normalized_text"]) for item in words]
         if text_tokens != word_tokens:
             raise HTTPException(status_code=422, detail="Corrected text must match the ordered word list; edit the word entries before verifying")
-        await self.repo.sync_words(revision.Id, words)
         content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        self.repo.update_revision_verification(
-            revision,
-            corrected_text=corrected_text,
-            content_hash=content_hash,
-            verified_by=actor_id,
-            verified_at=datetime.now(timezone.utc),
-        )
-        if page.LifecycleStatus == "ACTIVE":
-            self.repo.set_current_verified_revision(page, revision.Id)
         try:
+            # Word persistence, revision verification and the page's current pointer
+            # must succeed or roll back together.
+            await self.repo.sync_words(revision.Id, words)
+            self.repo.update_revision_verification(
+                revision,
+                corrected_text=corrected_text,
+                content_hash=content_hash,
+                verified_by=actor_id,
+                verified_at=datetime.now(timezone.utc),
+            )
+            if page.LifecycleStatus == "ACTIVE":
+                self.repo.set_current_verified_revision(page, revision.Id)
             await self.db.commit()
             await self.db.refresh(revision)
             await self.db.refresh(page)
@@ -641,6 +722,8 @@ class AdminOcrService:
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot reprocess a retired page")
         try:
             image_bytes = await run_in_threadpool(download_object, page.ImagePath)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
@@ -681,6 +764,29 @@ class AdminOcrService:
             raise
         # The current verified pointer and all historical session/event references remain untouched.
         return await self.revision_detail(page, revision)
+
+    async def retire_page(self, actor_id: UUID, page_id: UUID) -> AdminPageLifecycleRead:
+        """Hide a page from new reading sessions while preserving all historical references."""
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus not in ("ACTIVE", "RETIRED"):
+            raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
+        if page.LifecycleStatus != "RETIRED":
+            self.repo.set_page_lifecycle_status(page, "RETIRED")
+            try:
+                await self.db.commit()
+                await self.db.refresh(page)
+            except Exception:
+                await self.db.rollback()
+                raise
+        return AdminPageLifecycleRead(
+            page_id=page.Id,
+            book_id=page.BookId,
+            page_number=page.PageNumber,
+            lifecycle_status="RETIRED",
+        )
 
     async def image_url(self, page: BookPage) -> str:
         return create_signed_image_url(page.ImagePath)

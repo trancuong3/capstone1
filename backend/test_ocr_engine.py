@@ -52,7 +52,7 @@ class OcrEngineTests(unittest.TestCase):
         ):
             result = ocr_engine.extract_text_and_boxes(sample_png())
 
-        self.assertEqual(result["text"], "Chú mèo")
+        self.assertEqual(result["text"], "Chú\nmèo")
         self.assertEqual(result["words"][0]["text"], "Chú")
         first_bbox = result["words"][0]["bbox"]
         for actual, expected in zip(first_bbox, (0.25, 0.25, 0.1, 0.1)):
@@ -62,6 +62,37 @@ class OcrEngineTests(unittest.TestCase):
         self.assertEqual(result["words"][0]["line_index"], 0)
         self.assertEqual(result["words"][1]["line_index"], 1)
         self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
+
+    def test_preserves_line_breaks_paragraphs_and_detected_indentation(self):
+        layout = {
+            "text": ["Ngày", "xưa", "có", "một", "cậu", "bé"],
+            "left": [80, 160, 80, 110, 195, 80],
+            "top": [30, 30, 80, 130, 130, 180],
+            "width": [40, 40, 30, 35, 35, 25],
+            "height": [20, 20, 20, 20, 20, 20],
+            "conf": ["90", "90", "85", "88", "87", "92"],
+            "block_num": [1, 1, 1, 1, 1, 1],
+            "par_num": [1, 1, 1, 2, 2, 2],
+            "line_num": [1, 1, 2, 1, 1, 2],
+        }
+        patches = self._configured_tesseract()
+        with patches[0], patches[1], patches[2], patch.object(
+            ocr_engine.pytesseract,
+            "image_to_data",
+            return_value=layout,
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png())
+
+        self.assertEqual(result["text"], "Ngày xưa\ncó\n\n    một cậu\nbé")
+        self.assertEqual(
+            result["metadata"]["paragraph_start_line_indices"],
+            [2],
+        )
+        self.assertEqual(result["metadata"]["indented_line_indices"], [2])
+        self.assertEqual(
+            [word["line_index"] for word in result["words"]],
+            [0, 0, 1, 2, 2, 3],
+        )
 
     def test_invalid_tesseract_confidence_is_null(self):
         invalid_confidence = {
@@ -149,16 +180,21 @@ class OcrEngineTests(unittest.TestCase):
 
         self.assertEqual(result["text"], "mèo")
         self.assertEqual(result["metadata"]["selected_psm"], 6)
-        self.assertEqual(result["metadata"]["candidate_count"], 3)
+        self.assertEqual(result["metadata"]["candidate_count"], 4)
         self.assertEqual(
             [candidate["preprocessing"] for candidate in result["metadata"]["candidate_scores"]],
             [
                 "otsu_threshold",
                 "clahe_grayscale",
+                "grayscale",
                 "adaptive_gaussian_threshold",
             ],
         )
-        for actual, expected in zip(result["words"][0]["bbox"], (0.2, 0.2, 0.05, 0.05)):
+        # The test image is 400x200 and the OCR preprocessing upscale factor is 3.
+        for actual, expected in zip(
+            result["words"][0]["bbox"],
+            (200 / 1200, 100 / 600, 50 / 1200, 25 / 600),
+        ):
             self.assertAlmostEqual(actual, expected)
 
     def test_candidate_score_rejects_empty_or_non_text_output(self):
@@ -175,6 +211,27 @@ class OcrEngineTests(unittest.TestCase):
         })
         self.assertGreater(score, 0.75)
         self.assertLessEqual(score, 1.0)
+
+    def test_candidate_score_penalizes_non_text_artifacts_from_illustrations(self):
+        clean = {
+            "text": ["Chú", "mèo"],
+            "conf": ["90", "90"],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+        }
+        noisy = {
+            "text": ["Chú", "~——^", "mèo", "|"],
+            "conf": ["90", "99", "90", "99"],
+            "block_num": [1, 1, 1, 1],
+            "par_num": [1, 1, 1, 1],
+            "line_num": [1, 1, 1, 1],
+        }
+
+        self.assertLess(
+            ocr_engine._candidate_quality_score(noisy),
+            ocr_engine._candidate_quality_score(clean),
+        )
 
     def test_missing_vietnamese_language_data_fails_closed(self):
         with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
