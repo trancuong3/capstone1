@@ -132,6 +132,19 @@ class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
+    async def test_max_page_number_query_includes_retired_page_numbers(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=9)
+
+        result = await AdminCatalogRepository(db).max_page_number(BOOK)
+
+        self.assertEqual(result, 9)
+        statement = db.scalar.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("max(bookpages.pagenumber)", str(compiled))
+        self.assertIn(BOOK, compiled.params.values())
+        self.assertNotIn("lifecyclestatus", str(compiled).lower())
+
     async def test_admin_page_list_query_excludes_retired_pages(self):
         db = MagicMock()
         active_page = make_page()
