@@ -219,4 +219,7 @@ export type AdminMockScenario =
   | "degraded"
   | "unavailable";
 
-export type AdminBookDTO = BookListItemDTO;
+export type AdminBookDTO = BookListItemDTO & {
+  /** Next available page number, calculated across active and retired pages. */
+  readonly next_page_number?: number;
+};
