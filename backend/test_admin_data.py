@@ -86,6 +86,16 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
 
+    async def test_admin_book_detail_uses_max_page_number_including_retired_pages(self):
+        repo = catalog_repo()
+        repo.max_page_number = AsyncMock(return_value=7)
+
+        result = await AdminCatalogService(repository=repo).book_detail(BOOK)
+
+        self.assertEqual(result.id, BOOK)
+        self.assertEqual(result.next_page_number, 8)
+        repo.max_page_number.assert_awaited_once_with(BOOK)
+
     async def test_retired_page_is_hidden_from_direct_admin_detail_reads(self):
         repo = catalog_repo()
         repo.page.return_value = page_row(LifecycleStatus="RETIRED")
