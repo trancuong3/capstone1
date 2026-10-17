@@ -9,6 +9,7 @@ interface BookPageViewerProps {
   isTransitioning?: boolean;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
+  spokenWords?: Set<string>;
 }
 
 export function BookPageViewer({
@@ -16,6 +17,7 @@ export function BookPageViewer({
   isTransitioning = false,
   onWordClick,
   page,
+  spokenWords,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
 
@@ -68,30 +70,42 @@ export function BookPageViewer({
         <div className="mt-2 flex-1 overflow-y-auto rounded-card bg-white/70 p-4 shadow-inner">
           {hasWords ? (
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
-              {page.words.map((word) => (
-                <span
-                  className={cn(
-                    "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
-                    word.word_id === currentWordId &&
-                      "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
-                  )}
-                  data-bbox={word.bbox.join(",")}
-                  data-page-revision-id={page.page_revision_id}
-                  data-word-id={word.word_id}
-                  key={word.word_id}
-                  onClick={() => onWordClick?.(word)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onWordClick?.(word);
-                    }
-                  }}
-                >
-                  {word.text}
-                </span>
-              ))}
+              {page.words.map((word) => {
+                const isCurrent = word.word_id === currentWordId;
+                const isSpoken = Boolean(
+                  spokenWords?.has(word.text) ||
+                  spokenWords?.has(word.text.toLowerCase()),
+                );
+                return (
+                  <span
+                    className={cn(
+                      "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150 cursor-pointer select-none active:scale-95",
+                      isCurrent &&
+                        "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
+                      !isCurrent &&
+                        isSpoken &&
+                        "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
+                      !isCurrent && !isSpoken && "hover:bg-highlight/40",
+                    )}
+                    data-bbox={word.bbox.join(",")}
+                    data-page-revision-id={page.page_revision_id}
+                    data-word-id={word.word_id}
+                    key={word.word_id}
+                    onClick={() => onWordClick?.(word)}
+                    role="button"
+                    tabIndex={0}
+                    title={`Bấm để nghe đọc mẫu chữ: "${word.text}"`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onWordClick?.(word);
+                      }
+                    }}
+                  >
+                    {word.text}
+                  </span>
+                );
+              })}
             </p>
           ) : page.text ? (
             <p className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">

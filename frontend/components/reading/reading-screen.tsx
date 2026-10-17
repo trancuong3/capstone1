@@ -120,6 +120,12 @@ export function ReadingScreen({
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isReadingWord, setIsReadingWord] = useState(false);
+  const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
+  const sampleHighlightTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
@@ -130,6 +136,9 @@ export function ReadingScreen({
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+  const startListeningRef = useRef<() => Promise<boolean>>(() =>
+    Promise.resolve(false),
+  );
   const isUsingRecorderRef = useRef(false);
 
   const recordSpokenText = useCallback((text: string) => {
@@ -153,16 +162,43 @@ export function ReadingScreen({
     for (const w of words) {
       spokenWordsSetRef.current.add(w);
     }
+    setSpokenWords(new Set(spokenWordsSetRef.current));
   }, []);
 
   const handleWordClick = useCallback(
-    (word: ReadingPageWordDTO) => {
+    async (word: ReadingPageWordDTO) => {
       setCurrentWordId(word.word_id);
       setLatestTranscript(word.text);
-      recordSpokenText(word.text);
+
+      if (sampleHighlightTimerRef.current) {
+        clearInterval(sampleHighlightTimerRef.current);
+        sampleHighlightTimerRef.current = null;
+      }
+      if (speechPlayer.isPlaying) {
+        speechPlayer.stop();
+      }
+
+      setIsReadingWord(true);
+      try {
+        await speechPlayer.play(word.text);
+      } catch (err) {
+        console.warn("Lỗi phát âm 1 từ:", err);
+      } finally {
+        if (mountedRef.current) {
+          setIsReadingWord(false);
+        }
+      }
     },
-    [recordSpokenText],
+    [speechPlayer],
   );
+
+  const handleReadCurrentWord = useCallback(() => {
+    if (!page || !currentWordId) return;
+    const word = page.words.find((w) => w.word_id === currentWordId);
+    if (word) {
+      void handleWordClick(word);
+    }
+  }, [currentWordId, handleWordClick, page]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -170,6 +206,9 @@ export function ReadingScreen({
       mountedRef.current = false;
       isListeningActiveRef.current = false;
       transcriptionAbortRef.current?.abort();
+      if (sampleHighlightTimerRef.current) {
+        clearInterval(sampleHighlightTimerRef.current);
+      }
       try {
         recognitionRef.current?.abort?.();
       } catch {
@@ -177,6 +216,29 @@ export function ReadingScreen({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        if (mountedRef.current) {
+          setCountdown((c) => (c !== null ? c - 1 : null));
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+    const finishTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        setCountdown(null);
+        void startListeningRef.current().then((ok) => {
+          if (mountedRef.current && ok) {
+            setIsMicRecording(true);
+          }
+        });
+      }
+    }, 400);
+    return () => clearTimeout(finishTimer);
+  }, [countdown]);
 
   useEffect(() => {
     if (page?.page_id) {
@@ -285,25 +347,46 @@ export function ReadingScreen({
   function matchSpokenWord(spokenText: string) {
     if (!page || !page.words.length || !spokenText) return;
     const cleanSpoken = normalizeVietnamese(spokenText);
-    const tokens = cleanSpoken.split(/\s+/).filter(Boolean);
+    const tokens = cleanSpoken.split(/\s+/).filter((t) => t.length > 0);
     if (!tokens.length) return;
 
-    let matchedWordId: string | null = null;
-    for (const token of tokens) {
-      for (const w of page.words) {
-        const cleanWord = normalizeVietnamese(w.text);
-        if (
-          cleanWord === token ||
-          cleanWord.includes(token) ||
-          token.includes(cleanWord)
-        ) {
-          spokenWordsSetRef.current.add(w.text);
-          matchedWordId = w.word_id;
+    let matchedWord: ReadingPageWordDTO | null = null;
+
+    // 1. Prioritize exact token match starting from latest spoken word
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const token = tokens[i];
+      const found = page.words.find(
+        (w) => normalizeVietnamese(w.text) === token,
+      );
+      if (found) {
+        matchedWord = found;
+        break;
+      }
+    }
+
+    // 2. Fallback to substring match for tokens >= 2 chars
+    if (!matchedWord) {
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const token = tokens[i];
+        if (token.length < 2) continue;
+        const found = page.words.find((w) => {
+          const norm = normalizeVietnamese(w.text);
+          return (
+            norm === token ||
+            (norm.length >= 2 && (norm.includes(token) || token.includes(norm)))
+          );
+        });
+        if (found) {
+          matchedWord = found;
+          break;
         }
       }
     }
-    if (matchedWordId) {
-      setCurrentWordId(matchedWordId);
+
+    if (matchedWord) {
+      setCurrentWordId(matchedWord.word_id);
+      spokenWordsSetRef.current.add(matchedWord.text);
+      setSpokenWords(new Set(spokenWordsSetRef.current));
     }
   }
 
@@ -418,6 +501,10 @@ export function ReadingScreen({
     return true;
   }
 
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  });
+
   async function transcribeRecording(recording: Blob) {
     transcriptionAbortRef.current?.abort();
     const controller = new AbortController();
@@ -475,6 +562,17 @@ export function ReadingScreen({
 
   async function handleReadSample() {
     if (isBusy) return;
+    if (sampleHighlightTimerRef.current) {
+      clearInterval(sampleHighlightTimerRef.current);
+      sampleHighlightTimerRef.current = null;
+    }
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+      setIsReadingWord(false);
+      return;
+    }
+    if (!page) return;
+
     if (isMicRecording) {
       try {
         await stopListeningAndTranscribe();
@@ -483,29 +581,58 @@ export function ReadingScreen({
       }
       if (mountedRef.current) setIsMicRecording(false);
     }
-    if (speechPlayer.isPlaying) {
-      speechPlayer.stop();
-      return;
-    }
-    if (!page) return;
+
     const rawText = page.text || page.words.map((w) => w.text).join(" ") || "";
     const fullText = rawText.replace(/\s+/g, " ").trim();
     if (!fullText) return;
 
     setIsBusy(true);
+    setIsReadingWord(false);
+
+    if (page.words.length > 0) {
+      let wordIdx = 0;
+      setCurrentWordId(page.words[0].word_id);
+      const intervalMs = Math.max(
+        250,
+        Math.min(600, Math.floor(6000 / page.words.length)),
+      );
+      sampleHighlightTimerRef.current = setInterval(() => {
+        wordIdx += 1;
+        if (wordIdx < page.words.length) {
+          if (mountedRef.current) {
+            setCurrentWordId(page.words[wordIdx].word_id);
+          }
+        } else {
+          if (sampleHighlightTimerRef.current) {
+            clearInterval(sampleHighlightTimerRef.current);
+            sampleHighlightTimerRef.current = null;
+          }
+        }
+      }, intervalMs);
+    }
+
     try {
       await speechPlayer.play(fullText);
     } catch {
       if (mountedRef.current) setUiState("tts-error");
     } finally {
+      if (sampleHighlightTimerRef.current) {
+        clearInterval(sampleHighlightTimerRef.current);
+        sampleHighlightTimerRef.current = null;
+      }
       if (mountedRef.current) setIsBusy(false);
     }
   }
 
   async function handleToggleListening() {
     if (isBusy) return;
+    if (sampleHighlightTimerRef.current) {
+      clearInterval(sampleHighlightTimerRef.current);
+      sampleHighlightTimerRef.current = null;
+    }
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      setIsReadingWord(false);
     }
     if (isMicRecording) {
       setIsBusy(true);
@@ -545,6 +672,7 @@ export function ReadingScreen({
     setUiState("reading");
     setIsMicRecording(false);
     setIsBusy(false);
+    setCountdown(3);
   }
 
   async function resumeReading() {
@@ -845,12 +973,17 @@ export function ReadingScreen({
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
         controlsDisabled={uiState !== "reading" || isBusy}
+        countdown={countdown}
         currentWordId={currentWordId}
+        currentWordText={
+          page.words.find((w) => w.word_id === currentWordId)?.text ?? null
+        }
         exitHref={detailHref}
         isListening={uiState === "reading"}
         isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
-        isPlayingSample={speechPlayer.isPlaying}
+        isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
+        isReadingWord={isReadingWord}
         isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
         onFinish={() => setConfirmFinish(true)}
@@ -858,9 +991,11 @@ export function ReadingScreen({
         onManualPage={() => setUiState("manual-page")}
         onPause={() => void pauseReading()}
         onReadSample={() => void handleReadSample()}
+        onReadWord={handleReadCurrentWord}
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
+        spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
