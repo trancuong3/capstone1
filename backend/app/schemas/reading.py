@@ -194,3 +194,38 @@ class SessionDetailRead(SessionSummaryRead):
     fluency_assessment: SessionFluencyRead | None
     comprehension: list[SessionComprehensionRead]
     report_id: UUID | None
+
+
+class ReadingPageWordRead(BaseModel):
+    word_id: UUID
+    word_index: int = Field(ge=0)
+    text: str
+    bbox: tuple[float, float, float, float]
+
+
+class ReadingPageRead(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(ge=1)
+    confidence: float = Field(ge=0, le=1)
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    words: list[ReadingPageWordRead]
+
+
+class CameraPageMatchRead(BaseModel):
+    framing_valid: bool
+    matched: bool
+    book_id: UUID | None = None  # Bổ sung ID cuốn sách được nhận diện
+    status_code: Literal[
+        "INVALID_IMAGE",
+        "TOO_DARK",
+        "TOO_BLURRY",
+        "OUT_OF_FRAME",
+        "FRAME_OK",
+        "MATCHED",
+        "LOW_CONFIDENCE",
+    ]
+    message: str
+    confidence: float = Field(ge=0, le=1)
+    matched_page: ReadingPageRead | None = None

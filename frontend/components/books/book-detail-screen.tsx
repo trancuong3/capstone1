@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowLeft, ArrowRight, BookX, RefreshCw } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
@@ -53,6 +53,10 @@ export function BookDetailScreen({
   const childService = useChildService();
   const { readingService } = useReadingServices();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetPageId = searchParams.get("pageId");
+  const startButtonRef = useRef<HTMLButtonElement | null>(null);
+
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [selectedPage, setSelectedPage] = useState<BookPagePreviewDTO | null>(
@@ -93,7 +97,11 @@ export function BookDetailScreen({
 
         if (isActive) {
           setState({ status: "ready", book, child, pages, previewUnavailable });
-          setSelectedPage(pages[0] ?? null);
+          // Nếu có targetPageId truyền từ dashboard sang thì ưu tiên chọn trang đó
+          const matchedPage = targetPageId
+            ? pages.find((p) => p.page_id === targetPageId)
+            : null;
+          setSelectedPage(matchedPage ?? pages[0] ?? null);
         }
       } catch (error) {
         if (!isActive) {
@@ -120,6 +128,16 @@ export function BookDetailScreen({
     };
   }, [bookId, bookService, childService, requestKey, requestedChildId]);
 
+  useEffect(() => {
+    if (state.status === "ready" && targetPageId) {
+      const btn = document.getElementById("start-reading-button");
+      if (btn) {
+        btn.scrollIntoView({ behavior: "smooth", block: "center" });
+        btn.focus();
+      }
+    }
+  }, [state.status, targetPageId]);
+  
   async function handleStartReading() {
     if (
       state.status !== "ready" ||
@@ -266,6 +284,7 @@ export function BookDetailScreen({
           </p>
 
           <Button
+            id="start-reading-button"
             className="order-6 sm:order-none sm:w-[360px]"
             disabled={!selectedPage || !child}
             isLoading={startState === "starting"}
