@@ -123,9 +123,6 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
-  const sampleHighlightTimerRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
@@ -170,10 +167,6 @@ export function ReadingScreen({
       setCurrentWordId(word.word_id);
       setLatestTranscript(word.text);
 
-      if (sampleHighlightTimerRef.current) {
-        clearInterval(sampleHighlightTimerRef.current);
-        sampleHighlightTimerRef.current = null;
-      }
       if (speechPlayer.isPlaying) {
         speechPlayer.stop();
       }
@@ -206,9 +199,6 @@ export function ReadingScreen({
       mountedRef.current = false;
       isListeningActiveRef.current = false;
       transcriptionAbortRef.current?.abort();
-      if (sampleHighlightTimerRef.current) {
-        clearInterval(sampleHighlightTimerRef.current);
-      }
       try {
         recognitionRef.current?.abort?.();
       } catch {
@@ -350,42 +340,68 @@ export function ReadingScreen({
     const tokens = cleanSpoken.split(/\s+/).filter((t) => t.length > 0);
     if (!tokens.length) return;
 
-    let matchedWord: ReadingPageWordDTO | null = null;
+    const words = page.words;
+    const currentIdx = words.findIndex((w) => w.word_id === currentWordId);
+    const searchStartIdx = currentIdx >= 0 ? currentIdx : 0;
 
-    // 1. Prioritize exact token match starting from latest spoken word
-    for (let i = tokens.length - 1; i >= 0; i--) {
-      const token = tokens[i];
-      const found = page.words.find(
-        (w) => normalizeVietnamese(w.text) === token,
-      );
-      if (found) {
-        matchedWord = found;
-        break;
+    let matchedIdx = -1;
+
+    // 1. Look ahead within a forward window of 8 words from the current reading word:
+    for (let t = 0; t < tokens.length; t++) {
+      const token = tokens[t];
+      for (
+        let w = searchStartIdx;
+        w < Math.min(words.length, searchStartIdx + 8);
+        w++
+      ) {
+        const cleanWord = normalizeVietnamese(words[w].text);
+        if (
+          cleanWord === token ||
+          (token.length >= 2 && cleanWord.includes(token))
+        ) {
+          matchedIdx = w;
+        }
       }
     }
 
-    // 2. Fallback to substring match for tokens >= 2 chars
-    if (!matchedWord) {
-      for (let i = tokens.length - 1; i >= 0; i--) {
-        const token = tokens[i];
-        if (token.length < 2) continue;
-        const found = page.words.find((w) => {
-          const norm = normalizeVietnamese(w.text);
-          return (
-            norm === token ||
-            (norm.length >= 2 && (norm.includes(token) || token.includes(norm)))
-          );
-        });
-        if (found) {
-          matchedWord = found;
+    // 2. If not found in the immediate forward window, search all forward words on the page:
+    if (matchedIdx < 0) {
+      for (let t = tokens.length - 1; t >= 0; t--) {
+        const token = tokens[t];
+        for (let w = searchStartIdx; w < words.length; w++) {
+          if (normalizeVietnamese(words[w].text) === token) {
+            matchedIdx = w;
+            break;
+          }
+        }
+        if (matchedIdx >= 0) break;
+      }
+    }
+
+    // 3. Fallback: search entire page (in case the child jumped or restarted from the top)
+    if (matchedIdx < 0) {
+      for (let t = tokens.length - 1; t >= 0; t--) {
+        const token = tokens[t];
+        const foundIdx = words.findIndex(
+          (w) => normalizeVietnamese(w.text) === token,
+        );
+        if (foundIdx >= 0) {
+          matchedIdx = foundIdx;
           break;
         }
       }
     }
 
-    if (matchedWord) {
-      setCurrentWordId(matchedWord.word_id);
-      spokenWordsSetRef.current.add(matchedWord.text);
+    if (matchedIdx >= 0) {
+      const matched = words[matchedIdx];
+      setCurrentWordId(matched.word_id);
+      const startMark =
+        searchStartIdx >= 0 && searchStartIdx <= matchedIdx
+          ? searchStartIdx
+          : 0;
+      for (let i = startMark; i <= matchedIdx; i++) {
+        spokenWordsSetRef.current.add(words[i].text);
+      }
       setSpokenWords(new Set(spokenWordsSetRef.current));
     }
   }
@@ -561,14 +577,11 @@ export function ReadingScreen({
   }
 
   async function handleReadSample() {
-    if (isBusy) return;
-    if (sampleHighlightTimerRef.current) {
-      clearInterval(sampleHighlightTimerRef.current);
-      sampleHighlightTimerRef.current = null;
-    }
+    if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
       setIsReadingWord(false);
+      setIsBusy(false);
       return;
     }
     if (!page) return;
@@ -586,53 +599,81 @@ export function ReadingScreen({
     const fullText = rawText.replace(/\s+/g, " ").trim();
     if (!fullText) return;
 
+    const words = page.words;
+    if (!words.length) return;
+
     setIsBusy(true);
     setIsReadingWord(false);
 
-    if (page.words.length > 0) {
-      let wordIdx = 0;
-      setCurrentWordId(page.words[0].word_id);
-      const intervalMs = Math.max(
-        250,
-        Math.min(600, Math.floor(6000 / page.words.length)),
-      );
-      sampleHighlightTimerRef.current = setInterval(() => {
-        wordIdx += 1;
-        if (wordIdx < page.words.length) {
-          if (mountedRef.current) {
-            setCurrentWordId(page.words[wordIdx].word_id);
-          }
-        } else {
-          if (sampleHighlightTimerRef.current) {
-            clearInterval(sampleHighlightTimerRef.current);
-            sampleHighlightTimerRef.current = null;
-          }
-        }
-      }, intervalMs);
+    // Calculate word duration weights for natural Vietnamese speech rhythm
+    const weights = words.map((w) => {
+      let weight = Math.max(2, w.text.length);
+      if (/[.,;:!?…"”]/.test(w.text)) {
+        weight += 4;
+      }
+      return weight;
+    });
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    const cumulativeWeights: number[] = [];
+    let running = 0;
+    for (const w of weights) {
+      running += w;
+      cumulativeWeights.push(running);
     }
 
+    // Set first word active immediately so user sees what is being queued
+    setCurrentWordId(words[0].word_id);
+
     try {
-      await speechPlayer.play(fullText);
+      await speechPlayer.play(fullText, {
+        onPlay: () => {
+          if (!mountedRef.current) return;
+          setCurrentWordId(words[0].word_id);
+        },
+        onTimeUpdate: (currentTime, duration) => {
+          if (!mountedRef.current || !duration || duration <= 0) return;
+          const progress = Math.min(0.999, Math.max(0, currentTime / duration));
+          const targetWeight = progress * totalWeight;
+          let idx = cumulativeWeights.findIndex((cw) => cw >= targetWeight);
+          if (idx < 0) idx = 0;
+          if (idx >= words.length) idx = words.length - 1;
+
+          const targetWord = words[idx];
+          if (targetWord) {
+            setCurrentWordId(targetWord.word_id);
+            for (let i = 0; i <= idx; i++) {
+              spokenWordsSetRef.current.add(words[i].text);
+            }
+            setSpokenWords(new Set(spokenWordsSetRef.current));
+          }
+        },
+        onEnded: () => {
+          if (!mountedRef.current) return;
+          setIsBusy(false);
+          const lastWord = words[words.length - 1];
+          if (lastWord) {
+            setCurrentWordId(lastWord.word_id);
+            for (const w of words) {
+              spokenWordsSetRef.current.add(w.text);
+            }
+            setSpokenWords(new Set(spokenWordsSetRef.current));
+          }
+        },
+      });
     } catch {
-      if (mountedRef.current) setUiState("tts-error");
-    } finally {
-      if (sampleHighlightTimerRef.current) {
-        clearInterval(sampleHighlightTimerRef.current);
-        sampleHighlightTimerRef.current = null;
+      if (mountedRef.current) {
+        setUiState("tts-error");
+        setIsBusy(false);
       }
-      if (mountedRef.current) setIsBusy(false);
     }
   }
 
   async function handleToggleListening() {
-    if (isBusy) return;
-    if (sampleHighlightTimerRef.current) {
-      clearInterval(sampleHighlightTimerRef.current);
-      sampleHighlightTimerRef.current = null;
-    }
+    if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
       setIsReadingWord(false);
+      setIsBusy(false);
     }
     if (isMicRecording) {
       setIsBusy(true);
@@ -972,7 +1013,9 @@ export function ReadingScreen({
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
-        controlsDisabled={uiState !== "reading" || isBusy}
+        controlsDisabled={
+          uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
+        }
         countdown={countdown}
         currentWordId={currentWordId}
         currentWordText={
