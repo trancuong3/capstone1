@@ -21,6 +21,11 @@ import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  normalizeVietnameseWord,
+  syncPageTextToWords,
+  syncWordsToPageText,
+} from "@/lib/ocr/sync-page-text-words";
 import type {
   AdminBookDTO,
   AdminPageImageUI,
@@ -68,6 +73,7 @@ export function AdminOcrReviewScreen({
   const [detail, setDetail] = useState<AdminPageRevisionDetailDTO | null>(null);
   const [draftText, setDraftText] = useState("");
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
+  const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
   const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
@@ -82,6 +88,7 @@ export function AdminOcrReviewScreen({
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     setDetail(next);
     setDraftText(next.draft_text ?? "");
+    setWordSyncError(null);
     setWords(
       next.words.map((word) => ({
         ...word,
@@ -177,12 +184,42 @@ export function AdminOcrReviewScreen({
     }
   }
 
-  function updateWord(index: number, patch: Partial<AdminRevisionWordDTO>) {
-    setWords((current) =>
-      current.map((word) =>
-        word.word_index === index ? { ...word, ...patch } : word,
-      ),
+  function handleDraftTextChange(value: string) {
+    setDraftText(value);
+    const result = syncPageTextToWords(value, words);
+    if (result.status === "synchronized") {
+      setWords([...result.words]);
+      setWordSyncError(null);
+      return;
+    }
+    setWordSyncError(
+      `Nội dung mới có ${result.actualTokenCount} từ nhưng danh sách đang có ${result.expectedWordCount} từ. Để không gán nhầm tọa độ, hệ thống giữ nguyên Words hiện tại. Hãy khôi phục số từ hoặc xử lý lại OCR/đối chiếu tọa độ trước khi lưu.`,
     );
+  }
+
+  function updateWord(index: number, patch: Partial<AdminRevisionWordDTO>) {
+    const nextWords = words.map((word) =>
+      word.word_index === index
+        ? {
+            ...word,
+            ...patch,
+            normalized_text:
+              patch.text === undefined
+                ? patch.normalized_text ?? word.normalized_text
+                : normalizeVietnameseWord(patch.text),
+          }
+        : word,
+    );
+    setWords(nextWords);
+    const result = syncWordsToPageText(draftText, nextWords);
+    if (result.status === "synchronized") {
+      setDraftText(result.text);
+      setWordSyncError(null);
+    } else {
+      setWordSyncError(
+        `Danh sách có ${result.expectedWordCount} từ, nhưng văn bản trang có ${result.actualTokenCount} từ hoặc một mục Word chứa nhiều từ. Hãy chỉnh lại trước khi lưu.`,
+      );
+    }
   }
 
   function updateBbox(index: number, coordinate: number, value: number) {
@@ -205,12 +242,20 @@ export function AdminOcrReviewScreen({
   }
 
   function syncTextFromWords() {
-    setDraftText(
-      words
-        .map((word) => word.text.trim())
-        .filter(Boolean)
-        .join(" "),
-    );
+    const nextText = words
+      .map((word) => word.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    setDraftText(nextText);
+    const result = syncPageTextToWords(nextText, words);
+    if (result.status === "synchronized") {
+      setWords([...result.words]);
+      setWordSyncError(null);
+    } else {
+      setWordSyncError(
+        "Không thể đồng bộ vì có từ rỗng hoặc một từ chứa nhiều token. Hãy chỉnh danh sách từ trước khi lưu.",
+      );
+    }
   }
 
   async function createEditDraft() {
@@ -541,14 +586,24 @@ export function AdminOcrReviewScreen({
                 className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
                 disabled={verified || detail.lifecycle_status !== "ACTIVE"}
                 id="ocr-text"
-                onChange={(event) => setDraftText(event.target.value)}
+                onChange={(event) => handleDraftTextChange(event.target.value)}
                 value={draftText}
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi sửa số lượng hoặc thứ tự từ, hãy cập nhật danh sách từ và dùng
-              nút đồng bộ trước khi xác minh.
+              Khi sửa nội dung, danh sách Words tự đồng bộ nếu số lượng từ không
+              đổi. Tọa độ bounding box và confidence OCR được giữ nguyên. Thêm,
+              xóa, tách hoặc gộp từ cần đối chiếu tọa độ mới.
             </p>
+            {wordSyncError ? (
+              <p
+                aria-live="polite"
+                className="mt-3 rounded-control border border-red-500/50 bg-red-50 p-3 text-sm text-red-800"
+                role="alert"
+              >
+                {wordSyncError}
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-3">
               {verified ? (
                 <Button
@@ -568,7 +623,9 @@ export function AdminOcrReviewScreen({
                   <Button
                     className="sm:w-auto"
                     disabled={
-                      busy !== null || detail.lifecycle_status !== "ACTIVE"
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      wordSyncError !== null
                     }
                     isLoading={busy === "save"}
                     onClick={() => void saveDraft()}
@@ -581,7 +638,8 @@ export function AdminOcrReviewScreen({
                     disabled={
                       busy !== null ||
                       detail.lifecycle_status !== "ACTIVE" ||
-                      words.length === 0
+                      words.length === 0 ||
+                      wordSyncError !== null
                     }
                     isLoading={busy === "verify"}
                     onClick={() => void verifyRevision()}
@@ -643,9 +701,9 @@ export function AdminOcrReviewScreen({
                       onChange={(event) =>
                         updateWord(word.word_index, {
                           text: event.target.value,
-                          normalized_text: event.target.value
-                            .trim()
-                            .toLocaleLowerCase("vi"),
+                          normalized_text: normalizeVietnameseWord(
+                            event.target.value,
+                          ),
                         })
                       }
                       value={word.text}

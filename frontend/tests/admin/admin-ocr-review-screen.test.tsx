@@ -196,6 +196,93 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getByText(/0\.95/)).toBeInTheDocument();
   });
 
+  it("synchronizes one-to-one text edits with words without changing bbox and blocks unsafe token-count changes", async () => {
+    const services = createAdminServiceFixture();
+    const editableDetail = {
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW" as const,
+      draft_text: "Tôi đi học.",
+      words: [
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 0,
+          text: "Tôi",
+          normalized_text: "tôi",
+          bbox: [0.1, 0.2, 0.15, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.71,
+        },
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 1,
+          text: "đi",
+          normalized_text: "đi",
+          bbox: [0.28, 0.2, 0.1, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.82,
+        },
+        {
+          ...adminR1Fixture.words[0],
+          word_index: 2,
+          text: "học.",
+          normalized_text: "học",
+          bbox: [0.4, 0.2, 0.2, 0.04] as [number, number, number, number],
+          ocr_confidence: 0.91,
+        },
+      ],
+    };
+    services.ocr.getRevision.mockResolvedValue(editableDetail);
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const pageText = await screen.findByLabelText("Nội dung trang");
+    expect(pageText).toHaveValue("Tôi đi học.");
+    const boxes = [
+      screen.getByLabelText("Từ 0 bbox x"),
+      screen.getByLabelText("Từ 0 bbox y"),
+      screen.getByLabelText("Từ 0 bbox w"),
+      screen.getByLabelText("Từ 0 bbox h"),
+    ];
+    const originalBoxValues = boxes.map(
+      (box) => (box as HTMLInputElement).value,
+    );
+
+    await user.clear(pageText);
+    await user.type(pageText, "Ta đi học.");
+
+    const wordInputs = screen.getAllByLabelText("Văn bản từ");
+    expect(
+      wordInputs.map((input) => (input as HTMLInputElement).value),
+    ).toEqual(["Ta", "đi", "học."]);
+    expect(pageText).toHaveValue("Ta đi học.");
+    expect(boxes.map((box) => (box as HTMLInputElement).value)).toEqual(
+      originalBoxValues,
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await user.clear(pageText);
+    await user.type(pageText, "Ta rất đi học.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /để không gán nhầm tọa độ/i,
+    );
+    expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /Xác minh trang/ }),
+    ).toBeDisabled();
+
+    await user.clear(pageText);
+    await user.type(pageText, "Ta đi học.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen
+        .getAllByLabelText("Văn bản từ")
+        .map((input) => (input as HTMLInputElement).value),
+    ).toEqual(["Ta", "đi", "học."]);
+  });
+
   it("scrolls the word list to the first uncertain OCR word", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
