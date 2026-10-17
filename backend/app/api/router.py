@@ -7,6 +7,7 @@ from app.api.routes import (
     profile,
     reading,
     system,
+    tutor,
     voice,
 )
 
@@ -19,3 +20,4 @@ api_router.include_router(reading.router, prefix="/reading", tags=["Reading"])
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])
 api_router.include_router(voice.router, prefix="/voice", tags=["Voice"])
+api_router.include_router(tutor.router, prefix="/tutor", tags=["Tutor"])
