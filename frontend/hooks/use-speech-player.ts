@@ -15,9 +15,12 @@ export function useSpeechPlayer(): SpeechPlayer {
   const speechService = useMemo(() => createSpeechService(), []);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const pendingRef = useRef<AbortController | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const stop = useCallback(() => {
+    pendingRef.current?.abort();
+    pendingRef.current = null;
     const audio = audioRef.current;
     audioRef.current = null;
     if (audio) {
@@ -38,19 +41,26 @@ export function useSpeechPlayer(): SpeechPlayer {
   const play = useCallback(
     async (text: string) => {
       stop();
-      const source = await speechService.synthesize(text);
-      const objectUrl = URL.createObjectURL(source);
-      const audio = new Audio(objectUrl);
-      objectUrlRef.current = objectUrl;
-      audioRef.current = audio;
-      audio.onended = stop;
-      audio.onerror = stop;
-      setIsPlaying(true);
-
+      const controller = new AbortController();
+      pendingRef.current = controller;
       try {
+        const source = await speechService.synthesize(text, {
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted || pendingRef.current !== controller)
+          return;
+        const objectUrl = URL.createObjectURL(source);
+        objectUrlRef.current = objectUrl;
+        const audio = new Audio(objectUrl);
+        audioRef.current = audio;
+        audio.onended = stop;
+        audio.onerror = stop;
+        setIsPlaying(true);
+
         await audio.play();
       } catch (error) {
-        stop();
+        if (controller.signal.aborted) return;
+        if (pendingRef.current === controller) stop();
         throw error;
       }
     },

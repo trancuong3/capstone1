@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceError } from "@/lib/api/service-error";
@@ -13,11 +13,24 @@ import {
 } from "@/test/fixtures/report-data-fixture";
 import type { ReadingPageDTO, TutorAction } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook } = vi.hoisted(() => ({
+const { servicesHook, recorderStart, recorderCancel } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
+  recorderStart: vi.fn<() => Promise<void>>(),
+  recorderCancel: vi.fn(),
 }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
+}));
+vi.mock("@/hooks/use-speech-recorder", () => ({
+  useSpeechRecorder: () => ({
+    start: recorderStart,
+    cancel: recorderCancel,
+    stop: async () => null,
+    getStream: () => null,
+    isRecording: false,
+    isSpeaking: false,
+    audioLevel: 0,
+  }),
 }));
 
 // Typed, test-local responses only. The application provider still uses
@@ -178,6 +191,11 @@ function createReadingFixtures() {
         }),
     },
     tutorService: {
+      explainWord: vi
+        .fn<ReadingServices["tutorService"]["explainWord"]>()
+        .mockRejectedValue(
+          new Error("Configure the tutor response in its test"),
+        ),
       requestReadExample: vi
         .fn<ReadingServices["tutorService"]["requestReadExample"]>()
         .mockResolvedValue(tutorAction),
@@ -190,6 +208,8 @@ function createReadingFixtures() {
 
 let services: ReturnType<typeof createReadingFixtures>;
 beforeEach(() => {
+  recorderStart.mockReset().mockResolvedValue();
+  recorderCancel.mockReset();
   services = createReadingFixtures();
   servicesHook.mockReset().mockReturnValue(services);
 });
@@ -207,6 +227,89 @@ function renderReading(
 }
 
 describe("ReadingScreen presentation with typed test-local service responses", () => {
+  it("cancels delayed microphone activation when leaving the reading screen", async () => {
+    let activate: () => void = () => undefined;
+    recorderStart.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        activate = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    view.unmount();
+    await act(async () => {
+      activate();
+    });
+    expect(recorderCancel).toHaveBeenCalled();
+  });
+  it("explains only a manually selected word without marking it as spoken", async () => {
+    services.tutorService.explainWord.mockResolvedValueOnce({
+      page_revision_id: pageFour.page_revision_id,
+      word_id: pageFour.words[1].word_id,
+      word: "mèo",
+      explanation: "Mèo là một con vật nuôi.",
+      reading_hint: "Bé thử đọc lại câu nhé.",
+    });
+    const user = userEvent.setup();
+    renderReading("reading");
+    expect(
+      await screen.findByRole("button", { name: "Giải thích từ" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "mèo" }));
+    expect(screen.queryByText("Bé vừa đọc:")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Giải thích từ" }));
+    expect(
+      await screen.findByText("Mèo là một con vật nuôi."),
+    ).toBeInTheDocument();
+    expect(services.tutorService.explainWord).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      {
+        page_revision_id: pageFour.page_revision_id,
+        word_id: pageFour.words[1].word_id,
+      },
+      expect.any(AbortSignal),
+    );
+    await user.click(screen.getByRole("button", { name: "Đọc tiếp" }));
+    expect(recorderStart).not.toHaveBeenCalled();
+    expect(services.readingService.finish).not.toHaveBeenCalled();
+  });
+
+  it("pauses capture for tutor and resumes only on explicit Continue when mic was on", async () => {
+    services.tutorService.explainWord.mockResolvedValue({
+      page_revision_id: pageFour.page_revision_id,
+      word_id: pageFour.words[1].word_id,
+      word: "mèo",
+      explanation: "Mèo là một con vật nuôi.",
+      reading_hint: "Bé đọc lại câu nhé.",
+    });
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    expect(recorderStart).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "mèo" }));
+    await user.click(screen.getByRole("button", { name: "Giải thích từ" }));
+    await screen.findByText("Mèo là một con vật nuôi.");
+    expect(recorderCancel).toHaveBeenCalled();
+    expect(recorderStart).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Đọc tiếp" }));
+    await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" });
+    expect(recorderStart).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole("button", { name: "Giải thích từ" }));
+    await screen.findByRole("dialog", { name: "Mình cùng hiểu từ này nhé!" });
+    await user.keyboard("{Escape}");
+    expect(recorderStart).toHaveBeenCalledTimes(2);
+    expect(services.tutorService.explainWord).toHaveBeenCalledOnce();
+  });
+
   it("starts the listening UI only after the control service resolves", async () => {
     const user = userEvent.setup();
     renderReading("ready");

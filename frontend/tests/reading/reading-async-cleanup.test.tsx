@@ -175,6 +175,9 @@ function createReadingFixtures() {
         }),
     },
     tutorService: {
+      explainWord: vi
+        .fn<ReadingServices["tutorService"]["explainWord"]>()
+        .mockRejectedValue(new Error("Unused tutor explanation")),
       requestReadExample: vi
         .fn<ReadingServices["tutorService"]["requestReadExample"]>()
         .mockResolvedValue(tutorAction),

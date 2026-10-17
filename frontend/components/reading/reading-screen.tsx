@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AiTutorPanel } from "@/components/reading/ai-tutor-panel";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { ManualPageSelector } from "@/components/reading/manual-page-selector";
 import { ReadingLayout } from "@/components/reading/reading-layout";
@@ -21,6 +22,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
+import type { TutorWordSelection } from "@/types/tutor";
 import type {
   DeviceKind,
   DevicePermissionSnapshotUI,
@@ -105,6 +107,10 @@ export function ReadingScreen({
     useState<ReadingSessionState>("CREATED");
   const [page, setPage] = useState<ReadingPageDTO | null>(null);
   const [currentWordId, setCurrentWordId] = useState<string | null>(null);
+  const [selectedTutorWord, setSelectedTutorWord] =
+    useState<TutorWordSelection | null>(null);
+  const resumeAfterTutorRef = useRef(false);
+  const tutorInterruptionRef = useRef(0);
   const [selectedManualPageId, setSelectedManualPageId] = useState<
     string | null
   >(null);
@@ -157,12 +163,58 @@ export function ReadingScreen({
 
   const handleWordClick = useCallback(
     (word: ReadingPageWordDTO) => {
+      if (!page || uiState !== "reading" || isBusy) return;
       setCurrentWordId(word.word_id);
-      setLatestTranscript(word.text);
-      recordSpokenText(word.text);
+      setSelectedTutorWord({
+        page_revision_id: page.page_revision_id,
+        word_id: word.word_id,
+        word: word.text,
+      });
     },
-    [recordSpokenText],
+    [isBusy, page, uiState],
   );
+
+  const dismissAiTutor = useCallback(() => {
+    resumeAfterTutorRef.current = false;
+  }, []);
+
+  function openAiTutor() {
+    resumeAfterTutorRef.current =
+      isMicRecording || isListeningActiveRef.current;
+    tutorInterruptionRef.current += 1;
+    speechPlayer.stop();
+    isListeningActiveRef.current = false;
+    transcriptionAbortRef.current?.abort();
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onend = null;
+      try {
+        if (recognition.abort) recognition.abort();
+        else recognition.stop();
+      } catch {
+        // A stopped browser recognizer may already be closed.
+      }
+      recognitionRef.current = null;
+    }
+    isUsingRecorderRef.current = false;
+    speechRecorder.cancel();
+    setIsMicRecording(false);
+  }
+
+  async function continueAfterAiTutor() {
+    const resume = resumeAfterTutorRef.current;
+    resumeAfterTutorRef.current = false;
+    if (!resume || !mountedRef.current || uiState !== "reading" || isBusy)
+      return;
+    setIsBusy(true);
+    try {
+      const ok = await startListening();
+      if (mountedRef.current && ok) setIsMicRecording(true);
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -315,11 +367,17 @@ export function ReadingScreen({
     try {
       await speechRecorder.start(async (utteranceBlob) => {
         if (!mountedRef.current || !isListeningActiveRef.current) return;
+        const interruption = tutorInterruptionRef.current;
         try {
           const transcript = await speechService.transcribe(utteranceBlob, {
             languageCode: "vi",
           });
-          if (!mountedRef.current || !transcript.text) return;
+          if (
+            !mountedRef.current ||
+            interruption !== tutorInterruptionRef.current ||
+            !transcript.text
+          )
+            return;
           const cleanText = transcript.text.trim();
           if (cleanText) {
             setLatestTranscript(cleanText);
@@ -330,6 +388,11 @@ export function ReadingScreen({
           console.warn("Live ElevenLabs STT utterance notice:", e);
         }
       });
+      if (!mountedRef.current) {
+        isListeningActiveRef.current = false;
+        speechRecorder.cancel();
+        return false;
+      }
       isUsingRecorderRef.current = true;
     } catch (error) {
       isUsingRecorderRef.current = false;
@@ -862,6 +925,22 @@ export function ReadingScreen({
         onWordClick={handleWordClick}
         page={page}
       >
+        {uiState === "reading" && !confirmFinish && !tutorOpen ? (
+          <AiTutorPanel
+            key={`${sessionId}:${page.page_revision_id}:${selectedTutorWord?.word_id ?? ""}`}
+            disabled={isBusy}
+            onOpen={openAiTutor}
+            onDismiss={dismissAiTutor}
+            onContinue={() => void continueAfterAiTutor()}
+            selection={
+              selectedTutorWord?.page_revision_id === page.page_revision_id
+                ? selectedTutorWord
+                : null
+            }
+            service={services.tutorService}
+            sessionId={sessionId}
+          />
+        ) : null}
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
