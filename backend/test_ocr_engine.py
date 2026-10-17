@@ -83,7 +83,7 @@ class OcrEngineTests(unittest.TestCase):
         ):
             result = ocr_engine.extract_text_and_boxes(sample_png())
 
-        self.assertEqual(result["text"], "Ngày xưa\\ncó\\n\\n    một cậu\\nbé")
+        self.assertEqual(result["text"], "Ngày xưa\ncó\n\n    một cậu\nbé")
         self.assertEqual(
             result["metadata"]["paragraph_start_line_indices"],
             [2],
