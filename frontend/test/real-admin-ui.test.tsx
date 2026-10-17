@@ -37,6 +37,7 @@ const book = {
   min_grade: 1,
   max_grade: 3,
   lifecycle_status: "RETIRED",
+  next_page_number: 8,
 };
 const processing = {
   page_id: pageId,
