@@ -15,6 +15,7 @@ from app.repositories.book_repository import (
 )
 from app.schemas import BookCreate
 from app.schemas.book import (
+    AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
     AdminPageListRead,
@@ -118,6 +119,14 @@ class AdminCatalogService:
             return CatalogBookResponse.model_validate(row)
         except ValidationError:
             raise HTTPException(status_code=501, detail="Book contract is not available yet") from None
+
+    async def book_detail(self, book_id: UUID) -> AdminCatalogBookDetailResponse:
+        book = await self.book(book_id)
+        max_page_number = await self.repository.max_page_number(book_id)
+        return AdminCatalogBookDetailResponse(
+            **book.model_dump(),
+            next_page_number=(max_page_number or 0) + 1,
+        )
 
     async def page(self, page_id: UUID):
         page = await self.repository.page(page_id)
