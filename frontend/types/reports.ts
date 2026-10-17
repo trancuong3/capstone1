@@ -1,7 +1,7 @@
 import type { BookListItemDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ISODateTime, UUID } from "@/types/profile";
-import type { ReadingSessionSummaryDTO } from "@/types/reading";
+import type { HistorySessionSummaryDTO } from "@/types/reading";
 
 export interface DifficultWordDTO {
   readonly normalized_word: string;
@@ -54,7 +54,7 @@ export interface ReportDateWindow {
 }
 
 export interface SessionHistoryItemViewModelUI {
-  readonly session: ReadingSessionSummaryDTO;
+  readonly session: HistorySessionSummaryDTO;
   readonly book: BookListItemDTO;
   readonly child: ChildProfileDTO;
   readonly started_label: string;

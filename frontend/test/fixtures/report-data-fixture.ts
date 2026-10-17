@@ -72,6 +72,11 @@ export const sessionDetailFixture: ReadingSessionDetailDTO = {
   fluency_assessment: null,
   comprehension: [],
   report_id: null,
+  availability: {
+    events: "available",
+    fluency: "absent",
+    comprehension: "absent",
+  },
 };
 export const difficultWordFixture: DifficultWordDTO = {
   normalized_word: "nghiêng",

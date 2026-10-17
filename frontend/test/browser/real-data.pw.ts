@@ -84,9 +84,9 @@ test("Parent stored history → detail, report counts and words", async ({
   const api = await installApiFixture(page);
   await page.goto(`/sessions?childId=${ids.child}`);
   await expect(page.getByText(book.title).first()).toBeVisible();
-  await page.locator(`a[href="/sessions/${ids.session}"]`).click();
+  await page.getByRole("link", { name: "Xem chi tiết", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Buổi đọc chưa hoàn tất" }),
+    page.getByRole("heading", { name: "Buổi đọc đã dừng" }),
   ).toBeVisible();
   await expect(page.getByText("Chưa đánh giá")).toBeVisible();
   await page.goto(`/reports?childId=${ids.child}`);
@@ -122,7 +122,7 @@ test("Parent unavailable reports/history do not manufacture zero data and can re
   api.historyStatus = 200;
   await page.getByRole("button", { name: "Thử lại" }).click();
   await expect(
-    page.getByRole("heading", { name: "Buổi đọc chưa hoàn tất" }),
+    page.getByRole("heading", { name: "Buổi đọc đã dừng" }),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });

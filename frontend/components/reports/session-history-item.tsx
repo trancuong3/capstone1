@@ -5,9 +5,13 @@ import type { SessionHistoryItemViewModelUI } from "@/types/reports";
 
 interface SessionHistoryItemProps {
   readonly item: SessionHistoryItemViewModelUI;
+  readonly page?: number;
 }
 
-export function SessionHistoryItem({ item }: SessionHistoryItemProps) {
+export function SessionHistoryItem({
+  item,
+  page = 1,
+}: SessionHistoryItemProps) {
   return (
     <article className="rounded-card bg-white p-5 shadow-[0_12px_32px_rgba(33,65,86,0.06)] sm:p-6">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -16,7 +20,7 @@ export function SessionHistoryItem({ item }: SessionHistoryItemProps) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-extrabold leading-tight text-ink">
+            <h2 className="break-words text-2xl font-extrabold leading-tight text-ink">
               {item.book.title}
             </h2>
             <span className="rounded-full bg-success-surface px-3 py-1 text-label font-bold text-success-ink">
@@ -39,7 +43,7 @@ export function SessionHistoryItem({ item }: SessionHistoryItemProps) {
         </div>
         <Link
           className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-5 text-label font-bold text-primary-hover hover:bg-border focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-          href={`/sessions/${item.session.id}`}
+          href={`/sessions/${item.session.id}?childId=${encodeURIComponent(item.child.id)}&page=${page}`}
         >
           Xem chi tiết
         </Link>

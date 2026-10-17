@@ -103,7 +103,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(HistoryService.summary(session_row(EndedAt=None)).duration_ms)
 
     async def test_unknown_state_and_invalid_duration_are_not_guessed(self):
-        for row in (session_row(State="COMPLETED"), session_row(State="IN_PROGRESS"),
+        for row in (session_row(State="UNKNOWN_STATE"),
                     session_row(EndedAt=START - timedelta(seconds=1)),
                     session_row(EndedAt=datetime(2026, 10, 8, 1, 1))):
             with self.assertRaises(HTTPException) as caught:
@@ -128,7 +128,9 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         repo.fluency.return_value = SimpleNamespace(Metrics={"Accuracy": 80, "WCPM": 20},
                                                     Score=80, Uncertainty=None, ModelVersion="legacy")
         detail = await HistoryService(repo).get(SESSION, ACTOR)
-        self.assertIsNone(detail.fluency_assessment)
+        self.assertIsNone(detail.fluency_assessment.metrics)
+        self.assertEqual(detail.fluency_assessment.score, 80)
+        self.assertEqual(detail.availability.fluency, "partial")
         self.assertIsNone(detail.report_id)
         self.assertEqual(detail.reference_page_revision_ids, [])
 
@@ -143,14 +145,15 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.selected_page_revision_ids, [BOOK])
         self.assertEqual(detail.events[0].metadata, {})
 
-    async def test_unknown_event_enum_is_unavailable_not_remapped(self):
+    async def test_persisted_event_enum_is_preserved_not_remapped(self):
         repo = history_repo()
         repo.events.return_value = [SimpleNamespace(Id=QUESTION, SessionId=SESSION, PageId=BOOK,
             PageRevisionId=CHILD, WordId=None, Type="MISPRONUNCIATION", Status="DETECTED",
             StartMs=1000, EndMs=None, Confidence=None, Metadata={})]
-        with self.assertRaises(HTTPException) as caught:
-            await HistoryService(repo).get(SESSION, ACTOR)
-        self.assertEqual(caught.exception.status_code, 501)
+        detail = await HistoryService(repo).get(SESSION, ACTOR)
+        self.assertEqual(detail.events[0].type, "MISPRONUNCIATION")
+        self.assertEqual(detail.events[0].status, "DETECTED")
+        self.assertEqual(detail.availability.events, "available")
 
     async def test_expected_answers_are_never_returned(self):
         repo = history_repo()

@@ -118,12 +118,14 @@ async def create_fluency_assessment(
 
 
 import re
+from math import isfinite
 from pydantic import ValidationError
 from app.models import Book, ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
 from app.schemas.book import CatalogBookResponse
 from app.schemas.reading import (
-    SessionSummaryRead, SessionHistoryRead, SessionDetailRead, SessionEventRead,
-    SessionFluencyRead, SessionComprehensionRead,
+    HistorySessionSummaryRead, SessionHistoryRead, SessionDetailRead, HistoryEventRead,
+    HistoryFluencyRead, HistoryFluencyMetricsRead, HistoryComprehensionRead, HistoryQuestionRead,
+    HistoryAnswerRead, SessionSourceSpanRead,
 )
 
 
@@ -194,12 +196,13 @@ class HistoryService:
         try:
             if row.EndedAt is not None:
                 duration = int((row.EndedAt - row.StartedAt).total_seconds() * 1000)
-            return SessionSummaryRead(
-                id=row.Id, child_id=row.ChildId, book_id=row.BookId, state=row.State,
+            return HistorySessionSummaryRead(
+                id=row.Id, child_id=row.ChildId, book_id=row.BookId,
+                state="FINISHED" if row.State == "COMPLETED" else row.State,
                 started_at=row.StartedAt, ended_at=row.EndedAt, duration_ms=duration,
             )
         except (ValidationError, TypeError, ValueError):
-            # Do not reinterpret COMPLETED/IN_PROGRESS as a different wire enum.
+            # Unknown states and invalid timelines must never be guessed.
             raise HTTPException(status_code=501, detail="Session contract is not available yet") from None
 
     async def list(self, child_id: UUID, actor_id: UUID, cursor: str | None, limit: int):
@@ -215,7 +218,7 @@ class HistoryService:
         rows = await self.repository.sessions(child_id, actor_id, (page - 1) * limit, limit)
         return SessionHistoryRead(
             sessions=[self.summary(row) for row in rows[:limit]],
-            next_cursor=f"page-{page + 1}" if len(rows) > limit else None,
+            next_cursor=f"page-{page + 1}" if len(rows) > limit and page < 100000 else None,
         )
 
     async def get(self, session_id: UUID, actor_id: UUID):
@@ -227,47 +230,93 @@ class HistoryService:
         events = await self.repository.events(session_id)
         assessment = await self.repository.fluency(session_id)
         questions = await self.repository.questions(session_id)
-        try:
-            event_dtos = [SessionEventRead(
-                id=event.Id, session_id=event.SessionId, page_id=event.PageId,
-                page_revision_id=event.PageRevisionId, page_revision_word_id=event.WordId,
-                type=event.Type, start_ms=event.StartMs, end_ms=event.EndMs,
-                confidence=event.Confidence, status=event.Status,
-                # Screens do not need raw metadata; it can contain account,
-                # device or diagnostic payloads. Only expose the event DTO.
-                metadata={},
-            ) for event in events]
-            fluency = None
-            if assessment is not None:
+        event_dtos = []
+        for event in events:
+            try:
+                dto = HistoryEventRead(
+                    id=event.Id, session_id=event.SessionId, page_id=event.PageId,
+                    page_revision_id=event.PageRevisionId, page_revision_word_id=event.WordId,
+                    type=event.Type, start_ms=event.StartMs, end_ms=event.EndMs,
+                    confidence=event.Confidence, status=event.Status,
+                    # Never expose arbitrary diagnostic/device/account metadata.
+                    metadata={},
+                )
+                if dto.session_id != session_id or (dto.end_ms is not None and dto.end_ms < dto.start_ms):
+                    continue
+                event_dtos.append(dto)
+            except (ValidationError, TypeError, ValueError):
+                continue
+
+        fluency = None
+        if assessment is not None:
+            metrics = None
+            try:
+                metrics = HistoryFluencyMetricsRead.model_validate(assessment.Metrics)
+            except ValidationError:
+                pass  # A legacy JSON shape is not equivalent to missing data.
+            try:
+                fluency = HistoryFluencyRead(metrics=metrics, score=assessment.Score, uncertainty=assessment.Uncertainty, model_version=assessment.ModelVersion)
+            except ValidationError:
+                pass
+
+        comprehension = []
+        question_partial = False
+        for question in questions:
+            answer = await self.repository.answer(question.Id)
+            source_span = None
+            try:
+                source_span = SessionSourceSpanRead.model_validate(question.SourceSpan)
+                if source_span.end_word_index_exclusive <= source_span.start_word_index:
+                    source_span = None
+            except ValidationError:
+                pass
+            difficulty = question.Difficulty
+            if not isinstance(difficulty, (str, int, float)) or isinstance(difficulty, bool):
+                difficulty = None
+            if isinstance(difficulty, str) and (not difficulty.strip() or len(difficulty) > 120):
+                difficulty = None
+            if isinstance(difficulty, (int, float)) and not isfinite(difficulty):
+                difficulty = None
+            answer_dto = None
+            if answer is not None:
                 try:
-                    fluency = SessionFluencyRead(metrics=assessment.Metrics, score=assessment.Score, uncertainty=assessment.Uncertainty, model_version=assessment.ModelVersion)
+                    answer_dto = HistoryAnswerRead(
+                        answer_id=answer.Id, question_id=question.Id,
+                        submitted_answer=answer.Answer, is_correct=answer.IsCorrect,
+                        score=answer.Score, feedback_code=None,
+                    )
                 except ValidationError:
-                    # Optional assessment remains unknown until its DTO is available.
-                    fluency = None
-            comprehension = []
-            for question in questions:
-                answer = await self.repository.answer(question.Id)
-                comprehension.append(SessionComprehensionRead(
-                    question={
-                        "id": question.Id, "type": question.Type, "prompt": question.Prompt,
-                        "page_revision_id": question.PageRevisionId, "source_span": question.SourceSpan,
-                        "difficulty": question.Difficulty, "answered": answer is not None,
-                    },
-                    answer=None if answer is None else {
-                        "answer_id": answer.Id, "question_id": question.Id,
-                        "submitted_answer": answer.Answer, "is_correct": answer.IsCorrect,
-                        "score": answer.Score, "feedback_code": None,
-                    },
-                ))
-            return SessionDetailRead(
-                **summary.model_dump(),
-                selected_page_revision_ids=[] if row.SelectedPageRevisionId is None else [row.SelectedPageRevisionId],
-                reference_page_revision_ids=list(dict.fromkeys(event.PageRevisionId for event in events)),
-                events=event_dtos, fluency_assessment=fluency, comprehension=comprehension,
-                report_id=None,
-            )
-        except ValidationError:
-            raise HTTPException(status_code=501, detail="Session detail contract is not available yet") from None
+                    pass
+            try:
+                question_dto = HistoryQuestionRead(
+                    id=question.Id, type=question.Type, prompt=question.Prompt,
+                    page_revision_id=question.PageRevisionId, source_span=source_span,
+                    difficulty=difficulty, answered=answer is not None,
+                )
+                comprehension.append(HistoryComprehensionRead(question=question_dto, answer=answer_dto))
+                question_partial |= source_span is None or difficulty is None or (answer is not None and answer_dto is None)
+            except ValidationError:
+                continue
+
+        def section_status(total, readable, partial=False):
+            if total == 0:
+                return "absent"
+            if readable == 0:
+                return "unsupported"
+            return "partial" if readable < total or partial else "available"
+
+        return SessionDetailRead(
+            **summary.model_dump(),
+            selected_page_revision_ids=[] if row.SelectedPageRevisionId is None else [row.SelectedPageRevisionId],
+            reference_page_revision_ids=list(dict.fromkeys(event.PageRevisionId for event in events if event.SessionId == session_id)),
+            events=event_dtos, fluency_assessment=fluency, comprehension=comprehension,
+            availability={
+                "events": section_status(len(events), len(event_dtos)),
+                "fluency": section_status(int(assessment is not None), int(fluency is not None), fluency is not None and fluency.metrics is None),
+                "comprehension": section_status(len(questions), len(comprehension), question_partial),
+            },
+            report_id=None,
+        )
 
     async def book(self, session_id: UUID, actor_id: UUID):
         await self.require_parent(actor_id)
