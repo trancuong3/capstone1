@@ -19,7 +19,7 @@ describe("BookPageViewer", () => {
   it("preserves OCR line breaks and paragraph indentation while rendering words", () => {
     const formattedPage: ReadingPageDTO = {
       ...page,
-      text: "Ngày xưa\\ncó\\n\\n    một cậu\\nbé",
+      text: "Ngày xưa\ncó\n\n    một cậu\nbé",
       paragraph_start_line_indices: [2],
       indented_line_indices: [2],
       words: [
