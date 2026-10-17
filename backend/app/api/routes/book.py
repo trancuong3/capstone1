@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas import BookCreate, BookPageResponse, BookResponse
 from app.schemas.book import (
+    AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
     AdminPageListRead,
@@ -94,7 +95,7 @@ async def get_admin_catalog(
     return await service.list(search, lifecycle_status, verification_status)
 
 
-@router.get("/admin/catalog/{book_id}", response_model=CatalogBookResponse)
+@router.get("/admin/catalog/{book_id}", response_model=AdminCatalogBookDetailResponse)
 async def get_admin_book(
     book_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
@@ -102,7 +103,7 @@ async def get_admin_book(
 ):
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
-    return await service.book(book_id)
+    return await service.book_detail(book_id)
 
 
 @router.get("/admin/catalog/{book_id}/pages", response_model=list[AdminPageListRead])
