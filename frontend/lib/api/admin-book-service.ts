@@ -41,7 +41,9 @@ export function createAdminBookService(): AdminBookService {
     get: (bookId) =>
       requestApi(
         `/books/admin/catalog/${encodeURIComponent(bookId)}`,
-        bookDtoSchema.refine((book) => book.id === bookId),
+        bookDtoSchema
+          .extend({ next_page_number: z.number().int().positive().optional() })
+          .refine((book) => book.id === bookId),
       ),
     create: (request) =>
       requestApi("/books/admin/catalog", bookDtoSchema, undefined, {
