@@ -171,6 +171,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         bookId={book.id}
         nextPageNumber={Math.max(
           1,
+          book.next_page_number ?? 1,
           ...(items ?? []).map((item) => item.page_number + 1),
         )}
         onUploaded={() => void load()}
