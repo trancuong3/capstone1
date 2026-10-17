@@ -86,6 +86,16 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
 
+    async def test_retired_page_is_hidden_from_direct_admin_detail_reads(self):
+        repo = catalog_repo()
+        repo.page.return_value = page_row(LifecycleStatus="RETIRED")
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminCatalogService(repository=repo).processing_by_page_id(PAGE)
+
+        self.assertEqual(caught.exception.status_code, 404)
+        repo.revisions.assert_not_awaited()
+
     async def test_admin_page_list_includes_persisted_text_preview(self):
         repo = catalog_repo()
         result = await AdminCatalogService(repository=repo).pages(BOOK)
