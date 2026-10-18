@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 describe("shared header and footer", () => {
-  it("places the public header and footer around auth content", () => {
+  it("renders the ViRead public header without a footer on auth pages", () => {
     render(
       <AuthShell>
         <h1>Trang tài khoản</h1>
@@ -47,9 +47,8 @@ describe("shared header and footer", () => {
     expect(main.parentElement?.firstElementChild).toBe(
       screen.getByRole("banner"),
     );
-    expect(main.parentElement?.lastElementChild).toBe(
-      screen.getByRole("contentinfo"),
-    );
+    expect(main.parentElement?.lastElementChild).toBe(main);
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
     expect(
       within(
         screen.getByRole("navigation", { name: "Điều hướng tài khoản" }),
@@ -57,16 +56,16 @@ describe("shared header and footer", () => {
         name: "Đăng ký",
       }),
     ).toHaveAttribute("href", "/register");
-    expect(screen.getByRole("contentinfo")).toHaveTextContent(
-      "Đồng hành cùng bé trên hành trình đọc sách.",
-    );
+    expect(
+      screen.getByRole("link", { name: "ViRead - đăng nhập" }),
+    ).toHaveAttribute("href", "/login");
   });
 
-  it("keeps the same landmarks while auth content loads", () => {
+  it("does not render a footer while auth content loads", () => {
     render(<AuthLoadingState />);
     expect(screen.getAllByRole("banner")).toHaveLength(1);
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -87,9 +86,26 @@ describe("shared header and footer", () => {
       ),
     );
     expect(screen.getByRole("main")).toHaveTextContent("Nội dung phụ huynh");
-    expect(screen.getByRole("contentinfo")).toHaveTextContent(
-      "Đồng hành cùng bé trên hành trình đọc sách.",
-    );
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent("ViRead");
+    expect(footer).toHaveTextContent("Đại học Duy Tân");
+    expect(footer).toHaveTextContent("viread@gmail.com");
+    expect(footer).toHaveTextContent("0905373633");
+    expect(within(footer).getByRole("link", { name: "viread@gmail.com" }))
+      .toHaveAttribute("href", "mailto:viread@gmail.com");
+    expect(within(footer).getByRole("link", { name: "0905373633" }))
+      .toHaveAttribute("href", "tel:0905373633");
+    expect(within(footer).getByRole("link", { name: "Tổng quan" }))
+      .toHaveAttribute("href", "/dashboard");
+    expect(within(footer).getByRole("link", { name: "Tiến bộ" }))
+      .toHaveAttribute("href", "/reports");
+    expect(within(footer).getByRole("link", { name: "Lịch sử đọc" }))
+      .toHaveAttribute("href", "/sessions");
+    expect(within(footer).getByRole("link", { name: "Hồ sơ bé" }))
+      .toHaveAttribute("href", "/children");
+    expect(within(footer).getByRole("link", { name: "Hồ sơ phụ huynh" }))
+      .toHaveAttribute("href", "/profile");
+    expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
     expect(
       within(
         screen.getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
@@ -102,7 +118,7 @@ describe("shared header and footer", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps child onboarding minimal with a public footer", () => {
+  it("keeps child onboarding minimal while using the Parent footer", () => {
     navigationMock.pathname = "/children/new";
     render(
       withAuthFixture(
@@ -112,17 +128,19 @@ describe("shared header and footer", () => {
         createAuthServiceFixture(),
       ),
     );
-    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toHaveTextContent(
+      "© 2026 ViRead. Bảo lưu mọi quyền.",
+    );
     expect(
       screen.queryByRole("button", { name: "Đăng xuất" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Tổng quan" }),
+      screen.queryByRole("link", { name: "Tổng quan", hidden: true }),
     ).not.toBeInTheDocument();
   });
 
   it.each(["/books", "/books/book-1", "/reading/session-1"])(
-    "leaves the immersive layout unchanged on %s",
+    "keeps the immersive header hidden and moves the Parent footer after the content on %s",
     (pathname) => {
       navigationMock.pathname = pathname;
       const { container } = render(
@@ -135,7 +153,11 @@ describe("shared header and footer", () => {
       );
       expect(container.querySelector("header")).toHaveClass("hidden");
       expect(screen.getByRole("main")).toHaveTextContent("Không gian đọc");
-      expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+      expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+      expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
+      expect(container.querySelector("main")?.nextElementSibling).toBe(
+        screen.getByRole("contentinfo"),
+      );
     },
   );
 
@@ -150,18 +172,21 @@ describe("shared header and footer", () => {
     expect(screen.getByRole("main")).toHaveTextContent("Đăng nhập quản trị");
     expect(
       screen.getByRole("link", {
-        name: "ReadAlong Vision - đăng nhập quản trị",
+        name: "ViRead - đăng nhập quản trị",
       }),
     ).toHaveAttribute("href", "/admin/login");
     expect(
       screen.queryByRole("link", { name: "Đăng ký" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toHaveTextContent(
-      "Khu vực quản trị ReadAlong Vision.",
+      "Khu vực quản trị ViRead.",
     );
+    expect(
+      screen.queryByRole("contentinfo"),
+    ).not.toHaveTextContent("viread@gmail.com");
   });
 
-  it("keeps protected Admin navigation and its footer", () => {
+  it("keeps protected Admin navigation and its compact footer", () => {
     navigationMock.pathname = "/admin/books";
     render(
       withAdminFixture(
@@ -183,7 +208,10 @@ describe("shared header and footer", () => {
       screen.getByRole("button", { name: "Đăng xuất" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toHaveTextContent(
-      "Khu vực quản trị ReadAlong Vision.",
+      "Khu vực quản trị ViRead.",
     );
+    expect(
+      screen.queryByRole("contentinfo"),
+    ).not.toHaveTextContent("viread@gmail.com");
   });
 });
