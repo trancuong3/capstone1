@@ -33,6 +33,8 @@ interface ParentProfileApiResponse {
   created_at: string;
   email?: string | null;
   phone?: string | null;
+  pending_email?: string | null;
+  pending_phone?: string | null;
   email_verified?: boolean | null;
   phone_verified?: boolean | null;
   contact_info_status?: ContactInfoStatus;
@@ -236,6 +238,8 @@ function normalizeParentProfile(
     created_at: data.created_at,
     email: data.email ?? null,
     phone: data.phone ?? null,
+    pending_email: data.pending_email ?? null,
+    pending_phone: data.pending_phone ?? null,
     email_verified: data.email_verified ?? null,
     phone_verified: data.phone_verified ?? null,
     contact_info_status: data.contact_info_status ?? "lookup_failed",
