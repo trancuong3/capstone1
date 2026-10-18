@@ -445,7 +445,7 @@ describe("SupabaseAuthService", () => {
   });
 
   it.each([
-    ["google", "email profile"],
+    ["google", "openid email profile"],
     ["facebook", "email"],
   ] as const)(
     "starts %s OAuth with the expected scopes and app callback",
