@@ -32,7 +32,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
       {isParent ? (
         <>
           <div className="mx-auto grid w-full max-w-[1376px] gap-8 px-4 py-8 sm:px-8 md:grid-cols-2 md:gap-10 lg:grid-cols-[1.2fr_1fr_0.8fr] lg:py-10">
-            <section aria-labelledby="footer-viread-brand" className="min-w-0">
+            <section
+              aria-labelledby="footer-viread-brand"
+              className="min-w-0"
+            >
               <h2
                 className="text-xl font-black tracking-tight text-primary"
                 id="footer-viread-brand"
@@ -45,7 +48,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               </p>
             </section>
 
-            <section aria-labelledby="footer-viread-contact" className="min-w-0">
+            <section
+              aria-labelledby="footer-viread-contact"
+              className="min-w-0"
+            >
               <h2
                 className="text-sm font-extrabold uppercase tracking-wide text-ink"
                 id="footer-viread-contact"
@@ -54,14 +60,20 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               </h2>
               <address className="mt-4 flex flex-col gap-3 text-sm not-italic leading-6 text-muted">
                 <p className="flex items-start gap-3">
-                  <MapPin aria-hidden="true" className="mt-1 size-4 shrink-0 text-primary" />
+                  <MapPin
+                    aria-hidden="true"
+                    className="mt-1 size-4 shrink-0 text-primary"
+                  />
                   <span>
                     <span className="font-bold text-ink">Địa chỉ: </span>
                     Đại học Duy Tân
                   </span>
                 </p>
                 <p className="flex items-start gap-3">
-                  <Mail aria-hidden="true" className="mt-1 size-4 shrink-0 text-primary" />
+                  <Mail
+                    aria-hidden="true"
+                    className="mt-1 size-4 shrink-0 text-primary"
+                  />
                   <span>
                     <span className="font-bold text-ink">Email: </span>
                     <a
@@ -73,7 +85,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                   </span>
                 </p>
                 <p className="flex items-start gap-3">
-                  <Phone aria-hidden="true" className="mt-1 size-4 shrink-0 text-primary" />
+                  <Phone
+                    aria-hidden="true"
+                    className="mt-1 size-4 shrink-0 text-primary"
+                  />
                   <span>
                     <span className="font-bold text-ink">Số điện thoại: </span>
                     <a
@@ -87,7 +102,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               </address>
             </section>
 
-            <nav aria-labelledby="footer-viread-links" className="min-w-0">
+            <nav
+              aria-labelledby="footer-viread-links"
+              className="min-w-0"
+            >
               <h2
                 className="text-sm font-extrabold uppercase tracking-wide text-ink"
                 id="footer-viread-links"
