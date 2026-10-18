@@ -13,6 +13,13 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import { GET } from "@/app/auth/callback/route";
 
+const APP_ORIGIN = "http://localhost:3000";
+const CALLBACK_PATH = "/auth/callback?code=oauth-code";
+
+function requestFor(path: string) {
+  return new NextRequest(new URL(path, APP_ORIGIN));
+}
+
 function makeSupabase({
   email = "parent@example.com",
   role = "parent",
@@ -67,16 +74,14 @@ describe("OAuth callback", () => {
     createServerSupabaseClientMock.mockReset();
   });
 
-  it("routes a parent with an email to the dashboard", async () => {
+  it("routes a parent to the dashboard", async () => {
     const harness = makeSupabase();
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
-    const response = await GET(
-      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
-    );
+    const response = await GET(requestFor(CALLBACK_PATH));
 
     expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/dashboard",
+      `${APP_ORIGIN}/dashboard`,
     );
     expect(harness.exchangeCodeForSession).toHaveBeenCalledWith("oauth-code");
     expect(harness.select).toHaveBeenCalledWith("role");
@@ -86,64 +91,52 @@ describe("OAuth callback", () => {
     );
   });
 
-  it(
-    "routes an admin with an email to the fixed admin destination",
-    async () => {
-      const harness = makeSupabase({ role: "admin" });
-      createServerSupabaseClientMock.mockResolvedValue(harness.client);
+  it("routes an admin to the admin area", async () => {
+    const harness = makeSupabase({ role: "admin" });
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
-      const response = await GET(
-        new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
-      );
+    const response = await GET(requestFor(CALLBACK_PATH));
 
-      expect(response.headers.get("location")).toBe(
-        "http://localhost:3000/admin/books",
-      );
-    },
-  );
+    expect(response.headers.get("location")).toBe(
+      `${APP_ORIGIN}/admin/books`,
+    );
+  });
 
-  it("signs out and blocks an OAuth user whose email is missing", async () => {
+  it("rejects users without an email", async () => {
     const harness = makeSupabase({ email: null });
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
-    const response = await GET(
-      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
-    );
+    const response = await GET(requestFor(CALLBACK_PATH));
 
     expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/login?oauth_error=email_required",
+      `${APP_ORIGIN}/login?oauth_error=email_required`,
     );
     expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
     expect(harness.from).not.toHaveBeenCalled();
   });
 
-  it("fails closed if the database profile has no allowed role", async () => {
+  it("rejects users without a valid role", async () => {
     const harness = makeSupabase({ role: null });
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
-    const response = await GET(
-      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
-    );
+    const response = await GET(requestFor(CALLBACK_PATH));
 
     expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/login?oauth_error=oauth_failed",
+      `${APP_ORIGIN}/login?oauth_error=oauth_failed`,
     );
     expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 
-  it(
-    "does not expose raw provider errors when OAuth is cancelled or rejected",
-    async () => {
-      const response = await GET(
-        new NextRequest(
-          "http://localhost:3000/auth/callback?error=access_denied&error_description=Sensitive",
-        ),
-      );
+  it("hides provider errors", async () => {
+    const response = await GET(
+      requestFor(
+        "/auth/callback?error=access_denied&error_description=Sensitive",
+      ),
+    );
 
-      expect(response.headers.get("location")).toBe(
-        "http://localhost:3000/login?oauth_error=oauth_failed",
-      );
-      expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
-    },
-  );
+    expect(response.headers.get("location")).toBe(
+      `${APP_ORIGIN}/login?oauth_error=oauth_failed`,
+    );
+    expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
+  });
 });
