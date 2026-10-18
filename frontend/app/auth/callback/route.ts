@@ -2,13 +2,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-function redirectToLogin(request: NextRequest, oauthError: "email_required" | "oauth_failed") {
+function redirectToLogin(
+  request: NextRequest,
+  oauthError: "email_required" | "oauth_failed",
+) {
   const url = new URL("/login", request.url);
   url.searchParams.set("oauth_error", oauthError);
   return NextResponse.redirect(url);
 }
 
-async function signOutQuietly(supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
+async function signOutQuietly(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+) {
   try {
     await supabase.auth.signOut({ scope: "local" });
   } catch {
