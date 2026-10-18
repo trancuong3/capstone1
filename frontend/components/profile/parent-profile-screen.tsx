@@ -66,9 +66,15 @@ function contactValue(
   }
 }
 
-function verificationLabel(value: boolean | null): string {
-  if (value === true) return "Đã xác minh";
-  if (value === false) return "Chưa xác minh";
+function verificationLabel(
+  value: string | null,
+  verified: boolean | null,
+  status: ParentProfileDTO["contact_info_status"],
+): string {
+  if (status !== "available") return "Chưa thể kiểm tra trạng thái xác minh";
+  if (!value) return "Chưa có thông tin để xác minh";
+  if (verified === true) return "Đã xác minh";
+  if (verified === false) return "Chưa xác minh";
   return "Chưa có thông tin xác minh";
 }
 
@@ -207,7 +213,7 @@ export function ParentProfileScreen() {
               {contactValue(profile.email, profile.contact_info_status)}
             </dd>
             <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.email_verified)}
+              {verificationLabel(profile.email, profile.email_verified, profile.contact_info_status)}
             </p>
           </div>
 
@@ -220,7 +226,7 @@ export function ParentProfileScreen() {
               {contactValue(profile.phone, profile.contact_info_status)}
             </dd>
             <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.phone_verified)}
+              {verificationLabel(profile.phone, profile.phone_verified, profile.contact_info_status)}
             </p>
           </div>
 
@@ -300,7 +306,10 @@ export function ParentProfileScreen() {
         )}
       </Card>
 
-      <section aria-labelledby="parent-children-heading" className="flex flex-col gap-4">
+      <section
+        aria-labelledby="parent-children-heading"
+        className="flex flex-col gap-4"
+      >
         <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-label font-bold text-primary">GIA ĐÌNH</p>
