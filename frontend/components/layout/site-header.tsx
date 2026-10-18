@@ -29,7 +29,9 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
           className="inline-flex min-h-11 w-fit max-w-full flex-wrap items-center gap-2 rounded-control text-label font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:text-body"
           href={isAdminLogin ? "/admin/login" : "/login"}
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky text-primary">
+          <span
+            className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky text-primary"
+          >
             <BookOpen aria-hidden="true" className="size-5" />
           </span>
           <span className="tracking-tight">ViRead</span>
