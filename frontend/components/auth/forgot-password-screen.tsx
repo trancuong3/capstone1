@@ -46,14 +46,17 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
   if (submittedEmail) {
     return (
       <AuthShell>
-        <Card>
+        <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
           <div>
-            <h1 className="text-heading font-extrabold text-ink">
+            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+              Bảo mật tài khoản ViRead
+            </p>
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
               {resendState === "success"
                 ? "Đã yêu cầu gửi lại"
                 : "Kiểm tra email nhé"}
             </h1>
-            <p className="mt-4 text-body text-muted sm:mt-6">
+            <p className="mt-3 text-body leading-relaxed text-muted">
               Nếu email này đã được đăng ký, ba mẹ sẽ nhận được hướng dẫn đặt
               lại mật khẩu. Hãy kiểm tra cả thư rác.
             </p>
@@ -82,12 +85,15 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card>
+      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
         <div>
-          <h1 className="text-heading font-extrabold text-ink">
-            Quên mật khẩu?
+          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            Bảo mật tài khoản ViRead
+          </p>
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
+            Khôi phục mật khẩu
           </h1>
-          <p className="mt-4 text-body text-muted sm:mt-6">
+          <p className="mt-3 text-body leading-relaxed text-muted">
             Nhập email của ba mẹ để nhận hướng dẫn đặt lại mật khẩu.
           </p>
         </div>
