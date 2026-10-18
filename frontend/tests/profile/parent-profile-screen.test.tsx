@@ -31,6 +31,19 @@ const profile: ParentProfileDTO = {
   display_name: "Ba mẹ kiểm thử",
   role: "parent",
   created_at: "2026-10-01T00:00:00Z",
+  email: "parent@example.com",
+  phone: "0900000000",
+  email_verified: true,
+  phone_verified: false,
+  contact_info_status: "available",
+  children: [
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      alias: "Bé An",
+      grade: 2,
+      created_at: "2026-10-02T00:00:00Z",
+    },
+  ],
 };
 function renderProfile() {
   return render(
@@ -40,14 +53,21 @@ function renderProfile() {
   );
 }
 describe("ParentProfileScreen with real API adapter", () => {
-  it("renders only fields from ParentProfileDTO", async () => {
+  it("renders contact details, account ID, and only the linked child summary", async () => {
     apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
     renderProfile();
     expect(
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Phụ huynh")).toHaveLength(2);
-    expect(screen.queryByText(/@/)).not.toBeInTheDocument();
+    expect(screen.getByText("parent@example.com")).toBeInTheDocument();
+    expect(screen.getByText("0900000000")).toBeInTheDocument();
+    expect(screen.getByText(profile.id)).toBeInTheDocument();
+    expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
+    expect(screen.getByText("Chưa xác minh")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bé An" })).toBeInTheDocument();
+    expect(screen.getByText("Lớp 2")).toBeInTheDocument();
+    expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
   });
   it("validates and updates the permitted display name using the current backend contract", async () => {
