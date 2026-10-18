@@ -96,6 +96,65 @@ describe("ParentProfileScreen with real API adapter", () => {
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
   });
+  it("requests an email change through Supabase Auth without immediately changing verification state", async () => {
+    apiFetchFixture.mockResolvedValue(Response.json(profile));
+    const user = userEvent.setup();
+    renderProfile();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
+    const emailField = screen.getByLabelText("Email mới");
+    await user.clear(emailField);
+    await user.type(emailField, "new-parent@example.com");
+    await user.click(screen.getByRole("button", { name: "Yêu cầu đổi email" }));
+
+    expect(await screen.findByText("Đã gửi yêu cầu đổi email")).toBeInTheDocument();
+    expect(authMocks.updateUser).toHaveBeenCalledWith(
+      { email: "new-parent@example.com" },
+      { emailRedirectTo: expect.stringContaining("/auth/callback?next=%2Fprofile") },
+    );
+  });
+
+  it("requests phone-change OTP and verifies it with the phone_change type", async () => {
+    apiFetchFixture
+      .mockResolvedValueOnce(Response.json(profile))
+      .mockResolvedValueOnce(
+        Response.json({ ...profile, pending_phone: "+84912345678" }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ...profile,
+          phone: "+84912345678",
+          pending_phone: null,
+          phone_verified: true,
+        }),
+      );
+    const user = userEvent.setup();
+    renderProfile();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
+    const phoneField = screen.getByLabelText("Số điện thoại mới");
+    await user.clear(phoneField);
+    await user.type(phoneField, "0912345678");
+    await user.click(screen.getByRole("button", { name: "Gửi mã OTP để đổi số" }));
+
+    expect(await screen.findByLabelText("Mã OTP gồm 6 chữ số")).toBeInTheDocument();
+    expect(authMocks.updateUser).toHaveBeenCalledWith({ phone: "+84912345678" });
+
+    await user.type(screen.getByLabelText("Mã OTP gồm 6 chữ số"), "123456");
+    await user.click(screen.getByRole("button", { name: "Xác minh số điện thoại" }));
+
+    expect(await screen.findByText("Đã xác minh số điện thoại")).toBeInTheDocument();
+    expect(authMocks.verifyOtp).toHaveBeenCalledWith({
+      phone: "+84912345678",
+      token: "123456",
+      type: "phone_change",
+    });
+  });
+
   it("shows an explicit empty phone state when Supabase Auth has no phone", async () => {
     apiFetchFixture.mockResolvedValueOnce(
       Response.json({
