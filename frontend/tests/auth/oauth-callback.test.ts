@@ -89,6 +89,25 @@ describe("OAuth callback", () => {
     );
   });
 
+  it("allows a verified email-change callback to return to Profile", async () => {
+    const harness = makeSupabase();
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+
+    const response = await GET(requestFor("/auth/callback?code=email-change-code&next=%2Fprofile"));
+
+    expect(response.headers.get("location")).toBe(`${APP_ORIGIN}/profile`);
+    expect(harness.exchangeCodeForSession).toHaveBeenCalledWith("email-change-code");
+  });
+
+  it("does not allow an external callback redirect target", async () => {
+    const harness = makeSupabase();
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+
+    const response = await GET(requestFor("/auth/callback?code=oauth-code&next=https%3A%2F%2Fevil.example"));
+
+    expect(response.headers.get("location")).toBe(`${APP_ORIGIN}/dashboard`);
+  });
+
   it("routes an admin to the admin area", async () => {
     const harness = makeSupabase({ role: "admin" });
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
