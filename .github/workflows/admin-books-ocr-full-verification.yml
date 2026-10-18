@@ -36,6 +36,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Temporary formatter output for ViRead files
+        run: |
+          npx prettier --write components/layout/site-footer.tsx components/layout/site-header.tsx
+          echo '===== FORMATTED SITE FOOTER ====='
+          cat components/layout/site-footer.tsx
+          echo '===== FORMATTED SITE HEADER ====='
+          cat components/layout/site-header.tsx
+
       - name: Temporary Prettier diff for OCR changes
         run: |
           npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
