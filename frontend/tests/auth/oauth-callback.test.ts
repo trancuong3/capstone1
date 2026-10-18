@@ -72,9 +72,7 @@ describe("OAuth callback", () => {
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
     const response = await GET(
-      new NextRequest(
-        "http://localhost:3000/auth/callback?code=oauth-code",
-      ),
+      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
     );
 
     expect(response.headers.get("location")).toBe(
@@ -91,12 +89,12 @@ describe("OAuth callback", () => {
   it(
     "routes an admin with an email to the fixed admin destination",
     async () => {
-    const harness = makeSupabase({ role: "admin" });
-    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+      const harness = makeSupabase({ role: "admin" });
+      createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
-    const response = await GET(
-      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
-    );
+      const response = await GET(
+        new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
+      );
 
       expect(response.headers.get("location")).toBe(
         "http://localhost:3000/admin/books",
