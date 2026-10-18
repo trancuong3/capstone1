@@ -197,6 +197,11 @@ export function ParentProfileScreen() {
             <p className="mt-1 text-label text-muted">
               {verificationLabel(profile.email, profile.email_verified, profile.contact_info_status)}
             </p>
+            {profile.pending_email ? (
+              <p className="mt-2 break-words text-sm text-amber-700">
+                Đang chờ xác minh email mới: <strong>{profile.pending_email}</strong>
+              </p>
+            ) : null}
           </div>
 
           <div className="min-w-0 rounded-control bg-white p-4">
@@ -210,6 +215,11 @@ export function ParentProfileScreen() {
             <p className="mt-1 text-label text-muted">
               {verificationLabel(profile.phone, profile.phone_verified, profile.contact_info_status)}
             </p>
+            {profile.pending_phone ? (
+              <p className="mt-2 break-words text-sm text-amber-700">
+                Đang chờ xác minh số mới: <strong>{profile.pending_phone}</strong>
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-control bg-white p-4">
@@ -240,6 +250,10 @@ export function ParentProfileScreen() {
               setState({ status: "ready", profile: updatedProfile });
               setIsEditing(false);
               setShowSuccess(true);
+            }}
+            onProfileRefresh={(updatedProfile) => {
+              setState({ status: "ready", profile: updatedProfile });
+              setShowSuccess(false);
             }}
             profile={profile}
           />
