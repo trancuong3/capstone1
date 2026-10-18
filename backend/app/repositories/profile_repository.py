@@ -10,7 +10,7 @@ from app.models import Profile
 
 
 class ProfileRepository:
-    """Read profile rows from PostgreSQL using the existing ORM mappings."""
+    """Read and persist profile rows through PostgreSQL ORM mappings."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -35,3 +35,35 @@ class ProfileRepository:
             select(Profile).options(selectinload(Profile.children))
         )
         return result.scalars().unique().all()
+
+    async def create_profile(
+        self,
+        role: str,
+        display_name: str | None,
+    ) -> Profile:
+        profile = Profile(Role=role, DisplayName=display_name)
+        self.db.add(profile)
+        await self.db.commit()
+        return await self.get_by_id(profile.Id)  # type: ignore[return-value]
+
+    async def update_display_name(
+        self,
+        profile_id: UUID,
+        display_name: str,
+    ) -> Profile | None:
+        profile = await self.get_by_id(profile_id)
+        if profile is None:
+            return None
+
+        profile.DisplayName = display_name
+        await self.db.commit()
+        return await self.get_by_id(profile_id)
+
+    async def delete_by_id(self, profile_id: UUID) -> bool:
+        profile = await self.get_by_id(profile_id)
+        if profile is None:
+            return False
+
+        await self.db.delete(profile)
+        await self.db.commit()
+        return True
