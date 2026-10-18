@@ -83,7 +83,7 @@ describe("ParentProfileScreen with real API adapter", () => {
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Chưa cập nhật")).toBeInTheDocument();
-    expect(screen.getByText("Chưa có thông tin xác minh")).toBeInTheDocument();
+    expect(screen.getByText("Chưa có thông tin để xác minh")).toBeInTheDocument();
   });
   it("validates and updates the permitted display name using the current backend contract", async () => {
     apiFetchFixture.mockImplementation(async (_input, init) =>
