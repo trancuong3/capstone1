@@ -41,9 +41,6 @@ jobs:
           npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
           git -C .. diff -- frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/ocr/sync-page-text-words.ts
 
-      - name: Print formatted OAuth callback test
-        run: npx prettier tests/auth/oauth-callback.test.ts
-
       - name: Format check (changed frontend files)
         id: format
         continue-on-error: true
