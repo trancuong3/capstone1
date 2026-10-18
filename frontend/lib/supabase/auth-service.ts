@@ -17,6 +17,7 @@ import type {
 import type { ParentRole } from "@/types/profile";
 
 interface SupabaseAuthServiceOptions {
+  getOAuthRedirectUrl?: () => string;
   getEmailConfirmationRedirectUrl?: () => string;
   getPasswordResetRedirectUrl?: () => string;
 }
@@ -154,6 +155,14 @@ function readParentRole(profile: unknown): ParentRole | null {
     : null;
 }
 
+function defaultOAuthRedirectUrl() {
+  if (typeof window === "undefined") {
+    throw unexpectedAuthError();
+  }
+
+  return new URL("/auth/callback", window.location.origin).toString();
+}
+
 function defaultPasswordResetRedirectUrl() {
   if (typeof window === "undefined") {
     throw unexpectedAuthError();
@@ -187,6 +196,8 @@ export function createSupabaseAuthService(
   supabase: SupabaseClient = createBrowserSupabaseClient(),
   options: SupabaseAuthServiceOptions = {},
 ): AuthService {
+  const getOAuthRedirectUrl =
+    options.getOAuthRedirectUrl ?? defaultOAuthRedirectUrl;
   const getPasswordResetRedirectUrl =
     options.getPasswordResetRedirectUrl ?? defaultPasswordResetRedirectUrl;
   const getEmailConfirmationRedirectUrl =
@@ -272,6 +283,29 @@ export function createSupabaseAuthService(
       if (!data.session) throw unexpectedAuthError();
 
       return mapSession(data.session);
+    },
+
+    async signInWithOAuth(provider) {
+      let redirectTo: string;
+
+      try {
+        redirectTo = getOAuthRedirectUrl();
+      } catch {
+        throw unexpectedAuthError();
+      }
+
+      const scopes = provider === "facebook" ? "email" : "email profile";
+      const { error } = await runProviderOperation(() =>
+        supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo,
+            scopes,
+          },
+        }),
+      );
+
+      if (error) throw unexpectedAuthError();
     },
 
     async requestPasswordReset(request) {
