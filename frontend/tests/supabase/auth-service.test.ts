@@ -450,7 +450,7 @@ describe("SupabaseAuthService", () => {
   ] as const)(
     "starts %s OAuth with the expected scopes and app callback",
     async (provider, scopes) => {
-    const harness = createHarness();
+      const harness = createHarness();
 
       await expect(
         createService(harness).signInWithOAuth(provider),
