@@ -24,6 +24,8 @@ export interface ParentProfileDTO {
   readonly created_at: ISODateTime;
   readonly email: string | null;
   readonly phone: string | null;
+  readonly pending_email: string | null;
+  readonly pending_phone: string | null;
   readonly email_verified: boolean | null;
   readonly phone_verified: boolean | null;
   readonly contact_info_status: ContactInfoStatus;
