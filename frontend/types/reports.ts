@@ -17,11 +17,11 @@ export interface DifficultWordDTO {
 }
 
 export interface ProgressPeriodSummaryDTO {
-  readonly completed_sessions: number;
-  readonly reading_duration_ms: number;
-  readonly omission_count: number;
-  readonly repetition_count: number;
-  readonly long_pause_count: number;
+  readonly completed_sessions: number | null;
+  readonly reading_duration_ms: number | null;
+  readonly omission_count: number | null;
+  readonly repetition_count: number | null;
+  readonly long_pause_count: number | null;
   readonly omission_rate: number | null;
   readonly repetition_rate: number | null;
   readonly long_pause_rate: number | null;
@@ -38,12 +38,38 @@ export interface ProgressTrendDeltasDTO {
 }
 
 export interface ProgressReportDTO extends ProgressPeriodSummaryDTO {
+  readonly id: UUID;
+  readonly generated_at: ISODateTime;
   readonly child_id: UUID;
   readonly period_start: string;
   readonly period_end: string;
-  readonly difficult_words: readonly DifficultWordDTO[];
+  readonly difficult_words: readonly DifficultWordDTO[] | null;
   readonly previous_period: ProgressPeriodSummaryDTO | null;
-  readonly trend_deltas: ProgressTrendDeltasDTO;
+  readonly trend_deltas: ProgressTrendDeltasDTO | null;
+  readonly legacy: {
+    readonly avg_fluency: number | null;
+    readonly total_books: number | null;
+  } | null;
+  readonly data_status: "complete" | "partial" | "unsupported";
+  readonly availability: {
+    readonly metrics: ProgressAvailability;
+    readonly difficult_words: ProgressAvailability;
+    readonly comparison: ProgressAvailability;
+  };
+}
+
+export type ProgressAvailability =
+  "available" | "absent" | "partial" | "unsupported";
+export interface ProgressPeriodOptionDTO {
+  readonly id: UUID;
+  readonly child_id: UUID;
+  readonly period_start: string;
+  readonly period_end: string;
+  readonly generated_at: ISODateTime;
+}
+export interface ProgressPeriodsDTO {
+  readonly items: readonly ProgressPeriodOptionDTO[];
+  readonly next_cursor: string | null;
 }
 
 export interface ReportDateWindow {

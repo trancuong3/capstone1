@@ -6,6 +6,7 @@ import type {
   SessionHistoryItemViewModelUI,
 } from "@/types/reports";
 import type { HistorySessionSummaryDTO } from "@/types/reading";
+import { formatProgressDuration } from "@/lib/utils/progress-report-state";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("vi-VN", {
   dateStyle: "short",
@@ -79,29 +80,35 @@ export function mapReportMetrics(
     {
       id: "sessions",
       label: "Buổi đọc hoàn thành",
-      value: `${report.completed_sessions} buổi`,
-      hint: "Chỉ tính session FINISHED",
-      unavailable: false,
+      value:
+        report.completed_sessions === null
+          ? "Chưa có dữ liệu"
+          : `${report.completed_sessions} buổi`,
+      hint: "Theo báo cáo đã lưu của kỳ được chọn",
+      unavailable: report.completed_sessions === null,
     },
     {
       id: "duration",
       label: "Thời gian đọc",
-      value: formatDuration(report.reading_duration_ms),
-      hint: "Trong 30 ngày",
-      unavailable: false,
+      value: formatProgressDuration(report.reading_duration_ms),
+      hint: "Theo báo cáo đã lưu của kỳ được chọn",
+      unavailable: report.reading_duration_ms === null,
     },
     {
       id: "comprehension",
       label: "Câu hỏi đọc hiểu",
       value: formatPercent(report.comprehension_accuracy),
-      hint: "Đáp án có kết quả xác định",
+      hint: "Kết quả đọc hiểu trong báo cáo đã lưu",
       unavailable: report.comprehension_accuracy === null,
     },
     {
       id: "omission",
       label: "Tỷ lệ bỏ sót",
       value: formatPercent(report.omission_rate),
-      hint: `${report.omission_count} bằng chứng đã xác nhận`,
+      hint:
+        report.omission_count === null
+          ? "Chưa có số lần bỏ sót"
+          : `${report.omission_count} lần bỏ sót theo báo cáo đã lưu`,
       unavailable: report.omission_rate === null,
     },
   ];

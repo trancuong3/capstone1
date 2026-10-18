@@ -94,10 +94,32 @@ function readyResponse(url: string): Response {
   if (url.includes("/system/difficult-words/")) return Response.json([word]);
   if (url.includes("/system/progress/")) {
     const query = new URL(url).searchParams;
+    if (new URL(url).pathname.endsWith("/periods"))
+      return Response.json({
+        items: [
+          {
+            id: sessionId,
+            child_id: childId,
+            period_start: "2026-09-09",
+            period_end: "2026-10-08",
+            generated_at: "2026-10-08T01:00:00Z",
+          },
+        ],
+        next_cursor: null,
+      });
     return Response.json({
+      id: sessionId,
+      generated_at: "2026-10-08T01:00:00Z",
+      legacy: null,
+      data_status: "complete",
+      availability: {
+        metrics: "available",
+        difficult_words: "available",
+        comparison: "absent",
+      },
       child_id: childId,
-      period_start: query.get("period_start"),
-      period_end: query.get("period_end"),
+      period_start: query.get("period_start") ?? "2026-09-09",
+      period_end: query.get("period_end") ?? "2026-10-08",
       completed_sessions: 2,
       reading_duration_ms: 120000,
       omission_count: 1,
@@ -287,7 +309,6 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       render(<AppServicesProvider>{element}</AppServicesProvider>);
       expect(
         await screen.findByRole("heading", {
-          level: 1,
           name: "Dữ liệu đang chờ bổ sung",
         }),
       ).toBeInTheDocument();

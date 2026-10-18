@@ -14,7 +14,7 @@ export function ProgressChart({ report }: ProgressChartProps) {
       color: "bg-[#86c8bc]",
     },
   ] as const;
-  const maxValue = Math.max(...rows.map((row) => row.value), 1);
+  const maxValue = Math.max(...rows.map((row) => row.value ?? 0), 1);
 
   return (
     <section
@@ -25,10 +25,10 @@ export function ProgressChart({ report }: ProgressChartProps) {
         className="text-2xl font-extrabold text-ink"
         id="reading-evidence-title"
       >
-        Bằng chứng đọc đã xác nhận
+        Thống kê trong báo cáo đã lưu
       </h2>
       <p className="mt-2 text-label text-muted">
-        Chỉ gồm sự kiện CONFIRMED; UNCERTAIN và DISMISSED không được tính.
+        Giữ nguyên số đếm đã lưu. Chỉ số chưa có dữ liệu không được thay bằng 0.
       </p>
       <div
         aria-hidden="true"
@@ -40,12 +40,12 @@ export function ProgressChart({ report }: ProgressChartProps) {
             key={row.label}
           >
             <span className="mb-2 text-center text-lg font-extrabold text-ink">
-              {row.value}
+              {row.value ?? "Chưa có dữ liệu"}
             </span>
             <div
               className={`mx-auto w-full max-w-24 rounded-t-control ${row.color}`}
               style={{
-                height: `${Math.max((row.value / maxValue) * 132, 8)}px`,
+                height: `${((row.value ?? 0) / maxValue) * 132}px`,
               }}
             />
             <span className="mt-3 text-center text-label font-bold text-muted">
@@ -59,14 +59,14 @@ export function ProgressChart({ report }: ProgressChartProps) {
         <thead>
           <tr>
             <th scope="col">Loại</th>
-            <th scope="col">Số lần đã xác nhận</th>
+            <th scope="col">Số lần đã lưu</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.label}>
               <th scope="row">{row.label}</th>
-              <td>{row.value}</td>
+              <td>{row.value ?? "Chưa có dữ liệu"}</td>
             </tr>
           ))}
         </tbody>
