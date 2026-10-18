@@ -44,7 +44,9 @@ describe("ForgotPasswordScreen", () => {
         createAuthServiceFixture(),
       ),
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("vui lòng kiểm tra thông tin hoặc thử lại sau");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "vui lòng kiểm tra thông tin hoặc thử lại sau",
+    );
   });
   it("keeps rejected requests generic and permits retry", async () => {
     const service = createAuthServiceFixture();
@@ -61,7 +63,9 @@ describe("ForgotPasswordScreen", () => {
     );
     await user.click(screen.getByRole("button", { name: "Gửi hướng dẫn" }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("vui lòng kiểm tra thông tin hoặc thử lại sau");
+    expect(alert).toHaveTextContent(
+      "vui lòng kiểm tra thông tin hoặc thử lại sau",
+    );
     expect(alert).not.toHaveTextContent("Private provider details");
     expect(
       screen.queryByRole("heading", { name: "Kiểm tra email nhé" }),
