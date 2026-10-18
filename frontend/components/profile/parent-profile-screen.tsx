@@ -2,8 +2,6 @@
 
 import {
   CalendarDays,
-  Check,
-  Copy,
   Mail,
   Pencil,
   Phone,
@@ -27,8 +25,6 @@ type ProfileState =
   | { status: "loading" }
   | { status: "ready"; profile: ParentProfileDTO }
   | { status: "error" };
-
-type CopyState = "idle" | "success" | "error";
 
 function formatCreatedDate(value: string): string {
   const date = new Date(value);
@@ -106,7 +102,6 @@ export function ParentProfileScreen() {
   const [state, setState] = useState<ProfileState>({ status: "loading" });
   const [isEditing, setIsEditing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [copyState, setCopyState] = useState<CopyState>("idle");
 
   useEffect(() => {
     let isActive = true;
@@ -132,19 +127,6 @@ export function ParentProfileScreen() {
       isActive = false;
     };
   }, [profileService, requestKey]);
-
-  async function copyAccountId(accountId: string) {
-    setCopyState("idle");
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error("Clipboard API unavailable");
-      }
-      await navigator.clipboard.writeText(accountId);
-      setCopyState("success");
-    } catch {
-      setCopyState("error");
-    }
-  }
 
   if (state.status === "loading") {
     return <ParentProfileLoadingState />;
@@ -215,6 +197,11 @@ export function ParentProfileScreen() {
             <p className="mt-1 text-label text-muted">
               {verificationLabel(profile.email, profile.email_verified, profile.contact_info_status)}
             </p>
+            {profile.pending_email ? (
+              <p className="mt-2 break-words text-sm text-amber-700">
+                Đang chờ xác minh email mới: <strong>{profile.pending_email}</strong>
+              </p>
+            ) : null}
           </div>
 
           <div className="min-w-0 rounded-control bg-white p-4">
@@ -228,36 +215,11 @@ export function ParentProfileScreen() {
             <p className="mt-1 text-label text-muted">
               {verificationLabel(profile.phone, profile.phone_verified, profile.contact_info_status)}
             </p>
-          </div>
-
-          <div className="min-w-0 rounded-control bg-white p-4 sm:col-span-2">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <UserRound aria-hidden="true" className="size-5" />
-              Mã tài khoản
-            </dt>
-            <dd className="mt-2 break-all font-mono text-sm font-semibold text-ink">
-              {profile.id}
-            </dd>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Button
-                onClick={() => void copyAccountId(profile.id)}
-                variant="quiet"
-              >
-                {copyState === "success" ? (
-                  <Check aria-hidden="true" className="size-4" />
-                ) : (
-                  <Copy aria-hidden="true" className="size-4" />
-                )}
-                {copyState === "success"
-                  ? "Đã sao chép"
-                  : "Sao chép mã tài khoản"}
-              </Button>
-              <span aria-live="polite" className="text-label text-muted">
-                {copyState === "error"
-                  ? "Không thể sao chép. Ba mẹ hãy thử lại."
-                  : ""}
-              </span>
-            </div>
+            {profile.pending_phone ? (
+              <p className="mt-2 break-words text-sm text-amber-700">
+                Đang chờ xác minh số mới: <strong>{profile.pending_phone}</strong>
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-control bg-white p-4">
@@ -288,6 +250,10 @@ export function ParentProfileScreen() {
               setState({ status: "ready", profile: updatedProfile });
               setIsEditing(false);
               setShowSuccess(true);
+            }}
+            onProfileRefresh={(updatedProfile) => {
+              setState({ status: "ready", profile: updatedProfile });
+              setShowSuccess(false);
             }}
             profile={profile}
           />
