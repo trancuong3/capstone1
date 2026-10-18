@@ -283,6 +283,8 @@ function normalizeUpdatedProfile(
     created_at: createdAt,
     email: currentProfile.email,
     phone: currentProfile.phone,
+    pending_email: currentProfile.pending_email,
+    pending_phone: currentProfile.pending_phone,
     email_verified: currentProfile.email_verified,
     phone_verified: currentProfile.phone_verified,
     contact_info_status: currentProfile.contact_info_status,
