@@ -234,13 +234,39 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         state.historyStatus,
       );
     if (path.startsWith("/reading/history/")) return respond(route, {}, 404);
+    if (path.startsWith("/system/progress/") && path.endsWith("/periods"))
+      return respond(
+        route,
+        {
+          items: [
+            {
+              id: ids.session,
+              child_id: ids.child,
+              period_start: "2026-09-09",
+              period_end: "2026-10-08",
+              generated_at: timestamp,
+            },
+          ],
+          next_cursor: null,
+        },
+        state.reportStatus,
+      );
     if (path.startsWith("/system/progress/"))
       return respond(
         route,
         {
+          id: ids.session,
+          generated_at: timestamp,
+          legacy: null,
+          data_status: "complete",
+          availability: {
+            metrics: "available",
+            difficult_words: "available",
+            comparison: "absent",
+          },
           child_id: ids.child,
-          period_start: url.searchParams.get("period_start"),
-          period_end: url.searchParams.get("period_end"),
+          period_start: url.searchParams.get("period_start") ?? "2026-09-09",
+          period_end: url.searchParams.get("period_end") ?? "2026-10-08",
           completed_sessions: 2,
           reading_duration_ms: 120000,
           omission_count: 1,

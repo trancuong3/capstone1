@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict, AwareDatetime
+from typing import Optional, Dict, Any, Literal
 from datetime import datetime, date
 from uuid import UUID
 
@@ -88,13 +88,43 @@ class ProgressTrendRead(BaseModel):
     comprehension_accuracy: float | None
 
 
-class ProgressRead(ProgressPeriodRead):
+class SavedProgressPeriodRead(BaseModel):
+    completed_sessions: int | None = Field(default=None, ge=0, strict=True)
+    reading_duration_ms: int | None = Field(default=None, ge=0, strict=True)
+    omission_count: int | None = Field(default=None, ge=0, strict=True)
+    repetition_count: int | None = Field(default=None, ge=0, strict=True)
+    long_pause_count: int | None = Field(default=None, ge=0, strict=True)
+    omission_rate: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False, strict=True)
+    repetition_rate: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False, strict=True)
+    long_pause_rate: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False, strict=True)
+    comprehension_accuracy: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False, strict=True)
+
+
+class ProgressLegacyRead(BaseModel):
+    avg_fluency: float | None = Field(default=None, allow_inf_nan=False, strict=True)
+    total_books: int | None = Field(default=None, ge=0, strict=True)
+
+
+class ProgressPeriodOptionRead(BaseModel):
+    id: UUID
     child_id: UUID
     period_start: date
     period_end: date
-    difficult_words: list[DifficultWordRead]
+    generated_at: AwareDatetime
+
+
+class ProgressPeriodsRead(BaseModel):
+    items: list[ProgressPeriodOptionRead]
+    next_cursor: str | None
+
+
+class ProgressRead(SavedProgressPeriodRead, ProgressPeriodOptionRead):
+    difficult_words: list[DifficultWordRead] | None
     previous_period: ProgressPeriodRead | None
-    trend_deltas: ProgressTrendRead
+    trend_deltas: ProgressTrendRead | None
+    legacy: ProgressLegacyRead | None
+    data_status: Literal["complete", "partial", "unsupported"]
+    availability: dict[str, Literal["available", "absent", "partial", "unsupported"]]
 
 
 # Read DTOs match the existing Admin UI contract, not the legacy CRUD payload.

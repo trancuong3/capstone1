@@ -105,9 +105,7 @@ describe("Report/Session real API contracts", () => {
       reportWindowFixture,
     );
     expect(report.previous_period).toBeNull();
-    expect(
-      Object.values(report.trend_deltas).every((value) => value === null),
-    ).toBe(true);
+    expect(report.trend_deltas).toEqual(progressReportFixture.trend_deltas);
     const service = createDifficultWordService();
     const words = await service.list(TEST_CHILD_ID, reportWindowFixture);
     expect(words).toEqual([difficultWordFixture]);
