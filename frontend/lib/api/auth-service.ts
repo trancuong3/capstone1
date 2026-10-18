@@ -27,12 +27,15 @@ export class AuthServiceError extends Error {
   }
 }
 
+export type OAuthProvider = "google" | "facebook";
+
 export interface AuthService {
   initialize(): Promise<void>;
   registerParent(
     input: ParentRegistrationInput,
   ): Promise<ParentRegistrationResult>;
   signIn(request: LoginRequest): Promise<AuthSessionSnapshot>;
+  signInWithOAuth(provider: OAuthProvider): Promise<void>;
   requestPasswordReset(request: PasswordRecoveryRequest): Promise<void>;
   resetPassword(request: PasswordResetRequest): Promise<void>;
   getSession(): Promise<AuthSessionSnapshot | null>;
