@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -38,6 +38,7 @@ export function ForgotPasswordForm({ hasInitialError, onSubmitted }: ForgotPassw
   const [newPassword, setNewPassword] = useState("");
   const [phoneResetComplete, setPhoneResetComplete] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [isResettingPhone, setIsResettingPhone] = useState(false);
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -65,13 +66,15 @@ export function ForgotPasswordForm({ hasInitialError, onSubmitted }: ForgotPassw
     }
   });
 
-  const onResetPhonePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+  const onResetPhonePassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isResettingPhone) return;
     setHasError(false);
-    if (!pendingPhone || !/^\\d{4,8}$/.test(otp.trim()) || newPassword.length < 8) {
+    if (!pendingPhone || !/^\d{4,8}$/.test(otp.trim()) || newPassword.length < 8) {
       setHasError(true);
       return;
     }
+    setIsResettingPhone(true);
     try {
       await authService.resetPasswordByPhone({
         phone: pendingPhone,
@@ -81,6 +84,8 @@ export function ForgotPasswordForm({ hasInitialError, onSubmitted }: ForgotPassw
       setPhoneResetComplete(true);
     } catch {
       setHasError(true);
+    } finally {
+      setIsResettingPhone(false);
     }
   };
 
@@ -112,9 +117,9 @@ export function ForgotPasswordForm({ hasInitialError, onSubmitted }: ForgotPassw
         {hasError ? <StatusMessage tone="error">Không thể xác minh hoặc cập nhật mật khẩu. Ba mẹ kiểm tra mã, mật khẩu mới và thử lại.</StatusMessage> : null}
         <p className="text-sm text-muted">Nhập mã SMS gửi đến {pendingPhone} và tạo mật khẩu mới.</p>
         <form className="flex flex-col gap-4" noValidate onSubmit={onResetPhonePassword}>
-          <TextField autoComplete="one-time-code" inputMode="numeric" label="Mã xác minh OTP" value={otp} onChange={(event) => setOtp(event.currentTarget.value.replace(/\\D/g, "").slice(0, 8))} />
+          <TextField autoComplete="one-time-code" inputMode="numeric" label="Mã xác minh OTP" value={otp} onChange={(event) => setOtp(event.currentTarget.value.replace(/\D/g, "").slice(0, 8))} />
           <TextField autoComplete="new-password" label="Mật khẩu mới" placeholder="Tối thiểu 8 ký tự" type="password" value={newPassword} onChange={(event) => setNewPassword(event.currentTarget.value)} />
-          <Button disabled={isSubmitting || otp.trim().length < 4 || newPassword.length < 8} isLoading={isSubmitting} type="submit">Xác minh và đặt lại mật khẩu</Button>
+          <Button disabled={isResettingPhone || otp.trim().length < 4 || newPassword.length < 8} isLoading={isResettingPhone} type="submit">Xác minh và đặt lại mật khẩu</Button>
         </form>
         <Button disabled={isResending} isLoading={isResending} onClick={() => void resendPhoneOtp()} type="button" variant="quiet">Gửi lại mã SMS</Button>
         <ButtonLink href="/login" variant="quiet"><ArrowLeft aria-hidden="true" className="size-5" />Về đăng nhập</ButtonLink>

@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -76,6 +76,8 @@ export function RegisterForm({
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [emailLinkState, setEmailLinkState] = useState<EmailLinkState>("not-requested");
   const [isResending, setIsResending] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isContinuing, setIsContinuing] = useState(false);
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -157,12 +159,13 @@ export function RegisterForm({
 
   const verifyPhone = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!pendingPhone || isSubmitting || !/^\\d{4,8}$/.test(otp.trim())) {
+    if (!pendingPhone || isSubmitting || !/^\d{4,8}$/.test(otp.trim())) {
       setErrorMessage("Ba mẹ vui lòng nhập mã xác minh hợp lệ.");
       return;
     }
 
     setErrorMessage(null);
+    setIsVerifyingOtp(true);
     try {
       await authService.verifyPhoneSignup({ phone: pendingPhone, token: otp.trim() });
       setPhoneVerified(true);
@@ -173,6 +176,8 @@ export function RegisterForm({
           ? "Mã xác minh đã hết hạn. Ba mẹ vui lòng gửi lại mã."
           : "Không thể xác minh mã. Ba mẹ kiểm tra mã SMS hoặc thử gửi lại.",
       );
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
@@ -190,11 +195,15 @@ export function RegisterForm({
   };
 
   const continueAfterPhoneVerification = async () => {
+    if (isContinuing) return;
+    setIsContinuing(true);
     setErrorMessage(null);
     try {
       await finishParentOnboarding();
     } catch {
       setErrorMessage(safeRegistrationError);
+    } finally {
+      setIsContinuing(false);
     }
   };
 
@@ -217,9 +226,9 @@ export function RegisterForm({
                 label="Mã xác minh OTP"
                 placeholder="Nhập mã trong SMS"
                 value={otp}
-                onChange={(event) => setOtp(event.currentTarget.value.replace(/\\D/g, "").slice(0, 8))}
+                onChange={(event) => setOtp(event.currentTarget.value.replace(/\D/g, "").slice(0, 8))}
               />
-              <Button disabled={isSubmitting || otp.trim().length < 4} isLoading={isSubmitting} type="submit">
+              <Button disabled={isVerifyingOtp || otp.trim().length < 4} isLoading={isVerifyingOtp} type="submit">
                 Xác minh số điện thoại
               </Button>
             </form>
@@ -241,7 +250,7 @@ export function RegisterForm({
                 Thử liên kết email lại
               </Button>
             ) : null}
-            <Button onClick={() => void continueAfterPhoneVerification()} type="button">
+            <Button disabled={isContinuing} isLoading={isContinuing} onClick={() => void continueAfterPhoneVerification()} type="button">
               Tiếp tục thiết lập hồ sơ bé
               <ArrowRight aria-hidden="true" className="size-5" />
             </Button>

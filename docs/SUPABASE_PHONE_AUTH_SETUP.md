@@ -20,7 +20,7 @@ This project uses Supabase Auth for both email/password and phone/password authe
 
 ## Database compatibility
 
-The application profile is keyed by the Supabase Auth user ID and stores application profile/role information. Contact identifiers remain authoritative in Supabase Auth. Do not add a fake email for phone-only users, do not manually write to `auth.users`, and do not store OTPs in the application database.
+Apply migration `20261018120000_allow_phone_only_auth_users.sql` to Supabase after the earlier migration that required an email. It removes the email-only guard from the Auth user trigger while preserving creation of `public.profiles` with the same Auth user ID, `parent` role and display name. Review the migration before applying it to production. The application profile is keyed by the Supabase Auth user ID and stores application profile/role information. Contact identifiers remain authoritative in Supabase Auth. Do not add a fake email for phone-only users, do not manually write to `auth.users`, and do not store OTPs in the application database.
 
 ## Verification limits
 

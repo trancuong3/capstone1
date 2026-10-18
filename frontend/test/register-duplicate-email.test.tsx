@@ -128,7 +128,7 @@ function renderRegistration(
 async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("Họ và tên ba mẹ"), "Ba mẹ kiểm thử");
   await user.type(
-    screen.getByLabelText("Email của ba mẹ"),
+    screen.getByLabelText("Email của ba mẹ (không bắt buộc)"),
     "parent@example.com",
   );
   await user.type(screen.getByLabelText("Mật khẩu"), "test-password-123");
@@ -170,7 +170,7 @@ describe("Registration duplicate-email regression", () => {
       expect(refresh).not.toHaveBeenCalled();
       expect(harness.getCurrentRole).not.toHaveBeenCalled();
       expect(harness.signOut).not.toHaveBeenCalled();
-      expect(screen.getByLabelText("Email của ba mẹ")).toHaveValue(
+      expect(screen.getByLabelText("Email của ba mẹ (không bắt buộc)")).toHaveValue(
         "parent@example.com",
       );
       expect(
@@ -194,7 +194,7 @@ describe("Registration duplicate-email regression", () => {
     expect(
       screen.queryByRole("heading", { name: "Kiểm tra email nhé" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Email của ba mẹ")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email của ba mẹ (không bắt buộc)")).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -313,7 +313,7 @@ describe("Registration duplicate-email regression", () => {
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập họ và tên."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Ba mẹ vui lòng nhập email.")).toBeInTheDocument();
+    expect(screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại.")).toBeInTheDocument();
     expect(
       screen.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
     ).toBeInTheDocument();

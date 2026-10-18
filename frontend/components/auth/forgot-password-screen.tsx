@@ -88,7 +88,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
             Quên mật khẩu?
           </h1>
           <p className="mt-4 text-body text-muted sm:mt-6">
-            Nhập email của ba mẹ để nhận hướng dẫn đặt lại mật khẩu.
+            Nhập email hoặc số điện thoại của ba mẹ để đặt lại mật khẩu.
           </p>
         </div>
         <ForgotPasswordForm

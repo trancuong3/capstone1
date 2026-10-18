@@ -3,8 +3,8 @@
  * numbers to E.164. It intentionally rejects ambiguous local formats.
  */
 export function normalizePhoneNumber(input: string): string | null {
-  const compact = input.trim().replace(/[\\s().-]/g, "");
-  if (!compact || !/^\\+?\\d+$/.test(compact)) return null;
+  const compact = input.trim().replace(/[\s().-]/g, "");
+  if (!compact || !/^\+?\d+$/.test(compact)) return null;
 
   if (compact.startsWith("+")) {
     const digits = compact.slice(1);
@@ -40,7 +40,7 @@ export function normalizeEmail(input: string): string {
 
 export function isEmailAddress(input: string): boolean {
   const value = normalizeEmail(input);
-  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export function parseLoginIdentifier(
