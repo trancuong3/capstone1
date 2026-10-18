@@ -133,15 +133,15 @@ describe("OAuth callback", () => {
   it(
     "does not expose raw provider errors when OAuth is cancelled or rejected",
     async () => {
-    const response = await GET(
-      new NextRequest(
-        "http://localhost:3000/auth/callback?error=access_denied&error_description=Sensitive",
-      ),
-    );
+      const response = await GET(
+        new NextRequest(
+          "http://localhost:3000/auth/callback?error=access_denied&error_description=Sensitive",
+        ),
+      );
 
-    expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/login?oauth_error=oauth_failed",
-    );
+      expect(response.headers.get("location")).toBe(
+        "http://localhost:3000/login?oauth_error=oauth_failed",
+      );
       expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
     },
   );
