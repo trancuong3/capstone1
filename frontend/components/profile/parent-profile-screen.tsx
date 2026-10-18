@@ -195,11 +195,16 @@ export function ParentProfileScreen() {
               {contactValue(profile.email, profile.contact_info_status)}
             </dd>
             <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.email, profile.email_verified, profile.contact_info_status)}
+              {verificationLabel(
+                profile.email,
+                profile.email_verified,
+                profile.contact_info_status,
+              )}
             </p>
             {profile.pending_email ? (
               <p className="mt-2 break-words text-sm text-amber-700">
-                Đang chờ xác minh email mới: <strong>{profile.pending_email}</strong>
+                Đang chờ xác minh email mới:{" "}
+                <strong>{profile.pending_email}</strong>
               </p>
             ) : null}
           </div>
@@ -213,11 +218,16 @@ export function ParentProfileScreen() {
               {contactValue(profile.phone, profile.contact_info_status)}
             </dd>
             <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.phone, profile.phone_verified, profile.contact_info_status)}
+              {verificationLabel(
+                profile.phone,
+                profile.phone_verified,
+                profile.contact_info_status,
+              )}
             </p>
             {profile.pending_phone ? (
               <p className="mt-2 break-words text-sm text-amber-700">
-                Đang chờ xác minh số mới: <strong>{profile.pending_phone}</strong>
+                Đang chờ xác minh số mới:{" "}
+                <strong>{profile.pending_phone}</strong>
               </p>
             ) : null}
           </div>
