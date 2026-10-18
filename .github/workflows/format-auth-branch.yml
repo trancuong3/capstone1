@@ -1,0 +1,82 @@
+name: Temporary auth branch formatting
+
+on:
+  push:
+    branches:
+      - feature/auth-email-phone
+    paths:
+      - ".github/workflows/format-auth-branch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format-auth:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout auth feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/auth-email-phone
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Format files changed by the auth feature
+        run: |
+          npx prettier --write \
+            components/auth/forgot-password-form.tsx \
+            components/auth/forgot-password-screen.tsx \
+            components/auth/login-form.tsx \
+            components/auth/register-form.tsx \
+            lib/api/auth-service.ts \
+            lib/auth/phone.ts \
+            lib/supabase/auth-service.ts \
+            test/fixtures/auth-service-fixture.ts \
+            test/register-duplicate-email.test.tsx \
+            tests/auth/forgot-password-screen.test.tsx \
+            tests/auth/login-form.test.tsx \
+            tests/auth/register-form.test.tsx \
+            tests/e2e/auth.spec.ts \
+            tests/e2e/group2.spec.ts \
+            tests/supabase/auth-service.test.ts \
+            types/auth.ts
+
+      - name: Commit formatter changes without rewriting history
+        run: |
+          if git diff --quiet; then
+            echo "All auth changes are already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            components/auth/forgot-password-form.tsx \
+            components/auth/forgot-password-screen.tsx \
+            components/auth/login-form.tsx \
+            components/auth/register-form.tsx \
+            lib/api/auth-service.ts \
+            lib/auth/phone.ts \
+            lib/supabase/auth-service.ts \
+            test/fixtures/auth-service-fixture.ts \
+            test/register-duplicate-email.test.tsx \
+            tests/auth/forgot-password-screen.test.tsx \
+            tests/auth/login-form.test.tsx \
+            tests/auth/register-form.test.tsx \
+            tests/e2e/auth.spec.ts \
+            tests/e2e/group2.spec.ts \
+            tests/supabase/auth-service.test.ts \
+            types/auth.ts
+          git commit -m "style(auth): apply Prettier formatting"
+          git push origin HEAD:feature/auth-email-phone
