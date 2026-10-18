@@ -72,7 +72,7 @@ test.describe("Group 1 authentication UI", () => {
   }) => {
     await page.goto("/register?state=default");
     await page.getByLabel("Họ và tên ba mẹ").fill("Nguyễn Minh Anh");
-    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
+    await page.getByLabel("Email của ba mẹ (không bắt buộc)").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhau123");
     await page.getByRole("button", { name: "Tạo tài khoản" }).click();
 
@@ -96,7 +96,7 @@ test.describe("Group 1 authentication UI", () => {
     page,
   }) => {
     await page.goto("/forgot-password?state=default");
-    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
+    await page.getByLabel("Email hoặc số điện thoại").fill("minhanh@example.com");
     await page.getByRole("button", { name: "Gửi hướng dẫn" }).click();
 
     await expect(
@@ -115,7 +115,7 @@ test.describe("Group 1 authentication UI", () => {
     await page.goto("/login?state=default");
     await page.getByRole("link", { name: "Quên mật khẩu?" }).click();
     await expect(page).toHaveURL(/\/forgot-password$/);
-    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
+    await page.getByLabel("Email hoặc số điện thoại").fill("minhanh@example.com");
     await page.getByRole("button", { name: "Gửi hướng dẫn" }).click();
 
     await expect(
@@ -138,7 +138,7 @@ test.describe("Group 1 authentication UI", () => {
       .getByRole("link", { name: "Đăng nhập" })
       .click();
     await expect(page).toHaveURL(/\/login$/);
-    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
+    await page.getByLabel("Email hoặc số điện thoại").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhaumoi123");
     await page.getByRole("button", { name: "Đăng nhập" }).click();
 
