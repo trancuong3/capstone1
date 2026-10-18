@@ -40,12 +40,15 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                 ViRead
               </h2>
               <p className="mt-3 max-w-md text-sm leading-6 text-muted">
-                Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng
-                đọc sách và theo dõi quá trình học tập.
+                Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng đọc
+                sách và theo dõi quá trình học tập.
               </p>
             </section>
 
-            <section aria-labelledby="footer-viread-contact" className="min-w-0">
+            <section
+              aria-labelledby="footer-viread-contact"
+              className="min-w-0"
+            >
               <h2
                 className="text-sm font-extrabold uppercase tracking-wide text-ink"
                 id="footer-viread-contact"
