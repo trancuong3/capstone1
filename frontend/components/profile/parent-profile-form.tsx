@@ -48,9 +48,16 @@ function validEmail(value: string): boolean {
   return z.email().safeParse(value.trim()).success;
 }
 
-function validPhoneInput(value: string): boolean {
+function canonicalPhoneInput(value: string): string | null {
   const compact = value.trim().replace(/[\s().-]/g, "");
-  return /^(?:0\d{9}|84\d{9}|\+[1-9]\d{7,14})$/.test(compact);
+  if (/^0\d{9}$/.test(compact)) return `+84${compact.slice(1)}`;
+  if (/^84\d{9}$/.test(compact)) return `+${compact}`;
+  if (/^\+[1-9]\d{7,14}$/.test(compact)) return compact;
+  return null;
+}
+
+function validPhoneInput(value: string): boolean {
+  return canonicalPhoneInput(value) !== null;
 }
 
 export function ParentProfileForm({
@@ -179,7 +186,13 @@ export function ParentProfileForm({
       return;
     }
 
-    if (profile.pending_phone && normalized === profile.pending_phone) {
+    if (profile.pending_phone) {
+      if (canonicalPhoneInput(normalized) !== profile.pending_phone) {
+        setPhoneError(
+          "Đang có một số điện thoại chờ xác minh. Ba mẹ hãy xác minh số đó trước khi bắt đầu yêu cầu mới.",
+        );
+        return;
+      }
       setContactBusy("resend-phone");
       try {
         await profileService.resendPhoneChangeOtp(profile.pending_phone);
@@ -197,13 +210,6 @@ export function ParentProfileForm({
       } finally {
         setContactBusy(null);
       }
-      return;
-    }
-
-    if (profile.pending_phone) {
-      setPhoneError(
-        "Đang có một số điện thoại chờ xác minh. Ba mẹ hãy xác minh số đó trước khi bắt đầu yêu cầu mới.",
-      );
       return;
     }
 
@@ -380,9 +386,7 @@ export function ParentProfileForm({
           type="button"
           variant="secondary"
         >
-          {profile.pending_phone && phoneValue.trim() === profile.pending_phone
-            ? "Gửi lại mã OTP"
-            : "Gửi mã OTP để đổi số"}
+          {profile.pending_phone ? "Gửi lại mã OTP" : "Gửi mã OTP để đổi số"}
         </Button>
 
         {profile.pending_phone ? (
