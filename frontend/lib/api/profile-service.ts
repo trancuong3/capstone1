@@ -18,6 +18,11 @@ export interface ProfileService {
   update(
     request: ParentProfileUpdateInput,
   ): Promise<ParentProfileDTO>;
+  requestEmailChange(email: string): Promise<void>;
+  resendEmailChange(email: string): Promise<void>;
+  requestPhoneChange(phone: string): Promise<void>;
+  verifyPhoneChange(phone: string, token: string): Promise<void>;
+  resendPhoneChangeOtp(phone: string): Promise<void>;
 }
 
 interface ErrorPayload {
@@ -33,9 +38,13 @@ interface ParentProfileApiResponse {
   created_at: string;
   email?: string | null;
   phone?: string | null;
+  pending_email?: string | null;
+  pending_phone?: string | null;
   email_verified?: boolean | null;
   phone_verified?: boolean | null;
   contact_info_status?: ContactInfoStatus;
+  pending_email?: string | null;
+  pending_phone?: string | null;
   children?: ParentProfileChildDTO[];
 }
 
@@ -236,6 +245,8 @@ function normalizeParentProfile(
     created_at: data.created_at,
     email: data.email ?? null,
     phone: data.phone ?? null,
+    pending_email: data.pending_email ?? null,
+    pending_phone: data.pending_phone ?? null,
     email_verified: data.email_verified ?? null,
     phone_verified: data.phone_verified ?? null,
     contact_info_status: data.contact_info_status ?? "lookup_failed",
@@ -272,11 +283,73 @@ function normalizeUpdatedProfile(
     created_at: createdAt,
     email: currentProfile.email,
     phone: currentProfile.phone,
+    pending_email: currentProfile.pending_email,
+    pending_phone: currentProfile.pending_phone,
     email_verified: currentProfile.email_verified,
     phone_verified: currentProfile.phone_verified,
     contact_info_status: currentProfile.contact_info_status,
     children: currentProfile.children,
   };
+}
+
+function normalizeVietnamesePhone(value: string): string {
+  const compact = value.trim().replace(/[\s().-]/g, "");
+
+  if (/^0\d{9}$/.test(compact)) {
+    return `+84${compact.slice(1)}`;
+  }
+
+  if (/^84\d{9}$/.test(compact)) {
+    return `+${compact}`;
+  }
+
+  if (/^\+[1-9]\d{7,14}$/.test(compact)) {
+    return compact;
+  }
+
+  throw new Error("Số điện thoại chưa đúng định dạng. Ba mẹ vui lòng kiểm tra lại.");
+}
+
+function safeAuthChangeError(
+  error: unknown,
+  operation: "email" | "phone" | "otp" | "resend-email" | "resend-phone",
+): Error {
+  const info =
+    typeof error === "object" && error !== null
+      ? (error as { status?: unknown; code?: unknown })
+      : {};
+  if (info.status === 429 || info.code === "over_request_rate_limit" ||
+      info.code === "over_sms_send_rate_limit" ||
+      info.code === "over_email_send_rate_limit") {
+    return new Error("Ba mẹ thao tác quá nhanh. Vui lòng đợi rồi thử lại.");
+  }
+
+  if (info.code === "email_exists" || info.code === "phone_exists" ||
+      info.code === "user_already_exists") {
+    return new Error("Email hoặc số điện thoại này đã được tài khoản khác sử dụng.");
+  }
+
+  switch (operation) {
+    case "email":
+      return new Error("Chưa gửi được yêu cầu đổi email. Ba mẹ vui lòng kiểm tra cấu hình email và thử lại.");
+    case "phone":
+      return new Error("Chưa gửi được mã OTP. Ba mẹ vui lòng kiểm tra số điện thoại và cấu hình SMS.");
+    case "otp":
+      return new Error("Mã OTP không hợp lệ hoặc đã hết hạn. Ba mẹ vui lòng kiểm tra lại.");
+    case "resend-email":
+      return new Error("Chưa gửi lại được email xác minh. Ba mẹ vui lòng thử lại sau.");
+    case "resend-phone":
+      return new Error("Chưa gửi lại được mã OTP. Ba mẹ vui lòng thử lại sau.");
+  }
+}
+
+function getProfileEmailRedirectUrl(): string {
+  if (typeof window === "undefined") {
+    throw new Error("Email change can only be started in the browser.");
+  }
+  const redirect = new URL("/auth/callback", window.location.origin);
+  redirect.searchParams.set("next", "/profile");
+  return redirect.toString();
 }
 
 export function createProfileService(): ProfileService {
@@ -326,6 +399,86 @@ export function createProfileService(): ProfileService {
         );
 
       return normalizeUpdatedProfile(response, currentProfile);
+    },
+
+    async requestEmailChange(email: string): Promise<void> {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        throw new Error("Email chưa đúng định dạng.");
+      }
+
+      const supabase = createBrowserSupabaseClient();
+      const { data: currentUserData, error: currentUserError } =
+        await supabase.auth.getUser();
+      if (currentUserError || !currentUserData.user) {
+        throw new Error("Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.");
+      }
+      if (currentUserData.user.email?.trim().toLowerCase() === normalizedEmail) {
+        throw new Error("Email mới giống email hiện tại.");
+      }
+
+      const { error } = await supabase.auth.updateUser(
+        { email: normalizedEmail },
+        { emailRedirectTo: getProfileEmailRedirectUrl() },
+      );
+      if (error) throw safeAuthChangeError(error, "email");
+    },
+
+    async resendEmailChange(email: string): Promise<void> {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) throw new Error("Không có email đang chờ xác minh.");
+
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.auth.resend({
+        type: "email_change",
+        email: normalizedEmail,
+        options: { emailRedirectTo: getProfileEmailRedirectUrl() },
+      });
+      if (error) throw safeAuthChangeError(error, "resend-email");
+    },
+
+    async requestPhoneChange(phone: string): Promise<void> {
+      const normalizedPhone = normalizeVietnamesePhone(phone);
+      const supabase = createBrowserSupabaseClient();
+      const { data: currentUserData, error: currentUserError } =
+        await supabase.auth.getUser();
+      if (currentUserError || !currentUserData.user) {
+        throw new Error("Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.");
+      }
+      if (currentUserData.user.phone === normalizedPhone) {
+        throw new Error("Số điện thoại mới giống số hiện tại.");
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        phone: normalizedPhone,
+      });
+      if (error) throw safeAuthChangeError(error, "phone");
+    },
+
+    async verifyPhoneChange(phone: string, token: string): Promise<void> {
+      const normalizedPhone = normalizeVietnamesePhone(phone);
+      const normalizedToken = token.trim();
+      if (!/^\d{6}$/.test(normalizedToken)) {
+        throw new Error("Mã OTP phải gồm 6 chữ số.");
+      }
+
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.auth.verifyOtp({
+        phone: normalizedPhone,
+        token: normalizedToken,
+        type: "phone_change",
+      });
+      if (error) throw safeAuthChangeError(error, "otp");
+    },
+
+    async resendPhoneChangeOtp(phone: string): Promise<void> {
+      const normalizedPhone = normalizeVietnamesePhone(phone);
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.auth.resend({
+        type: "phone_change",
+        phone: normalizedPhone,
+      });
+      if (error) throw safeAuthChangeError(error, "resend-phone");
     },
   };
 }
