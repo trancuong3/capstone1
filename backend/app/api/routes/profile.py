@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
-from app.models import Profile, ChildProfile
+from app.models import ChildProfile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.profile_service import (
     ProfileAccessDeniedError,
@@ -663,34 +662,16 @@ async def create_profile(
 
     service = ProfileService(ProfileRepository(db))
     try:
-        await service.require_admin(current_actor_id)
+        return await service.create_profile_for_admin(
+            current_actor_id,
+            profile_in.Role,
+            profile_in.DisplayName,
+        )
     except ProfileAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Admin access required"},
         ) from error
-
-    new_profile = Profile(
-        **profile_in.model_dump()
-    )
-
-    db.add(new_profile)
-
-    await db.commit()
-
-    query = (
-        select(Profile)
-        .where(
-            Profile.Id == new_profile.Id
-        )
-        .options(
-            selectinload(Profile.children)
-        )
-    )
-
-    result = await db.execute(query)
-
-    return result.scalar_one()
 
 
 # =========================================================
@@ -706,37 +687,20 @@ async def get_profile(
     current_parent_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Lấy Profile của chính người dùng đã xác thực.
-    """
-
-    if profile_id != current_parent_id:
+    """Read only the authenticated user's own profile."""
+    service = ProfileService(ProfileRepository(db))
+    try:
+        return await service.get_profile_for_owner(current_parent_id, profile_id)
+    except ProfileAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Access to this profile is denied"},
-        )
-
-    query = (
-        select(Profile)
-        .where(
-            Profile.Id == profile_id
-        )
-        .options(
-            selectinload(Profile.children)
-        )
-    )
-
-    result = await db.execute(query)
-
-    profile = result.scalar_one_or_none()
-
-    if not profile:
+        ) from error
+    except ProfileNotFoundError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Profile not found",
-        )
-
-    return profile
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Profile not found"},
+        ) from error
 
 
 # =========================================================
@@ -753,48 +717,24 @@ async def update_profile(
     current_parent_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Chỉ cho phép người dùng cập nhật hồ sơ của chính mình.
-    """
-
-    if profile_id != current_parent_id:
+    """Update only the display name on the authenticated user's own profile."""
+    service = ProfileService(ProfileRepository(db))
+    try:
+        return await service.update_profile_for_owner(
+            current_parent_id,
+            profile_id,
+            profile_in.displayname,
+        )
+    except ProfileAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Access to this profile is denied"},
-        )
-
-    result = await db.execute(
-        select(Profile)
-        .where(
-            Profile.Id == profile_id
-        )
-    )
-
-    profile = result.scalar_one_or_none()
-
-    if not profile:
+        ) from error
+    except ProfileNotFoundError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Profile not found",
-        )
-
-    profile.DisplayName = profile_in.displayname
-
-    await db.commit()
-
-    result = await db.execute(
-        select(Profile)
-        .where(
-            Profile.Id == profile_id
-        )
-        .options(
-            selectinload(Profile.children)
-        )
-    )
-
-    profile = result.scalar_one()
-
-    return profile
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Profile not found"},
+        ) from error
 
 
 # =========================================================
@@ -815,31 +755,17 @@ async def delete_profile(
 
     service = ProfileService(ProfileRepository(db))
     try:
-        await service.require_admin(current_actor_id)
+        await service.delete_profile_for_admin(current_actor_id, profile_id)
     except ProfileAccessDeniedError as error:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Admin access required"},
         ) from error
-
-    result = await db.execute(
-        select(Profile)
-        .where(
-            Profile.Id == profile_id
-        )
-    )
-
-    profile = result.scalar_one_or_none()
-
-    if not profile:
+    except ProfileNotFoundError as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Profile not found",
-        )
-
-    await db.delete(profile)
-
-    await db.commit()
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Profile not found"},
+        ) from error
 
     return {
         "message": "Profile deleted"
