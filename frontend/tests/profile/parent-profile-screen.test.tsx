@@ -110,7 +110,7 @@ describe("ParentProfileScreen with real API adapter", () => {
     ).toBeInTheDocument();
     expect(apiFetchFixture).toHaveBeenCalledTimes(1);
     await user.type(field, "Ba Mẹ Mây");
-    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+    await user.click(screen.getByRole("button", { name: "Lưu tên hiển thị" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Đã cập nhật hồ sơ",
     );
