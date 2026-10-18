@@ -83,12 +83,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div
-      className={cn(
-        "min-h-dvh bg-canvas",
-        !isImmersiveRoute && "flex flex-col",
-      )}
-    >
+    <div className="flex min-h-dvh flex-col bg-canvas">
       <header
         className={cn(
           "shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8",
@@ -113,7 +108,7 @@ export function AppShell({ children }: AppShellProps) {
             )}
             href="/dashboard"
           >
-            READALONG VISION
+            ViRead
           </Link>
 
           {!isChildOnboarding ? (
@@ -123,7 +118,7 @@ export function AppShell({ children }: AppShellProps) {
                   pathname === href ||
                   (href !== "/dashboard" &&
                     href !== "/reports" &&
-                    pathname.startsWith(`${href}/`));
+                    pathname.startsWith(href + "/"));
 
                 return (
                   <Link
@@ -172,7 +167,7 @@ export function AppShell({ children }: AppShellProps) {
       <main
         className={cn(
           isImmersiveRoute
-            ? "w-full"
+            ? "w-full flex-1"
             : "mx-auto w-full max-w-[1440px] px-4 sm:px-8",
           !isImmersiveRoute && "min-w-0 flex-1",
           !isImmersiveRoute &&
@@ -181,7 +176,7 @@ export function AppShell({ children }: AppShellProps) {
       >
         {children}
       </main>
-      {!isImmersiveRoute ? <SiteFooter /> : null}
+      <SiteFooter variant="parent" />
     </div>
   );
 }
