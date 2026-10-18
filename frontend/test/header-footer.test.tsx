@@ -91,20 +91,27 @@ describe("shared header and footer", () => {
     expect(footer).toHaveTextContent("Đại học Duy Tân");
     expect(footer).toHaveTextContent("viread@gmail.com");
     expect(footer).toHaveTextContent("0905373633");
-    expect(within(footer).getByRole("link", { name: "viread@gmail.com" }))
-      .toHaveAttribute("href", "mailto:viread@gmail.com");
-    expect(within(footer).getByRole("link", { name: "0905373633" }))
-      .toHaveAttribute("href", "tel:0905373633");
-    expect(within(footer).getByRole("link", { name: "Tổng quan" }))
-      .toHaveAttribute("href", "/dashboard");
-    expect(within(footer).getByRole("link", { name: "Tiến bộ" }))
-      .toHaveAttribute("href", "/reports");
-    expect(within(footer).getByRole("link", { name: "Lịch sử đọc" }))
-      .toHaveAttribute("href", "/sessions");
-    expect(within(footer).getByRole("link", { name: "Hồ sơ bé" }))
-      .toHaveAttribute("href", "/children");
-    expect(within(footer).getByRole("link", { name: "Hồ sơ phụ huynh" }))
-      .toHaveAttribute("href", "/profile");
+    expect(
+      within(footer).getByRole("link", { name: "viread@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:viread@gmail.com");
+    expect(
+      within(footer).getByRole("link", { name: "0905373633" }),
+    ).toHaveAttribute("href", "tel:0905373633");
+    expect(
+      within(footer).getByRole("link", { name: "Tổng quan" }),
+    ).toHaveAttribute("href", "/dashboard");
+    expect(
+      within(footer).getByRole("link", { name: "Tiến bộ" }),
+    ).toHaveAttribute("href", "/reports");
+    expect(
+      within(footer).getByRole("link", { name: "Lịch sử đọc" }),
+    ).toHaveAttribute("href", "/sessions");
+    expect(
+      within(footer).getByRole("link", { name: "Hồ sơ bé" }),
+    ).toHaveAttribute("href", "/children");
+    expect(
+      within(footer).getByRole("link", { name: "Hồ sơ phụ huynh" }),
+    ).toHaveAttribute("href", "/profile");
     expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
     expect(
       within(
@@ -135,7 +142,9 @@ describe("shared header and footer", () => {
       screen.queryByRole("button", { name: "Đăng xuất" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("link", { name: "Tổng quan", hidden: true }),
+      within(
+        screen.getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
+      ).queryByRole("link", { name: "Tổng quan" }),
     ).not.toBeInTheDocument();
   });
 
@@ -181,9 +190,9 @@ describe("shared header and footer", () => {
     expect(screen.getByRole("contentinfo")).toHaveTextContent(
       "Khu vực quản trị ViRead.",
     );
-    expect(
-      screen.queryByRole("contentinfo"),
-    ).not.toHaveTextContent("viread@gmail.com");
+    expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
+      "viread@gmail.com",
+    );
   });
 
   it("keeps protected Admin navigation and its compact footer", () => {
@@ -210,8 +219,8 @@ describe("shared header and footer", () => {
     expect(screen.getByRole("contentinfo")).toHaveTextContent(
       "Khu vực quản trị ViRead.",
     );
-    expect(
-      screen.queryByRole("contentinfo"),
-    ).not.toHaveTextContent("viread@gmail.com");
+    expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
+      "viread@gmail.com",
+    );
   });
 });
