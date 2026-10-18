@@ -1,6 +1,6 @@
-import { Card } from "@/components/common/card";
 import { AuthLoadingState, AuthShell } from "@/components/auth/auth-shell";
 import { LoginForm } from "@/components/auth/login-form";
+import { Card } from "@/components/common/card";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface LoginScreenProps {
@@ -20,16 +20,17 @@ export function LoginScreen({
 
   return (
     <AuthShell>
-      <Card>
+      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
         <div>
-          <h1 className="text-heading font-extrabold text-ink">Đăng nhập</h1>
-          <p className="mt-4 text-body text-muted sm:mt-6">
-            <span className="sm:hidden">
-              Ba mẹ đăng nhập để cùng bé đọc sách.
-            </span>
-            <span className="hidden sm:inline">
-              Bé không cần tài khoản riêng.
-            </span>
+          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            Dành cho ba mẹ
+          </p>
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
+            Chào mừng trở lại
+          </h1>
+          <p className="mt-3 text-body leading-relaxed text-muted">
+            Đăng nhập ViRead để cùng bé đọc sách và theo dõi hành trình tiến bộ
+            mỗi ngày.
           </p>
         </div>
         <LoginForm
