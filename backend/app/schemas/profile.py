@@ -131,6 +131,8 @@ class ParentProfileResponse(BaseModel):
     # Email and phone are owned by Supabase Auth, not public.profiles.
     email: Optional[str] = None
     phone: Optional[str] = None
+    pending_email: Optional[str] = None
+    pending_phone: Optional[str] = None
     email_verified: Optional[bool] = None
     phone_verified: Optional[bool] = None
     contact_info_status: Literal[
