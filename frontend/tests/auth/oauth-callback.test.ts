@@ -88,7 +88,9 @@ describe("OAuth callback", () => {
     );
   });
 
-  it("routes an admin with an email to the fixed admin destination", async () => {
+  it(
+    "routes an admin with an email to the fixed admin destination",
+    async () => {
     const harness = makeSupabase({ role: "admin" });
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
@@ -96,10 +98,11 @@ describe("OAuth callback", () => {
       new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
     );
 
-    expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/admin/books",
-    );
-  });
+      expect(response.headers.get("location")).toBe(
+        "http://localhost:3000/admin/books",
+      );
+    },
+  );
 
   it("signs out and blocks an OAuth user whose email is missing", async () => {
     const harness = makeSupabase({ email: null });
