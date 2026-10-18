@@ -344,7 +344,7 @@ export function createSupabaseAuthService(
       const phone = normalizePhoneNumber(request.phone);
       const token = request.token.trim();
       if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
-      if (!/^\\d{4,8}$/.test(token)) {
+      if (!/^\d{4,8}$/.test(token)) {
         throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
       }
 
@@ -459,15 +459,29 @@ export function createSupabaseAuthService(
     },
 
     async resendPhonePasswordReset(request) {
-      // Auth owns delivery limits; re-requesting with shouldCreateUser=false never creates an account.
-      await this.requestPhonePasswordReset(request);
+      const phone = normalizePhoneNumber(request.phone);
+      if (!phone) {
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
+      }
+
+      // Auth owns delivery limits; this request cannot create a user.
+      const { error } = await runProviderOperation(() =>
+        supabase.auth.signInWithOtp({
+          phone,
+          options: { shouldCreateUser: false, channel: "sms" },
+        }),
+      );
+      if (error) throw unexpectedAuthError();
     },
 
     async resetPasswordByPhone(request) {
       const phone = normalizePhoneNumber(request.phone);
       const token = request.token.trim();
       if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
-      if (!/^\\d{4,8}$/.test(token)) {
+      if (!/^\d{4,8}$/.test(token)) {
         throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
       }
       if (request.newPassword.length < 8) {
