@@ -43,7 +43,10 @@ beforeEach(() => {
     error: null,
   });
   authMocks.updateUser.mockResolvedValue({ data: { user: null }, error: null });
-  authMocks.verifyOtp.mockResolvedValue({ data: { user: null, session: null }, error: null });
+  authMocks.verifyOtp.mockResolvedValue({
+    data: { user: null, session: null },
+    error: null,
+  });
   authMocks.resend.mockResolvedValue({ data: {}, error: null });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -88,7 +91,9 @@ describe("ParentProfileScreen with real API adapter", () => {
     expect(screen.getByText("0900000000")).toBeInTheDocument();
     expect(screen.queryByText(profile.id)).not.toBeInTheDocument();
     expect(screen.queryByText(/mã tài khoản/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /sao chép mã tài khoản/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /sao chép mã tài khoản/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.getByText("Chưa xác minh")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Bé An" })).toBeInTheDocument();
@@ -109,10 +114,16 @@ describe("ParentProfileScreen with real API adapter", () => {
     await user.type(emailField, "new-parent@example.com");
     await user.click(screen.getByRole("button", { name: "Yêu cầu đổi email" }));
 
-    expect(await screen.findByText("Đã gửi yêu cầu đổi email")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã gửi yêu cầu đổi email"),
+    ).toBeInTheDocument();
     expect(authMocks.updateUser).toHaveBeenCalledWith(
       { email: "new-parent@example.com" },
-      { emailRedirectTo: expect.stringContaining("/auth/callback?next=%2Fprofile") },
+      {
+        emailRedirectTo: expect.stringContaining(
+          "/auth/callback?next=%2Fprofile",
+        ),
+      },
     );
   });
 
@@ -139,15 +150,25 @@ describe("ParentProfileScreen with real API adapter", () => {
     const phoneField = screen.getByLabelText("Số điện thoại mới");
     await user.clear(phoneField);
     await user.type(phoneField, "0912345678");
-    await user.click(screen.getByRole("button", { name: "Gửi mã OTP để đổi số" }));
+    await user.click(
+      screen.getByRole("button", { name: "Gửi mã OTP để đổi số" }),
+    );
 
-    expect(await screen.findByLabelText("Mã OTP gồm 6 chữ số")).toBeInTheDocument();
-    expect(authMocks.updateUser).toHaveBeenCalledWith({ phone: "+84912345678" });
+    expect(
+      await screen.findByLabelText("Mã OTP gồm 6 chữ số"),
+    ).toBeInTheDocument();
+    expect(authMocks.updateUser).toHaveBeenCalledWith({
+      phone: "+84912345678",
+    });
 
     await user.type(screen.getByLabelText("Mã OTP gồm 6 chữ số"), "123456");
-    await user.click(screen.getByRole("button", { name: "Xác minh số điện thoại" }));
+    await user.click(
+      screen.getByRole("button", { name: "Xác minh số điện thoại" }),
+    );
 
-    expect(await screen.findByText("Đã xác minh số điện thoại")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã xác minh số điện thoại"),
+    ).toBeInTheDocument();
     expect(authMocks.verifyOtp).toHaveBeenCalledWith({
       phone: "+84912345678",
       token: "123456",
@@ -168,7 +189,9 @@ describe("ParentProfileScreen with real API adapter", () => {
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Chưa cập nhật")).toBeInTheDocument();
-    expect(screen.getByText("Chưa có thông tin để xác minh")).toBeInTheDocument();
+    expect(
+      screen.getByText("Chưa có thông tin để xác minh"),
+    ).toBeInTheDocument();
   });
   it("validates and updates the permitted display name using the current backend contract", async () => {
     apiFetchFixture.mockImplementation(async (_input, init) =>
