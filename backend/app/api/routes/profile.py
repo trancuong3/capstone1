@@ -9,7 +9,11 @@ from uuid import UUID
 from app.api.deps import get_db, get_current_parent_id
 from app.models import Profile, ChildProfile
 from app.repositories.profile_repository import ProfileRepository
-from app.services.profile_service import ProfileNotFoundError, ProfileService
+from app.services.profile_service import (
+    ProfileAccessDeniedError,
+    ProfileNotFoundError,
+    ProfileService,
+)
 from app.schemas.profile import (
     AdminParentListResponse,
     AdminParentDetailResponse,
@@ -626,29 +630,18 @@ async def update_admin_parent(
     response_model=List[ProfileResponse],
 )
 async def get_profiles(
+    current_actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Lấy tất cả Parent Profiles.
-
-    API này giữ nguyên từ implementation hiện tại.
-    """
-
-    query = (
-        select(Profile)
-        .options(
-            selectinload(Profile.children)
-        )
-    )
-
-    result = await db.execute(query)
-
-    return (
-        result
-        .scalars()
-        .unique()
-        .all()
-    )
+    """List all profiles for authenticated Admin users only."""
+    service = ProfileService(ProfileRepository(db))
+    try:
+        return await service.list_profiles_for_admin(current_actor_id)
+    except ProfileAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
+        ) from error
 
 
 # =========================================================
@@ -661,13 +654,21 @@ async def get_profiles(
 )
 async def create_profile(
     profile_in: ProfileCreate,
+    current_actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Tạo Parent Profile.
-
-    API này giữ nguyên implementation hiện tại.
+    Tạo Parent Profile thông qua endpoint legacy, chỉ dành cho Admin đã xác thực.
     """
+
+    service = ProfileService(ProfileRepository(db))
+    try:
+        await service.require_admin(current_actor_id)
+    except ProfileAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
+        ) from error
 
     new_profile = Profile(
         **profile_in.model_dump()
@@ -805,11 +806,21 @@ async def update_profile(
 )
 async def delete_profile(
     profile_id: UUID,
+    current_actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Xóa Parent Profile.
+    Xóa hồ sơ qua endpoint legacy, chỉ dành cho Admin đã xác thực.
     """
+
+    service = ProfileService(ProfileRepository(db))
+    try:
+        await service.require_admin(current_actor_id)
+    except ProfileAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required"},
+        ) from error
 
     result = await db.execute(
         select(Profile)
