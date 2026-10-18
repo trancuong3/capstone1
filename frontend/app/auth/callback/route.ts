@@ -67,7 +67,15 @@ export async function GET(request: NextRequest) {
     return redirectToLogin(request, "oauth_failed");
   }
 
-  return NextResponse.redirect(
-    new URL(role === "admin" ? "/admin/books" : "/dashboard", request.url),
-  );
+  // Email-change confirmations can safely return to the Profile page.
+  // Other Auth/OAuth flows retain their established role-based destination.
+  const requestedNext = request.nextUrl.searchParams.get("next");
+  const destination =
+    requestedNext === "/profile"
+      ? "/profile"
+      : role === "admin"
+        ? "/admin/books"
+        : "/dashboard";
+
+  return NextResponse.redirect(new URL(destination, request.url));
 }
