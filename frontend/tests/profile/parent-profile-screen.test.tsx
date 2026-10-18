@@ -33,6 +33,8 @@ const profile: ParentProfileDTO = {
   created_at: "2026-10-01T00:00:00Z",
   email: "parent@example.com",
   phone: "0900000000",
+  pending_email: null,
+  pending_phone: null,
   email_verified: true,
   phone_verified: false,
   contact_info_status: "available",
@@ -53,7 +55,7 @@ function renderProfile() {
   );
 }
 describe("ParentProfileScreen with real API adapter", () => {
-  it("renders contact details, account ID, and only the linked child summary", async () => {
+  it("renders contact details without showing the account ID and shows linked children", async () => {
     apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
     renderProfile();
     expect(
@@ -62,7 +64,9 @@ describe("ParentProfileScreen with real API adapter", () => {
     expect(screen.getAllByText("Phụ huynh")).toHaveLength(2);
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(screen.getByText("0900000000")).toBeInTheDocument();
-    expect(screen.getByText(profile.id)).toBeInTheDocument();
+    expect(screen.queryByText(profile.id)).not.toBeInTheDocument();
+    expect(screen.queryByText(/mã tài khoản/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sao chép mã tài khoản/i })).not.toBeInTheDocument();
     expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.getByText("Chưa xác minh")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Bé An" })).toBeInTheDocument();
@@ -100,7 +104,7 @@ describe("ParentProfileScreen with real API adapter", () => {
     );
     const field = screen.getByLabelText("Tên hiển thị của ba mẹ");
     await user.clear(field);
-    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+    await user.click(screen.getByRole("button", { name: "Lưu tên hiển thị" }));
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập tên hiển thị."),
     ).toBeInTheDocument();
