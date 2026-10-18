@@ -17,14 +17,14 @@ export function BookChildHeader({
   mobileLabel,
 }: BookChildHeaderProps) {
   const childLabel = child
-    ? `${child.alias} · Lớp ${child.grade}`
+    ? child.alias + " · Lớp " + child.grade
     : "Chọn sách cho bé";
 
   return (
     <header className="w-full">
       <div className="hidden h-16 w-full items-center justify-between sm:flex">
         <Link
-          aria-label="Về tổng quan"
+          aria-label="Về tổng quan ViRead"
           className="flex h-16 shrink-0 items-center gap-3 rounded-control font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
           href="/dashboard"
         >
@@ -35,7 +35,7 @@ export function BookChildHeader({
             src="/images/figma/owl-mascot.svg"
             width={48}
           />
-          <span className="text-body">READALONG VISION</span>
+          <span className="text-body">ViRead</span>
         </Link>
         <ButtonLink
           className="max-w-[220px] shrink-0"
@@ -48,7 +48,7 @@ export function BookChildHeader({
       </div>
 
       <Link
-        aria-label={`Quay lại. ${mobileLabel ?? childLabel}`}
+        aria-label={"Quay lại. " + (mobileLabel ?? childLabel)}
         className="flex h-12 w-full items-center gap-2 rounded-control text-left font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:hidden"
         href={backHref}
       >
