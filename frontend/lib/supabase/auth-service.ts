@@ -404,7 +404,11 @@ export function createSupabaseAuthService(
     },
 
     async signIn(request) {
-      const identifier = "identifier" in request ? request.identifier : request.email;
+      const identifier = typeof request.identifier === "string"
+        ? request.identifier
+        : typeof request.email === "string"
+          ? request.email
+          : "";
       const parsed = parseLoginIdentifier(identifier);
       if (!parsed) {
         throw new AuthServiceError("invalid-credentials", "The supplied credentials were rejected.");

@@ -15,7 +15,7 @@ describe("ForgotPasswordScreen", () => {
       withAuthFixture(<ForgotPasswordScreen scenario="default" />, service),
     );
     await user.type(
-      screen.getByLabelText("Email hoặc số điện thoại"),
+      screen.getByLabelText("Email của ba mẹ"),
       "minhanh@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Gửi hướng dẫn" }));
@@ -56,7 +56,7 @@ describe("ForgotPasswordScreen", () => {
       withAuthFixture(<ForgotPasswordScreen scenario="default" />, service),
     );
     await user.type(
-      screen.getByLabelText("Email hoặc số điện thoại"),
+      screen.getByLabelText("Email của ba mẹ"),
       "parent@example.com",
     );
     await user.click(screen.getByRole("button", { name: "Gửi hướng dẫn" }));

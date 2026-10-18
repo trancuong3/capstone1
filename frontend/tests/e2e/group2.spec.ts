@@ -73,7 +73,7 @@ test.describe("Group 2 parent and child profile UI", () => {
     await page.getByRole("link", { name: /Đăng ký/ }).click();
 
     await page.getByLabel("Họ và tên ba mẹ").fill("Nguyễn Minh Anh");
-    await page.getByLabel("Email của ba mẹ (không bắt buộc)").fill("minhanh@example.com");
+    await page.getByLabel("Email của ba mẹ").fill("minhanh@example.com");
     await page.getByLabel("Mật khẩu").fill("matkhau123");
     await page.getByRole("button", { name: "Tạo tài khoản" }).click();
 
