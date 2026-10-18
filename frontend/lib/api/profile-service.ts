@@ -43,8 +43,6 @@ interface ParentProfileApiResponse {
   email_verified?: boolean | null;
   phone_verified?: boolean | null;
   contact_info_status?: ContactInfoStatus;
-  pending_email?: string | null;
-  pending_phone?: string | null;
   children?: ParentProfileChildDTO[];
 }
 
@@ -373,10 +371,11 @@ export function createProfileService(): ProfileService {
        * Vì parent_id không được lấy từ Frontend request,
        * trước tiên lấy profile hiện tại từ /profiles/me.
        */
-      const currentProfile =
+      const currentProfileResponse =
         await request<ParentProfileApiResponse>(
           "/profiles/me",
         );
+      const currentProfile = normalizeParentProfile(currentProfileResponse);
 
       /*
        * Backend ProfileUpdate hiện tại có:
