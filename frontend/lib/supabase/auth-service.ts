@@ -294,7 +294,7 @@ export function createSupabaseAuthService(
         throw unexpectedAuthError();
       }
 
-      const scopes = provider === "facebook" ? "email" : "email profile";
+      const scopes = provider === "facebook" ? "email" : "openid email profile";
       const { error } = await runProviderOperation(() =>
         supabase.auth.signInWithOAuth({
           provider,
