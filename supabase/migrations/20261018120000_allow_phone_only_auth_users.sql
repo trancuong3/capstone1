@@ -12,6 +12,15 @@ as $$
 declare
   resolved_display_name text;
 begin
+  -- Every new application identity must provide at least one real contact
+  -- method. Phone-only signup is valid; identities with neither are not.
+  if nullif(pg_catalog.btrim(coalesce(new.email, '')), '') is null
+     and nullif(pg_catalog.btrim(coalesce(new.phone, '')), '') is null then
+    raise exception using
+      errcode = '23514',
+      message = 'readalong_contact_required';
+  end if;
+
   resolved_display_name := coalesce(
     nullif(pg_catalog.btrim(new.raw_user_meta_data ->> 'display_name'), ''),
     nullif(pg_catalog.btrim(new.raw_user_meta_data ->> 'full_name'), ''),
