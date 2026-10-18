@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -128,7 +130,9 @@ describe("OAuth callback", () => {
     expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
 
-  it("does not expose raw provider errors when OAuth is cancelled or rejected", async () => {
+  it(
+    "does not expose raw provider errors when OAuth is cancelled or rejected",
+    async () => {
     const response = await GET(
       new NextRequest(
         "http://localhost:3000/auth/callback?error=access_denied&error_description=Sensitive",
@@ -138,6 +142,7 @@ describe("OAuth callback", () => {
     expect(response.headers.get("location")).toBe(
       "http://localhost:3000/login?oauth_error=oauth_failed",
     );
-    expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
-  });
+      expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
+    },
+  );
 });
