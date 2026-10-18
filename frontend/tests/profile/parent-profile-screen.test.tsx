@@ -10,20 +10,42 @@ import {
 } from "@/test/fixtures/api-test-fixture";
 import type { ParentProfileDTO } from "@/types/profile";
 
+const authMocks = vi.hoisted(() => ({
+  getSession: vi.fn(),
+  getUser: vi.fn(),
+  updateUser: vi.fn(),
+  verifyOtp: vi.fn(),
+  resend: vi.fn(),
+}));
+
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
-    auth: {
-      getSession: async () => ({
-        data: { session: { access_token: "isolated-test-token" } },
-        error: null,
-      }),
-    },
+    auth: authMocks,
   }),
 }));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
-beforeEach(() => installApiFetchFixture());
+beforeEach(() => {
+  installApiFetchFixture();
+  authMocks.getSession.mockResolvedValue({
+    data: { session: { access_token: "isolated-test-token" } },
+    error: null,
+  });
+  authMocks.getUser.mockResolvedValue({
+    data: {
+      user: {
+        id: "10000000-0000-4000-8000-000000000001",
+        email: "parent@example.com",
+        phone: "+84900000000",
+      },
+    },
+    error: null,
+  });
+  authMocks.updateUser.mockResolvedValue({ data: { user: null }, error: null });
+  authMocks.verifyOtp.mockResolvedValue({ data: { user: null, session: null }, error: null });
+  authMocks.resend.mockResolvedValue({ data: {}, error: null });
+});
 afterEach(() => vi.unstubAllGlobals());
 
 const profile: ParentProfileDTO = {
