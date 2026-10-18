@@ -6,10 +6,12 @@ import type { AuthMockScenario } from "@/types/auth";
 interface LoginScreenProps {
   isAuthCallback?: boolean;
   scenario: AuthMockScenario;
+  oauthError?: "email_required" | "oauth_failed" | null;
 }
 
 export function LoginScreen({
   isAuthCallback = false,
+  oauthError = null,
   scenario,
 }: LoginScreenProps) {
   if (scenario === "loading") {
@@ -30,7 +32,11 @@ export function LoginScreen({
             </span>
           </p>
         </div>
-        <LoginForm isAuthCallback={isAuthCallback} scenario={scenario} />
+        <LoginForm
+          isAuthCallback={isAuthCallback}
+          oauthError={oauthError}
+          scenario={scenario}
+        />
       </Card>
     </AuthShell>
   );
