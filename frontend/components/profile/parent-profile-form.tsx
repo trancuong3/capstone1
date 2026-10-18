@@ -68,11 +68,16 @@ export function ParentProfileForm({
 }: ParentProfileFormProps) {
   const isHydrated = useHydrated();
   const profileService = useProfileService();
-  const [displayNameFeedback, setDisplayNameFeedback] = useState<Feedback | null>(null);
+  const [displayNameFeedback, setDisplayNameFeedback] =
+    useState<Feedback | null>(null);
   const [emailFeedback, setEmailFeedback] = useState<Feedback | null>(null);
   const [phoneFeedback, setPhoneFeedback] = useState<Feedback | null>(null);
-  const [emailValue, setEmailValue] = useState(profile.pending_email ?? profile.email ?? "");
-  const [phoneValue, setPhoneValue] = useState(profile.pending_phone ?? profile.phone ?? "");
+  const [emailValue, setEmailValue] = useState(
+    profile.pending_email ?? profile.email ?? "",
+  );
+  const [phoneValue, setPhoneValue] = useState(
+    profile.pending_phone ?? profile.phone ?? "",
+  );
   const [otpValue, setOtpValue] = useState("");
   const [emailError, setEmailError] = useState<string | undefined>();
   const [phoneError, setPhoneError] = useState<string | undefined>();
@@ -135,7 +140,8 @@ export function ParentProfileForm({
         setEmailFeedback({
           tone: "success",
           title: "Đã gửi lại email xác minh",
-          message: "Ba mẹ hãy kiểm tra hộp thư đến và thư rác để hoàn tất xác minh.",
+          message:
+            "Ba mẹ hãy kiểm tra hộp thư đến và thư rác để hoàn tất xác minh.",
         });
         await refreshContactProfile();
       } catch (error) {
@@ -169,7 +175,10 @@ export function ParentProfileForm({
       setEmailFeedback({
         tone: "error",
         title: "Chưa gửi được yêu cầu đổi email",
-        message: safeErrorMessage(error, "Ba mẹ vui lòng kiểm tra cấu hình email và thử lại."),
+        message: safeErrorMessage(
+          error,
+          "Ba mẹ vui lòng kiểm tra cấu hình email và thử lại.",
+        ),
       });
     } finally {
       setContactBusy(null);
@@ -182,7 +191,9 @@ export function ParentProfileForm({
     const normalized = phoneValue.trim();
 
     if (!validPhoneInput(normalized)) {
-      setPhoneError("Nhập số điện thoại hợp lệ, ví dụ 0912345678 hoặc +84912345678.");
+      setPhoneError(
+        "Nhập số điện thoại hợp lệ, ví dụ 0912345678 hoặc +84912345678.",
+      );
       return;
     }
 
@@ -199,7 +210,8 @@ export function ParentProfileForm({
         setPhoneFeedback({
           tone: "success",
           title: "Đã gửi lại mã OTP",
-          message: "Ba mẹ nhập mã OTP mới nhất được gửi đến số điện thoại đang chờ xác minh.",
+          message:
+            "Ba mẹ nhập mã OTP mới nhất được gửi đến số điện thoại đang chờ xác minh.",
         });
       } catch (error) {
         setPhoneFeedback({
@@ -213,7 +225,10 @@ export function ParentProfileForm({
       return;
     }
 
-    if (canonicalPhoneInput(profile.phone ?? "") === canonicalPhoneInput(normalized)) {
+    if (
+      canonicalPhoneInput(profile.phone ?? "") ===
+      canonicalPhoneInput(normalized)
+    ) {
       setPhoneError("Số điện thoại mới phải khác số hiện tại.");
       return;
     }
@@ -224,14 +239,18 @@ export function ParentProfileForm({
       setPhoneFeedback({
         tone: "success",
         title: "Đã gửi yêu cầu xác minh số điện thoại",
-        message: "Nhập mã OTP được gửi qua SMS để hoàn tất thay đổi số điện thoại.",
+        message:
+          "Nhập mã OTP được gửi qua SMS để hoàn tất thay đổi số điện thoại.",
       });
       await refreshContactProfile();
     } catch (error) {
       setPhoneFeedback({
         tone: "error",
         title: "Chưa gửi được mã OTP",
-        message: safeErrorMessage(error, "Ba mẹ vui lòng kiểm tra cấu hình SMS và thử lại."),
+        message: safeErrorMessage(
+          error,
+          "Ba mẹ vui lòng kiểm tra cấu hình SMS và thử lại.",
+        ),
       });
     } finally {
       setContactBusy(null);
@@ -243,7 +262,9 @@ export function ParentProfileForm({
     setPhoneFeedback(null);
     const pendingPhone = profile.pending_phone;
     if (!pendingPhone) {
-      setOtpError("Không tìm thấy số điện thoại đang chờ xác minh. Ba mẹ hãy tải lại hồ sơ.");
+      setOtpError(
+        "Không tìm thấy số điện thoại đang chờ xác minh. Ba mẹ hãy tải lại hồ sơ.",
+      );
       return;
     }
 
@@ -266,7 +287,10 @@ export function ParentProfileForm({
       setPhoneFeedback({
         tone: "error",
         title: "Chưa xác minh được số điện thoại",
-        message: safeErrorMessage(error, "Mã OTP không hợp lệ hoặc đã hết hạn."),
+        message: safeErrorMessage(
+          error,
+          "Mã OTP không hợp lệ hoặc đã hết hạn.",
+        ),
       });
     } finally {
       setContactBusy(null);
@@ -279,17 +303,27 @@ export function ParentProfileForm({
     <form className="flex flex-col gap-6" noValidate onSubmit={onSubmit}>
       <div className="flex items-center gap-2">
         <ShieldCheck aria-hidden="true" className="size-5 text-primary" />
-        <h3 className="text-lg font-extrabold text-ink">Chỉnh sửa thông tin hồ sơ</h3>
+        <h3 className="text-lg font-extrabold text-ink">
+          Chỉnh sửa thông tin hồ sơ
+        </h3>
       </div>
 
       {displayNameFeedback ? (
-        <StatusMessage title={displayNameFeedback.title} tone={displayNameFeedback.tone}>
+        <StatusMessage
+          title={displayNameFeedback.title}
+          tone={displayNameFeedback.tone}
+        >
           {displayNameFeedback.message}
         </StatusMessage>
       ) : null}
 
-      <section className="flex flex-col gap-3" aria-labelledby="display-name-heading">
-        <h4 id="display-name-heading" className="font-bold text-ink">Tên hiển thị</h4>
+      <section
+        className="flex flex-col gap-3"
+        aria-labelledby="display-name-heading"
+      >
+        <h4 id="display-name-heading" className="font-bold text-ink">
+          Tên hiển thị
+        </h4>
         <TextField
           autoComplete="name"
           error={errors.displayName?.message}
@@ -303,22 +337,34 @@ export function ParentProfileForm({
           isLoading={isSubmitting}
           type="submit"
         >
-          {!isSubmitting ? <Save aria-hidden="true" className="size-5" /> : null}
+          {!isSubmitting ? (
+            <Save aria-hidden="true" className="size-5" />
+          ) : null}
           {isSubmitting ? "Đang lưu…" : "Lưu tên hiển thị"}
         </Button>
       </section>
 
-      <section className="flex flex-col gap-3 border-t border-border pt-5" aria-labelledby="email-heading">
-        <h4 id="email-heading" className="flex items-center gap-2 font-bold text-ink">
+      <section
+        className="flex flex-col gap-3 border-t border-border pt-5"
+        aria-labelledby="email-heading"
+      >
+        <h4
+          id="email-heading"
+          className="flex items-center gap-2 font-bold text-ink"
+        >
           <Mail aria-hidden="true" className="size-5" />
           Email
         </h4>
         <p className="text-sm text-muted">
-          Email hiện tại: <span className="break-all font-semibold text-ink">{profile.email ?? "Chưa cập nhật"}</span>
+          Email hiện tại:{" "}
+          <span className="break-all font-semibold text-ink">
+            {profile.email ?? "Chưa cập nhật"}
+          </span>
         </p>
         {profile.pending_email ? (
           <p className="break-words text-sm text-amber-700">
-            Đang chờ xác minh email mới: <strong>{profile.pending_email}</strong>
+            Đang chờ xác minh email mới:{" "}
+            <strong>{profile.pending_email}</strong>
           </p>
         ) : null}
         <TextField
@@ -344,19 +390,30 @@ export function ParentProfileForm({
           type="button"
           variant="secondary"
         >
-          {profile.pending_email && emailValue.trim().toLowerCase() === profile.pending_email.toLowerCase()
+          {profile.pending_email &&
+          emailValue.trim().toLowerCase() ===
+            profile.pending_email.toLowerCase()
             ? "Gửi lại email xác minh"
             : "Yêu cầu đổi email"}
         </Button>
       </section>
 
-      <section className="flex flex-col gap-3 border-t border-border pt-5" aria-labelledby="phone-heading">
-        <h4 id="phone-heading" className="flex items-center gap-2 font-bold text-ink">
+      <section
+        className="flex flex-col gap-3 border-t border-border pt-5"
+        aria-labelledby="phone-heading"
+      >
+        <h4
+          id="phone-heading"
+          className="flex items-center gap-2 font-bold text-ink"
+        >
           <Phone aria-hidden="true" className="size-5" />
           Số điện thoại
         </h4>
         <p className="text-sm text-muted">
-          Số hiện tại: <span className="break-all font-semibold text-ink">{profile.phone ?? "Chưa cập nhật"}</span>
+          Số hiện tại:{" "}
+          <span className="break-all font-semibold text-ink">
+            {profile.phone ?? "Chưa cập nhật"}
+          </span>
         </p>
         {profile.pending_phone ? (
           <p className="break-words text-sm text-amber-700">
@@ -397,7 +454,9 @@ export function ParentProfileForm({
               inputMode="numeric"
               label="Mã OTP gồm 6 chữ số"
               maxLength={6}
-              onChange={(event) => setOtpValue(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              onChange={(event) =>
+                setOtpValue(event.target.value.replace(/\D/g, "").slice(0, 6))
+              }
               placeholder="Nhập mã OTP"
               type="text"
               value={otpValue}
