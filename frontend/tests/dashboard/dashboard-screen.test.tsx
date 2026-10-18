@@ -41,6 +41,14 @@ const profile: ParentProfileDTO = {
   display_name: "Ba mẹ kiểm thử",
   role: "parent",
   created_at: childFixture.created_at,
+  email: "parent@example.com",
+  phone: null,
+  pending_email: null,
+  pending_phone: null,
+  email_verified: null,
+  phone_verified: null,
+  contact_info_status: "not_configured",
+  children: [],
 };
 function readyResponse(input: RequestInfo | URL, empty = false) {
   const path = new URL(String(input)).pathname;
