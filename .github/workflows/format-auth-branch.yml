@@ -61,7 +61,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
+          git add -f \
             components/auth/forgot-password-form.tsx \
             components/auth/forgot-password-screen.tsx \
             components/auth/login-form.tsx \
