@@ -159,7 +159,7 @@ export function RegisterForm({
 
   const verifyPhone = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!pendingPhone || isVerifyingOtp || !/^\d{4,8}$/.test(otp.trim())) {
+    if (!pendingPhone || isSubmitting || !/^\d{4,8}$/.test(otp.trim())) {
       setErrorMessage("Ba mẹ vui lòng nhập mã xác minh hợp lệ.");
       return;
     }
