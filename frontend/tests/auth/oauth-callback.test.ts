@@ -70,7 +70,9 @@ describe("OAuth callback", () => {
     createServerSupabaseClientMock.mockResolvedValue(harness.client);
 
     const response = await GET(
-      new NextRequest("http://localhost:3000/auth/callback?code=oauth-code"),
+      new NextRequest(
+        "http://localhost:3000/auth/callback?code=oauth-code",
+      ),
     );
 
     expect(response.headers.get("location")).toBe(
