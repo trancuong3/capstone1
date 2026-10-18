@@ -141,7 +141,7 @@ export function CameraPreview({
             framing_valid: false,
             matched: false,
             status_code: "INVALID_IMAGE",
-            message: "Đang kết nối tới ViRead Vision... Bé giữ yên sách nhé!",
+            message: "Đang kết nối tới ViRead... Bé giữ yên sách nhé!",
             confidence: 0,
             matched_page: null,
           });
@@ -198,7 +198,7 @@ export function CameraPreview({
 
   return (
     <section
-      aria-label="Khung camera nhận diện trang sách ViRead Vision"
+      aria-label="Khung camera nhận diện trang sách ViRead"
       className="relative flex w-full flex-col gap-4 rounded-card bg-desk p-4 sm:p-6"
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
@@ -284,7 +284,7 @@ export function CameraPreview({
                         aria-hidden="true"
                         className="size-4 animate-spin"
                       />
-                      ViRead Vision đang quét…
+                      ViRead đang quét…
                     </span>
                   ) : null}
                 </div>

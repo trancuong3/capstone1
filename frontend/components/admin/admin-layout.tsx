@@ -53,7 +53,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             className="mr-auto flex min-h-11 items-center rounded-control text-xl font-black text-primary focus-visible:outline-3 focus-visible:outline-primary"
             href="/admin/parents"
           >
-            ReadAlong <span className="text-ink">Admin</span>
+            ViRead <span className="ml-2 text-ink">Admin</span>
           </Link>
           <nav
             aria-label="Điều hướng quản trị"

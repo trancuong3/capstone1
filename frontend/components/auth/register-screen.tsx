@@ -18,7 +18,11 @@ interface RegisterScreenProps {
 function RegisterLoadingState() {
   return (
     <AuthShell>
-      <Card aria-busy="true" aria-label="Đang tải nội dung đăng ký">
+      <Card
+        aria-busy="true"
+        aria-label="Đang tải nội dung đăng ký"
+        className="mx-auto max-w-[560px] border border-border bg-white shadow-sm"
+      >
         <span className="sr-only" role="status">
           Đang tải…
         </span>
@@ -45,12 +49,15 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
   if (requiresEmailConfirmation) {
     return (
       <AuthShell>
-        <Card tone="success">
+        <Card
+          className="mx-auto max-w-[560px] border border-border shadow-sm"
+          tone="success"
+        >
           <div>
             <h1 className="text-heading font-extrabold text-success-ink">
               Kiểm tra email nhé
             </h1>
-            <p className="mt-4 text-body text-muted sm:mt-6">
+            <p className="mt-4 text-body leading-relaxed text-muted">
               Nếu yêu cầu đăng ký hợp lệ, ba mẹ sẽ nhận được liên kết xác nhận.
               Hãy kiểm tra cả thư rác trước khi đăng nhập.
             </p>
@@ -70,19 +77,16 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
 
   return (
     <AuthShell>
-      <Card>
+      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
         <div>
-          <h1 className="text-heading font-extrabold text-ink">
-            <span className="sm:hidden">Đăng ký</span>
-            <span className="hidden sm:inline">Tạo tài khoản cho ba mẹ</span>
+          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            Bắt đầu cùng ViRead
+          </p>
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
+            Tạo tài khoản phụ huynh
           </h1>
-          <p className="mt-4 text-body text-muted sm:mt-6">
-            <span className="sm:hidden">
-              Tạo tài khoản của ba mẹ. Bé không cần tài khoản riêng.
-            </span>
-            <span className="hidden sm:inline">
-              Cùng bé bắt đầu hành trình đọc sách.
-            </span>
+          <p className="mt-3 text-body leading-relaxed text-muted">
+            Tạo tài khoản để quản lý hồ sơ bé và theo dõi quá trình đọc sách.
           </p>
         </div>
         <RegisterForm

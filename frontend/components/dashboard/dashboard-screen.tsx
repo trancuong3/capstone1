@@ -210,7 +210,7 @@ export function DashboardScreen() {
               <Camera aria-hidden="true" className="size-5" />
               {showCameraScanner
                 ? "Đóng khung Camera quét sách"
-                : "Quét sách trước Camera (ViRead Vision)"}
+                : "Quét sách trước Camera (ViRead)"}
             </Button>
 
             {showCameraScanner ? (
