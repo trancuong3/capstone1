@@ -117,6 +117,41 @@ class ParentProfileApiTests(unittest.TestCase):
         self.assertEqual(body["contact_info_status"], "not_configured")
         self.assertEqual(body["children"], [])
 
+    def test_generic_profile_listing_is_admin_only(self):
+        repository = MagicMock()
+        repository.get_role = AsyncMock(return_value="parent")
+        repository.list_all_profiles = AsyncMock()
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with make_client() as client:
+                response = client.get("/profiles/")
+
+        self.assertEqual(response.status_code, 403)
+        repository.list_all_profiles.assert_not_awaited()
+
+    def test_generic_profile_creation_is_admin_only(self):
+        repository = MagicMock()
+        repository.get_role = AsyncMock(return_value="parent")
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with make_client() as client:
+                response = client.post(
+                    "/profiles/",
+                    json={"Role": "parent", "DisplayName": "Không được tạo"},
+                )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_generic_profile_deletion_is_admin_only(self):
+        repository = MagicMock()
+        repository.get_role = AsyncMock(return_value="parent")
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with make_client() as client:
+                response = client.delete(f"/profiles/{PARENT_ID}")
+
+        self.assertEqual(response.status_code, 403)
+
     def test_id_based_profile_read_rejects_another_users_profile(self):
         with make_client() as client:
             response = client.get(f"/profiles/{OTHER_ID}")
