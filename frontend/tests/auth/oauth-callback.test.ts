@@ -80,9 +80,7 @@ describe("OAuth callback", () => {
 
     const response = await GET(requestFor(CALLBACK_PATH));
 
-    expect(response.headers.get("location")).toBe(
-      `${APP_ORIGIN}/dashboard`,
-    );
+    expect(response.headers.get("location")).toBe(`${APP_ORIGIN}/dashboard`);
     expect(harness.exchangeCodeForSession).toHaveBeenCalledWith("oauth-code");
     expect(harness.select).toHaveBeenCalledWith("role");
     expect(harness.eq).toHaveBeenCalledWith(
@@ -97,9 +95,7 @@ describe("OAuth callback", () => {
 
     const response = await GET(requestFor(CALLBACK_PATH));
 
-    expect(response.headers.get("location")).toBe(
-      `${APP_ORIGIN}/admin/books`,
-    );
+    expect(response.headers.get("location")).toBe(`${APP_ORIGIN}/admin/books`);
   });
 
   it("rejects users without an email", async () => {
