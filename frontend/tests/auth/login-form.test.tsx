@@ -130,6 +130,38 @@ describe("LoginForm", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  it.each(["google", "facebook"] as const)(
+    "starts social sign-in with %s",
+    async (provider) => {
+      const service = createAuthServiceFixture();
+      const user = userEvent.setup();
+      renderLoginForm("default", service);
+
+      await user.click(
+        screen.getByRole("button", {
+          name: `Tiếp tục với ${provider === "google" ? "Google" : "Facebook"}`,
+        }),
+      );
+
+      await waitFor(() =>
+        expect(service.signInWithOAuth).toHaveBeenCalledWith(provider),
+      );
+    },
+  );
+
+  it("explains why Facebook sign-in is blocked when email is missing", () => {
+    render(
+      withAuthFixture(
+        <LoginForm scenario="default" oauthError="email_required" />,
+        createAuthServiceFixture(),
+      ),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Facebook không cung cấp email",
+    );
+  });
+
   it("renders the safe invalid-credentials message", () => {
     renderLoginForm("invalid-credentials");
     expect(screen.getByRole("alert")).toHaveTextContent(

@@ -62,6 +62,10 @@ function createHarness() {
     data: { session: providerSession, user: providerUser },
     error: null,
   });
+  const signInWithOAuth = vi.fn().mockResolvedValue({
+    data: { provider: "google", url: "https://provider.example.com/oauth" },
+    error: null,
+  });
   const resetPasswordForEmail = vi.fn().mockResolvedValue({
     data: {},
     error: null,
@@ -97,6 +101,7 @@ function createHarness() {
       initialize,
       onAuthStateChange,
       resetPasswordForEmail,
+      signInWithOAuth,
       signInWithPassword,
       signOut,
       signUp,
@@ -119,6 +124,7 @@ function createHarness() {
     onAuthStateChange,
     resetPasswordForEmail,
     select,
+    signInWithOAuth,
     signInWithPassword,
     signOut,
     signUp,
@@ -131,6 +137,7 @@ function createService(harness: ReturnType<typeof createHarness>) {
   return createSupabaseAuthService(harness.client, {
     getEmailConfirmationRedirectUrl: () =>
       "https://app.example.com/login?auth_callback=signup",
+    getOAuthRedirectUrl: () => "https://app.example.com/auth/callback",
     getPasswordResetRedirectUrl: () => "https://app.example.com/reset-password",
   });
 }
@@ -435,6 +442,43 @@ describe("SupabaseAuthService", () => {
       createService(harness).getCurrentRole(),
     ).rejects.toBeInstanceOf(AuthServiceError);
     expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it.each([
+    ["google", "openid email profile"],
+    ["facebook", "email"],
+  ] as const)(
+    "starts %s OAuth with the expected scopes and app callback",
+    async (provider, scopes) => {
+      const harness = createHarness();
+
+      await expect(
+        createService(harness).signInWithOAuth(provider),
+      ).resolves.toBeUndefined();
+
+      expect(harness.signInWithOAuth).toHaveBeenCalledWith({
+        provider,
+        options: {
+          redirectTo: "https://app.example.com/auth/callback",
+          scopes,
+        },
+      });
+    },
+  );
+
+  it("sanitizes provider OAuth errors", async () => {
+    const harness = createHarness();
+    harness.signInWithOAuth.mockResolvedValue({
+      data: { provider: "facebook", url: null },
+      error: authError("provider_disabled"),
+    });
+
+    await expect(
+      createService(harness).signInWithOAuth("facebook"),
+    ).rejects.toMatchObject({
+      reason: "unexpected",
+      message: "The authentication provider could not complete the request.",
+    });
   });
 
   it("sends a non-enumerating password recovery request to the configured URL", async () => {
