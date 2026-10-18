@@ -123,6 +123,18 @@ class ProfileService:
         phone_value = contact.get("phone")
         email = email_value.strip() or None if isinstance(email_value, str) else None
         phone = phone_value.strip() or None if isinstance(phone_value, str) else None
+        pending_email_value = contact.get("pending_email")
+        pending_phone_value = contact.get("pending_phone")
+        pending_email = (
+            pending_email_value.strip() or None
+            if isinstance(pending_email_value, str)
+            else None
+        )
+        pending_phone = (
+            pending_phone_value.strip() or None
+            if isinstance(pending_phone_value, str)
+            else None
+        )
 
         email_verified_value = contact.get("email_verified")
         phone_verified_value = contact.get("phone_verified")
@@ -150,6 +162,8 @@ class ProfileService:
             "created_at": profile.CreatedAt,
             "email": email,
             "phone": phone,
+            "pending_email": pending_email,
+            "pending_phone": pending_phone,
             "email_verified": email_verified,
             "phone_verified": phone_verified,
             "contact_info_status": status_value,
