@@ -170,9 +170,9 @@ describe("Registration duplicate-email regression", () => {
       expect(refresh).not.toHaveBeenCalled();
       expect(harness.getCurrentRole).not.toHaveBeenCalled();
       expect(harness.signOut).not.toHaveBeenCalled();
-      expect(screen.getByLabelText("Email của ba mẹ (không bắt buộc)")).toHaveValue(
-        "parent@example.com",
-      );
+      expect(
+        screen.getByLabelText("Email của ba mẹ (không bắt buộc)"),
+      ).toHaveValue("parent@example.com");
       expect(
         screen.getByRole("link", { name: "Đã có tài khoản? Đăng nhập" }),
       ).toHaveAttribute("href", "/login");
@@ -194,7 +194,9 @@ describe("Registration duplicate-email regression", () => {
     expect(
       screen.queryByRole("heading", { name: "Kiểm tra email nhé" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Email của ba mẹ (không bắt buộc)")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Email của ba mẹ (không bắt buộc)"),
+    ).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -313,7 +315,9 @@ describe("Registration duplicate-email regression", () => {
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập họ và tên."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại."),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
     ).toBeInTheDocument();

@@ -56,7 +56,9 @@ describe("RegisterForm", () => {
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập họ và tên."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại."),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
     ).toBeInTheDocument();

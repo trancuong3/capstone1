@@ -9,7 +9,12 @@ import type {
 
 import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { isEmailAddress, normalizeEmail, normalizePhoneNumber, parseLoginIdentifier } from "@/lib/auth/phone";
+import {
+  isEmailAddress,
+  normalizeEmail,
+  normalizePhoneNumber,
+  parseLoginIdentifier,
+} from "@/lib/auth/phone";
 import type {
   AuthSessionSnapshot,
   AuthUserSnapshot,
@@ -44,7 +49,11 @@ const invalidCredentialCodes = new Set([
 ]);
 
 const expiredOtpCodes = new Set(["otp_expired", "token_expired"]);
-const invalidOtpCodes = new Set(["invalid_otp", "invalid_token", "otp_disabled"]);
+const invalidOtpCodes = new Set([
+  "invalid_otp",
+  "invalid_token",
+  "otp_disabled",
+]);
 
 const expiredRecoveryCodes = new Set([
   "flow_state_expired",
@@ -113,10 +122,16 @@ function mapSignInError(error: AuthError) {
 
 function mapOtpError(error: AuthError) {
   if (expiredOtpCodes.has(error.code ?? "")) {
-    return new AuthServiceError("expired-otp", "The verification code has expired.");
+    return new AuthServiceError(
+      "expired-otp",
+      "The verification code has expired.",
+    );
   }
   if (invalidOtpCodes.has(error.code ?? "")) {
-    return new AuthServiceError("invalid-otp", "The verification code is invalid.");
+    return new AuthServiceError(
+      "invalid-otp",
+      "The verification code is invalid.",
+    );
   }
   return unexpectedAuthError();
 }
@@ -239,12 +254,14 @@ export function createSupabaseAuthService(
     },
 
     async registerParent(input): Promise<ParentRegistrationResult> {
-      const email = typeof input.email === "string" && input.email.trim()
-        ? normalizeEmail(input.email)
-        : null;
-      const phone = typeof input.phone === "string" && input.phone.trim()
-        ? normalizePhoneNumber(input.phone)
-        : null;
+      const email =
+        typeof input.email === "string" && input.email.trim()
+          ? normalizeEmail(input.email)
+          : null;
+      const phone =
+        typeof input.phone === "string" && input.phone.trim()
+          ? normalizePhoneNumber(input.phone)
+          : null;
 
       if (!email && !phone) {
         throw new AuthServiceError(
@@ -253,10 +270,16 @@ export function createSupabaseAuthService(
         );
       }
       if (email && !isEmailAddress(email)) {
-        throw new AuthServiceError("registration-validation", "The email address is invalid.");
+        throw new AuthServiceError(
+          "registration-validation",
+          "The email address is invalid.",
+        );
       }
       if (input.phone?.trim() && !phone) {
-        throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
       }
 
       if (phone) {
@@ -343,9 +366,16 @@ export function createSupabaseAuthService(
     async verifyPhoneSignup(request) {
       const phone = normalizePhoneNumber(request.phone);
       const token = request.token.trim();
-      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!phone)
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
       if (!/^\d{4,8}$/.test(token)) {
-        throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
+        throw new AuthServiceError(
+          "invalid-otp",
+          "The verification code is invalid.",
+        );
       }
 
       const { data, error } = await runProviderOperation(() =>
@@ -361,7 +391,11 @@ export function createSupabaseAuthService(
 
     async resendPhoneSignupConfirmation(request) {
       const phone = normalizePhoneNumber(request.phone);
-      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!phone)
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
       const { error } = await runProviderOperation(() =>
         supabase.auth.resend({ type: "sms", phone }),
       );
@@ -371,11 +405,14 @@ export function createSupabaseAuthService(
     async addEmailToCurrentUser(request) {
       const email = normalizeEmail(request.email);
       if (!isEmailAddress(email)) {
-        throw new AuthServiceError("registration-validation", "The email address is invalid.");
+        throw new AuthServiceError(
+          "registration-validation",
+          "The email address is invalid.",
+        );
       }
 
-      const { data: userData, error: userError } = await runProviderOperation(() =>
-        supabase.auth.getUser(),
+      const { data: userData, error: userError } = await runProviderOperation(
+        () => supabase.auth.getUser(),
       );
       const user = userData.user;
       if (userError || !user || !user.phone || !user.phone_confirmed_at) {
@@ -404,19 +441,24 @@ export function createSupabaseAuthService(
     },
 
     async signIn(request) {
-      const identifier = typeof request.identifier === "string"
-        ? request.identifier
-        : typeof request.email === "string"
-          ? request.email
-          : "";
+      const identifier =
+        typeof request.identifier === "string"
+          ? request.identifier
+          : typeof request.email === "string"
+            ? request.email
+            : "";
       const parsed = parseLoginIdentifier(identifier);
       if (!parsed) {
-        throw new AuthServiceError("invalid-credentials", "The supplied credentials were rejected.");
+        throw new AuthServiceError(
+          "invalid-credentials",
+          "The supplied credentials were rejected.",
+        );
       }
 
-      const credentials = parsed.kind === "email"
-        ? { email: parsed.value, password: request.password }
-        : { phone: parsed.value, password: request.password };
+      const credentials =
+        parsed.kind === "email"
+          ? { email: parsed.value, password: request.password }
+          : { phone: parsed.value, password: request.password };
 
       const { data, error } = await runProviderOperation(() =>
         supabase.auth.signInWithPassword(credentials),
@@ -451,7 +493,11 @@ export function createSupabaseAuthService(
 
     async requestPhonePasswordReset(request) {
       const phone = normalizePhoneNumber(request.phone);
-      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!phone)
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
 
       const { error } = await runProviderOperation(() =>
         supabase.auth.signInWithOtp({
@@ -484,12 +530,22 @@ export function createSupabaseAuthService(
     async resetPasswordByPhone(request) {
       const phone = normalizePhoneNumber(request.phone);
       const token = request.token.trim();
-      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!phone)
+        throw new AuthServiceError(
+          "phone-validation",
+          "The phone number is invalid.",
+        );
       if (!/^\d{4,8}$/.test(token)) {
-        throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
+        throw new AuthServiceError(
+          "invalid-otp",
+          "The verification code is invalid.",
+        );
       }
       if (request.newPassword.length < 8) {
-        throw new AuthServiceError("registration-validation", "The new password is too short.");
+        throw new AuthServiceError(
+          "registration-validation",
+          "The new password is too short.",
+        );
       }
 
       const { data, error } = await runProviderOperation(() =>

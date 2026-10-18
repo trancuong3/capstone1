@@ -59,7 +59,14 @@ function createHarness() {
     error: null,
   });
   const verifyOtp = vi.fn().mockResolvedValue({
-    data: { session: providerSession, user: { ...providerUser, phone: "+84912345678", phone_confirmed_at: "2026-10-18T00:00:00Z" } },
+    data: {
+      session: providerSession,
+      user: {
+        ...providerUser,
+        phone: "+84912345678",
+        phone_confirmed_at: "2026-10-18T00:00:00Z",
+      },
+    },
     error: null,
   });
   const resend = vi.fn().mockResolvedValue({ data: {}, error: null });
@@ -158,14 +165,24 @@ describe("SupabaseAuthService", () => {
   it("registers phone-only accounts through SMS and waits for OTP instead of creating a second identity", async () => {
     const harness = createHarness();
     harness.signUp.mockResolvedValue({
-      data: { session: null, user: { ...providerUser, email: undefined, phone: "+84912345678", identities: [{ ...providerUser.identities![0], provider: "phone" }] } },
+      data: {
+        session: null,
+        user: {
+          ...providerUser,
+          email: undefined,
+          phone: "+84912345678",
+          identities: [{ ...providerUser.identities![0], provider: "phone" }],
+        },
+      },
       error: null,
     });
-    await expect(createService(harness).registerParent({
-      displayName: "Nguyen Minh Anh",
-      phone: "0912345678",
-      password: "password123",
-    })).resolves.toEqual({
+    await expect(
+      createService(harness).registerParent({
+        displayName: "Nguyen Minh Anh",
+        phone: "0912345678",
+        password: "password123",
+      }),
+    ).resolves.toEqual({
       status: "phone-confirmation-required",
       phone: "+84912345678",
       session: null,
@@ -179,7 +196,10 @@ describe("SupabaseAuthService", () => {
 
   it("signs in with a normalized phone number using the phone credential field", async () => {
     const harness = createHarness();
-    await createService(harness).signIn({ identifier: "0912345678", password: "password123" });
+    await createService(harness).signIn({
+      identifier: "0912345678",
+      password: "password123",
+    });
     expect(harness.signInWithPassword).toHaveBeenCalledWith({
       phone: "+84912345678",
       password: "password123",
@@ -188,10 +208,12 @@ describe("SupabaseAuthService", () => {
 
   it("verifies an SMS OTP through Supabase and returns its session", async () => {
     const harness = createHarness();
-    await expect(createService(harness).verifyPhoneSignup({
-      phone: "0912345678",
-      token: "123456",
-    })).resolves.toMatchObject({ user: { id: providerUser.id } });
+    await expect(
+      createService(harness).verifyPhoneSignup({
+        phone: "0912345678",
+        token: "123456",
+      }),
+    ).resolves.toMatchObject({ user: { id: providerUser.id } });
     expect(harness.verifyOtp).toHaveBeenCalledWith({
       phone: "+84912345678",
       token: "123456",
@@ -201,7 +223,9 @@ describe("SupabaseAuthService", () => {
 
   it("requests phone recovery OTP without creating users", async () => {
     const harness = createHarness();
-    await createService(harness).requestPhonePasswordReset({ phone: "0912345678" });
+    await createService(harness).requestPhonePasswordReset({
+      phone: "0912345678",
+    });
     expect(harness.signInWithOtp).toHaveBeenCalledWith({
       phone: "+84912345678",
       options: { shouldCreateUser: false, channel: "sms" },
