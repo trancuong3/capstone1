@@ -98,28 +98,63 @@ class SupabaseAuthContactProvider:
         return SupabaseAuthProviderError()
 
     @staticmethod
-    def _lookup(user_id: UUID) -> dict[str, str | None | ContactInfoStatus]:
+    def _lookup(user_id: UUID) -> dict[str, str | None | bool | ContactInfoStatus]:
         client = get_supabase_admin_client()
         if client is None:
-            return {"email": None, "phone": None, "contact_info_status": "not_configured"}
+            return {
+                "email": None,
+                "phone": None,
+                "email_verified": None,
+                "phone_verified": None,
+                "contact_info_status": "not_configured",
+            }
         try:
             response = client.auth.admin.get_user_by_id(str(user_id))
             user = getattr(response, "user", None)
             if user is None:
-                return {"email": None, "phone": None, "contact_info_status": "user_not_found"}
+                return {
+                    "email": None,
+                    "phone": None,
+                    "email_verified": None,
+                    "phone_verified": None,
+                    "contact_info_status": "user_not_found",
+                }
+
             email = getattr(user, "email", None)
             phone = getattr(user, "phone", None)
             return {
                 "email": email if isinstance(email, str) and email.strip() else None,
                 "phone": phone if isinstance(phone, str) and phone.strip() else None,
+                "email_verified": (
+                    bool(getattr(user, "email_confirmed_at", None))
+                    if hasattr(user, "email_confirmed_at")
+                    else None
+                ),
+                "phone_verified": (
+                    bool(getattr(user, "phone_confirmed_at", None))
+                    if hasattr(user, "phone_confirmed_at")
+                    else None
+                ),
                 "contact_info_status": "available",
             }
         except Exception as error:
             message = str(error).lower()
             status_code = getattr(error, "status", None) or getattr(error, "status_code", None)
             if status_code == 404 or "user not found" in message or "user_not_found" in message:
-                return {"email": None, "phone": None, "contact_info_status": "user_not_found"}
-            return {"email": None, "phone": None, "contact_info_status": "lookup_failed"}
+                return {
+                    "email": None,
+                    "phone": None,
+                    "email_verified": None,
+                    "phone_verified": None,
+                    "contact_info_status": "user_not_found",
+                }
+            return {
+                "email": None,
+                "phone": None,
+                "email_verified": None,
+                "phone_verified": None,
+                "contact_info_status": "lookup_failed",
+            }
 
     @staticmethod
     def _invite_parent(email: str, display_name: str, phone: str | None) -> UUID:
@@ -211,7 +246,7 @@ class SupabaseAuthContactProvider:
 
     async def get_contact_info(
         self, user_id: UUID
-    ) -> dict[str, str | None | ContactInfoStatus]:
+    ) -> dict[str, str | None | bool | ContactInfoStatus]:
         return await asyncio.to_thread(self._lookup, user_id)
 
     async def invite_parent(
