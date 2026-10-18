@@ -1,5 +1,7 @@
 import type {
+  ContactInfoStatus,
   ParentProfileDTO,
+  ParentProfileChildDTO,
   ParentProfileUpdateInput,
 } from "@/types/profile";
 
@@ -29,6 +31,12 @@ interface ParentProfileApiResponse {
   display_name: string | null;
   role: "parent" | "admin";
   created_at: string;
+  email?: string | null;
+  phone?: string | null;
+  email_verified?: boolean | null;
+  phone_verified?: boolean | null;
+  contact_info_status?: ContactInfoStatus;
+  children?: ParentProfileChildDTO[];
 }
 
 interface ProfileUpdateApiResponse {
@@ -226,11 +234,18 @@ function normalizeParentProfile(
     display_name: data.display_name,
     role: data.role,
     created_at: data.created_at,
+    email: data.email ?? null,
+    phone: data.phone ?? null,
+    email_verified: data.email_verified ?? null,
+    phone_verified: data.phone_verified ?? null,
+    contact_info_status: data.contact_info_status ?? "lookup_failed",
+    children: data.children ?? [],
   };
 }
 
 function normalizeUpdatedProfile(
   data: ProfileUpdateApiResponse,
+  currentProfile: ParentProfileDTO,
 ): ParentProfileDTO {
   const id = data.id ?? data.Id;
   const role = data.role ?? data.Role;
@@ -255,6 +270,12 @@ function normalizeUpdatedProfile(
     display_name: displayName,
     role,
     created_at: createdAt,
+    email: currentProfile.email,
+    phone: currentProfile.phone,
+    email_verified: currentProfile.email_verified,
+    phone_verified: currentProfile.phone_verified,
+    contact_info_status: currentProfile.contact_info_status,
+    children: currentProfile.children,
   };
 }
 
@@ -304,7 +325,7 @@ export function createProfileService(): ProfileService {
           },
         );
 
-      return normalizeUpdatedProfile(response);
+      return normalizeUpdatedProfile(response, currentProfile);
     },
   };
 }
