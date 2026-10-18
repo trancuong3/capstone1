@@ -8,6 +8,8 @@ from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
 from app.models import Profile, ChildProfile
+from app.repositories.profile_repository import ProfileRepository
+from app.services.profile_service import ProfileNotFoundError, ProfileService
 from app.schemas.profile import (
     AdminParentListResponse,
     AdminParentDetailResponse,
@@ -43,13 +45,6 @@ class ChildProfileNotFoundError(Exception):
     """
     Child profile không tồn tại hoặc không thuộc
     parent hiện tại.
-    """
-    pass
-
-
-class ProfileNotFoundError(Exception):
-    """
-    Parent profile không tồn tại.
     """
     pass
 
@@ -219,69 +214,6 @@ class ChildProfileService:
         await self.repository.delete(
             child
         )
-
-
-# =========================================================
-# PARENT PROFILE REPOSITORY
-# =========================================================
-
-class ProfileRepository:
-    """
-    Repository chịu trách nhiệm truy cập Database
-    cho Parent Profile.
-
-    Không chứa business logic.
-    """
-
-    def __init__(
-        self,
-        db: AsyncSession,
-    ):
-        self.db = db
-
-    async def get_by_id(
-        self,
-        profile_id: UUID,
-    ):
-        result = await self.db.execute(
-            select(Profile)
-            .where(
-                Profile.Id == profile_id
-            )
-        )
-
-        return result.scalar_one_or_none()
-
-
-# =========================================================
-# PARENT PROFILE SERVICE
-# =========================================================
-
-class ProfileService:
-    """
-    Service xử lý business logic cho Parent Profile.
-
-    Service không truy cập Database trực tiếp.
-    """
-
-    def __init__(
-        self,
-        repository: ProfileRepository,
-    ):
-        self.repository = repository
-
-    async def get_current_profile(
-        self,
-        parent_id: UUID,
-    ):
-        profile = await self.repository.get_by_id(
-            parent_id
-        )
-
-        if profile is None:
-            raise ProfileNotFoundError()
-
-        return profile
 
 
 # =========================================================
@@ -485,10 +417,7 @@ async def get_current_profile(
             },
         )
 
-    return ParentProfileResponse.model_validate(
-        profile,
-        from_attributes=True,
-    )
+    return ParentProfileResponse.model_validate(profile)
 
 
 # =========================================================
@@ -773,13 +702,18 @@ async def create_profile(
 )
 async def get_profile(
     profile_id: UUID,
+    current_parent_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Lấy Profile theo ID.
-
-    Route /me phải được khai báo phía trên route này.
+    Lấy Profile của chính người dùng đã xác thực.
     """
+
+    if profile_id != current_parent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Access to this profile is denied"},
+        )
 
     query = (
         select(Profile)
@@ -815,11 +749,18 @@ async def get_profile(
 async def update_profile(
     profile_id: UUID,
     profile_in: ProfileUpdate,
+    current_parent_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Cập nhật Parent Profile.
+    Chỉ cho phép người dùng cập nhật hồ sơ của chính mình.
     """
+
+    if profile_id != current_parent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Access to this profile is denied"},
+        )
 
     result = await db.execute(
         select(Profile)
