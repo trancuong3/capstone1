@@ -21,6 +21,10 @@ class ProfileNotFoundError(Exception):
     """Raised when an authenticated user's profile does not exist."""
 
 
+class ProfileAccessDeniedError(Exception):
+    """Raised when a non-admin attempts a legacy all-profile operation."""
+
+
 class ProfileService:
     """Combine the PostgreSQL profile projection with safe Supabase Auth fields."""
 
@@ -33,6 +37,15 @@ class ProfileService:
         self.auth_contact_provider = (
             auth_contact_provider or SupabaseAuthContactProvider()
         )
+
+    async def require_admin(self, actor_id: UUID) -> None:
+        """Allow legacy all-profile operations only for authenticated Admin users."""
+        if await self.repository.get_role(actor_id) != "admin":
+            raise ProfileAccessDeniedError()
+
+    async def list_profiles_for_admin(self, actor_id: UUID):
+        await self.require_admin(actor_id)
+        return await self.repository.list_all_profiles()
 
     async def get_current_profile(self, parent_id: UUID) -> dict[str, Any]:
         profile = await self.repository.get_by_id(parent_id)
