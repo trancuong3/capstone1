@@ -293,17 +293,17 @@ function normalizeUpdatedProfile(
 }
 
 function normalizeVietnamesePhone(value: string): string {
-  const compact = value.trim().replace(/[\\s().-]/g, "");
+  const compact = value.trim().replace(/[\s().-]/g, "");
 
-  if (/^0\\d{9}$/.test(compact)) {
+  if (/^0\d{9}$/.test(compact)) {
     return `+84${compact.slice(1)}`;
   }
 
-  if (/^84\\d{9}$/.test(compact)) {
+  if (/^84\d{9}$/.test(compact)) {
     return `+${compact}`;
   }
 
-  if (/^\\+[1-9]\\d{7,14}$/.test(compact)) {
+  if (/^\+[1-9]\d{7,14}$/.test(compact)) {
     return compact;
   }
 
@@ -403,7 +403,7 @@ export function createProfileService(): ProfileService {
 
     async requestEmailChange(email: string): Promise<void> {
       const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalizedEmail)) {
+      if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
         throw new Error("Email chưa đúng định dạng.");
       }
 
@@ -458,7 +458,7 @@ export function createProfileService(): ProfileService {
     async verifyPhoneChange(phone: string, token: string): Promise<void> {
       const normalizedPhone = normalizeVietnamesePhone(phone);
       const normalizedToken = token.trim();
-      if (!/^\\d{6}$/.test(normalizedToken)) {
+      if (!/^\d{6}$/.test(normalizedToken)) {
         throw new Error("Mã OTP phải gồm 6 chữ số.");
       }
 
