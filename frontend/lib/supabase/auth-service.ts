@@ -9,6 +9,7 @@ import type {
 
 import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { isEmailAddress, normalizeEmail, normalizePhoneNumber, parseLoginIdentifier } from "@/lib/auth/phone";
 import type {
   AuthSessionSnapshot,
   AuthUserSnapshot,
@@ -30,6 +31,7 @@ const registrationValidationCodes = new Set([
 
 const duplicateRegistrationCodes = new Set([
   "email_exists",
+  "phone_exists",
   "user_already_exists",
 ]);
 
@@ -38,7 +40,11 @@ const invalidCredentialCodes = new Set([
   "invalid_credentials",
   "user_banned",
   "user_not_found",
+  "phone_not_confirmed",
 ]);
+
+const expiredOtpCodes = new Set(["otp_expired", "token_expired"]);
+const invalidOtpCodes = new Set(["invalid_otp", "invalid_token", "otp_disabled"]);
 
 const expiredRecoveryCodes = new Set([
   "flow_state_expired",
@@ -102,6 +108,16 @@ function mapSignInError(error: AuthError) {
     );
   }
 
+  return unexpectedAuthError();
+}
+
+function mapOtpError(error: AuthError) {
+  if (expiredOtpCodes.has(error.code ?? "")) {
+    return new AuthServiceError("expired-otp", "The verification code has expired.");
+  }
+  if (invalidOtpCodes.has(error.code ?? "")) {
+    return new AuthServiceError("invalid-otp", "The verification code is invalid.");
+  }
   return unexpectedAuthError();
 }
 
@@ -223,8 +239,70 @@ export function createSupabaseAuthService(
     },
 
     async registerParent(input): Promise<ParentRegistrationResult> {
-      let emailRedirectTo: string;
+      const email = typeof input.email === "string" && input.email.trim()
+        ? normalizeEmail(input.email)
+        : null;
+      const phone = typeof input.phone === "string" && input.phone.trim()
+        ? normalizePhoneNumber(input.phone)
+        : null;
 
+      if (!email && !phone) {
+        throw new AuthServiceError(
+          "registration-validation",
+          "An email address or phone number is required.",
+        );
+      }
+      if (email && !isEmailAddress(email)) {
+        throw new AuthServiceError("registration-validation", "The email address is invalid.");
+      }
+      if (input.phone?.trim() && !phone) {
+        throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      }
+
+      if (phone) {
+        const { data, error } = await runProviderOperation(() =>
+          supabase.auth.signUp({
+            phone,
+            password: input.password,
+            options: {
+              data: { display_name: input.displayName },
+              channel: "sms",
+            },
+          }),
+        );
+
+        if (error) {
+          if (duplicateRegistrationCodes.has(error.code ?? "")) {
+            throw unexpectedAuthError();
+          }
+          if (registrationValidationCodes.has(error.code ?? "")) {
+            throw mapRegistrationError(error);
+          }
+          throw unexpectedAuthError();
+        }
+
+        if (!data.user || data.user.identities?.length === 0) {
+          throw unexpectedAuthError();
+        }
+
+        // Phone signup must remain pending until a real Supabase SMS OTP is verified.
+        // A session at this point usually means Confirm phone is disabled in Dashboard.
+        if (data.session) {
+          await signOutQuietly();
+          throw new AuthServiceError(
+            "unexpected",
+            "Phone confirmation must be enabled in Supabase Auth before phone signup can be used.",
+          );
+        }
+
+        return {
+          status: "phone-confirmation-required",
+          phone,
+          session: null,
+        };
+      }
+
+      let emailRedirectTo: string;
       try {
         emailRedirectTo = getEmailConfirmationRedirectUrl();
       } catch {
@@ -233,12 +311,10 @@ export function createSupabaseAuthService(
 
       const { data, error } = await runProviderOperation(() =>
         supabase.auth.signUp({
-          email: input.email,
+          email: email!,
           password: input.password,
           options: {
-            data: {
-              display_name: input.displayName,
-            },
+            data: { display_name: input.displayName },
             emailRedirectTo,
           },
         }),
@@ -248,40 +324,101 @@ export function createSupabaseAuthService(
         if (duplicateRegistrationCodes.has(error.code ?? "")) {
           throw unexpectedAuthError();
         }
-
         throw mapRegistrationError(error);
       }
 
-      // Confirmed accounts can receive an obfuscated user instead of an error.
-      // Do not treat that response or a missing user as a new pending account.
+      // A confirmed account may be returned as an obfuscated user. Never mistake it
+      // for a newly created pending identity.
       if (!data.user || data.user.identities?.length === 0) {
         throw unexpectedAuthError();
       }
 
       if (!data.session) {
-        return {
-          status: "email-confirmation-required",
-          session: null,
-        };
+        return { status: "email-confirmation-required", session: null };
       }
 
-      return {
-        status: "authenticated",
-        session: mapSession(data.session),
-      };
+      return { status: "authenticated", session: mapSession(data.session) };
+    },
+
+    async verifyPhoneSignup(request) {
+      const phone = normalizePhoneNumber(request.phone);
+      const token = request.token.trim();
+      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!/^\\d{4,8}$/.test(token)) {
+        throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
+      }
+
+      const { data, error } = await runProviderOperation(() =>
+        supabase.auth.verifyOtp({ phone, token, type: "sms" }),
+      );
+      if (error) throw mapOtpError(error);
+      if (!data.session || !data.user || !data.user.phone_confirmed_at) {
+        await signOutQuietly();
+        throw unexpectedAuthError();
+      }
+      return mapSession(data.session);
+    },
+
+    async resendPhoneSignupConfirmation(request) {
+      const phone = normalizePhoneNumber(request.phone);
+      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      const { error } = await runProviderOperation(() =>
+        supabase.auth.resend({ type: "sms", phone }),
+      );
+      if (error) throw unexpectedAuthError();
+    },
+
+    async addEmailToCurrentUser(request) {
+      const email = normalizeEmail(request.email);
+      if (!isEmailAddress(email)) {
+        throw new AuthServiceError("registration-validation", "The email address is invalid.");
+      }
+
+      const { data: userData, error: userError } = await runProviderOperation(() =>
+        supabase.auth.getUser(),
+      );
+      const user = userData.user;
+      if (userError || !user || !user.phone || !user.phone_confirmed_at) {
+        throw new AuthServiceError(
+          "invalid-recovery-context",
+          "A verified phone session is required to add an email address.",
+        );
+      }
+
+      let emailRedirectTo: string;
+      try {
+        emailRedirectTo = getEmailConfirmationRedirectUrl();
+      } catch {
+        throw unexpectedAuthError();
+      }
+
+      const { error } = await runProviderOperation(() =>
+        supabase.auth.updateUser({ email }, { emailRedirectTo }),
+      );
+      if (error) {
+        if (duplicateRegistrationCodes.has(error.code ?? "")) {
+          throw unexpectedAuthError();
+        }
+        throw mapRegistrationError(error);
+      }
     },
 
     async signIn(request) {
-      const { data, error } = await runProviderOperation(() =>
-        supabase.auth.signInWithPassword({
-          email: request.email,
-          password: request.password,
-        }),
-      );
+      const identifier = "identifier" in request ? request.identifier : request.email;
+      const parsed = parseLoginIdentifier(identifier);
+      if (!parsed) {
+        throw new AuthServiceError("invalid-credentials", "The supplied credentials were rejected.");
+      }
 
+      const credentials = parsed.kind === "email"
+        ? { email: parsed.value, password: request.password }
+        : { phone: parsed.value, password: request.password };
+
+      const { data, error } = await runProviderOperation(() =>
+        supabase.auth.signInWithPassword(credentials),
+      );
       if (error) throw mapSignInError(error);
       if (!data.session) throw unexpectedAuthError();
-
       return mapSession(data.session);
     },
 
@@ -306,6 +443,59 @@ export function createSupabaseAuthService(
       );
 
       if (error) throw unexpectedAuthError();
+    },
+
+    async requestPhonePasswordReset(request) {
+      const phone = normalizePhoneNumber(request.phone);
+      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+
+      const { error } = await runProviderOperation(() =>
+        supabase.auth.signInWithOtp({
+          phone,
+          options: { shouldCreateUser: false, channel: "sms" },
+        }),
+      );
+      if (error) throw unexpectedAuthError();
+    },
+
+    async resendPhonePasswordReset(request) {
+      // Auth owns delivery limits; re-requesting with shouldCreateUser=false never creates an account.
+      await this.requestPhonePasswordReset(request);
+    },
+
+    async resetPasswordByPhone(request) {
+      const phone = normalizePhoneNumber(request.phone);
+      const token = request.token.trim();
+      if (!phone) throw new AuthServiceError("phone-validation", "The phone number is invalid.");
+      if (!/^\\d{4,8}$/.test(token)) {
+        throw new AuthServiceError("invalid-otp", "The verification code is invalid.");
+      }
+      if (request.newPassword.length < 8) {
+        throw new AuthServiceError("registration-validation", "The new password is too short.");
+      }
+
+      const { data, error } = await runProviderOperation(() =>
+        supabase.auth.verifyOtp({ phone, token, type: "sms" }),
+      );
+      if (error) throw mapOtpError(error);
+      if (
+        !data.session ||
+        !data.user ||
+        normalizePhoneNumber(data.user.phone ?? "") !== phone ||
+        !data.user.phone_confirmed_at
+      ) {
+        await signOutQuietly();
+        throw invalidRecoveryContextError();
+      }
+
+      const { error: updateError } = await runProviderOperation(() =>
+        supabase.auth.updateUser({ password: request.newPassword }),
+      );
+      if (updateError) {
+        await signOutQuietly();
+        throw mapRecoveryError(updateError);
+      }
+      await signOutQuietly();
     },
 
     async requestPasswordReset(request) {

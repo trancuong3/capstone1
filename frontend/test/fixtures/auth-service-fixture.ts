@@ -28,12 +28,18 @@ export function createAuthServiceFixture() {
     signIn: vi
       .fn<AuthService["signIn"]>()
       .mockResolvedValue(authSessionFixture),
+    verifyPhoneSignup: vi.fn<AuthService["verifyPhoneSignup"]>().mockResolvedValue(authSessionFixture),
+    resendPhoneSignupConfirmation: vi.fn<AuthService["resendPhoneSignupConfirmation"]>().mockResolvedValue(undefined),
+    addEmailToCurrentUser: vi.fn<AuthService["addEmailToCurrentUser"]>().mockResolvedValue(undefined),
     signInWithOAuth: vi
       .fn<AuthService["signInWithOAuth"]>()
       .mockResolvedValue(undefined),
     requestPasswordReset: vi
       .fn<AuthService["requestPasswordReset"]>()
       .mockResolvedValue(undefined),
+    requestPhonePasswordReset: vi.fn<AuthService["requestPhonePasswordReset"]>().mockResolvedValue(undefined),
+    resendPhonePasswordReset: vi.fn<AuthService["resendPhonePasswordReset"]>().mockResolvedValue(undefined),
+    resetPasswordByPhone: vi.fn<AuthService["resetPasswordByPhone"]>().mockResolvedValue(undefined),
     resetPassword: vi
       .fn<AuthService["resetPassword"]>()
       .mockResolvedValue(undefined),

@@ -35,7 +35,7 @@ function renderRegisterForm(service = createAuthServiceFixture()) {
 async function fillValidRegistration(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("Họ và tên ba mẹ"), "Nguyễn Minh Anh");
   await user.type(
-    screen.getByLabelText("Email của ba mẹ"),
+    screen.getByLabelText("Email của ba mẹ (không bắt buộc)"),
     "minhanh@example.com",
   );
   await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
@@ -48,7 +48,7 @@ describe("RegisterForm", () => {
     replaceMock.mockClear();
   });
 
-  it("shows field-level validation for all three registration fields", async () => {
+  it("requires a name, one contact method, and a valid password", async () => {
     const user = userEvent.setup();
     const service = createAuthServiceFixture();
     renderRegisterForm(service);
@@ -56,7 +56,7 @@ describe("RegisterForm", () => {
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập họ và tên."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Ba mẹ vui lòng nhập email.")).toBeInTheDocument();
+    expect(screen.getByText("Ba mẹ vui lòng nhập email hoặc số điện thoại.")).toBeInTheDocument();
     expect(
       screen.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
     ).toBeInTheDocument();

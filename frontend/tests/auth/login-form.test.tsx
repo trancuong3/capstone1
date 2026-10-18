@@ -26,7 +26,7 @@ function renderLoginForm(
 }
 async function fillValidLogin(user: ReturnType<typeof userEvent.setup>) {
   await user.type(
-    screen.getByLabelText("Email của ba mẹ"),
+    screen.getByLabelText("Email hoặc số điện thoại"),
     "minhanh@example.com",
   );
   await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
@@ -61,7 +61,7 @@ describe("LoginForm", () => {
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
     expect(service.signIn).toHaveBeenCalledWith({
-      email: "minhanh@example.com",
+      identifier: "minhanh@example.com",
       password: "matkhau123",
     });
     expect(refreshMock).toHaveBeenCalledOnce();
@@ -165,7 +165,7 @@ describe("LoginForm", () => {
   it("renders the safe invalid-credentials message", () => {
     renderLoginForm("invalid-credentials");
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Email hoặc mật khẩu chưa đúng",
+      "Thông tin đăng nhập không chính xác hoặc tài khoản chưa đáp ứng điều kiện xác minh.",
     );
   });
 

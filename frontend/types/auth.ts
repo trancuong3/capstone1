@@ -1,13 +1,14 @@
 import type { ParentRole, UUID } from "@/types/profile";
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
+export type LoginRequest =
+  | { identifier: string; email?: never; password: string }
+  // Kept for service consumers during migration; the UI uses identifier.
+  | { email: string; identifier?: never; password: string };
 
 export interface ParentRegistrationInput {
   displayName: string;
-  email: string;
+  email?: string;
+  phone?: string;
   password: string;
 }
 
@@ -16,6 +17,22 @@ export interface PasswordRecoveryRequest {
 }
 
 export interface PasswordResetRequest {
+  newPassword: string;
+}
+
+export interface PhoneOtpRequest {
+  phone: string;
+}
+
+export interface PhoneOtpVerificationRequest extends PhoneOtpRequest {
+  token: string;
+}
+
+export interface EmailLinkRequest {
+  email: string;
+}
+
+export interface PhonePasswordResetRequest extends PhoneOtpVerificationRequest {
   newPassword: string;
 }
 
@@ -37,6 +54,11 @@ export type ParentRegistrationResult =
     }
   | {
       readonly status: "email-confirmation-required";
+      readonly session: null;
+    }
+  | {
+      readonly status: "phone-confirmation-required";
+      readonly phone: string;
       readonly session: null;
     };
 
