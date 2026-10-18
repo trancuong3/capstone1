@@ -18,15 +18,15 @@ CONTACT_INFO_STATUSES = {
 
 
 class ProfileNotFoundError(Exception):
-    """Raised when an authenticated user's profile does not exist."""
+    """Raised when the requested profile does not exist."""
 
 
 class ProfileAccessDeniedError(Exception):
-    """Raised when a non-admin attempts a legacy all-profile operation."""
+    """Raised when an actor does not have permission for a profile operation."""
 
 
 class ProfileService:
-    """Combine the PostgreSQL profile projection with safe Supabase Auth fields."""
+    """Apply profile authorization and coordinate PostgreSQL with Supabase Auth."""
 
     def __init__(
         self,
@@ -46,6 +46,53 @@ class ProfileService:
     async def list_profiles_for_admin(self, actor_id: UUID):
         await self.require_admin(actor_id)
         return await self.repository.list_all_profiles()
+
+    async def create_profile_for_admin(
+        self,
+        actor_id: UUID,
+        role: str,
+        display_name: str | None,
+    ):
+        await self.require_admin(actor_id)
+        return await self.repository.create_profile(role, display_name)
+
+    async def get_profile_for_owner(
+        self,
+        actor_id: UUID,
+        profile_id: UUID,
+    ):
+        if actor_id != profile_id:
+            raise ProfileAccessDeniedError()
+        profile = await self.repository.get_by_id(profile_id)
+        if profile is None:
+            raise ProfileNotFoundError()
+        return profile
+
+    async def update_profile_for_owner(
+        self,
+        actor_id: UUID,
+        profile_id: UUID,
+        display_name: str,
+    ):
+        if actor_id != profile_id:
+            raise ProfileAccessDeniedError()
+        profile = await self.repository.update_display_name(
+            profile_id,
+            display_name,
+        )
+        if profile is None:
+            raise ProfileNotFoundError()
+        return profile
+
+    async def delete_profile_for_admin(
+        self,
+        actor_id: UUID,
+        profile_id: UUID,
+    ) -> None:
+        await self.require_admin(actor_id)
+        deleted = await self.repository.delete_by_id(profile_id)
+        if not deleted:
+            raise ProfileNotFoundError()
 
     async def get_current_profile(self, parent_id: UUID) -> dict[str, Any]:
         profile = await self.repository.get_by_id(parent_id)
