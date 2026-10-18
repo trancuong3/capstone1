@@ -70,6 +70,21 @@ describe("ParentProfileScreen with real API adapter", () => {
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
   });
+  it("shows an explicit empty phone state when Supabase Auth has no phone", async () => {
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        ...profile,
+        phone: null,
+        phone_verified: null,
+      }),
+    );
+    renderProfile();
+    expect(
+      await screen.findByRole("heading", { name: profile.display_name ?? "" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Chưa cập nhật")).toBeInTheDocument();
+    expect(screen.getByText("Chưa có thông tin xác minh")).toBeInTheDocument();
+  });
   it("validates and updates the permitted display name using the current backend contract", async () => {
     apiFetchFixture.mockImplementation(async (_input, init) =>
       Response.json(
