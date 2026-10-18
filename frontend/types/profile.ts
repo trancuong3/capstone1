@@ -5,10 +5,7 @@ export type ISODateTime = string;
 export type ParentRole = "parent" | "admin";
 
 export type ContactInfoStatus =
-  | "available"
-  | "not_configured"
-  | "user_not_found"
-  | "lookup_failed";
+  "available" | "not_configured" | "user_not_found" | "lookup_failed";
 
 export interface ParentProfileChildDTO {
   readonly id: UUID;
