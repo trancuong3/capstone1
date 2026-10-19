@@ -61,8 +61,10 @@ describe("AdminMetadataQualityScreen", () => {
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
     expect(await screen.findByText("12")).toBeInTheDocument();
-    expect(screen.getByText("Chưa có tác giả")).toBeInTheDocument();
-    expect(screen.getByText("Khoảng lớp không hợp lệ")).toBeInTheDocument();
+    expect(screen.getAllByText("Chưa có tác giả").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Khoảng lớp không hợp lệ").length,
+    ).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Xem chi tiết" })).toHaveAttribute(
       "href",
       "/admin/books/33333333-3333-4333-8333-333333333333",
@@ -83,7 +85,10 @@ describe("AdminMetadataQualityScreen", () => {
 
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
     await screen.findByRole("heading", { name: "Sách cần kiểm tra" });
-    await user.selectOptions(screen.getByLabelText("Loại vấn đề"), "MISSING_AUTHOR");
+    await user.selectOptions(
+      screen.getByLabelText("Loại vấn đề"),
+      "MISSING_AUTHOR",
+    );
 
     await waitFor(() => {
       expect(services.metadataQuality.get).toHaveBeenLastCalledWith({
@@ -100,7 +105,12 @@ describe("AdminMetadataQualityScreen", () => {
     const services = createAdminServiceFixture();
     services.metadataQuality.get
       .mockRejectedValueOnce(new Error("database-private-detail"))
-      .mockResolvedValueOnce({ ...dashboardFixture, items: [], total: 0 });
+      .mockResolvedValueOnce({
+        ...dashboardFixture,
+        summary: { ...dashboardFixture.summary, books_with_issues: 0 },
+        items: [],
+        total: 0,
+      });
     const user = userEvent.setup();
 
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
@@ -108,12 +118,16 @@ describe("AdminMetadataQualityScreen", () => {
     expect(
       await screen.findByText("Không thể tải dữ liệu chất lượng metadata"),
     ).toBeInTheDocument();
-    expect(screen.queryByText("database-private-detail")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("database-private-detail"),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Thử lại" }));
 
     await waitFor(() => {
       expect(services.metadataQuality.get).toHaveBeenCalledTimes(2);
     });
-    expect(await screen.findByText("Chưa phát hiện vấn đề metadata")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Chưa phát hiện vấn đề metadata"),
+    ).toBeInTheDocument();
   });
 });

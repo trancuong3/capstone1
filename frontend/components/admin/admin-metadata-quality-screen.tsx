@@ -30,12 +30,16 @@ const lifecycleLabels: Record<string, string> = {
 
 export function AdminMetadataQualityScreen() {
   const { metadataQuality } = useAdminServices();
-  const [dashboard, setDashboard] = useState<MetadataQualityDashboardDTO | null>(null);
+  const [dashboard, setDashboard] =
+    useState<MetadataQualityDashboardDTO | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(null);
+  const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
   const [issueType, setIssueType] = useState<MetadataQualityIssueType | "">("");
-  const [lifecycle, setLifecycle] = useState<MetadataQualityLifecycleStatus | "">("");
+  const [lifecycle, setLifecycle] =
+    useState<MetadataQualityLifecycleStatus | "">("");
   const [offset, setOffset] = useState(0);
   const requestIdRef = useRef(0);
   const limit = 10;
@@ -84,7 +88,8 @@ export function AdminMetadataQualityScreen() {
     setOffset(0);
   }
 
-  const firstItem = dashboard && dashboard.total > 0 ? dashboard.offset + 1 : 0;
+  const firstItem =
+    dashboard && dashboard.total > 0 ? dashboard.offset + 1 : 0;
   const lastItem = dashboard
     ? Math.min(dashboard.offset + dashboard.limit, dashboard.total)
     : 0;
@@ -109,10 +114,16 @@ export function AdminMetadataQualityScreen() {
         }
       />
 
-      <section aria-label="Bộ lọc chất lượng metadata" className="mb-6 rounded-card border border-border bg-white p-4 sm:p-6">
+      <section
+        aria-label="Bộ lọc chất lượng metadata"
+        className="mb-6 rounded-card border border-border bg-white p-4 sm:p-6"
+      >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_200px]">
           <div className="relative">
-            <Search aria-hidden className="pointer-events-none absolute right-4 top-9 size-5 text-muted" />
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute right-4 top-9 size-5 text-muted"
+            />
             <TextField
               label="Tìm theo tiêu đề hoặc tác giả"
               onChange={(event) => {
@@ -126,21 +137,27 @@ export function AdminMetadataQualityScreen() {
             label="Loại vấn đề"
             onChange={(event) => {
               setOffset(0);
-              setIssueType(event.target.value as MetadataQualityIssueType | "");
+              setIssueType(
+                event.target.value as MetadataQualityIssueType | "",
+              );
             }}
             value={issueType}
           >
             <option value="">Tất cả vấn đề</option>
             <option value="MISSING_TITLE">Thiếu tiêu đề</option>
             <option value="MISSING_AUTHOR">Chưa có tác giả</option>
-            <option value="INVALID_GRADE_RANGE">Khoảng lớp không hợp lệ</option>
+            <option value="INVALID_GRADE_RANGE">
+              Khoảng lớp không hợp lệ
+            </option>
             <option value="POSSIBLE_DUPLICATE">Có thể trùng sách</option>
           </SelectField>
           <SelectField
             label="Vòng đời sách"
             onChange={(event) => {
               setOffset(0);
-              setLifecycle(event.target.value as MetadataQualityLifecycleStatus | "");
+              setLifecycle(
+                event.target.value as MetadataQualityLifecycleStatus | "",
+              );
             }}
             value={lifecycle}
           >
@@ -189,23 +206,60 @@ export function AdminMetadataQualityScreen() {
               Thử lại
             </button>
           ) : (
-            <p>Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.</p>
+            <p>
+              Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.
+            </p>
           )}
         </StatusMessage>
       ) : dashboard ? (
         <>
-          <section aria-label="Tổng quan metadata" className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <section
+            aria-label="Tổng quan metadata"
+            className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+          >
             {[
-              { label: "Tổng số sách", value: dashboard.summary.total_books, detail: "Toàn bộ catalog Admin" },
-              { label: "Sách cần kiểm tra", value: dashboard.summary.books_with_issues, detail: "Mỗi sách chỉ tính một lần" },
-              { label: "Thiếu tiêu đề", value: dashboard.summary.missing_title, detail: "Tiêu đề rỗng hoặc chỉ có khoảng trắng" },
-              { label: "Chưa có tác giả", value: dashboard.summary.missing_author, detail: "Cảnh báo bổ sung metadata" },
-              { label: "Khoảng lớp không hợp lệ", value: dashboard.summary.invalid_grade_range, detail: "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa" },
-              { label: "Nhóm có thể trùng", value: dashboard.summary.possible_duplicate_groups, detail: dashboard.summary.books_in_duplicate_groups + " sách nằm trong các nhóm ứng viên" },
+              {
+                label: "Tổng số sách",
+                value: dashboard.summary.total_books,
+                detail: "Toàn bộ catalog Admin",
+              },
+              {
+                label: "Sách cần kiểm tra",
+                value: dashboard.summary.books_with_issues,
+                detail: "Mỗi sách chỉ tính một lần",
+              },
+              {
+                label: "Thiếu tiêu đề",
+                value: dashboard.summary.missing_title,
+                detail: "Tiêu đề rỗng hoặc chỉ có khoảng trắng",
+              },
+              {
+                label: "Chưa có tác giả",
+                value: dashboard.summary.missing_author,
+                detail: "Cảnh báo bổ sung metadata",
+              },
+              {
+                label: "Khoảng lớp không hợp lệ",
+                value: dashboard.summary.invalid_grade_range,
+                detail:
+                  "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa",
+              },
+              {
+                label: "Nhóm có thể trùng",
+                value: dashboard.summary.possible_duplicate_groups,
+                detail:
+                  dashboard.summary.books_in_duplicate_groups +
+                  " sách nằm trong các nhóm ứng viên",
+              },
             ].map((metric) => (
-              <article className="rounded-card border border-border bg-white p-5" key={metric.label}>
+              <article
+                className="rounded-card border border-border bg-white p-5"
+                key={metric.label}
+              >
                 <p className="text-sm font-bold text-muted">{metric.label}</p>
-                <p className="mt-2 text-3xl font-black tabular-nums text-ink">{metric.value.toLocaleString("vi-VN")}</p>
+                <p className="mt-2 text-3xl font-black tabular-nums text-ink">
+                  {metric.value.toLocaleString("vi-VN")}
+                </p>
                 <p className="mt-2 text-sm text-muted">{metric.detail}</p>
               </article>
             ))}
@@ -214,12 +268,18 @@ export function AdminMetadataQualityScreen() {
           <section className="rounded-card border border-border bg-white p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-xl font-black text-ink">Sách cần kiểm tra</h2>
+                <h2 className="text-xl font-black text-ink">
+                  Sách cần kiểm tra
+                </h2>
                 <p className="mt-1 text-sm text-muted">
-                  Các trường hợp trùng chỉ dựa trên tiêu đề và tác giả sau khi bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.
+                  Các trường hợp trùng chỉ dựa trên tiêu đề và tác giả sau khi
+                  bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.
                 </p>
               </div>
-              <p aria-live="polite" className="text-sm font-bold text-muted">
+              <p
+                aria-live="polite"
+                className="text-sm font-bold text-muted"
+              >
                 {dashboard.total.toLocaleString("vi-VN")} kết quả
               </p>
             </div>
@@ -244,19 +304,36 @@ export function AdminMetadataQualityScreen() {
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border text-muted">
-                      <th className="px-3 py-3 font-extrabold" scope="col">Sách</th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">Tác giả</th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">Khối lớp</th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">Trạng thái</th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">Vấn đề phát hiện</th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">Thao tác</th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Sách
+                      </th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Tác giả
+                      </th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Khối lớp
+                      </th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Trạng thái
+                      </th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Vấn đề phát hiện
+                      </th>
+                      <th className="px-3 py-3 font-extrabold" scope="col">
+                        Thao tác
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {dashboard.items.map((book) => (
-                      <tr className="border-b border-border last:border-0" key={book.id}>
+                      <tr
+                        className="border-b border-border last:border-0"
+                        key={book.id}
+                      >
                         <td className="px-3 py-4 font-bold text-ink">
-                          {book.title?.trim() ? book.title : "Chưa có tiêu đề"}
+                          {book.title?.trim()
+                            ? book.title
+                            : "Chưa có tiêu đề"}
                         </td>
                         <td className="px-3 py-4 text-muted">
                           {book.author?.trim() ? book.author : "Chưa có"}
@@ -264,11 +341,15 @@ export function AdminMetadataQualityScreen() {
                         <td className="px-3 py-4 text-muted">
                           {book.min_grade == null || book.max_grade == null
                             ? "Chưa đủ dữ liệu"
-                            : "Lớp " + book.min_grade + "–" + book.max_grade}
+                            : "Lớp " +
+                              book.min_grade +
+                              "–" +
+                              book.max_grade}
                         </td>
                         <td className="px-3 py-4">
                           <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-bold text-muted">
-                            {lifecycleLabels[book.lifecycle_status] ?? book.lifecycle_status}
+                            {lifecycleLabels[book.lifecycle_status] ??
+                              book.lifecycle_status}
                           </span>
                         </td>
                         <td className="px-3 py-4">
@@ -300,20 +381,26 @@ export function AdminMetadataQualityScreen() {
 
             <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted">
-                Hiển thị {firstItem}–{lastItem} trên {dashboard.total.toLocaleString("vi-VN")} kết quả
+                Hiển thị {firstItem}–{lastItem} trên{" "}
+                {dashboard.total.toLocaleString("vi-VN")} kết quả
               </p>
               <div className="flex gap-2">
                 <button
                   className="min-h-11 rounded-control border border-border px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={dashboard.offset === 0 || loading}
-                  onClick={() => setOffset((current) => Math.max(0, current - limit))}
+                  onClick={() =>
+                    setOffset((current) => Math.max(0, current - limit))
+                  }
                   type="button"
                 >
                   Trước
                 </button>
                 <button
                   className="min-h-11 rounded-control border border-border px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={dashboard.offset + dashboard.limit >= dashboard.total || loading}
+                  disabled={
+                    dashboard.offset + dashboard.limit >= dashboard.total ||
+                    loading
+                  }
                   onClick={() => setOffset((current) => current + limit)}
                   type="button"
                 >
@@ -322,8 +409,10 @@ export function AdminMetadataQualityScreen() {
               </div>
             </div>
             <p className="mt-4 text-xs text-muted">
-              Lần kiểm tra dữ liệu: {new Date(dashboard.summary.checked_at).toLocaleString("vi-VN")}.
-              Đây là cảnh báo metadata; không có thao tác sửa hoặc xóa sách tự động.
+              Lần kiểm tra dữ liệu:{" "}
+              {new Date(dashboard.summary.checked_at).toLocaleString("vi-VN")}.
+              Đây là cảnh báo metadata; không có thao tác sửa hoặc xóa sách tự
+              động.
             </p>
           </section>
         </>
