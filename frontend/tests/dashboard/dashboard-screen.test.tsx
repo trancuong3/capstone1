@@ -42,11 +42,9 @@ const profile: ParentProfileDTO = {
   role: "parent",
   created_at: childFixture.created_at,
   email: "parent@example.com",
-  phone: null,
+  contact_phone: null,
   pending_email: null,
-  pending_phone: null,
   email_verified: null,
-  phone_verified: null,
   contact_info_status: "not_configured",
   children: [],
 };
