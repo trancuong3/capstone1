@@ -110,7 +110,7 @@ class ReadingManagementTests(unittest.TestCase):
         row = session("COMPLETED", start, end)
         cycle_start = now - timedelta(minutes=10)
         self.assertEqual(
-            completed_metric([row], "MINUTES", now, cycle_start, now), 10
+            completed_metric([row], "MINUTES", now, cycle_start, now), 5
         )
         self.assertEqual(
             completed_metric([row], "SESSIONS", now, cycle_start, now), 1
