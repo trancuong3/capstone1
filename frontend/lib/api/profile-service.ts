@@ -323,29 +323,16 @@ export function createProfileService(): ProfileService {
   return {
     async get(): Promise<ParentProfileDTO> {
       const response = await request<ParentProfileApiResponse>("/profiles/me");
-
       return normalizeParentProfile(response);
     },
 
     async update(
       requestBody: ParentProfileUpdateInput,
     ): Promise<ParentProfileDTO> {
-      /*
-       * Backend PUT /profiles/{profile_id}
-       * hiện yêu cầu profile_id.
-       *
-       * Vì parent_id không được lấy từ Frontend request,
-       * trước tiên lấy profile hiện tại từ /profiles/me.
-       */
       const currentProfileResponse =
         await request<ParentProfileApiResponse>("/profiles/me");
       const currentProfile = normalizeParentProfile(currentProfileResponse);
 
-      /*
-       * Backend ProfileUpdate hiện tại có:
-       * - Role
-       * - displayname
-       */
       const response = await request<ProfileUpdateApiResponse>(
         `/profiles/${encodeURIComponent(currentProfile.id)}`,
         {
@@ -360,7 +347,9 @@ export function createProfileService(): ProfileService {
       return normalizeUpdatedProfile(response, currentProfile);
     },
 
-    async updateContactPhone(contactPhone: string): Promise<ParentProfileDTO> {
+    async updateContactPhone(
+      contactPhone: string,
+    ): Promise<ParentProfileDTO> {
       const normalizedPhone = normalizeVietnamesePhone(contactPhone);
       const response = await request<ParentProfileApiResponse>(
         "/profiles/me/contact-phone",
@@ -368,6 +357,9 @@ export function createProfileService(): ProfileService {
           method: "PATCH",
           body: JSON.stringify({ contact_phone: normalizedPhone }),
         },
+      );
+      return normalizeParentProfile(response);
+    },
 
     async requestEmailChange(email: string): Promise<void> {
       const normalizedEmail = email.trim().toLowerCase();
@@ -401,8 +393,9 @@ export function createProfileService(): ProfileService {
 
     async resendEmailChange(email: string): Promise<void> {
       const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail)
+      if (!normalizedEmail) {
         throw new Error("Không có email đang chờ xác minh.");
+      }
 
       const supabase = createBrowserSupabaseClient();
       const { error } = await supabase.auth.resend({
@@ -412,10 +405,5 @@ export function createProfileService(): ProfileService {
       });
       if (error) throw safeAuthChangeError(error, "resend-email");
     },
-
-      );
-      return normalizeParentProfile(response);
-    },
-
   };
 }
