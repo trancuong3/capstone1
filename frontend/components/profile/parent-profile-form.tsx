@@ -9,9 +9,7 @@ import { useProfileService } from "@/hooks/use-profile-service";
 import type { ParentProfileDTO } from "@/types/profile";
 
 export type ParentProfileEditableField =
-  | "display_name"
-  | "email"
-  | "contact_phone";
+  "display_name" | "email" | "contact_phone";
 
 interface ParentProfileFormProps {
   field: ParentProfileEditableField;
@@ -98,11 +96,7 @@ export function ParentProfileForm({
         const updatedProfile = await profileService.update({
           display_name: trimmed,
         });
-        onSaved(
-          field,
-          updatedProfile,
-          "Đã cập nhật tên hiển thị.",
-        );
+        onSaved(field, updatedProfile, "Đã cập nhật tên hiển thị.");
         return;
       }
 
@@ -151,9 +145,7 @@ export function ParentProfileForm({
 
       const normalizedPhone = canonicalPhoneInput(trimmed);
       if (!normalizedPhone) {
-        setError(
-          "Nhập số hợp lệ, ví dụ 0912345678 hoặc +84912345678.",
-        );
+        setError("Nhập số hợp lệ, ví dụ 0912345678 hoặc +84912345678.");
         return;
       }
 
