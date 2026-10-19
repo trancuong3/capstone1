@@ -1,0 +1,48 @@
+name: Temporary Reading Management file formatter
+
+on:
+  push:
+    branches:
+      - feature/reading-management-20261019
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.repository == 'trancuong3/capstone1'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/reading-management-20261019
+          token: ${{ github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format the changed screen
+        run: npx prettier --write components/reading-management/reading-management-screen.tsx
+
+      - name: Commit formatter output to the feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u -- components/reading-management/reading-management-screen.tsx
+          if git diff --cached --quiet; then
+            echo "The screen is already formatted."
+            exit 0
+          fi
+          git commit -m "style: format reading management screen"
+          git push origin HEAD:refs/heads/feature/reading-management-20261019
