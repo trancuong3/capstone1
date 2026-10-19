@@ -94,6 +94,20 @@ class ProfileService:
         if not deleted:
             raise ProfileNotFoundError()
 
+    async def update_contact_phone_for_owner(
+        self,
+        parent_id: UUID,
+        contact_phone: str,
+    ) -> dict[str, Any]:
+        """Update the authenticated profile's contact number without Auth OTP."""
+        profile = await self.repository.update_contact_phone(
+            parent_id,
+            contact_phone,
+        )
+        if profile is None:
+            raise ProfileNotFoundError()
+        return await self.get_current_profile(parent_id)
+
     async def get_current_profile(self, parent_id: UUID) -> dict[str, Any]:
         profile = await self.repository.get_by_id(parent_id)
         if profile is None:
@@ -120,32 +134,24 @@ class ProfileService:
             status_value = "lookup_failed"
 
         email_value = contact.get("email")
-        phone_value = contact.get("phone")
         email = email_value.strip() or None if isinstance(email_value, str) else None
-        phone = phone_value.strip() or None if isinstance(phone_value, str) else None
+        contact_phone_value = getattr(profile, "ContactPhone", None)
+        contact_phone = (
+            contact_phone_value.strip() or None
+            if isinstance(contact_phone_value, str)
+            else None
+        )
         pending_email_value = contact.get("pending_email")
-        pending_phone_value = contact.get("pending_phone")
         pending_email = (
             pending_email_value.strip() or None
             if isinstance(pending_email_value, str)
             else None
         )
-        pending_phone = (
-            pending_phone_value.strip() or None
-            if isinstance(pending_phone_value, str)
-            else None
-        )
 
         email_verified_value = contact.get("email_verified")
-        phone_verified_value = contact.get("phone_verified")
         email_verified = (
             email_verified_value
             if isinstance(email_verified_value, bool) and status_value == "available"
-            else None
-        )
-        phone_verified = (
-            phone_verified_value
-            if isinstance(phone_verified_value, bool) and status_value == "available"
             else None
         )
 
@@ -161,11 +167,9 @@ class ProfileService:
             "role": profile.Role,
             "created_at": profile.CreatedAt,
             "email": email,
-            "phone": phone,
+            "contact_phone": contact_phone,
             "pending_email": pending_email,
-            "pending_phone": pending_phone,
             "email_verified": email_verified,
-            "phone_verified": phone_verified,
             "contact_info_status": status_value,
             # Deliberately expose only a small display-safe child summary.
             # Settings JSON and reading/event data stay out of the profile response.
