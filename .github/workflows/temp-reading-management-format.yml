@@ -54,19 +54,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            "app/(app)/reading-management/page.tsx" \
-            "components/books/book-card.tsx" \
-            "components/books/book-library-screen.tsx" \
-            "components/layout/app-shell.tsx" \
-            "components/providers/app-services-provider.tsx" \
-            "components/reading-management/reading-management-screen.tsx" \
-            "hooks/use-reading-management-service.ts" \
-            "lib/api/reading-management-service.ts" \
-            "test/reading-management-service.test.ts" \
-            "test/reading-management-ui.test.tsx" \
-            "tests/books/book-library-screen.test.tsx" \
-            "types/reading-management.ts"
+          git add -u -- .
           if git diff --cached --quiet; then
             echo "All targeted files are already formatted."
             exit 0
