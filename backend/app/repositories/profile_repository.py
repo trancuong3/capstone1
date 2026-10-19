@@ -59,6 +59,20 @@ class ProfileRepository:
         await self.db.commit()
         return await self.get_by_id(profile_id)
 
+    async def update_contact_phone(
+        self,
+        profile_id: UUID,
+        contact_phone: str,
+    ) -> Profile | None:
+        """Persist the parent's unverified contact number, never Auth phone."""
+        profile = await self.get_by_id(profile_id)
+        if profile is None:
+            return None
+
+        profile.ContactPhone = contact_phone
+        await self.db.commit()
+        return await self.get_by_id(profile_id)
+
     async def delete_by_id(self, profile_id: UUID) -> bool:
         profile = await self.get_by_id(profile_id)
         if profile is None:
