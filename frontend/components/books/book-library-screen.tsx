@@ -85,13 +85,9 @@ export function BookLibraryScreen({
 
   useEffect(() => {
     if (!selectedChildId) {
-      setSavedCollections([]);
-      setSavedCollectionOwner("");
       return;
     }
     let isActive = true;
-    setSavedCollections([]);
-    setSavedCollectionOwner("");
     void readingManagementService.listCollections(selectedChildId).then((items) => {
       if (!isActive) return;
       setSavedCollections(items);

@@ -66,7 +66,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
   useEffect(() => {
     let active = true;
-    setLoadingChildren(true);
     childService.list().then((items) => {
       if (!active) return;
       setChildren(items);
@@ -80,7 +79,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
   useEffect(() => {
     if (!childId) {
-      setGoals([]); setCollections([]); setReminders([]); setDue([]); setBooks([]);
       return;
     }
     const controller = new AbortController();
@@ -152,11 +150,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       await runAction("reminder-create", () => service.createReminder({ child_id: childId, ...payload, is_active: true }), "Đã tạo lịch nhắc.");
     }
   }
-  function beginReminderEdit(reminder: ReadingReminderDTO) {
-    setEditingReminderId(reminder.id); setReminderTime(clock(reminder.remind_at));
-    setReminderDays(reminder.weekdays); setReminderTimezone(reminder.timezone); setError(""); setSuccess("");
-  }
-
   if (loadingChildren) return <section className="mx-auto max-w-5xl p-6" aria-busy="true">Đang tải hồ sơ bé…</section>;
 
   return (
