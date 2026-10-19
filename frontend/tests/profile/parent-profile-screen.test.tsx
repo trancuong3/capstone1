@@ -101,9 +101,7 @@ describe("ParentProfileScreen inline editing", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.queryByText("Chưa xác minh")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Bé An" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bé An" })).toBeInTheDocument();
     expect(screen.getByText("Lớp 2")).toBeInTheDocument();
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
@@ -127,15 +125,17 @@ describe("ParentProfileScreen inline editing", () => {
     );
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Số điện thoại liên hệ")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Số điện thoại liên hệ"),
+    ).not.toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Email"));
     await user.type(screen.getByLabelText("Email"), "new-parent@example.com");
     await user.click(screen.getByRole("button", { name: "Lưu" }));
 
-    expect(
-      await screen.findByRole("status"),
-    ).toHaveTextContent("Đã gửi yêu cầu đổi email");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã gửi yêu cầu đổi email",
+    );
     expect(authMocks.updateUser).toHaveBeenCalledWith(
       { email: "new-parent@example.com" },
       {
@@ -144,7 +144,9 @@ describe("ParentProfileScreen inline editing", () => {
         ),
       },
     );
-    expect(screen.getByText("Đang chờ xác minh email mới:")).toBeInTheDocument();
+    expect(
+      screen.getByText("Đang chờ xác minh email mới:"),
+    ).toBeInTheDocument();
     expect(screen.getByText("new-parent@example.com")).toBeInTheDocument();
     expect(authMocks.verifyOtp).not.toHaveBeenCalled();
   });
@@ -168,10 +170,10 @@ describe("ParentProfileScreen inline editing", () => {
       }),
     );
 
+    expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Số điện thoại liên hệ"),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Mã OTP gồm 6 chữ số")).not.toBeInTheDocument();
+      screen.queryByLabelText("Mã OTP gồm 6 chữ số"),
+    ).not.toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Số điện thoại liên hệ"));
     await user.type(
@@ -180,9 +182,9 @@ describe("ParentProfileScreen inline editing", () => {
     );
     await user.click(screen.getByRole("button", { name: "Lưu" }));
 
-    expect(
-      await screen.findByRole("status"),
-    ).toHaveTextContent("Đã lưu số điện thoại liên hệ. Không cần xác minh.");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã lưu số điện thoại liên hệ. Không cần xác minh.",
+    );
     expect(screen.getByText("+84912345678")).toBeInTheDocument();
 
     const mutation = apiFetchFixture.mock.calls.find(
@@ -229,22 +231,23 @@ describe("ParentProfileScreen inline editing", () => {
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập tên hiển thị."),
     ).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Tên hiển thị của ba mẹ"), "Ba Mẹ Mây");
+    await user.type(
+      screen.getByLabelText("Tên hiển thị của ba mẹ"),
+      "Ba Mẹ Mây",
+    );
     await user.click(screen.getByRole("button", { name: "Lưu" }));
 
     expect(
       await screen.findByRole("heading", { name: "Ba Mẹ Mây" }),
     ).toBeInTheDocument();
-    expect(
-      await screen.findByRole("status"),
-    ).toHaveTextContent("Đã cập nhật tên hiển thị.");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã cập nhật tên hiển thị.",
+    );
     expect(authMocks.updateUser).not.toHaveBeenCalled();
   });
 
   it("keeps load errors generic", async () => {
-    apiFetchFixture.mockRejectedValueOnce(
-      new Error("Private profile details"),
-    );
+    apiFetchFixture.mockRejectedValueOnce(new Error("Private profile details"));
     renderProfile();
 
     const alert = await screen.findByRole("alert");
