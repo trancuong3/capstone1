@@ -104,7 +104,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [editingReminderId, setEditingReminderId] = useState("");
 
   const currentRequestKey = `${childId}:${reloadKey}`;
-  const isReadingDataLoading = Boolean(childId) && settledRequestKey !== currentRequestKey;
+  const isReadingDataLoading =
+    Boolean(childId) && settledRequestKey !== currentRequestKey;
   const selectedChild = useMemo(
     () => children.find((child) => child.id === childId) ?? null,
     [children, childId],
@@ -183,7 +184,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       active = false;
       controller.abort();
     };
-  }, [bookService, childId, currentRequestKey, reloadKey, selectedChild?.grade, service]);
+  }, [
+    bookService,
+    childId,
+    currentRequestKey,
+    reloadKey,
+    selectedChild?.grade,
+    service,
+  ]);
 
   async function runAction(
     key: string,
@@ -371,7 +379,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </p>
       ) : null}
 
-      {childId && !isReadingDataLoading && loadedRequestKey === currentRequestKey ? (
+      {childId &&
+      !isReadingDataLoading &&
+      loadedRequestKey === currentRequestKey ? (
         <>
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
