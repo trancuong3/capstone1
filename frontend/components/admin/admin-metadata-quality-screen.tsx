@@ -206,9 +206,7 @@ export function AdminMetadataQualityScreen() {
               Thử lại
             </button>
           ) : (
-            <p>
-              Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.
-            </p>
+            <p>Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.</p>
           )}
         </StatusMessage>
       ) : dashboard ? (
