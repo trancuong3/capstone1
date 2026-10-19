@@ -100,27 +100,26 @@ function unavailable() {
 }
 
 // Test-only responses/spies, not a mutable store or a runtime adapter.
-function createMetadataQualityServiceFixture(): AdminServices["metadataQuality"] {
-  return {
-    get: vi
-      .fn<AdminServices["metadataQuality"]["get"]>()
-      .mockResolvedValue({
-        summary: {
-          total_books: 0,
-          books_with_issues: 0,
-          missing_title: 0,
-          missing_author: 0,
-          invalid_grade_range: 0,
-          possible_duplicate_groups: 0,
-          books_in_duplicate_groups: 0,
-          checked_at: createdAt,
-        },
-        items: [],
-        total: 0,
-        limit: 10,
-        offset: 0,
-      }),
-  };
+function createMetadataQualityServiceFixture() {
+  const get = vi
+    .fn<AdminServices["metadataQuality"]["get"]>()
+    .mockResolvedValue({
+      summary: {
+        total_books: 0,
+        books_with_issues: 0,
+        missing_title: 0,
+        missing_author: 0,
+        invalid_grade_range: 0,
+        possible_duplicate_groups: 0,
+        books_in_duplicate_groups: 0,
+        checked_at: createdAt,
+      },
+      items: [],
+      total: 0,
+      limit: 10,
+      offset: 0,
+    });
+  return { get } satisfies AdminServices["metadataQuality"];
 }
 
 export function createAdminServiceFixture() {

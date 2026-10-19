@@ -56,7 +56,7 @@ describe("AdminMetadataQualityScreen", () => {
 
   it("renders real service summary and metadata issues", async () => {
     const services = createAdminServiceFixture();
-    services.metadataQuality.get.mockResolvedValue(dashboardFixture);
+    vi.mocked(services.metadataQuality.get).mockResolvedValue(dashboardFixture);
 
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
@@ -80,7 +80,7 @@ describe("AdminMetadataQualityScreen", () => {
 
   it("sends issue filters to the API service", async () => {
     const services = createAdminServiceFixture();
-    services.metadataQuality.get.mockResolvedValue(dashboardFixture);
+    vi.mocked(services.metadataQuality.get).mockResolvedValue(dashboardFixture);
     const user = userEvent.setup();
 
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
@@ -103,7 +103,8 @@ describe("AdminMetadataQualityScreen", () => {
 
   it("shows a safe error and allows retry", async () => {
     const services = createAdminServiceFixture();
-    services.metadataQuality.get
+    vi
+      .mocked(services.metadataQuality.get)
       .mockRejectedValueOnce(new Error("database-private-detail"))
       .mockResolvedValueOnce({
         ...dashboardFixture,
