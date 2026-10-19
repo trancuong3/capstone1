@@ -48,6 +48,7 @@ class ParentProfileApiTests(unittest.TestCase):
             DisplayName="Ba mẹ An",
             Role="parent",
             CreatedAt=CREATED_AT,
+            ContactPhone="+84900000000",
             children=[child],
         )
         repository = MagicMock()
@@ -56,9 +57,9 @@ class ParentProfileApiTests(unittest.TestCase):
         provider.get_contact_info = AsyncMock(
             return_value={
                 "email": "parent@example.com",
-                "phone": "0900000000",
+                "phone": "+84999999999",
                 "email_verified": True,
-                "phone_verified": False,
+                "phone_verified": True,
                 "contact_info_status": "available",
             }
         )
@@ -74,9 +75,10 @@ class ParentProfileApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["email"], "parent@example.com")
-        self.assertEqual(body["phone"], "0900000000")
+        self.assertEqual(body["contact_phone"], "+84900000000")
         self.assertTrue(body["email_verified"])
-        self.assertFalse(body["phone_verified"])
+        self.assertNotIn("phone", body)
+        self.assertNotIn("phone_verified", body)
         self.assertEqual(body["children"][0]["alias"], "Bé An")
         self.assertEqual(body["children"][0]["grade"], 2)
         self.assertNotIn("settings", body["children"][0])
@@ -88,6 +90,7 @@ class ParentProfileApiTests(unittest.TestCase):
             DisplayName="Ba mẹ An",
             Role="parent",
             CreatedAt=CREATED_AT,
+            ContactPhone=None,
             children=[],
         )
         repository = MagicMock()
@@ -113,9 +116,68 @@ class ParentProfileApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertIsNone(body["phone"])
+        self.assertIsNone(body["contact_phone"])
+        self.assertNotIn("phone_verified", body)
         self.assertEqual(body["contact_info_status"], "not_configured")
         self.assertEqual(body["children"], [])
+
+    def test_contact_phone_update_saves_to_profile_without_auth_phone_change(self):
+        profile = SimpleNamespace(
+            Id=PARENT_ID,
+            DisplayName="Ba mẹ An",
+            Role="parent",
+            CreatedAt=CREATED_AT,
+            ContactPhone="+84912345678",
+            children=[],
+        )
+        repository = MagicMock()
+        repository.update_contact_phone = AsyncMock(return_value=profile)
+        repository.get_by_id = AsyncMock(return_value=profile)
+        provider = MagicMock()
+        provider.get_contact_info = AsyncMock(
+            return_value={
+                "email": "parent@example.com",
+                "phone": "+84900000000",
+                "pending_email": None,
+                "email_verified": True,
+                "contact_info_status": "available",
+            }
+        )
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with patch(
+                "app.services.profile_service.SupabaseAuthContactProvider",
+                return_value=provider,
+            ):
+                with make_client() as client:
+                    response = client.patch(
+                        "/profiles/me/contact-phone",
+                        json={"contact_phone": "+84912345678"},
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["contact_phone"], "+84912345678")
+        self.assertNotIn("phone", body)
+        self.assertNotIn("phone_verified", body)
+        repository.update_contact_phone.assert_awaited_once_with(
+            PARENT_ID,
+            "+84912345678",
+        )
+
+    def test_contact_phone_update_rejects_local_format_before_persistence(self):
+        repository = MagicMock()
+        repository.update_contact_phone = AsyncMock()
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with make_client() as client:
+                response = client.patch(
+                    "/profiles/me/contact-phone",
+                    json={"contact_phone": "0912345678"},
+                )
+
+        self.assertEqual(response.status_code, 422)
+        repository.update_contact_phone.assert_not_awaited()
 
     def test_generic_profile_listing_is_admin_only(self):
         repository = MagicMock()
