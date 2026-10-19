@@ -121,7 +121,7 @@ class ReadingManagementRepository:
         result = await self.db.execute(select(ReadingReminderOccurrence, ReadingReminder)
             .join(ReadingReminder, ReadingReminder.Id == ReadingReminderOccurrence.ReminderId)
             .where(ReadingReminder.ChildId == child_id, ReadingReminder.DeletedAt.is_(None),
-                   ReadingReminderOccurrence.Status == "PENDING", ReadingReminderOccurrence.ScheduledFor <= now)
+                   ReadingReminder.IsActive.is_(True), ReadingReminderOccurrence.Status == "PENDING", ReadingReminderOccurrence.ScheduledFor <= now)
             .order_by(ReadingReminderOccurrence.ScheduledFor, ReadingReminderOccurrence.Id))
         return [(row[0], row[1]) for row in result.all()]
 

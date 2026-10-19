@@ -51,6 +51,8 @@ class ReadingGoalUpdate(BaseModel):
     def require_changes(self):
         if not self.model_fields_set:
             raise ValueError("At least one field must be supplied")
+        if "target_value" in self.model_fields_set and self.target_value is None:
+            raise ValueError("target_value cannot be null")
         return self
 
 
@@ -150,6 +152,9 @@ class ReadingReminderUpdate(BaseModel):
     def require_changes(self):
         if not self.model_fields_set:
             raise ValueError("At least one field must be supplied")
+        for field_name in ("remind_at", "weekdays", "timezone", "is_active"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null")
         return self
 
 

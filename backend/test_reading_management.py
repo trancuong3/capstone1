@@ -99,3 +99,13 @@ def test_non_parent_role_cannot_access_reading_management():
             UUID("11111111-1111-4111-8111-111111111111"),
             UUID("22222222-2222-4222-8222-222222222222"),
         ))
+
+    
+def test_reminder_patch_rejects_null_for_required_fields():
+    from app.schemas.reading_management import ReadingReminderUpdate, ReadingGoalUpdate
+    with pytest.raises(ValidationError):
+        ReadingReminderUpdate(is_active=None)
+    with pytest.raises(ValidationError):
+        ReadingReminderUpdate(timezone=None)
+    with pytest.raises(ValidationError):
+        ReadingGoalUpdate(target_value=None)
