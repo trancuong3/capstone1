@@ -347,9 +347,7 @@ export function createProfileService(): ProfileService {
       return normalizeUpdatedProfile(response, currentProfile);
     },
 
-    async updateContactPhone(
-      contactPhone: string,
-    ): Promise<ParentProfileDTO> {
+    async updateContactPhone(contactPhone: string): Promise<ParentProfileDTO> {
       const normalizedPhone = normalizeVietnamesePhone(contactPhone);
       const response = await request<ParentProfileApiResponse>(
         "/profiles/me/contact-phone",
