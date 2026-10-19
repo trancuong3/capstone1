@@ -2,6 +2,7 @@
 
 import {
   BookOpenCheck,
+  ClipboardCheck,
   HeartPulse,
   LogOut,
   ScrollText,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils/cn";
 const links = [
   { href: "/admin/parents", label: "Phụ huynh", icon: UsersRound },
   { href: "/admin/books", label: "Kho sách", icon: BookOpenCheck },
+  { href: "/admin/metadata-quality", label: "Chất lượng sách", icon: ClipboardCheck },
   { href: "/admin/audit-logs", label: "Nhật ký", icon: ScrollText },
   { href: "/admin/health", label: "Vận hành", icon: HeartPulse },
 ];

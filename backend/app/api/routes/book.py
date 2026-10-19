@@ -20,9 +20,33 @@ from app.schemas.book import (
     CatalogBookResponse,
     CatalogPagePreviewResponse,
 )
+from app.repositories.metadata_quality_repository import MetadataQualityRepository
+from app.schemas.metadata_quality import MetadataQualityIssueType, MetadataQualityResponse
 from app.services.book_service import AdminCatalogService, BookService, CatalogService
+from app.services.metadata_quality_service import MetadataQualityService
 
 router = APIRouter()
+
+
+@router.get("/admin/metadata-quality", response_model=MetadataQualityResponse)
+async def get_admin_metadata_quality(
+    search: str | None = Query(default=None, max_length=120),
+    issue_type: MetadataQualityIssueType | None = Query(default=None),
+    lifecycle_status: Literal["ACTIVE", "RETIRED"] | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MetadataQualityService(MetadataQualityRepository(db))
+    return await service.dashboard(
+        actor_id,
+        search=search,
+        issue_type=issue_type,
+        lifecycle_status=lifecycle_status,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/", response_model=List[BookResponse])
