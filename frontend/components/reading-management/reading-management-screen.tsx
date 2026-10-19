@@ -83,11 +83,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [due, setDue] = useState<ReadingReminderOccurrenceDTO[]>([]);
   const [books, setBooks] = useState<BookListItemDTO[]>([]);
   const [loadingChildren, setLoadingChildren] = useState(true);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  const [loadedForChild, setLoadedForChild] = useState("");
+  const [loadedRequestKey, setLoadedRequestKey] = useState("");
+  const [settledRequestKey, setSettledRequestKey] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [goalMetric, setGoalMetric] = useState<ReadingGoalMetric>("MINUTES");
   const [goalPeriod, setGoalPeriod] = useState<ReadingGoalPeriod>("DAILY");
@@ -103,6 +103,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [reminderTimezone, setReminderTimezone] = useState("Asia/Ho_Chi_Minh");
   const [editingReminderId, setEditingReminderId] = useState("");
 
+  const currentRequestKey = `${childId}:${reloadKey}`;
+  const isReadingDataLoading = Boolean(childId) && settledRequestKey !== currentRequestKey;
   const selectedChild = useMemo(
     () => children.find((child) => child.id === childId) ?? null,
     [children, childId],
@@ -147,15 +149,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     }
     const controller = new AbortController();
     let active = true;
-    setLoading(true);
-    setLoadedForChild("");
-    setError("");
-    setSuccess("");
-    setGoals([]);
-    setCollections([]);
-    setReminders([]);
-    setDue([]);
-    setBooks([]);
     Promise.all([
       service.listGoals(childId, controller.signal),
       service.listCollections(childId, controller.signal),
@@ -164,11 +157,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     ])
       .then(([goalRows, savedRows, reminderRows, bookRows]) => {
         if (!active) return;
+        setError("");
         setGoals(goalRows);
         setCollections(savedRows);
         setReminders(reminderRows);
         setBooks(bookRows);
-        setLoadedForChild(childId);
+        setLoadedRequestKey(currentRequestKey);
         void service
           .dueReminders(childId, controller.signal)
           .then((items) => {
@@ -183,13 +177,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           );
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setSettledRequestKey(currentRequestKey);
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [bookService, childId, reloadKey, selectedChild?.grade, service]);
+  }, [bookService, childId, currentRequestKey, reloadKey, selectedChild?.grade, service]);
 
   async function runAction(
     key: string,
@@ -326,7 +320,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <Button
           onClick={() => setReloadKey((value) => value + 1)}
           variant="secondary"
-          disabled={loading || !childId}
+          disabled={isReadingDataLoading || !childId}
         >
           <RefreshCw aria-hidden="true" className="size-4" /> Tải lại
         </Button>
@@ -364,20 +358,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           {success}
         </StatusMessage>
       ) : null}
-      {!childId && !loading ? (
+      {!childId && !isReadingDataLoading ? (
         <EmptyState
           icon={<Target className="size-9" />}
           title="Chưa có hồ sơ bé"
           description="Hãy tạo hồ sơ bé trước khi thiết lập mục tiêu hoặc lịch nhắc."
         />
       ) : null}
-      {loading && childId ? (
+      {isReadingDataLoading && childId ? (
         <p role="status" aria-live="polite">
           Đang tải dữ liệu của bé…
         </p>
       ) : null}
 
-      {childId && !loading && loadedForChild === childId ? (
+      {childId && !isReadingDataLoading && loadedRequestKey === currentRequestKey ? (
         <>
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
