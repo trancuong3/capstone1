@@ -19,7 +19,13 @@ interface BookCardProps {
   collectionBusy?: boolean;
 }
 
-export function BookCard({ book, childId, savedTypes = [], onToggleCollection, collectionBusy = false }: BookCardProps) {
+export function BookCard({
+  book,
+  childId,
+  savedTypes = [],
+  onToggleCollection,
+  collectionBusy = false,
+}: BookCardProps) {
   const query = childId ? `?childId=${encodeURIComponent(childId)}` : "";
 
   return (
@@ -47,9 +53,20 @@ export function BookCard({ book, childId, savedTypes = [], onToggleCollection, c
             const ActionIcon = type === "FAVORITE" ? Heart : ListChecks;
             return (
               <button
-                aria-label={(saved ? "Bỏ " : "Thêm ") + book.title + (type === "FAVORITE" ? " " + label.toLowerCase() : " vào danh sách muốn đọc")}
+                aria-label={
+                  (saved ? "Bỏ " : "Thêm ") +
+                  book.title +
+                  (type === "FAVORITE"
+                    ? " " + label.toLowerCase()
+                    : " vào danh sách muốn đọc")
+                }
                 aria-pressed={saved}
-                className={"flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-bold " + (saved ? "bg-sky text-primary" : "border border-border text-ink hover:bg-canvas")}
+                className={
+                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-bold " +
+                  (saved
+                    ? "bg-sky text-primary"
+                    : "border border-border text-ink hover:bg-canvas")
+                }
                 disabled={collectionBusy}
                 key={type}
                 onClick={() => onToggleCollection(type)}

@@ -6,6 +6,9 @@ import type { ReadingManagementService } from "@/lib/api/reading-management-serv
 
 export function useReadingManagementService(): ReadingManagementService {
   const services = useContext(AppServicesContext);
-  if (!services) throw new Error("useReadingManagementService must be used inside AppServicesProvider.");
+  if (!services)
+    throw new Error(
+      "useReadingManagementService must be used inside AppServicesProvider.",
+    );
   return services.readingManagementService;
 }
