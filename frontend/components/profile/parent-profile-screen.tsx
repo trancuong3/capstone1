@@ -196,7 +196,8 @@ export function ParentProfileScreen() {
           Thông tin tài khoản
         </h1>
         <p className="mt-2 text-body text-muted">
-          Xem và cập nhật thông tin liên hệ cùng các hồ sơ trẻ đã liên kết với ViRead.
+          Xem và cập nhật thông tin liên hệ cùng các hồ sơ trẻ đã liên kết với
+          ViRead.
         </p>
       </header>
 
@@ -277,7 +278,10 @@ export function ParentProfileScreen() {
               </>
             )}
             {fieldNotices.email ? (
-              <p className="mt-2 break-words text-sm text-primary" role="status">
+              <p
+                className="mt-2 break-words text-sm text-primary"
+                role="status"
+              >
                 {fieldNotices.email}
               </p>
             ) : null}
