@@ -34,6 +34,7 @@ function catalogResponse(input: RequestInfo | URL, empty = false) {
   const url = new URL(String(input));
   if (url.pathname === `/profiles/children/${TEST_CHILD_ID}`)
     return Response.json(childFixture);
+  if (url.pathname === "/reading-management/collections") return Response.json([]);
   if (url.pathname === "/books/catalog")
     return Response.json(
       empty || url.searchParams.get("search") ? [] : [bookFixture],
