@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: feature/reading-management-20261019
-          token: \${{ github.token }}
+          token: ${{ github.token }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -50,7 +50,7 @@ jobs:
 
       - name: Commit formatter output to the feature branch
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
