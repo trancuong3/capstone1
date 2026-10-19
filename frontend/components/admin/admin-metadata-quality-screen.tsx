@@ -265,8 +265,12 @@ export function AdminMetadataQualityScreen() {
             ))}
           </section>
 
-          <section className="rounded-card border border-border bg-white p-4 sm:p-6">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <section
+            className="rounded-card border border-border bg-white p-4 sm:p-6"
+          >
+            <div
+              className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"
+            >
               <div>
                 <h2 className="text-xl font-black text-ink">
                   Sách cần kiểm tra
@@ -276,10 +280,7 @@ export function AdminMetadataQualityScreen() {
                   bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.
                 </p>
               </div>
-              <p
-                aria-live="polite"
-                className="text-sm font-bold text-muted"
-              >
+              <p aria-live="polite" className="text-sm font-bold text-muted">
                 {dashboard.total.toLocaleString("vi-VN")} kết quả
               </p>
             </div>
@@ -301,7 +302,9 @@ export function AdminMetadataQualityScreen() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                <table
+                  className="w-full min-w-[900px] border-collapse text-left text-sm"
+                >
                   <thead>
                     <tr className="border-b border-border text-muted">
                       <th className="px-3 py-3 font-extrabold" scope="col">
@@ -341,13 +344,12 @@ export function AdminMetadataQualityScreen() {
                         <td className="px-3 py-4 text-muted">
                           {book.min_grade == null || book.max_grade == null
                             ? "Chưa đủ dữ liệu"
-                            : "Lớp " +
-                              book.min_grade +
-                              "–" +
-                              book.max_grade}
+                            : "Lớp " + book.min_grade + "–" + book.max_grade}
                         </td>
                         <td className="px-3 py-4">
-                          <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-bold text-muted">
+                          <span
+                            className="inline-flex rounded-full bg-canvas px-3 py-1 font-bold text-muted"
+                          >
                             {lifecycleLabels[book.lifecycle_status] ??
                               book.lifecycle_status}
                           </span>
@@ -379,7 +381,9 @@ export function AdminMetadataQualityScreen() {
               </div>
             )}
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div
+              className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between"
+            >
               <p className="text-sm text-muted">
                 Hiển thị {firstItem}–{lastItem} trên{" "}
                 {dashboard.total.toLocaleString("vi-VN")} kết quả
