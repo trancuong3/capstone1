@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, model_validator
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
@@ -106,6 +108,24 @@ class ParentProfileChildResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ContactPhoneUpdateRequest(BaseModel):
+    """Request to change only the current user's unverified contact phone."""
+
+    contact_phone: str = Field(min_length=9, max_length=16)
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone(cls, value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", normalized):
+            raise ValueError(
+                "contact_phone must be in international E.164 format"
+            )
+        return normalized
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ParentProfileResponse(BaseModel):
     id: UUID = Field(
         validation_alias="Id",
@@ -128,13 +148,12 @@ class ParentProfileResponse(BaseModel):
         serialization_alias="created_at",
     )
 
-    # Email and phone are owned by Supabase Auth, not public.profiles.
+    # Email and verification state come from Supabase Auth.
+    # The contact phone is stored separately on public.profiles and is unverified.
     email: Optional[str] = None
-    phone: Optional[str] = None
+    contact_phone: Optional[str] = None
     pending_email: Optional[str] = None
-    pending_phone: Optional[str] = None
     email_verified: Optional[bool] = None
-    phone_verified: Optional[bool] = None
     contact_info_status: Literal[
         "available", "not_configured", "user_not_found", "lookup_failed"
     ] = "lookup_failed"
