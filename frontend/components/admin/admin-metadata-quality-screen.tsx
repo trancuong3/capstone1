@@ -235,8 +235,7 @@ export function AdminMetadataQualityScreen() {
               {
                 label: "Khoảng lớp không hợp lệ",
                 value: dashboard.summary.invalid_grade_range,
-                detail:
-                  "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa",
+                detail: "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa",
               },
               {
                 label: "Nhóm có thể trùng",
