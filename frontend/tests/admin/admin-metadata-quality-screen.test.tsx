@@ -103,8 +103,7 @@ describe("AdminMetadataQualityScreen", () => {
 
   it("shows a safe error and allows retry", async () => {
     const services = createAdminServiceFixture();
-    vi
-      .mocked(services.metadataQuality.get)
+    vi.mocked(services.metadataQuality.get)
       .mockRejectedValueOnce(new Error("database-private-detail"))
       .mockResolvedValueOnce({
         ...dashboardFixture,
