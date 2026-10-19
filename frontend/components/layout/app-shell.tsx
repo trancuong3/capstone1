@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  CalendarClock,
   History,
   LayoutDashboard,
   LogOut,
@@ -31,6 +32,11 @@ const navigationItems = [
     href: "/reports",
     icon: BarChart3,
     label: "Tiến bộ",
+  },
+  {
+    href: "/reading-management",
+    icon: CalendarClock,
+    label: "Quản lý đọc",
   },
   {
     href: "/sessions",

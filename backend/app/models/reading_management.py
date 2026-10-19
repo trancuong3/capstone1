@@ -1,0 +1,77 @@
+from sqlalchemy import Column, String, Integer, SmallInteger, Date, Time, Boolean, DateTime, ForeignKey, CheckConstraint, UniqueConstraint, Index, text
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.sql import func
+from app.database.session import Base
+
+
+class ReadingGoal(Base):
+    __tablename__ = "readinggoals"
+    __table_args__ = (
+        CheckConstraint("metric IN ('MINUTES', 'SESSIONS')", name="ck_readinggoals_metric"),
+        CheckConstraint("period IN ('DAILY', 'WEEKLY')", name="ck_readinggoals_period"),
+        CheckConstraint("targetvalue > 0", name="ck_readinggoals_target_positive"),
+        CheckConstraint("status IN ('ACTIVE', 'PAUSED', 'COMPLETED', 'ENDED')", name="ck_readinggoals_status"),
+        CheckConstraint("endson IS NULL OR endson >= startson", name="ck_readinggoals_date_range"),
+        Index("ix_readinggoals_child_status", "childid", "status"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ChildId = Column("childid", UUID(as_uuid=True), ForeignKey("childprofiles.id", ondelete="CASCADE"), nullable=False)
+    Metric = Column("metric", String(16), nullable=False)
+    TargetValue = Column("targetvalue", Integer, nullable=False)
+    Period = Column("period", String(16), nullable=False)
+    StartsOn = Column("startson", Date, nullable=False)
+    EndsOn = Column("endson", Date)
+    Timezone = Column("timezone", String(64), nullable=False, server_default=text("'Asia/Ho_Chi_Minh'"))
+    Status = Column("status", String(16), nullable=False, server_default=text("'ACTIVE'"))
+    CompletedValue = Column("completedvalue", Integer)
+    CompletedAt = Column("completedat", DateTime(timezone=True))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+    UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ChildBookCollection(Base):
+    __tablename__ = "childbookcollections"
+    __table_args__ = (
+        UniqueConstraint("childid", "bookid", "collectiontype", name="uq_childbookcollections_child_book_type"),
+        CheckConstraint("collectiontype IN ('FAVORITE', 'WANT_TO_READ')", name="ck_childbookcollections_type"),
+        Index("ix_childbookcollections_child_type_created", "childid", "collectiontype", "createdat"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ChildId = Column("childid", UUID(as_uuid=True), ForeignKey("childprofiles.id", ondelete="CASCADE"), nullable=False)
+    BookId = Column("bookid", UUID(as_uuid=True), ForeignKey("books.id", ondelete="RESTRICT"), nullable=False)
+    CollectionType = Column("collectiontype", String(20), nullable=False)
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ReadingReminder(Base):
+    __tablename__ = "readingreminders"
+    __table_args__ = (
+        CheckConstraint("cardinality(weekdays) BETWEEN 1 AND 7", name="ck_readingreminders_weekdays_count"),
+        CheckConstraint("timezone <> ''", name="ck_readingreminders_timezone_nonempty"),
+        Index("ix_readingreminders_child_active", "childid", "isactive"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ChildId = Column("childid", UUID(as_uuid=True), ForeignKey("childprofiles.id", ondelete="CASCADE"), nullable=False)
+    RemindAt = Column("remindat", Time, nullable=False)
+    Weekdays = Column("weekdays", ARRAY(SmallInteger), nullable=False, server_default=text("ARRAY[0,1,2,3,4,5,6]::smallint[]"))
+    Timezone = Column("timezone", String(64), nullable=False, server_default=text("'Asia/Ho_Chi_Minh'"))
+    IsActive = Column("isactive", Boolean, nullable=False, server_default=text("true"))
+    DeletedAt = Column("deletedat", DateTime(timezone=True))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+    UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ReadingReminderOccurrence(Base):
+    __tablename__ = "readingreminderoccurrences"
+    __table_args__ = (
+        UniqueConstraint("reminderid", "scheduledlocaldate", name="uq_reminder_occurrence_local_day"),
+        CheckConstraint("status IN ('PENDING', 'ACKNOWLEDGED')", name="ck_reminderoccurrence_status"),
+        Index("ix_reminderoccurrences_status_scheduled", "status", "scheduledfor"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ReminderId = Column("reminderid", UUID(as_uuid=True), ForeignKey("readingreminders.id", ondelete="CASCADE"), nullable=False)
+    ScheduledLocalDate = Column("scheduledlocaldate", Date, nullable=False)
+    ScheduledFor = Column("scheduledfor", DateTime(timezone=True), nullable=False)
+    Status = Column("status", String(16), nullable=False, server_default=text("'PENDING'"))
+    AcknowledgedAt = Column("acknowledgedat", DateTime(timezone=True))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
