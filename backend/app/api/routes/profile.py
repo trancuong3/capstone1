@@ -14,6 +14,7 @@ from app.services.profile_service import (
     ProfileService,
 )
 from app.schemas.profile import (
+    ContactPhoneUpdateRequest,
     AdminParentListResponse,
     AdminParentDetailResponse,
     AdminParentCreateRequest,
@@ -419,6 +420,34 @@ async def get_current_profile(
                 "message": "Profile not found",
             },
         )
+
+    return ParentProfileResponse.model_validate(profile)
+
+
+@router.patch(
+    "/me/contact-phone",
+    response_model=ParentProfileResponse,
+)
+async def update_current_contact_phone(
+    payload: ContactPhoneUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    """Update the authenticated user's contact phone without modifying Auth phone."""
+    service = ProfileService(ProfileRepository(db))
+    try:
+        profile = await service.update_contact_phone_for_owner(
+            current_parent_id,
+            payload.contact_phone,
+        )
+    except ProfileNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Profile not found",
+            },
+        ) from error
 
     return ParentProfileResponse.model_validate(profile)
 

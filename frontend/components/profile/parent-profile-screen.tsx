@@ -2,8 +2,6 @@
 
 import {
   CalendarDays,
-  Check,
-  Copy,
   Mail,
   Pencil,
   Phone,
@@ -15,7 +13,10 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ParentProfileForm } from "@/components/profile/parent-profile-form";
+import {
+  ParentProfileForm,
+  type ParentProfileEditableField,
+} from "@/components/profile/parent-profile-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
@@ -27,8 +28,6 @@ type ProfileState =
   | { status: "loading" }
   | { status: "ready"; profile: ParentProfileDTO }
   | { status: "error" };
-
-type CopyState = "idle" | "success" | "error";
 
 function formatCreatedDate(value: string): string {
   const date = new Date(value);
@@ -56,23 +55,25 @@ function contactValue(
 
   switch (status) {
     case "not_configured":
-      return "Nguồn thông tin liên hệ chưa được cấu hình";
+      return "Chưa thể tải email từ Supabase Auth";
     case "user_not_found":
       return "Không tìm thấy tài khoản xác thực";
     case "lookup_failed":
-      return "Chưa tải được thông tin liên hệ";
+      return "Chưa tải được email";
     default:
       return "Chưa cập nhật";
   }
 }
 
-function verificationLabel(
+function emailVerificationLabel(
   value: string | null,
   verified: boolean | null,
   status: ParentProfileDTO["contact_info_status"],
 ): string {
-  if (status !== "available") return "Chưa thể kiểm tra trạng thái xác minh";
-  if (!value) return "Chưa có thông tin để xác minh";
+  if (status !== "available") {
+    return "Chưa thể kiểm tra trạng thái xác minh";
+  }
+  if (!value) return "Chưa có email";
   if (verified === true) return "Đã xác minh";
   if (verified === false) return "Chưa xác minh";
   return "Chưa có thông tin xác minh";
@@ -104,9 +105,11 @@ export function ParentProfileScreen() {
   const profileService = useProfileService();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ProfileState>({ status: "loading" });
-  const [isEditing, setIsEditing] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const [editingField, setEditingField] =
+    useState<ParentProfileEditableField | null>(null);
+  const [fieldNotices, setFieldNotices] = useState<
+    Partial<Record<ParentProfileEditableField, string>>
+  >({});
 
   useEffect(() => {
     let isActive = true;
@@ -133,17 +136,32 @@ export function ParentProfileScreen() {
     };
   }, [profileService, requestKey]);
 
-  async function copyAccountId(accountId: string) {
-    setCopyState("idle");
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error("Clipboard API unavailable");
-      }
-      await navigator.clipboard.writeText(accountId);
-      setCopyState("success");
-    } catch {
-      setCopyState("error");
-    }
+  function beginEditing(field: ParentProfileEditableField) {
+    setFieldNotices((current) => ({ ...current, [field]: undefined }));
+    setEditingField(field);
+  }
+
+  function handleSaved(
+    field: ParentProfileEditableField,
+    updatedProfile: ParentProfileDTO,
+    message: string,
+  ) {
+    setState({ status: "ready", profile: updatedProfile });
+    setEditingField(null);
+    setFieldNotices((current) => ({ ...current, [field]: message }));
+  }
+
+  function renderInlineEditor(field: ParentProfileEditableField) {
+    if (editingField !== field || state.status !== "ready") return null;
+
+    return (
+      <ParentProfileForm
+        field={field}
+        onCancel={() => setEditingField(null)}
+        onSaved={handleSaved}
+        profile={state.profile}
+      />
+    );
   }
 
   if (state.status === "loading") {
@@ -178,28 +196,45 @@ export function ParentProfileScreen() {
           Thông tin tài khoản
         </h1>
         <p className="mt-2 text-body text-muted">
-          Xem thông tin tài khoản và các hồ sơ trẻ đã liên kết với ViRead.
+          Xem và cập nhật thông tin liên hệ cùng các hồ sơ trẻ đã liên kết với
+          ViRead.
         </p>
       </header>
-
-      {showSuccess ? (
-        <StatusMessage title="Đã cập nhật hồ sơ" tone="success">
-          Thay đổi của ba mẹ đã được lưu thành công.
-        </StatusMessage>
-      ) : null}
 
       <Card className="sm:p-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <div className="flex size-24 shrink-0 items-center justify-center rounded-full bg-sky text-primary">
             <UserRound aria-hidden="true" className="size-12" />
           </div>
-          <div className="min-w-0">
-            <h2 className="break-words text-2xl font-extrabold leading-[1.4] text-ink">
-              {profile.display_name || "Chưa cập nhật tên hiển thị"}
-            </h2>
-            <p className="mt-1 text-body text-muted">
-              {getRoleLabel(profile.role)}
-            </p>
+          <div className="min-w-0 flex-1">
+            {editingField === "display_name" ? (
+              renderInlineEditor("display_name")
+            ) : (
+              <div className="flex items-center gap-2">
+                <h2 className="break-words text-2xl font-extrabold leading-[1.4] text-ink">
+                  {profile.display_name || "Chưa cập nhật tên hiển thị"}
+                </h2>
+                <Button
+                  aria-label="Chỉnh sửa tên hiển thị"
+                  className="!h-10 !w-10 shrink-0 px-2"
+                  onClick={() => beginEditing("display_name")}
+                  title="Chỉnh sửa tên hiển thị"
+                  variant="quiet"
+                >
+                  <Pencil aria-hidden="true" className="size-4" />
+                </Button>
+              </div>
+            )}
+            {editingField !== "display_name" ? (
+              <p className="mt-1 text-body text-muted">
+                {getRoleLabel(profile.role)}
+              </p>
+            ) : null}
+            {fieldNotices.display_name ? (
+              <p className="mt-2 text-sm text-primary" role="status">
+                {fieldNotices.display_name}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -209,55 +244,80 @@ export function ParentProfileScreen() {
               <Mail aria-hidden="true" className="size-5" />
               Email
             </dt>
-            <dd className="mt-2 break-words text-body font-bold text-ink">
-              {contactValue(profile.email, profile.contact_info_status)}
-            </dd>
-            <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.email, profile.email_verified, profile.contact_info_status)}
-            </p>
+            {editingField === "email" ? (
+              renderInlineEditor("email")
+            ) : (
+              <>
+                <div className="mt-2 flex min-w-0 items-start gap-2">
+                  <dd className="min-w-0 flex-1 break-words text-body font-bold text-ink">
+                    {contactValue(profile.email, profile.contact_info_status)}
+                  </dd>
+                  <Button
+                    aria-label="Chỉnh sửa email"
+                    className="!h-10 !w-10 shrink-0 px-2"
+                    onClick={() => beginEditing("email")}
+                    title="Chỉnh sửa email"
+                    variant="quiet"
+                  >
+                    <Pencil aria-hidden="true" className="size-4" />
+                  </Button>
+                </div>
+                <p className="mt-1 text-label text-muted">
+                  {emailVerificationLabel(
+                    profile.email,
+                    profile.email_verified,
+                    profile.contact_info_status,
+                  )}
+                </p>
+                {profile.pending_email ? (
+                  <p className="mt-2 break-words text-sm text-amber-700">
+                    Đang chờ xác minh email mới:{" "}
+                    <strong>{profile.pending_email}</strong>
+                  </p>
+                ) : null}
+              </>
+            )}
+            {fieldNotices.email ? (
+              <p
+                className="mt-2 break-words text-sm text-primary"
+                role="status"
+              >
+                {fieldNotices.email}
+              </p>
+            ) : null}
           </div>
 
           <div className="min-w-0 rounded-control bg-white p-4">
             <dt className="flex items-center gap-2 text-label font-bold text-muted">
               <Phone aria-hidden="true" className="size-5" />
-              Số điện thoại
+              Số điện thoại liên hệ
             </dt>
-            <dd className="mt-2 break-words text-body font-bold text-ink">
-              {contactValue(profile.phone, profile.contact_info_status)}
-            </dd>
-            <p className="mt-1 text-label text-muted">
-              {verificationLabel(profile.phone, profile.phone_verified, profile.contact_info_status)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-control bg-white p-4 sm:col-span-2">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <UserRound aria-hidden="true" className="size-5" />
-              Mã tài khoản
-            </dt>
-            <dd className="mt-2 break-all font-mono text-sm font-semibold text-ink">
-              {profile.id}
-            </dd>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Button
-                onClick={() => void copyAccountId(profile.id)}
-                variant="quiet"
+            {editingField === "contact_phone" ? (
+              renderInlineEditor("contact_phone")
+            ) : (
+              <div className="mt-2 flex min-w-0 items-start gap-2">
+                <dd className="min-w-0 flex-1 break-words text-body font-bold text-ink">
+                  {profile.contact_phone || "Chưa cập nhật"}
+                </dd>
+                <Button
+                  aria-label="Chỉnh sửa số điện thoại liên hệ"
+                  className="!h-10 !w-10 shrink-0 px-2"
+                  onClick={() => beginEditing("contact_phone")}
+                  title="Chỉnh sửa số điện thoại liên hệ"
+                  variant="quiet"
+                >
+                  <Pencil aria-hidden="true" className="size-4" />
+                </Button>
+              </div>
+            )}
+            {fieldNotices.contact_phone ? (
+              <p
+                className="mt-2 break-words text-sm text-primary"
+                role="status"
               >
-                {copyState === "success" ? (
-                  <Check aria-hidden="true" className="size-4" />
-                ) : (
-                  <Copy aria-hidden="true" className="size-4" />
-                )}
-                {copyState === "success"
-                  ? "Đã sao chép"
-                  : "Sao chép mã tài khoản"}
-              </Button>
-              <span aria-live="polite" className="text-label text-muted">
-                {copyState === "error"
-                  ? "Không thể sao chép. Ba mẹ hãy thử lại."
-                  : ""}
-              </span>
-            </div>
+                {fieldNotices.contact_phone}
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-control bg-white p-4">
@@ -280,30 +340,6 @@ export function ParentProfileScreen() {
             </dd>
           </div>
         </dl>
-
-        {isEditing ? (
-          <ParentProfileForm
-            onCancel={() => setIsEditing(false)}
-            onUpdated={(updatedProfile) => {
-              setState({ status: "ready", profile: updatedProfile });
-              setIsEditing(false);
-              setShowSuccess(true);
-            }}
-            profile={profile}
-          />
-        ) : (
-          <Button
-            className="mt-6 sm:w-auto sm:self-start sm:px-8"
-            onClick={() => {
-              setShowSuccess(false);
-              setIsEditing(true);
-            }}
-            variant="secondary"
-          >
-            <Pencil aria-hidden="true" className="size-5" />
-            Chỉnh sửa hồ sơ
-          </Button>
-        )}
       </Card>
 
       <section

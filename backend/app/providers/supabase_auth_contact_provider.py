@@ -98,12 +98,16 @@ class SupabaseAuthContactProvider:
         return SupabaseAuthProviderError()
 
     @staticmethod
-    def _lookup(user_id: UUID) -> dict[str, str | None | bool | ContactInfoStatus]:
+    def _lookup(
+        user_id: UUID,
+    ) -> dict[str, str | None | bool | ContactInfoStatus]:
         client = get_supabase_admin_client()
         if client is None:
             return {
                 "email": None,
                 "phone": None,
+                "pending_email": None,
+                "pending_phone": None,
                 "email_verified": None,
                 "phone_verified": None,
                 "contact_info_status": "not_configured",
@@ -115,6 +119,8 @@ class SupabaseAuthContactProvider:
                 return {
                     "email": None,
                     "phone": None,
+                    "pending_email": None,
+                    "pending_phone": None,
                     "email_verified": None,
                     "phone_verified": None,
                     "contact_info_status": "user_not_found",
@@ -122,9 +128,21 @@ class SupabaseAuthContactProvider:
 
             email = getattr(user, "email", None)
             phone = getattr(user, "phone", None)
+            pending_email = getattr(user, "new_email", None)
+            pending_phone = getattr(user, "new_phone", None)
             return {
                 "email": email if isinstance(email, str) and email.strip() else None,
                 "phone": phone if isinstance(phone, str) and phone.strip() else None,
+                "pending_email": (
+                    pending_email.strip()
+                    if isinstance(pending_email, str) and pending_email.strip()
+                    else None
+                ),
+                "pending_phone": (
+                    pending_phone.strip()
+                    if isinstance(pending_phone, str) and pending_phone.strip()
+                    else None
+                ),
                 "email_verified": (
                     bool(getattr(user, "email_confirmed_at", None))
                     if hasattr(user, "email_confirmed_at")
@@ -144,6 +162,8 @@ class SupabaseAuthContactProvider:
                 return {
                     "email": None,
                     "phone": None,
+                    "pending_email": None,
+                    "pending_phone": None,
                     "email_verified": None,
                     "phone_verified": None,
                     "contact_info_status": "user_not_found",
@@ -151,6 +171,8 @@ class SupabaseAuthContactProvider:
             return {
                 "email": None,
                 "phone": None,
+                "pending_email": None,
+                "pending_phone": None,
                 "email_verified": None,
                 "phone_verified": None,
                 "contact_info_status": "lookup_failed",

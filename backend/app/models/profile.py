@@ -12,6 +12,7 @@ class Profile(Base):
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     Role = Column("role", String, nullable=False)
     DisplayName = Column("displayname", String)
+    ContactPhone = Column("contact_phone", String, nullable=True)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
     Active = Column("active", SmallInteger, nullable=False, server_default=text("1"))
 
