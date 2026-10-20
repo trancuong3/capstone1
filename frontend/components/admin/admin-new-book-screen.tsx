@@ -3,7 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -18,15 +18,22 @@ export function AdminNewBookScreen() {
   const [minGrade, setMinGrade] = useState("1");
   const [maxGrade, setMaxGrade] = useState("5");
   const [saving, setSaving] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const savingRef = useRef(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (savingRef.current) return;
+
     setError(null);
+    setTitleError(null);
+    const normalizedTitle = title.trim();
     const min = Number(minGrade);
     const max = Number(maxGrade);
-    if (!title.trim()) {
-      setError("Vui lòng nhập tên sách.");
+
+    if (!normalizedTitle) {
+      setTitleError("Vui lòng nhập tiêu đề sách.");
       return;
     }
     if (
@@ -41,10 +48,12 @@ export function AdminNewBookScreen() {
       );
       return;
     }
+
+    savingRef.current = true;
     setSaving(true);
     try {
       const created = await books.create({
-        title: title.trim(),
+        title: normalizedTitle,
         author: author.trim() || null,
         min_grade: min,
         max_grade: max,
@@ -55,6 +64,7 @@ export function AdminNewBookScreen() {
         "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -78,17 +88,31 @@ export function AdminNewBookScreen() {
             {error}
           </StatusMessage>
         ) : null}
-        <form className="grid gap-5" onSubmit={submit}>
+        <form className="grid gap-5" noValidate onSubmit={submit}>
           <label className="grid gap-2 font-bold" htmlFor="book-title">
-            Tên sách
+            Tiêu đề sách *
             <input
               id="book-title"
+              aria-describedby={titleError ? "book-title-error" : undefined}
+              aria-invalid={titleError ? true : undefined}
               className="min-h-12 rounded-control border border-border px-4 font-normal focus:border-primary focus:outline-3 focus:outline-primary/30"
               maxLength={250}
-              onChange={(event) => setTitle(event.target.value)}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                if (titleError) setTitleError(null);
+              }}
               required
               value={title}
             />
+            {titleError ? (
+              <span
+                className="font-normal text-danger"
+                id="book-title-error"
+                role="alert"
+              >
+                {titleError}
+              </span>
+            ) : null}
           </label>
           <label className="grid gap-2 font-bold" htmlFor="book-author">
             Tác giả{" "}
@@ -106,7 +130,7 @@ export function AdminNewBookScreen() {
               Khối lớp nhỏ nhất
               <select
                 id="book-min-grade"
-                className="min-h-12 rounded-control border border-border px-4 font-normal"
+                className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMinGrade(event.target.value)}
                 value={minGrade}
               >
@@ -121,7 +145,7 @@ export function AdminNewBookScreen() {
               Khối lớp lớn nhất
               <select
                 id="book-max-grade"
-                className="min-h-12 rounded-control border border-border px-4 font-normal"
+                className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMaxGrade(event.target.value)}
                 value={maxGrade}
               >
