@@ -32,6 +32,8 @@ import type {
   ReadingGoalStatus,
   ReadingReminderDTO,
   ReadingReminderOccurrenceDTO,
+  ReadingReminderEmailStatusDTO,
+  ReadingReminderEmailStatus,
 } from "@/types/reading-management";
 
 const weekdayOptions = [
@@ -102,6 +104,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   ]);
   const [reminderTimezone, setReminderTimezone] = useState("Asia/Ho_Chi_Minh");
   const [editingReminderId, setEditingReminderId] = useState("");
+  const [reminderEmailEnabled, setReminderEmailEnabled] = useState(false);
+  const [emailReadiness, setEmailReadiness] = useState<ReadingReminderEmailStatusDTO | null>(null);
 
   const currentRequestKey = `${childId}:${reloadKey}`;
   const isReadingDataLoading =
@@ -150,6 +154,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     }
     const controller = new AbortController();
     let active = true;
+    void service.reminderEmailStatus(controller.signal)
+      .then((readiness) => { if (active) setEmailReadiness(readiness); })
+      .catch(() => { if (active) setEmailReadiness(null); });
     Promise.all([
       service.listGoals(childId, controller.signal),
       service.listCollections(childId, controller.signal),
@@ -282,6 +289,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       remind_at: reminderTime,
       weekdays: [...reminderDays].sort((a, b) => a - b),
       timezone: reminderTimezone,
+      email_enabled: reminderEmailEnabled,
     };
     if (editingReminderId) {
       await runAction(
@@ -757,10 +765,19 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <CalendarClock className="size-6 text-primary" />
               <h2 className="text-xl font-extrabold text-ink">Lịch nhắc đọc</h2>
             </div>
-            <p className="mb-4 text-label text-muted">
-              Nhắc trong ứng dụng khi phụ huynh mở trang này sau giờ đặt. Chưa
-              có push, email, SMS hoặc nhắc nền khi ứng dụng đóng.
+            <p className="mb-3 text-label text-muted">
+              Lịch trong ứng dụng được lưu riêng với email. Khi bật email, worker phía backend sẽ gửi tới email tài khoản Parent đã xác minh; không cần mở ViRead.
             </p>
+            {emailReadiness && !emailReadiness.ready ? (
+              <div className="mb-4 rounded-control border border-border bg-canvas p-3 text-label text-muted">
+                {!emailReadiness.email_available || emailReadiness.email_verified !== true ? (
+                  <p>Email tài khoản chưa có hoặc chưa xác minh. Hãy kiểm tra trang <Link className="font-bold text-primary underline" href="/profile">Hồ sơ</Link>.</p>
+                ) : null}
+                {!emailReadiness.provider_configured || !emailReadiness.sender_configured || !emailReadiness.app_url_configured || !emailReadiness.auth_admin_configured ? (
+                  <p>Email nhắc đọc chưa được cấu hình đầy đủ ở backend. Lịch trong ứng dụng vẫn hoạt động; email sẽ không được giả định là đã gửi.</p>
+                ) : null}
+              </div>
+            ) : null}
             <form
               className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"
               onSubmit={submitReminder}
@@ -824,6 +841,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
+              <label className="flex items-center gap-2 text-label font-bold text-ink md:col-span-2 lg:col-span-4">
+                <input
+                  type="checkbox"
+                  checked={reminderEmailEnabled}
+                  onChange={(event) => setReminderEmailEnabled(event.target.checked)}
+                  disabled={Boolean(busyKey)}
+                />
+                Gửi email nhắc phụ huynh
+              </label>
               <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-4">
                 <Button type="submit" disabled={Boolean(busyKey)}>
                   {editingReminderId ? "Lưu chỉnh sửa" : "Tạo lịch nhắc"}
@@ -839,6 +865,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 ) : null}
               </div>
             </form>
+            <p className="mt-2 text-xs text-muted">
+              Email chỉ được gửi khi email tài khoản Parent đã xác minh và Resend/worker đã cấu hình. Trạng thái SENT nghĩa là nhà cung cấp chấp nhận yêu cầu, không xác nhận email đã vào hộp thư đến.
+            </p>
             {due.length > 0 ? (
               <div className="mt-5 rounded-card border border-border bg-cream p-4">
                 <h3 className="mb-3 flex items-center gap-2 font-extrabold text-ink">
@@ -909,6 +938,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             .join(", ")}{" "}
                           · {reminder.timezone}
                         </p>
+                        <p className="mt-2 text-xs text-muted">
+                          {reminder.email_enabled ? "Đã bật email nhắc" : "Chỉ nhắc trong ứng dụng"}
+                          {reminder.latest_email_status ? " · " + ({ PENDING: "Chờ gửi", PROCESSING: "Đang xử lý", SENT: "Nhà cung cấp đã chấp nhận", FAILED: "Gửi thất bại", SKIPPED: "Đã bỏ qua" } satisfies Record<ReadingReminderEmailStatus, string>)[reminder.latest_email_status] : ""}
+                        </p>
                       </div>
                       <label className="flex items-center gap-2 text-label font-bold">
                         <input
@@ -940,6 +973,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           setReminderTime(clock(reminder.remind_at));
                           setReminderDays(reminder.weekdays);
                           setReminderTimezone(reminder.timezone);
+                          setReminderEmailEnabled(reminder.email_enabled);
                         }}
                       >
                         Chỉnh sửa
