@@ -40,3 +40,16 @@ if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
         "Missing required backend environment variables: DATABASE_URL, SUPABASE_URL, SUPABASE_KEY"
     )
+
+
+# Optional server-side email-reminder configuration. Never expose these values to the frontend.
+RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip() or None
+READING_REMINDER_FROM_EMAIL = (os.getenv("READING_REMINDER_FROM_EMAIL") or "").strip() or None
+READING_REMINDER_APP_URL = (os.getenv("READING_REMINDER_APP_URL") or "").strip() or None
+
+try:
+    READING_REMINDER_CATCH_UP_MINUTES = max(
+        0, min(1440, int(os.getenv("READING_REMINDER_CATCH_UP_MINUTES", "120")))
+    )
+except (TypeError, ValueError):
+    READING_REMINDER_CATCH_UP_MINUTES = 120
