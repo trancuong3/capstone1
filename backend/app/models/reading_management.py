@@ -56,6 +56,8 @@ class ReadingReminder(Base):
     Weekdays = Column("weekdays", ARRAY(SmallInteger), nullable=False, server_default=text("ARRAY[0,1,2,3,4,5,6]::smallint[]"))
     Timezone = Column("timezone", String(64), nullable=False, server_default=text("'Asia/Ho_Chi_Minh'"))
     IsActive = Column("isactive", Boolean, nullable=False, server_default=text("true"))
+    EmailEnabled = Column("emailenabled", Boolean, nullable=False, server_default=text("false"))
+    EmailEnabledAt = Column("emailenabledat", DateTime(timezone=True))
     DeletedAt = Column("deletedat", DateTime(timezone=True))
     CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
     UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -75,3 +77,33 @@ class ReadingReminderOccurrence(Base):
     Status = Column("status", String(16), nullable=False, server_default=text("'PENDING'"))
     AcknowledgedAt = Column("acknowledgedat", DateTime(timezone=True))
     CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ReadingReminderEmailDelivery(Base):
+    """Durable email outbox; owner and occurrence key survive reminder deletion."""
+
+    __tablename__ = "readingreminderemaildeliveries"
+    __table_args__ = (
+        UniqueConstraint("occurrencekey", name="uq_reminder_email_delivery_occurrence_key"),
+        UniqueConstraint("providermessageid", name="uq_reminder_email_delivery_provider_message"),
+        CheckConstraint("status IN ('PENDING', 'PROCESSING', 'SENT', 'FAILED', 'SKIPPED')", name="ck_reminder_email_delivery_status"),
+        CheckConstraint("attemptcount >= 0", name="ck_reminder_email_delivery_attempts"),
+        Index("ix_reminder_email_delivery_due", "status", "nextattemptat"),
+        Index("ix_reminder_email_delivery_parent_created", "parentid", "createdat"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    # Deliberately not a foreign key, so history survives hard deletion.
+    OccurrenceKey = Column("occurrencekey", UUID(as_uuid=True), nullable=False)
+    OccurrenceId = Column("occurrenceid", UUID(as_uuid=True), ForeignKey("readingreminderoccurrences.id", ondelete="SET NULL"), nullable=True)
+    ReminderId = Column("reminderid", UUID(as_uuid=True), ForeignKey("readingreminders.id", ondelete="SET NULL"), nullable=True)
+    # Snapshot of the owning Parent account at queue time; no email address is stored.
+    ParentId = Column("parentid", UUID(as_uuid=True), nullable=False)
+    Status = Column("status", String(16), nullable=False, server_default=text("'PENDING'"))
+    AttemptCount = Column("attemptcount", Integer, nullable=False, server_default=text("0"))
+    LastAttemptAt = Column("lastattemptat", DateTime(timezone=True))
+    NextAttemptAt = Column("nextattemptat", DateTime(timezone=True), nullable=True, server_default=func.now())
+    ProviderAcceptedAt = Column("provideracceptedat", DateTime(timezone=True))
+    ProviderMessageId = Column("providermessageid", String(255))
+    LastErrorCode = Column("lasterrorcode", String(80))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+    UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
