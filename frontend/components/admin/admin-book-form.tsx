@@ -63,6 +63,7 @@ export function AdminBookForm({
       <TextField
         error={errors.title?.message}
         label="Tên sách (bắt buộc)"
+        required
         {...register("title")}
       />
       <TextField
