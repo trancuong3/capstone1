@@ -90,7 +90,8 @@ class FakeAuth:
 class ReminderEmailTests(unittest.TestCase):
     def test_occurrence_uses_local_weekday_and_timezone(self):
         reminder = SimpleNamespace(RemindAt=time(19, 0), Weekdays=[0, 2, 4],
-                                   Timezone="Asia/Ho_Chi_Minh", EmailEnabledAt=None)
+                                   Timezone="Asia/Ho_Chi_Minh",
+                                   EmailEnabledAt=datetime(2026, 10, 19, 11, 30, tzinfo=timezone.utc))
         rows = scheduled_occurrences(reminder, NOW, 120)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], date(2026, 10, 19))
@@ -98,7 +99,8 @@ class ReminderEmailTests(unittest.TestCase):
 
     def test_old_occurrence_is_not_caught_up_after_long_downtime(self):
         reminder = SimpleNamespace(RemindAt=time(19, 0), Weekdays=[0],
-                                   Timezone="Asia/Ho_Chi_Minh", EmailEnabledAt=None)
+                                   Timezone="Asia/Ho_Chi_Minh",
+                                   EmailEnabledAt=datetime(2026, 10, 19, 11, 30, tzinfo=timezone.utc))
         now = datetime(2026, 10, 19, 16, 0, tzinfo=timezone.utc)
         self.assertEqual(scheduled_occurrences(reminder, now, 120), [])
 
