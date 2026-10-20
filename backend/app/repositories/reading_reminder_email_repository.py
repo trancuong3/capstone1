@@ -99,9 +99,13 @@ class ReadingReminderEmailRepository:
     async def skip_ineligible_deliveries(self, now: datetime) -> int:
         delivery = ReadingReminderEmailDelivery
         eligible = exists(select(ReadingReminder.Id)
+            .join(ReadingReminderOccurrence, ReadingReminderOccurrence.ReminderId == ReadingReminder.Id)
             .join(ChildProfile, ChildProfile.Id == ReadingReminder.ChildId)
             .where(ReadingReminder.Id == delivery.ReminderId,
+                   ReadingReminderOccurrence.Id == delivery.OccurrenceId,
                    ReadingReminder.IsActive.is_(True), ReadingReminder.EmailEnabled.is_(True),
+                   ReadingReminder.EmailEnabledAt.is_not(None),
+                   ReadingReminder.EmailEnabledAt <= ReadingReminderOccurrence.ScheduledFor,
                    ReadingReminder.DeletedAt.is_(None), ChildProfile.ParentId == delivery.ParentId))
         result = await self.db.execute(update(delivery).where(
             delivery.Status.in_(("PENDING", "FAILED")), ~eligible
@@ -127,6 +131,8 @@ class ReadingReminderEmailRepository:
                 .join(ChildProfile, ChildProfile.Id == ReadingReminder.ChildId)
                 .where(delivery.Status.in_(("PENDING", "FAILED")), delivery.NextAttemptAt <= now,
                        ReadingReminder.IsActive.is_(True), ReadingReminder.EmailEnabled.is_(True),
+                       ReadingReminder.EmailEnabledAt.is_not(None),
+                       ReadingReminder.EmailEnabledAt <= ReadingReminderOccurrence.ScheduledFor,
                        ReadingReminder.DeletedAt.is_(None), ChildProfile.ParentId == delivery.ParentId)
                 .order_by(delivery.NextAttemptAt, delivery.CreatedAt, delivery.Id)
                 .limit(1).with_for_update(skip_locked=True, of=delivery)
@@ -155,6 +161,8 @@ class ReadingReminderEmailRepository:
                    ReadingReminderEmailDelivery.Status == "PROCESSING",
                    ReadingReminderEmailDelivery.ParentId == ChildProfile.ParentId,
                    ReadingReminder.IsActive.is_(True), ReadingReminder.EmailEnabled.is_(True),
+                   ReadingReminder.EmailEnabledAt.is_not(None),
+                   ReadingReminder.EmailEnabledAt <= ReadingReminderOccurrence.ScheduledFor,
                    ReadingReminder.DeletedAt.is_(None)))
         return bool(await self.db.scalar(select(eligible)))
 
