@@ -1,15 +1,29 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
 from uuid import UUID
 
 # --- BOOK ---
 class BookBase(BaseModel):
-    Title: str = Field(...)
+    Title: str = Field(..., min_length=1)
     Author: Optional[str] = None
     MinGrade: int = Field(..., ge=1, le=5)
     MaxGrade: int = Field(..., ge=1, le=5)
-    LifecycleStatus: str = Field(..., example="ACTIVE")
+    LifecycleStatus: Literal["ACTIVE", "RETIRED"] = Field(..., example="ACTIVE")
+
+    @field_validator("Title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Title must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_grade_range(self):
+        if self.MinGrade > self.MaxGrade:
+            raise ValueError("MinGrade must be less than or equal to MaxGrade")
+        return self
 
 class BookCreate(BookBase):
     CreatedBy: Optional[UUID] = None
@@ -81,7 +95,6 @@ class PageRevisionWordResponse(PageRevisionWordBase):
 
 
 # Read-only Parent DTOs. Legacy request/response contracts above stay unchanged.
-from typing import Literal
 from pydantic import AliasChoices
 
 
@@ -97,7 +110,21 @@ class CatalogBookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AdminCatalogBookDetailResponse(CatalogBookResponse):
+class AdminBookMetadataResponse(BaseModel):
+    """Admin metadata contract tolerates legacy values so invalid rows remain repairable."""
+
+    id: UUID = Field(validation_alias=AliasChoices("id", "Id"))
+    title: str = Field(validation_alias=AliasChoices("title", "Title"))
+    author: str | None = Field(validation_alias=AliasChoices("author", "Author"))
+    min_grade: int = Field(validation_alias=AliasChoices("min_grade", "MinGrade"))
+    max_grade: int = Field(validation_alias=AliasChoices("max_grade", "MaxGrade"))
+    lifecycle_status: Literal["ACTIVE", "RETIRED"] = Field(
+        validation_alias=AliasChoices("lifecycle_status", "LifecycleStatus")
+    )
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminCatalogBookDetailResponse(AdminBookMetadataResponse):
     """Admin-only book detail metadata; includes retired page numbers for safe numbering."""
 
     next_page_number: int = Field(ge=1)
@@ -112,7 +139,7 @@ class CatalogPagePreviewResponse(BaseModel):
 
 
 class AdminCatalogBookResponse(BaseModel):
-    book: CatalogBookResponse
+    book: AdminBookMetadataResponse
     page_count: int = Field(ge=0)
     processing_count: int = Field(ge=0)
     needs_review_count: int = Field(ge=0)
