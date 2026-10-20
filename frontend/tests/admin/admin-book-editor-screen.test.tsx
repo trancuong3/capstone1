@@ -115,7 +115,7 @@ describe("AdminBookEditorScreen", () => {
         services,
       ),
     );
-    await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
+    await screen.findByRole("textbox", { name: "Tên sách" });
     await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
 
     await waitFor(() => {
@@ -156,7 +156,7 @@ describe("AdminBookEditorScreen", () => {
         services,
       ),
     );
-    await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
+    await screen.findByRole("textbox", { name: "Tên sách" });
     await user.click(screen.getByRole("button", { name: "Kích hoạt lại" }));
 
     expect(
