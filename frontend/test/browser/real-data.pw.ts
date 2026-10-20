@@ -138,8 +138,8 @@ test("Admin catalog → metadata, unavailable pages retry, audit and health", as
   await expect(page.getByRole("heading", { name: book.title })).toBeVisible();
   await expect(page.getByText("Dữ liệu trang đang chờ bổ sung")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Sửa thông tin" }),
-  ).toBeDisabled();
+    page.getByRole("link", { name: "Chỉnh sửa metadata / vòng đời" }),
+  ).toBeVisible();
   api.adminPagesStatus = 200;
   await page.getByRole("button", { name: "Tải lại" }).click();
   await expect(page.getByRole("heading", { name: "Trang 2" })).toBeVisible();
@@ -164,12 +164,12 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   await expect(
     page.getByRole("heading", { name: "Kiểm tra OCR · R2" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toBeDisabled();
+  await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Chạy lại OCR" }),
   ).toBeDisabled();
   await page.getByRole("button", { name: /^R1/ }).click();
-  await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toHaveValue(
+  await expect(page.getByLabel("Nội dung trang")).toHaveValue(
     "Văn bản revision cũ",
   );
   expect(api.unexpected).toEqual([]);
@@ -184,9 +184,9 @@ test("Admin book creation requires a title and sends normalized metadata", async
 
   const title = page.getByRole("textbox", { name: "Tiêu đề sách *" });
   await page.getByRole("button", { name: "Tạo sách" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Vui lòng nhập tiêu đề sách.",
-  );
+  await expect(
+    page.getByText("Vui lòng nhập tiêu đề sách.", { exact: true }),
+  ).toBeVisible();
   expect(api.createBookRequest).toBeNull();
 
   await title.fill("  Cuốn sách mới  ");
@@ -265,7 +265,7 @@ for (const width of [1440, 1024, 768, 390]) {
           page.getByRole("heading", { name: "Trang 2" }),
         ).toBeVisible();
       if (path === `/admin/books/${ids.book}/pages/${ids.page}`)
-        await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toHaveValue(
+        await expect(page.getByLabel("Nội dung trang")).toHaveValue(
           "Văn bản đã lưu",
         );
       if (path === "/admin/audit-logs")

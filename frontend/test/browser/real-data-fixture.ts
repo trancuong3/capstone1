@@ -215,6 +215,13 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect width="800" height="1000" fill="#fff9e8"/><text x="100" y="220" font-size="38">Stored page - test fixture</text></svg>',
       });
     expect(request.headers().authorization).toMatch(/^Bearer /);
+    if (
+      path === "/reading-management/collections" ||
+      path === "/reading-management/goals" ||
+      path === "/reading-management/reminders" ||
+      path === "/reading-management/reminders/due"
+    )
+      return respond(route, []);
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,
