@@ -34,17 +34,47 @@ python -m app.jobs.send_reading_reminder_emails
 
 Lệnh chạy một lần rồi thoát, phù hợp với cron job bên ngoài. Exit code 0 nghĩa job xử lý xong; exit code khác 0 thể hiện lỗi vận hành. Log ghi tổng số lượng, không ghi recipient, nội dung email, API key hoặc lỗi raw từ provider.
 
-Worker dùng DATABASE_URL và Supabase Auth Admin như backend. Nếu cấu hình provider thiếu, delivery đang chờ sẽ được đánh dấu SKIPPED với mã lỗi cấu hình, không giả lập gửi thành công. Khi thiếu email/chưa xác minh, delivery bị bỏ qua và không retry vô hạn. Cấu hình hoàn chỉnh sẽ áp dụng cho occurrence tương lai.
+Worker dùng DATABASE_URL và Supabase Auth Admin như backend. Nếu Resend hoặc Supabase Auth Admin chưa được cấu hình, worker ném lỗi an toàn và thoát với exit code khác 0; các delivery hợp lệ đang chờ vẫn nằm trong outbox để xử lý sau khi cấu hình được sửa. Không đánh dấu SKIPPED chỉ vì thiếu cấu hình. Lỗi database cũng làm job thất bại thay vì báo gửi thành công. Email phụ huynh không tồn tại/chưa xác minh được xử lý theo policy hiện tại; lỗi lookup/provider tạm thời được retry với giới hạn.
 
-## 4. Render Cron Job
+## 4. GitHub Actions scheduler (không cần máy local)
 
-Tạo một Cron Job riêng cùng repository/commit và cùng môi trường backend. Đặt Root Directory là backend nếu dự án được deploy theo thư mục đó; nếu Root Directory là repository root, dùng command có cd backend hoặc cấu hình tương ứng với host. Dùng cùng phiên bản Python và cài requirements.txt.
+Workflow được thêm tại `.github/workflows/reading-reminder-email.yml`:
 
-- Command khi Root Directory là backend: python -m app.jobs.send_reading_reminder_emails
-- Schedule khuyến nghị: * * * * * nếu gói/hosting hiện tại của bạn chấp nhận tần suất mỗi phút.
-- Thiết lập toàn bộ biến môi trường backend cần thiết, bao gồm DATABASE_URL, SUPABASE_URL, SUPABASE_KEY, Supabase Auth Admin key và các biến Resend ở trên.
+- Schedule: `*/5 * * * *` (GitHub Actions kiểm tra theo lịch dự kiến mỗi 5 phút; thời điểm chạy có thể trễ).
+- Runner: `ubuntu-latest`, Python 3.12, cài dependencies bằng `backend/requirements.txt`.
+- Worker one-shot: `python -m app.jobs.send_reading_reminder_emails`; sau một lượt xử lý job kết thúc, không có polling liên tục hay worker chạy nền.
+- Không dùng Render Cron Job, Windows Task Scheduler, browser timer hay Uvicorn local làm scheduler.
+- `workflow_dispatch` không nhận email người nhận hoặc payload tùy ý; workflow chỉ xử lý delivery đến hạn được lưu trong database.
+- `concurrency` ngăn các lượt chạy của workflow này chạy song song. Outbox PostgreSQL vẫn dùng claim/unique key để bảo vệ tính idempotent.
 
-Commit worker lên GitHub không tự kích hoạt Cron Job. Phải tạo/cấu hình Cron Job trong Dashboard của host. Độ trễ gửi thực tế phụ thuộc cron schedule, thời gian khởi chạy job, thời gian xử lý và giới hạn của nhà cung cấp/hosting. Nếu host không cho chạy mỗi phút, chọn interval được host hỗ trợ và tăng/điều chỉnh catch-up window có chủ đích.
+### Secrets cần đặt trên GitHub
+
+Vào **Settings → Secrets and variables → Actions → New repository secret** và khai báo các giá trị thực tế:
+
+| Secret | Mục đích |
+| --- | --- |
+| `DATABASE_URL` | Connection string async PostgreSQL của Supabase cloud; phải trỏ cùng database với backend local |
+| `SUPABASE_URL` | URL project Supabase |
+| `SUPABASE_KEY` | Publishable/anon key server-side được config backend hiện tại yêu cầu |
+| `SUPABASE_SECRET_KEY` hoặc `SUPABASE_SERVICE_ROLE_KEY` | Một Supabase Auth Admin key server-side; ưu tiên `SUPABASE_SECRET_KEY` nếu project đã dùng key mới |
+| `RESEND_API_KEY` | Resend API key thuộc gói miễn phí hiện có |
+| `READING_REMINDER_FROM_EMAIL` | Sender đã xác minh/được phép gửi từ Resend |
+| `READING_REMINDER_APP_URL` | URL ViRead mà phụ huynh có thể truy cập; không dùng `localhost` cho email thật |
+| `READING_REMINDER_CATCH_UP_MINUTES` | Tùy chọn, mặc định 120; chỉ nhận giá trị 0–1440 |
+
+Chỉ cần cấu hình một trong hai Supabase Admin key. Không đặt key trong frontend, biến `NEXT_PUBLIC_*`, workflow YAML hoặc commit. Secret chưa khai báo sẽ được truyền thành chuỗi rỗng; worker cần fail rõ ràng và không được đánh dấu các delivery đang chờ là thành công hoặc SKIPPED vì thiếu cấu hình.
+
+### Branch, kiểm tra thủ công và kích hoạt schedule
+
+Hiện workflow được commit trên branch `feature/reading-reminder-zero-cost-20261020` để review. **GitHub chỉ kích hoạt event `schedule` cho workflow tồn tại trên nhánh mặc định**; push feature branch không làm scheduler production hoạt động. Merge Pull Request sau khi review là bước bắt buộc để bật lịch định kỳ.
+
+Theo quy tắc GitHub Actions, file workflow cũng phải tồn tại trên nhánh mặc định để event `workflow_dispatch` được kích hoạt. Vì vậy không thể cam kết chạy worker email qua nút Actions trên feature branch trước khi merge. Trước khi merge, có thể kiểm tra CI/unit test và review YAML; chỉ chạy email thật sau khi đã merge, khai báo secrets và xác nhận sender. Lần chạy thủ công chỉ dành cho người có quyền write phù hợp trong repository.
+
+### Giới hạn chi phí quan trọng với repository hiện tại
+
+Metadata GitHub hiện tại cho biết repository `trancuong3/capstone1` đang ở trạng thái **private**. GitHub-hosted standard runner miễn phí không giới hạn cho repository public; repository private sử dụng hạn mức phút miễn phí theo plan rồi có thể bị tính phí vượt hạn mức nếu billing cho phép. Với lịch 5 phút, 30 ngày tương đương khoảng 8.640 lần khởi chạy; trung bình 15 giây runner-time mỗi lần đã tương đương khoảng 2.160 phút/tháng, chưa tính phần setup/install.
+
+Do đó không thể cam kết chi phí 0 USD/tháng cho schedule này khi vẫn private mà chưa kiểm tra hạn mức và billing của tài khoản. **Không chuyển repository sang public tự động** vì việc đó làm công khai source code và lịch sử git. Trước khi merge workflow vào nhánh mặc định, hãy chọn một trong hai điều kiện: (a) chủ repository chủ động xác nhận việc công khai toàn bộ repository là chấp nhận được; hoặc (b) kiểm tra GitHub Actions included minutes và đặt spending limit/overage ở mức không cho phép chi phí phát sinh. Điều kiện (b) có thể khiến Actions ngừng chạy khi hết quota, do đó không bảo đảm lời nhắc tiếp tục chạy suốt tháng. Không nâng cấp plan và không bật overage trong quá trình triển khai này.
 
 ## 5. Kiểm tra an toàn
 
@@ -57,4 +87,4 @@ Commit worker lên GitHub không tự kích hoạt Cron Job. Phải tạo/cấu 
 7. Xác minh lịch email bị tắt trước khi worker claim sẽ được đánh dấu SKIPPED. Khi bật lại, EmailEnabledAt được đặt lại và không gửi các occurrence đã đến hạn trước thời điểm bật lại.
 8. Email chưa xác minh sẽ không được gửi. Phụ huynh có thể vào /profile để kiểm tra/cập nhật email theo luồng hiện có.
 
-Không có API công khai cho phép browser tự chọn người nhận hoặc kích hoạt gửi hàng loạt. Cron job không nhận recipient từ request.
+Không có API công khai cho phép browser tự chọn người nhận hoặc kích hoạt gửi hàng loạt. Workflow không nhận recipient từ request.
