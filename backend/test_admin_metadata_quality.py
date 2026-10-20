@@ -159,8 +159,8 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
             set(result.items[0].issues),
             {"MISSING_TITLE", "MISSING_AUTHOR", "INVALID_GRADE_RANGE", "POSSIBLE_DUPLICATE"},
         )
-        self.assertEqual(book.Title, " \\t\\r\\n ")
-        self.assertEqual(book.Author, "\\n\\t")
+        self.assertEqual(book.Title, " \t\r\n ")
+        self.assertEqual(book.Author, "\n\t")
         self.assertEqual(result.total, 1)
 
     def test_endpoint_requires_authentication(self):
