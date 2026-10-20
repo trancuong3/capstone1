@@ -26,6 +26,8 @@ Thêm các biến sau vào backend local .env hoặc Environment của backend h
 
 Để gửi email cần đồng thời có Resend API key, sender hợp lệ, URL ứng dụng, Supabase Auth Admin key, email tài khoản Parent và email_confirmed_at tương ứng. Chỉ cấu hình đủ biến môi trường không thay thế việc xác minh sender/domain ở Resend.
 
+Theo trang giá Resend được kiểm tra ngày 20/10/2026, Free hiện liệt kê tối đa 3.000 email/tháng và 100 email/ngày. Hạn mức và yêu cầu sender có thể thay đổi; kiểm tra [Resend Pricing](https://resend.com/pricing) trước khi triển khai. Không bật gói Pro hoặc pay-as-you-go/overage. Không thể xác nhận từ source code liệu tài khoản của bạn đã có sender/domain được xác minh hay chưa.
+
 ## 3. Chạy worker thử nghiệm
 
 Từ thư mục backend và virtual environment đã cài requirements.txt:
@@ -76,7 +78,9 @@ GitHub có thể trì hoãn lịch chạy khi hệ thống bận. Với reposito
 
 Metadata GitHub hiện tại cho biết repository `trancuong3/capstone1` đang ở trạng thái **private**. GitHub-hosted standard runner miễn phí không giới hạn cho repository public; repository private sử dụng hạn mức phút miễn phí theo plan rồi có thể bị tính phí vượt hạn mức nếu billing cho phép. Với lịch 5 phút, 30 ngày tương đương khoảng 8.640 lần khởi chạy; trung bình 15 giây runner-time mỗi lần đã tương đương khoảng 2.160 phút/tháng, chưa tính phần setup/install.
 
-Do đó không thể cam kết chi phí 0 USD/tháng cho schedule này khi vẫn private mà chưa kiểm tra hạn mức và billing của tài khoản. **Không chuyển repository sang public tự động** vì việc đó làm công khai source code và lịch sử git. Trước khi merge workflow vào nhánh mặc định, hãy chọn một trong hai điều kiện: (a) chủ repository chủ động xác nhận việc công khai toàn bộ repository là chấp nhận được; hoặc (b) kiểm tra GitHub Actions included minutes và đặt spending limit/overage ở mức không cho phép chi phí phát sinh. Điều kiện (b) có thể khiến Actions ngừng chạy khi hết quota, do đó không bảo đảm lời nhắc tiếp tục chạy suốt tháng. Không nâng cấp plan và không bật overage trong quá trình triển khai này.
+Tài liệu GitHub hiện liệt kê GitHub Free với 2.000 phút runner/tháng cho repository private (hạn mức thực tế phụ thuộc plan chủ repository); xem [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) và kiểm tra trang Billing & licensing/Usage của tài khoản. Do đó không thể cam kết chi phí 0 USD/tháng cho schedule này khi vẫn private mà chưa kiểm tra hạn mức và billing của tài khoản. **Không chuyển repository sang public tự động** vì việc đó làm công khai source code và lịch sử git. Trước khi merge workflow vào nhánh mặc định, hãy chọn một trong hai điều kiện: (a) chủ repository chủ động xác nhận việc công khai toàn bộ repository là chấp nhận được; hoặc (b) kiểm tra GitHub Actions included minutes và đặt spending limit/overage ở mức không cho phép chi phí phát sinh. Điều kiện (b) có thể khiến Actions ngừng chạy khi hết quota, do đó không bảo đảm lời nhắc tiếp tục chạy suốt tháng. Không nâng cấp plan và không bật overage trong quá trình triển khai này.
+
+Supabase Free cũng có thể tự tạm dừng project khi hoạt động database thấp trong khoảng 7 ngày. Khi đó worker không thể đọc lịch hoặc cập nhật delivery cho tới khi chủ project khôi phục project. Tham khảo [Supabase Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing). Không tạo request giả chỉ để né cơ chế tạm dừng.
 
 ## 5. Kiểm tra an toàn
 
