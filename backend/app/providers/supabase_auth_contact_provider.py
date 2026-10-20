@@ -40,6 +40,11 @@ class SupabaseAuthCompensationError(SupabaseAuthProviderError):
 class SupabaseAuthContactProvider:
     """Return only safe contact fields; never expose a raw Auth User object."""
 
+    @property
+    def is_configured(self) -> bool:
+        """Whether the server-side Supabase Auth Admin credential is available."""
+        return get_supabase_admin_client() is not None
+
     @staticmethod
     def _normalize_error(
         error: Exception, *, operation: str = "request"
