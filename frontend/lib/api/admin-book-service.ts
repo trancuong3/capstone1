@@ -11,8 +11,6 @@ import {
   apiQuery,
   requestApi,
 } from "@/lib/api/api-client";
-import { bookDtoSchema } from "@/lib/api/book-service";
-
 const adminBookDtoSchema = z.object({
   id: z.guid(),
   title: z.string(),
