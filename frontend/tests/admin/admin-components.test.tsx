@@ -190,7 +190,9 @@ describe("admin components", () => {
       await screen.findByRole("button", { name: "Kích hoạt lại" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
-    expect(await screen.findByText("Đã ngừng hoạt động sách")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã ngừng hoạt động sách"),
+    ).toBeInTheDocument();
   });
 
   it("renders lifecycle and OCR metrics from typed service responses and forwards filters", async () => {
@@ -209,11 +211,11 @@ describe("admin components", () => {
       name: adminBookListItemFixture.book.title,
     });
     expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
-    expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent(
-      "3",
-    );
+    expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent("3");
     for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-      expect(screen.getByText(label).nextElementSibling).toHaveTextContent("1");
+      expect(
+        screen.getByText(label).nextElementSibling,
+      ).toHaveTextContent("1");
     }
     services.books.list.mockResolvedValueOnce([retired]);
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
