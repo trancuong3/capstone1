@@ -143,14 +143,11 @@ describe("real Admin adapters", () => {
     expect(url.searchParams.get("lifecycle_status")).toBe("RETIRED");
     expect(url.searchParams.get("verification_status")).toBe("VERIFIED");
   });
-  it(
-    "reads book metadata and next page number from the admin route",
-    async () => {
-      const adminBookDetail = { ...book, next_page_number: 8 };
-      fetchMock.mockResolvedValue(Response.json(adminBookDetail));
-      expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
-    },
-  );
+  it("reads book metadata and next page number from the admin route", async () => {
+    const adminBookDetail = { ...book, next_page_number: 8 };
+    fetchMock.mockResolvedValue(Response.json(adminBookDetail));
+    expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
+  });
   it("rejects a book belonging to a different requested ID", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...book, id: pageId }));
     await expect(createAdminBookService().get(bookId)).rejects.toMatchObject({
@@ -189,34 +186,28 @@ describe("real Admin adapters", () => {
       createAdminPageService().getImage(pageId),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
   });
-  it(
-    "rejects image and processing IDs that differ from the request",
-    async () => {
-      fetchMock
-        .mockResolvedValueOnce(Response.json({ ...image, page_id: bookId }))
-        .mockResolvedValueOnce(Response.json({ ...processing, page_id: bookId }));
-      await expect(
-        createAdminPageService().getImage(pageId),
-      ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
-      await expect(createAdminPageService().reload(pageId)).rejects.toMatchObject(
-        { code: "NETWORK_ERROR" },
-      );
-    },
-  );
-  it(
-    "reads revision summaries without changing status or version",
-    async () => {
-      const summary = {
-        page_revision_id: revisionId,
-        revision_no: 2,
-        verification_status: "VERIFIED",
-        created_at: timestamp,
-        is_current_verified: true,
-      };
-      fetchMock.mockResolvedValue(Response.json([summary]));
-      expect(await createRevisionService().list(pageId)).toEqual([summary]);
-    },
-  );
+  it("rejects image and processing IDs that differ from the request", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ ...image, page_id: bookId }))
+      .mockResolvedValueOnce(Response.json({ ...processing, page_id: bookId }));
+    await expect(
+      createAdminPageService().getImage(pageId),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    await expect(createAdminPageService().reload(pageId)).rejects.toMatchObject(
+      { code: "NETWORK_ERROR" },
+    );
+  });
+  it("reads revision summaries without changing status or version", async () => {
+    const summary = {
+      page_revision_id: revisionId,
+      revision_no: 2,
+      verification_status: "VERIFIED",
+      created_at: timestamp,
+      is_current_verified: true,
+    };
+    fetchMock.mockResolvedValue(Response.json([summary]));
+    expect(await createRevisionService().list(pageId)).toEqual([summary]);
+  });
   it("reads nullable stored text, not generated OCR text", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...detail, draft_text: null }));
     expect(
@@ -234,29 +225,26 @@ describe("real Admin adapters", () => {
       createOcrReviewService().getRevision(pageId, revisionId),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
   });
-  it(
-    "rejects pixel bounding boxes rather than guessing normalization",
-    async () => {
-      fetchMock.mockResolvedValue(
-        Response.json({
-          ...detail,
-          words: [
-            {
-              word_index: 0,
-              line_index: 0,
-              text: "Real",
-              normalized_text: "real",
-              bbox: [120, 50, 50, 20],
-              ocr_confidence: null,
-            },
-          ],
-        }),
-      );
-      await expect(
-        createOcrReviewService().getRevision(pageId, revisionId),
-      ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
-    },
-  );
+  it("rejects pixel bounding boxes rather than guessing normalization", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        ...detail,
+        words: [
+          {
+            word_index: 0,
+            line_index: 0,
+            text: "Real",
+            normalized_text: "real",
+            bbox: [120, 50, 50, 20],
+            ocr_confidence: null,
+          },
+        ],
+      }),
+    );
+    await expect(
+      createOcrReviewService().getRevision(pageId, revisionId),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
   it.each(["id", "actor_id", "resource_id"] as const)(
     "preserves PostgreSQL audit UUID in %s",
     async (field) => {
@@ -288,38 +276,35 @@ describe("real Admin adapters", () => {
       });
     },
   );
-  it(
-    "reads audit nullable actors and forwards filters and cursor",
-    async () => {
-      const result = {
-        items: [
-          {
-            id: revisionId,
-            actor_id: null,
-            resource_id: null,
-            action: "book.read",
-            resource_type: "book",
-            request_id: null,
-            created_at: timestamp,
-            metadata: {},
-          },
-        ],
-        next_cursor: "page-3",
-      };
-      fetchMock.mockResolvedValue(Response.json(result));
-      expect(
-        await createAuditService().list({
+  it("reads audit nullable actors and forwards filters and cursor", async () => {
+    const result = {
+      items: [
+        {
+          id: revisionId,
+          actor_id: null,
+          resource_id: null,
           action: "book.read",
           resource_type: "book",
-          cursor: "page-2",
-          limit: 10,
-        }),
-      ).toEqual(result);
-      const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
-      expect(query.get("cursor")).toBe("page-2");
-      expect(query.get("action")).toBe("book.read");
-    },
-  );
+          request_id: null,
+          created_at: timestamp,
+          metadata: {},
+        },
+      ],
+      next_cursor: "page-3",
+    };
+    fetchMock.mockResolvedValue(Response.json(result));
+    expect(
+      await createAuditService().list({
+        action: "book.read",
+        resource_type: "book",
+        cursor: "page-2",
+        limit: 10,
+      }),
+    ).toEqual(result);
+    const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
+    expect(query.get("cursor")).toBe("page-2");
+    expect(query.get("action")).toBe("book.read");
+  });
   it("reads actual backend health snapshot", async () => {
     const result = {
       overall_status: "DEGRADED",
@@ -350,45 +335,39 @@ describe("real Admin adapters", () => {
       });
     },
   );
-  it(
-    "shows a mapped safe message for a known OCR configuration error",
-    async () => {
-      fetchMock.mockResolvedValue(
-        Response.json(
-          { detail: "Supabase Storage is not configured" },
-          { status: 503 },
-        ),
-      );
-      await expect(createAdminBookService().list()).rejects.toMatchObject({
-        status: 503,
-        message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
-      });
-    },
-  );
+  it("shows a mapped safe message for a known OCR configuration error", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { detail: "Supabase Storage is not configured" },
+        { status: 503 },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+    });
+  });
 
-  it(
-    "shows the safe Storage bucket reason and includes its request ID",
-    async () => {
-      fetchMock.mockResolvedValue(
-        Response.json(
-          {
-            detail:
-              "Supabase Storage bucket was not found; verify SUPABASE_STORAGE_BUCKET in the configured project",
-          },
-          {
-            status: 503,
-            headers: { "X-Request-ID": "request-test-123" },
-          },
-        ),
-      );
-      await expect(createAdminBookService().list()).rejects.toMatchObject({
-        status: 503,
-        request_id: "request-test-123",
-        message:
-          "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
-      });
-    },
-  );
+  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          detail:
+            "Supabase Storage bucket was not found; verify SUPABASE_STORAGE_BUCKET in the configured project",
+        },
+        {
+          status: 503,
+          headers: { "X-Request-ID": "request-test-123" },
+        },
+      ),
+    );
+    await expect(createAdminBookService().list()).rejects.toMatchObject({
+      status: 503,
+      request_id: "request-test-123",
+      message:
+        "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
+    });
+  });
 
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
@@ -414,63 +393,60 @@ describe("real Admin adapters", () => {
     });
   });
 
-  it(
-    "uploads each page as multipart data and reloads the server page list",
-    async () => {
-      const needsReviewDetail = {
-        ...detail,
-        verification_status: "NEEDS_REVIEW",
-        draft_text: "Chú mèo",
-        words: [],
-        verified_at: null,
-        verified_by: null,
-      };
-      const file = new File(["valid-for-mock"], "page-2.png", {
-        type: "image/png",
-      });
-      const input = {
-        client_id: "2-page-2.png-14",
-        file_name: file.name,
-        mime_type: "image/png" as const,
-        size_bytes: file.size,
-        page_number: 2,
-        width: 800,
-        height: 1000,
-        file,
-      };
-      fetchMock
-        .mockResolvedValueOnce(Response.json(needsReviewDetail))
-        .mockResolvedValueOnce(Response.json([page]));
-      const progress: { status: string; progress_percent: number }[] = [];
-      const result = await createAdminPageService().upload(
-        bookId,
-        [input],
-        (item) => {
-          progress.push({
-            status: item.status,
-            progress_percent: item.progress_percent,
-          });
-        },
-      );
-      expect(result).toEqual([page]);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
-      expect(init.method).toBe("POST");
-      expect(init.body).toBeInstanceOf(FormData);
-      expect((init.body as FormData).get("page_number")).toBe("2");
-      expect((init.body as FormData).get("image")).toMatchObject({
-        name: "page-2.png",
-      });
-      expect(
-        (init.headers as Record<string, string>)["Content-Type"],
-      ).toBeUndefined();
-      expect(progress).toEqual([
-        { status: "UPLOADING", progress_percent: 0 },
-        { status: "PROCESSING", progress_percent: 100 },
-      ]);
-    },
-  );
+  it("uploads each page as multipart data and reloads the server page list", async () => {
+    const needsReviewDetail = {
+      ...detail,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "Chú mèo",
+      words: [],
+      verified_at: null,
+      verified_by: null,
+    };
+    const file = new File(["valid-for-mock"], "page-2.png", {
+      type: "image/png",
+    });
+    const input = {
+      client_id: "2-page-2.png-14",
+      file_name: file.name,
+      mime_type: "image/png" as const,
+      size_bytes: file.size,
+      page_number: 2,
+      width: 800,
+      height: 1000,
+      file,
+    };
+    fetchMock
+      .mockResolvedValueOnce(Response.json(needsReviewDetail))
+      .mockResolvedValueOnce(Response.json([page]));
+    const progress: { status: string; progress_percent: number }[] = [];
+    const result = await createAdminPageService().upload(
+      bookId,
+      [input],
+      (item) => {
+        progress.push({
+          status: item.status,
+          progress_percent: item.progress_percent,
+        });
+      },
+    );
+    expect(result).toEqual([page]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("page_number")).toBe("2");
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-2.png",
+    });
+    expect(
+      (init.headers as Record<string, string>)["Content-Type"],
+    ).toBeUndefined();
+    expect(progress).toEqual([
+      { status: "UPLOADING", progress_percent: 0 },
+      { status: "PROCESSING", progress_percent: 100 },
+    ]);
+  });
 
   it("shows a safe Storage reason for a failed page upload", async () => {
     const file = new File(["image-bytes"], "page-3.png", {
@@ -514,152 +490,143 @@ describe("real Admin adapters", () => {
     });
   });
 
-  it(
-    "persists an OCR draft using the validated revision contract",
-    async () => {
-      const word = {
-        word_index: 0,
-        line_index: 0,
-        text: "Chú",
-        normalized_text: "chú",
-        bbox: [0.1, 0.2, 0.2, 0.05] as const,
-        ocr_confidence: 0.82,
-      };
-      fetchMock.mockResolvedValueOnce(
-        Response.json({
-          ...detail,
-          verification_status: "NEEDS_REVIEW",
-          draft_text: "Chú",
-          words: [word],
-          verified_at: null,
-          verified_by: null,
-        }),
-      );
-      const saved = await createOcrReviewService().saveDraft(
-        pageId,
-        revisionId,
-        "Chú",
-        [word],
-      );
-      expect(saved.draft_text).toBe("Chú");
-      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toContain(
-        `/books/admin/pages/${pageId}/revisions/${revisionId}/draft`,
-      );
-      expect(init.method).toBe("PUT");
-      expect(JSON.parse(String(init.body))).toMatchObject({
+  it("persists an OCR draft using the validated revision contract", async () => {
+    const word = {
+      word_index: 0,
+      line_index: 0,
+      text: "Chú",
+      normalized_text: "chú",
+      bbox: [0.1, 0.2, 0.2, 0.05] as const,
+      ocr_confidence: 0.82,
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "NEEDS_REVIEW",
         draft_text: "Chú",
-        words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
-      });
-    },
-  );
-
-  it(
-    "verifies a revision and can request a new immutable OCR revision",
-    async () => {
-      const word = {
-        word_index: 0,
-        line_index: 0,
-        text: "Chú",
-        normalized_text: "chú",
-        bbox: [0.1, 0.2, 0.2, 0.05] as const,
-        ocr_confidence: 0.82,
-      };
-      fetchMock.mockResolvedValueOnce(
-        Response.json({
-          ...detail,
-          verification_status: "VERIFIED",
-          draft_text: "Chú",
-          words: [word],
-          verified_at: timestamp,
-          verified_by: "11111111-1111-4111-8111-111111111111",
-        }),
-      );
-      const verified = await createRevisionService().verify(pageId, {
-        page_revision_id: revisionId,
-        corrected_text: "Chú",
         words: [word],
-      });
-      expect(verified.verification_status).toBe("VERIFIED");
-      const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
-      expect(verifyUrl).toContain(`/books/admin/pages/${pageId}/verify`);
-      expect(verifyInit.method).toBe("POST");
-  
-      const nextRevisionId = "55555555-5555-4555-8555-555555555555";
-      fetchMock.mockReset();
-      fetchMock.mockResolvedValueOnce(
-        Response.json({
-          ...detail,
-          page_revision_id: nextRevisionId,
-          revision_no: 3,
-          verification_status: "NEEDS_REVIEW",
-          draft_text: "Chú",
-          words: [word],
-          verified_at: null,
-          verified_by: null,
-        }),
-      );
-      const next = await createRevisionService().reprocess(pageId);
-      expect(next.page_revision_id).toBe(nextRevisionId);
-      expect(next.revision_no).toBe(3);
-      expect(fetchMock.mock.calls[0][0]).toContain(
-        `/books/admin/pages/${pageId}/reprocess`,
-      );
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
-    },
-  );
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
+    const saved = await createOcrReviewService().saveDraft(
+      pageId,
+      revisionId,
+      "Chú",
+      [word],
+    );
+    expect(saved.draft_text).toBe("Chú");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(
+      `/books/admin/pages/${pageId}/revisions/${revisionId}/draft`,
+    );
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      draft_text: "Chú",
+      words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
+    });
+  });
 
-  it(
-    "updates metadata and lifecycle through the real book API adapters",
-    async () => {
-      const books = createAdminBookService();
-      fetchMock.mockResolvedValueOnce(
-        Response.json({
+  it("verifies a revision and can request a new immutable OCR revision", async () => {
+    const word = {
+      word_index: 0,
+      line_index: 0,
+      text: "Chú",
+      normalized_text: "chú",
+      bbox: [0.1, 0.2, 0.2, 0.05] as const,
+      ocr_confidence: 0.82,
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        verification_status: "VERIFIED",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: timestamp,
+        verified_by: "11111111-1111-4111-8111-111111111111",
+      }),
+    );
+    const verified = await createRevisionService().verify(pageId, {
+      page_revision_id: revisionId,
+      corrected_text: "Chú",
+      words: [word],
+    });
+    expect(verified.verification_status).toBe("VERIFIED");
+    const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(verifyUrl).toContain(`/books/admin/pages/${pageId}/verify`);
+    expect(verifyInit.method).toBe("POST");
+
+    const nextRevisionId = "55555555-5555-4555-8555-555555555555";
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...detail,
+        page_revision_id: nextRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Chú",
+        words: [word],
+        verified_at: null,
+        verified_by: null,
+      }),
+    );
+    const next = await createRevisionService().reprocess(pageId);
+    expect(next.page_revision_id).toBe(nextRevisionId);
+    expect(next.revision_no).toBe(3);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/pages/${pageId}/reprocess`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+  });
+
+  it("updates metadata and lifecycle through the real book API adapters", async () => {
+    const books = createAdminBookService();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
         ...book,
         title: "Updated title",
         min_grade: 2,
         max_grade: 4,
       }),
-      );
-  
-      const updated = await books.update(bookId, {
-        title: "  Updated title  ",
-        author: "  Author  ",
-        min_grade: 2,
-        max_grade: 4,
-      });
-  
-      expect(updated.title).toBe("Updated title");
-      expect(fetchMock.mock.calls[0][0]).toContain(
-        `/books/admin/catalog/${bookId}`,
-      );
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-        title: "Updated title",
-        author: "Author",
-        min_grade: 2,
-        max_grade: 4,
-      });
-  
-      fetchMock.mockReset();
-      fetchMock.mockResolvedValueOnce(
-        Response.json({ ...book, lifecycle_status: "RETIRED" }),
-      );
-      const retired = await books.updateStatus(bookId, { status: "RETIRED" });
-  
-      expect(retired.lifecycle_status).toBe("RETIRED");
-      expect(fetchMock.mock.calls[0][0]).toContain(
-        `/books/admin/catalog/${bookId}/status`,
-      );
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-        status: "RETIRED",
-      });
-    },
-  );
+    );
+
+    const updated = await books.update(bookId, {
+      title: "  Updated title  ",
+      author: "  Author  ",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    expect(updated.title).toBe("Updated title");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "Updated title",
+      author: "Author",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...book, lifecycle_status: "RETIRED" }),
+    );
+    const retired = await books.updateStatus(bookId, { status: "RETIRED" });
+
+    expect(retired.lifecycle_status).toBe("RETIRED");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}/status`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      status: "RETIRED",
+    });
+  });
 
   it("keeps unsupported page lifecycle updates unavailable", async () => {
     await expect(
