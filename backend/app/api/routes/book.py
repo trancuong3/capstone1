@@ -110,6 +110,20 @@ async def get_parent_catalog_previews(
     return await service.previews(book_id)
 
 
+@router.post(
+    "/admin/catalog",
+    response_model=AdminBookMetadataResponse,
+    status_code=201,
+)
+async def create_admin_book(
+    payload: AdminBookWriteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an Admin catalog entry through schema, service, and repository layers."""
+    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
+
+
 @router.put(
     "/admin/catalog/{book_id}",
     response_model=AdminBookMetadataResponse,
