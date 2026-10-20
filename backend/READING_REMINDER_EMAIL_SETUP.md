@@ -55,7 +55,7 @@ Vào **Settings → Secrets and variables → Actions → New repository secret*
 
 | Secret | Mục đích |
 | --- | --- |
-| `DATABASE_URL` | Connection string async PostgreSQL của Supabase cloud; phải trỏ cùng database với backend local |
+| `DATABASE_URL` | Cùng connection string async PostgreSQL cloud với backend local; bắt buộc scheme `postgresql+asyncpg://`, không để URL dashboard ở dạng `postgresql://` nếu chưa đổi driver scheme |
 | `SUPABASE_URL` | URL project Supabase |
 | `SUPABASE_KEY` | Publishable/anon key server-side được config backend hiện tại yêu cầu |
 | `SUPABASE_SECRET_KEY` hoặc `SUPABASE_SERVICE_ROLE_KEY` | Một Supabase Auth Admin key server-side; ưu tiên `SUPABASE_SECRET_KEY` nếu project đã dùng key mới |
@@ -68,7 +68,7 @@ Chỉ cần cấu hình một trong hai Supabase Admin key. Không đặt key tr
 
 ### Branch, kiểm tra thủ công và kích hoạt schedule
 
-Hiện workflow được commit trên branch `feature/reading-reminder-zero-cost-20261020` để review. **GitHub chỉ kích hoạt event `schedule` cho workflow tồn tại trên nhánh mặc định**; push feature branch không làm scheduler production hoạt động. Merge Pull Request sau khi review là bước bắt buộc để bật lịch định kỳ.
+Hiện workflow được commit trên branch `feature/reading-reminder-zero-cost-20261020` để review. Pull Request #37 đang nhắm vào branch kế thừa `feature/reading-reminder-email-20261020`, không phải `main`. **GitHub chỉ kích hoạt event `schedule` cho workflow tồn tại trên nhánh mặc định**; merge PR #37 vào branch kế thừa vẫn chưa kích hoạt production schedule. Sau đó, code phải được review và tích hợp vào nhánh mặc định `main` (thông qua quy trình PR riêng của dự án) thì lịch định kỳ mới được kích hoạt. Không tự động merge vào `main`.
 
 Theo quy tắc GitHub Actions, file workflow cũng phải tồn tại trên nhánh mặc định để event `workflow_dispatch` được kích hoạt. Vì vậy không thể cam kết chạy worker email qua nút Actions trên feature branch trước khi merge. Trước khi merge, có thể kiểm tra CI/unit test và review YAML; chỉ chạy email thật sau khi đã merge, khai báo secrets và xác nhận sender. Lần chạy thủ công chỉ dành cho người có quyền write phù hợp trong repository.
 
