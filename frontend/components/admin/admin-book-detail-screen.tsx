@@ -163,9 +163,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       >
         <ArrowLeft aria-hidden className="size-5" /> Kho sách
       </Link>
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <AdminStatusBadge status={book.lifecycle_status} />
         <span className="text-sm text-muted">ID: {book.id}</span>
+        <Link
+          className="inline-flex min-h-11 items-center rounded-control border border-border px-4 font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
+          href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
+        >
+          Chỉnh sửa metadata / vòng đời
+        </Link>
       </div>
       <AdminPageUploader
         bookId={book.id}
