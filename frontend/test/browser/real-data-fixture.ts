@@ -342,11 +342,11 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         [book, ...(state.createdBook ? [state.createdBook] : [])].map(
           (catalogBook) => ({
             book: catalogBook,
-            page_count: 0,
+            page_count: catalogBook.id === book.id ? 1 : 0,
             processing_count: 0,
             needs_review_count: 0,
-            verified_count: 0,
-            parent_catalog_eligible: false,
+            verified_count: catalogBook.id === book.id ? 1 : 0,
+            parent_catalog_eligible: catalogBook.id === book.id,
           }),
         ),
       );
