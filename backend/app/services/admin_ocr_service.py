@@ -18,8 +18,8 @@ from starlette.concurrency import run_in_threadpool
 from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
-from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
-from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead, CatalogBookResponse
+from app.schemas.admin_ocr import AdminOcrDraftRequest, AdminOcrVerifyRequest
+from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.services.ocr_engine import (
     OcrEngineUnavailable, OcrNoTextDetected, extract_text_and_boxes, normalize_text_tokens, normalize_word,
 )
@@ -71,28 +71,6 @@ class AdminOcrService:
         if await self.repo.role(actor_id) != "admin":
             # Safe even when auth.users.id is not mapped to profiles.id; fail closed.
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-
-    async def create_book(self, actor_id: UUID, payload: AdminBookCreateRequest) -> CatalogBookResponse:
-        await self.require_admin(actor_id)
-        row = Book(
-            Title=payload.title.strip(),
-            Author=payload.author,
-            MinGrade=payload.min_grade,
-            MaxGrade=payload.max_grade,
-            LifecycleStatus="ACTIVE",
-            CreatedBy=actor_id,
-        )
-        self.repo.stage_book(row)
-        try:
-            await self.db.commit()
-            await self.db.refresh(row)
-        except IntegrityError as exc:
-            await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Could not create book with the current database constraints") from exc
-        except Exception:
-            await self.db.rollback()
-            raise
-        return CatalogBookResponse.model_validate(row)
 
     async def _read_validate_image(self, file: UploadFile) -> tuple[bytes, str, str, int, int]:
         if not file.filename:
