@@ -76,7 +76,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run end-to-end tests
-        run: npm run test:e2e
+        run: npx playwright test --config=playwright.real-data.config.ts
 
       - name: Upload Playwright diagnostics
         if: always()
