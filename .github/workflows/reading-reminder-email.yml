@@ -37,6 +37,11 @@ jobs:
       READING_REMINDER_CATCH_UP_MINUTES: ${{ secrets.READING_REMINDER_CATCH_UP_MINUTES }}
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Validate required cloud worker configuration without printing values
         run: |
           python3 - <<'PY'
@@ -66,11 +71,6 @@ jobs:
           if not hostname or hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
               raise SystemExit("DATABASE_URL must point to the shared cloud PostgreSQL database, not localhost")
           PY
-
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
