@@ -89,7 +89,8 @@ export function AdminBooksScreen() {
   async function changeLifecycle(book: AdminBookDTO) {
     if (lifecycleBusyBookId !== null) return;
 
-    const nextStatus = book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
+    const nextStatus =
+      book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
     const confirmation =
       nextStatus === "RETIRED"
         ? "Ngừng hoạt động sách này? Trang sách, revision và lịch sử đọc sẽ được giữ nguyên."
@@ -286,7 +287,10 @@ export function AdminBooksScreen() {
                     <dl className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
                       <Metric label="Trang" value={item.page_count} />
                       <Metric label="Xử lý" value={item.processing_count} />
-                      <Metric label="Cần duyệt" value={item.needs_review_count} />
+                      <Metric
+                        label="Cần duyệt"
+                        value={item.needs_review_count}
+                      />
                       <Metric label="Đã duyệt" value={item.verified_count} />
                     </dl>
                   </div>
@@ -297,9 +301,7 @@ export function AdminBooksScreen() {
                       href={editHref}
                     >
                       <PencilLine aria-hidden className="size-4" />
-                      {missingTitle
-                        ? "Bổ sung tiêu đề"
-                        : "Chỉnh sửa thông tin"}
+                      {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
                     </Link>
                     <Button
                       className="h-auto min-h-11 w-auto px-3 py-2 text-sm"
