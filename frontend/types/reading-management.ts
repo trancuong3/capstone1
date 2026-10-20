@@ -2,6 +2,17 @@ export type ReadingGoalMetric = "MINUTES" | "SESSIONS";
 export type ReadingGoalPeriod = "DAILY" | "WEEKLY";
 export type ReadingGoalStatus = "ACTIVE" | "PAUSED" | "COMPLETED" | "ENDED";
 export type BookCollectionType = "FAVORITE" | "WANT_TO_READ";
+export type ReadingReminderEmailStatus = "PENDING" | "PROCESSING" | "SENT" | "FAILED" | "SKIPPED";
+
+export interface ReadingReminderEmailStatusDTO {
+  provider_configured: boolean;
+  sender_configured: boolean;
+  app_url_configured: boolean;
+  auth_admin_configured: boolean;
+  email_available: boolean;
+  email_verified: boolean | null;
+  ready: boolean;
+}
 
 export interface ReadingGoalDTO {
   id: string;
@@ -44,6 +55,8 @@ export interface ReadingReminderDTO {
   weekdays: number[];
   timezone: string;
   is_active: boolean;
+  email_enabled: boolean;
+  latest_email_status: ReadingReminderEmailStatus | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -72,4 +85,5 @@ export interface ReadingReminderWriteDTO {
   weekdays?: number[];
   timezone?: string;
   is_active?: boolean;
+  email_enabled?: boolean;
 }
