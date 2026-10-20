@@ -585,7 +585,12 @@ describe("real Admin adapters", () => {
   it("updates metadata and lifecycle through the real book API adapters", async () => {
     const books = createAdminBookService();
     fetchMock.mockResolvedValueOnce(
-      Response.json({ ...book, title: "Updated title", min_grade: 2, max_grade: 4 }),
+      Response.json({
+        ...book,
+        title: "Updated title",
+        min_grade: 2,
+        max_grade: 4,
+      }),
     );
 
     const updated = await books.update(bookId, {

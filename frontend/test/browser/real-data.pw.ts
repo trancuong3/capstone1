@@ -138,8 +138,8 @@ test("Admin catalog → metadata, unavailable pages retry, audit and health", as
   await expect(page.getByRole("heading", { name: book.title })).toBeVisible();
   await expect(page.getByText("Dữ liệu trang đang chờ bổ sung")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Sửa thông tin" }),
-  ).toBeDisabled();
+    page.getByRole("link", { name: "Chỉnh sửa metadata / vòng đời" }),
+  ).toBeVisible();
   api.adminPagesStatus = 200;
   await page.getByRole("button", { name: "Tải lại" }).click();
   await expect(page.getByRole("heading", { name: "Trang 2" })).toBeVisible();
@@ -155,7 +155,7 @@ test("Admin catalog → metadata, unavailable pages retry, audit and health", as
   expect(api.unexpected).toEqual([]);
 });
 
-test("Admin OCR is read-only, switches stored revision and cannot create books", async ({
+test("Admin OCR is read-only and can switch to a stored revision", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
@@ -164,19 +164,50 @@ test("Admin OCR is read-only, switches stored revision and cannot create books",
   await expect(
     page.getByRole("heading", { name: "Kiểm tra OCR · R2" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toBeDisabled();
+  await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Chạy lại OCR" }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: /^R1/ }).click();
-  await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toHaveValue(
+  ).toBeEnabled();
+  await page.getByRole("button", { name: /Revision R1/ }).click();
+  await expect(page.getByLabel("Nội dung trang")).toHaveValue(
     "Văn bản revision cũ",
   );
+  expect(api.unexpected).toEqual([]);
+});
+
+test("Admin book creation requires a title and sends normalized metadata", async ({
+  page,
+}) => {
+  const api = await installApiFixture(page);
+  await setRole(page, "admin");
   await page.goto("/admin/books/new");
+
+  const title = page.getByRole("textbox", { name: "Tiêu đề sách *" });
+  await page.getByRole("button", { name: "Tạo sách" }).click();
   await expect(
-    page.getByText(/API tạo sách chưa được triển khai/),
+    page.getByText("Vui lòng nhập tiêu đề sách.", { exact: true }),
   ).toBeVisible();
-  await expect(page.locator("form")).toHaveCount(0);
+  expect(api.createBookRequest).toBeNull();
+
+  await title.fill("  Cuốn sách mới  ");
+  await page.getByLabel(/Tác giả/).fill("  Tác giả A  ");
+  await page.getByRole("button", { name: "Tạo sách" }).click();
+
+  await expect(page).toHaveURL(
+    /\/admin\/books\/88888888-8888-4888-8888-888888888888$/,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Cuốn sách mới", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sách chưa có trang" }),
+  ).toBeVisible();
+  expect(api.createBookRequest).toEqual({
+    title: "Cuốn sách mới",
+    author: "Tác giả A",
+    min_grade: 1,
+    max_grade: 5,
+  });
   expect(api.unexpected).toEqual([]);
 });
 
@@ -234,7 +265,7 @@ for (const width of [1440, 1024, 768, 390]) {
           page.getByRole("heading", { name: "Trang 2" }),
         ).toBeVisible();
       if (path === `/admin/books/${ids.book}/pages/${ids.page}`)
-        await expect(page.getByLabel("Nội dung đã hiệu chỉnh")).toHaveValue(
+        await expect(page.getByLabel("Nội dung trang")).toHaveValue(
           "Văn bản đã lưu",
         );
       if (path === "/admin/audit-logs")

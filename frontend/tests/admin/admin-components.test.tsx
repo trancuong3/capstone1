@@ -213,9 +213,7 @@ describe("admin components", () => {
     expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
     expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent("3");
     for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-      expect(
-        screen.getByText(label).nextElementSibling,
-      ).toHaveTextContent("1");
+      expect(screen.getByText(label).nextElementSibling).toHaveTextContent("1");
     }
     services.books.list.mockResolvedValueOnce([retired]);
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
