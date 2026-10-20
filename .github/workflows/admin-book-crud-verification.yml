@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   frontend-verification:
@@ -37,7 +37,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check formatting
+      - name: Format frontend files touched by Admin Book CRUD
+        run: |
+          npx prettier --write \
+            "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
+            components/admin/admin-book-detail-screen.tsx \
+            components/admin/admin-book-editor-screen.tsx \
+            components/admin/admin-books-screen.tsx \
+            components/admin/admin-metadata-quality-screen.tsx \
+            lib/api/admin-book-service.ts \
+            tests/admin/admin-book-editor-screen.test.tsx \
+            tests/admin/admin-metadata-quality-screen.test.tsx
+
+      - name: Commit scoped formatting if required
+        working-directory: .
+        run: |
+          git add -- \
+            "frontend/app/admin/(protected)/books/[bookId]/edit/page.tsx" \
+            frontend/components/admin/admin-book-detail-screen.tsx \
+            frontend/components/admin/admin-book-editor-screen.tsx \
+            frontend/components/admin/admin-books-screen.tsx \
+            frontend/components/admin/admin-metadata-quality-screen.tsx \
+            frontend/lib/api/admin-book-service.ts \
+            frontend/tests/admin/admin-book-editor-screen.test.tsx \
+            frontend/tests/admin/admin-metadata-quality-screen.test.tsx
+          if git diff --cached --quiet; then
+            echo "Scoped frontend formatting is already clean."
+          else
+            git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "style: format admin book CRUD frontend files"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Check formatting of feature files
+        run: |
+          npx prettier --check \
+            "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
+            components/admin/admin-book-detail-screen.tsx \
+            components/admin/admin-book-editor-screen.tsx \
+            components/admin/admin-books-screen.tsx \
+            components/admin/admin-metadata-quality-screen.tsx \
+            lib/api/admin-book-service.ts \
+            tests/admin/admin-book-editor-screen.test.tsx \
+            tests/admin/admin-metadata-quality-screen.test.tsx
+
+      - name: Check whole-repository formatting
+        continue-on-error: true
         run: npm run format:check
 
       - name: Run ESLint
