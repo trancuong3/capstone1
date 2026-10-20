@@ -37,11 +37,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: TEMPORARY format diagnostic
-        run: |
-          npx prettier --write components/admin/admin-books-screen.tsx tests/admin/admin-components.test.tsx
-          git diff -- components/admin/admin-books-screen.tsx tests/admin/admin-components.test.tsx
-
       - name: Check formatting of feature files
         run: |
           npx prettier --check \
