@@ -207,17 +207,25 @@ class ReadingManagementService:
         reminder = await self.repository.reminder_for_actor(reminder_id, actor_id)
         if reminder is None:
             raise ManagementNotFound()
+        was_active = reminder.IsActive
+        was_email_enabled = reminder.EmailEnabled
         for key, value in payload.model_dump(exclude_unset=True).items():
-            if key == "remind_at": reminder.RemindAt = value
-            elif key == "weekdays": reminder.Weekdays = value
-            elif key == "timezone": reminder.Timezone = value
-            elif key == "is_active": reminder.IsActive = value
+            if key == "remind_at":
+                reminder.RemindAt = value
+            elif key == "weekdays":
+                reminder.Weekdays = value
+            elif key == "timezone":
+                reminder.Timezone = value
+            elif key == "is_active":
+                reminder.IsActive = value
             elif key == "email_enabled":
-                if value and not reminder.EmailEnabled:
-                    reminder.EmailEnabledAt = datetime.now(timezone.utc)
-                elif not value:
-                    reminder.EmailEnabledAt = None
                 reminder.EmailEnabled = value
+        # Re-enabling a schedule is an explicit new opt-in moment. Do not catch up
+        # any occurrence that passed while the reminder/email option was disabled.
+        if not reminder.IsActive or not reminder.EmailEnabled:
+            reminder.EmailEnabledAt = None
+        elif not was_active or not was_email_enabled:
+            reminder.EmailEnabledAt = datetime.now(timezone.utc)
         return self.reminder_dict(await self.repository.save(reminder))
 
     async def delete_reminder(self, actor_id: UUID, reminder_id: UUID):
