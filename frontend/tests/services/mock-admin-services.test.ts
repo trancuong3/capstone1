@@ -227,38 +227,59 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     expect(apiFetchFixture.mock.calls[1][1]?.method).toBe("POST");
   });
 
-  it.each([
-    {
-      name: "page lifecycle",
-      call: () =>
-        createAdminPageService().updateStatus(ADMIN_PAGE_ID, {
-          status: "RETIRED",
-        }),
-    },
-    {
-      name: "book lifecycle",
-      call: () =>
-        createAdminBookService().updateStatus(ADMIN_BOOK_ID, {
-          status: "RETIRED",
-        }),
-    },
-    {
-      name: "book metadata update",
-      call: () =>
-        createAdminBookService().update(ADMIN_BOOK_ID, {
-          title: "Test",
-          author: null,
-          min_grade: 1,
-          max_grade: 3,
-        }),
-    },
-  ])("keeps unsupported $name operations unavailable", async ({ call }) => {
-    await expect(call()).rejects.toMatchObject({
+  it("keeps unsupported page lifecycle updates unavailable", async () => {
+    await expect(
+      createAdminPageService().updateStatus(ADMIN_PAGE_ID, {
+        status: "RETIRED",
+      }),
+    ).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       status: 501,
       retryable: false,
     });
     expect(apiFetchFixture).not.toHaveBeenCalled();
+  });
+
+  it("updates book metadata through the backend API", async () => {
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({ ...adminBookFixture, title: "Updated title" }),
+    );
+    const updated = await createAdminBookService().update(ADMIN_BOOK_ID, {
+      title: "  Updated title  ",
+      author: "  Author  ",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    expect(updated.title).toBe("Updated title");
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/admin/catalog/${ADMIN_BOOK_ID}`,
+    );
+    expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("PUT");
+    expect(JSON.parse(String(apiFetchFixture.mock.calls[0][1]?.body))).toEqual({
+      title: "Updated title",
+      author: "Author",
+      min_grade: 2,
+      max_grade: 4,
+    });
+  });
+
+  it("updates book lifecycle through the backend API", async () => {
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({ ...adminBookFixture, lifecycle_status: "RETIRED" }),
+    );
+    const updated = await createAdminBookService().updateStatus(ADMIN_BOOK_ID, {
+      status: "RETIRED",
+    });
+
+    expect(updated.lifecycle_status).toBe("RETIRED");
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/admin/catalog/${ADMIN_BOOK_ID}/status`,
+    );
+    expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(apiFetchFixture.mock.calls[0][1]?.body))).toEqual({
+      status: "RETIRED",
+    });
   });
 
   it.each([
