@@ -10,6 +10,7 @@ from app.schemas.reading_management import (
     ReadingGoalCreate, ReadingGoalUpdate, ReadingGoalTransition, ReadingGoalRead,
     ChildBookCollectionCreate, ChildBookCollectionRead, CollectionType, DeletedResponse,
     ReadingReminderCreate, ReadingReminderUpdate, ReadingReminderRead, ReadingReminderOccurrenceRead,
+    ReadingReminderEmailStatusRead,
 )
 
 router = APIRouter()
@@ -125,6 +126,14 @@ async def delete_reminder(reminder_id: UUID, actor_id: UUID = Depends(get_curren
     try:
         await build_service(db).delete_reminder(actor_id, reminder_id)
         return {"deleted": True}
+    except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
+        raise map_domain_error(exc) from None
+
+
+@router.get("/reminders/email-status", response_model=ReadingReminderEmailStatusRead)
+async def reminder_email_status(actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)):
+    try:
+        return await build_service(db).reminder_email_status(actor_id)
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
