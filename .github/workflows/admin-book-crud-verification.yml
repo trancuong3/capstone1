@@ -52,7 +52,7 @@ jobs:
       - name: Commit scoped formatting if required
         working-directory: .
         run: |
-          git add -- \
+          git add -f -- \
             "frontend/app/admin/(protected)/books/[bookId]/edit/page.tsx" \
             frontend/components/admin/admin-book-detail-screen.tsx \
             frontend/components/admin/admin-book-editor-screen.tsx \
