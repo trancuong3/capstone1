@@ -199,7 +199,9 @@ test("Admin book creation requires a title and sends normalized metadata", async
   await expect(
     page.getByRole("heading", { name: "Cuốn sách mới", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Sách chưa có trang" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sách chưa có trang" }),
+  ).toBeVisible();
   expect(api.createBookRequest).toEqual({
     title: "Cuốn sách mới",
     author: "Tác giả A",
