@@ -114,6 +114,23 @@ class ReadingReminderEmailRepository:
         await self.db.commit()
         return int(result.rowcount or 0)
 
+    async def release_delivery_for_configuration_error(
+        self, delivery_id: UUID, reason: str, now: datetime
+    ) -> None:
+        """Return a claimed delivery to PENDING without charging a delivery attempt."""
+        delivery = ReadingReminderEmailDelivery
+        await self.db.execute(update(delivery).where(
+            delivery.Id == delivery_id,
+            delivery.Status == "PROCESSING",
+        ).values(
+            Status="PENDING",
+            AttemptCount=case((delivery.AttemptCount > 0, delivery.AttemptCount - 1), else_=0),
+            NextAttemptAt=now,
+            LastErrorCode=reason[:80],
+            UpdatedAt=now,
+        ))
+        await self.db.commit()
+
     async def claim_next_delivery(self, now: datetime) -> dict | None:
         delivery = ReadingReminderEmailDelivery
         try:
