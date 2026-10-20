@@ -41,7 +41,7 @@ const dashboardFixture: MetadataQualityDashboardDTO = {
       min_grade: 5,
       max_grade: 2,
       lifecycle_status: "ACTIVE",
-      issues: ["MISSING_TITLE", "MISSING_AUTHOR", "INVALID_GRADE_RANGE"],
+      issues: ["MISSING_TITLE", "MISSING_AUTHOR", "INVALID_GRADE_RANGE", "POSSIBLE_DUPLICATE"],
     },
   ],
   total: 1,
@@ -65,7 +65,11 @@ describe("AdminMetadataQualityScreen", () => {
     expect(
       screen.getAllByText("Khoảng lớp không hợp lệ").length,
     ).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Xem chi tiết" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Bổ sung metadata" })).toHaveAttribute(
+      "href",
+      "/admin/books/33333333-3333-4333-8333-333333333333/edit?returnTo=metadata-quality&issue=MISSING_TITLE",
+    );
+    expect(screen.getByRole("link", { name: "So sánh sách" })).toHaveAttribute(
       "href",
       "/admin/books/33333333-3333-4333-8333-333333333333",
     );
