@@ -144,7 +144,7 @@ describe("Phase 5 real-data runtime cleanup", () => {
       screen.getByRole("heading", { name: "Tạo sách mới" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", { name: "Tên sách" }),
+      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("textbox", { name: /Tác giả/ }),

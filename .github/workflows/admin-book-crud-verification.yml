@@ -52,6 +52,7 @@ jobs:
             lib/api/admin-book-service.ts \
             tests/admin/admin-book-editor-screen.test.tsx \
             tests/admin/admin-metadata-quality-screen.test.tsx \
+            test/real-data-runtime-cleanup.test.tsx \\
             tests/admin/admin-new-book-screen.test.tsx
 
       - name: Check whole-repository formatting

@@ -112,7 +112,7 @@ describe("AdminNewBookScreen", () => {
 
     expect(
       await screen.findByText(
-        "Không thể tạo sách. Kiểm tra quyền Admin/kết nối Backend rồi thử lại.",
+        "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
       ),
     ).toBeInTheDocument();
     expect(title).toHaveValue("Sách chưa được tạo");
