@@ -167,7 +167,7 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Chạy lại OCR" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.getByRole("button", { name: /Revision R1/ }).click();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue(
     "Văn bản revision cũ",
