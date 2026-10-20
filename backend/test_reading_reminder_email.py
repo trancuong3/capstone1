@@ -242,7 +242,7 @@ class ReminderEmailTests(unittest.TestCase):
 
         with patch.object(reminder_worker, "AsyncSessionLocal",
                           return_value=BrokenSessionContext()), \
-             patch.object(reminder_worker.engine, "dispose", new_callable=AsyncMock):
+             patch.object(reminder_worker, "engine", SimpleNamespace(dispose=AsyncMock())):
             with self.assertLogs(reminder_worker.logger, level="ERROR") as captured:
                 exit_code = asyncio.run(reminder_worker.run())
 
@@ -267,7 +267,7 @@ class ReminderEmailTests(unittest.TestCase):
                           return_value=FakeSessionContext()), \
              patch.object(reminder_worker, "ReadingReminderEmailService",
                           return_value=service), \
-             patch.object(reminder_worker.engine, "dispose", new_callable=AsyncMock):
+             patch.object(reminder_worker, "engine", SimpleNamespace(dispose=AsyncMock())):
             with self.assertLogs(reminder_worker.logger, level="ERROR") as captured:
                 exit_code = asyncio.run(reminder_worker.run())
 
