@@ -45,7 +45,7 @@ describe("AdminBookEditorScreen", () => {
     );
 
     const title = await screen.findByRole("textbox", {
-      name: "Tên sách (bắt buộc)",
+      name: "Tên sách",
     });
     expect(title).toHaveValue(adminBookFixture.title);
     await user.clear(title);
@@ -87,7 +87,7 @@ describe("AdminBookEditorScreen", () => {
     );
 
     const title = await screen.findByRole("textbox", {
-      name: "Tên sách (bắt buộc)",
+      name: "Tên sách",
     });
     await user.clear(title);
     await user.type(title, "Đã bổ sung tiêu đề");
