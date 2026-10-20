@@ -129,7 +129,11 @@ describe("admin components", () => {
     const services = createAdminServiceFixture();
     const missingTitle = {
       ...adminBookListItemFixture,
-      book: { ...adminBookListItemFixture.book, title: "" },
+      book: {
+        ...adminBookListItemFixture.book,
+        id: "81000000-0000-4000-8000-000000000099",
+        title: "",
+      },
     };
     services.books.list.mockResolvedValue([
       missingTitle,
