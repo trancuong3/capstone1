@@ -76,6 +76,11 @@ export function AdminBookForm({
           label="Khối tối thiểu"
           {...register("min_grade", { valueAsNumber: true })}
         >
+          {initial && (initial.min_grade < 1 || initial.min_grade > 5) ? (
+            <option value={initial.min_grade}>
+              Giá trị hiện tại không hợp lệ ({initial.min_grade}) — cần sửa
+            </option>
+          ) : null}
           {[1, 2, 3, 4, 5].map((grade) => (
             <option key={grade} value={grade}>
               Khối {grade}
@@ -87,6 +92,11 @@ export function AdminBookForm({
           label="Khối tối đa"
           {...register("max_grade", { valueAsNumber: true })}
         >
+          {initial && (initial.max_grade < 1 || initial.max_grade > 5) ? (
+            <option value={initial.max_grade}>
+              Giá trị hiện tại không hợp lệ ({initial.max_grade}) — cần sửa
+            </option>
+          ) : null}
           {[1, 2, 3, 4, 5].map((grade) => (
             <option key={grade} value={grade}>
               Khối {grade}
