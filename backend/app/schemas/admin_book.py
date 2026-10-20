@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AdminBookWriteRequest(BaseModel):
-    title: str = Field(min_length=1)
-    author: str | None = None
+    title: str = Field(min_length=1, max_length=250)
+    author: str | None = Field(default=None, max_length=250)
     min_grade: int = Field(ge=1, le=5)
     max_grade: int = Field(ge=1, le=5)
 
