@@ -5,6 +5,11 @@ from zoneinfo import ZoneInfo
 from app.models import ChildProfile
 from app.models.reading_management import ChildBookCollection, ReadingGoal, ReadingReminder
 from app.repositories.reading_management_repository import ReadingManagementRepository
+from app.database.config import (
+    RESEND_API_KEY, READING_REMINDER_FROM_EMAIL, READING_REMINDER_APP_URL,
+    SUPABASE_ADMIN_KEY,
+)
+from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.schemas.reading_management import ReadingGoalCreate, ReadingGoalUpdate, ReadingGoalTransition, ChildBookCollectionCreate, ReadingReminderCreate, ReadingReminderUpdate
 
 
@@ -172,20 +177,29 @@ class ReadingManagementService:
     def reminder_dict(row: ReadingReminder):
         return {"id": row.Id, "child_id": row.ChildId, "remind_at": row.RemindAt,
                 "weekdays": list(row.Weekdays or []), "timezone": row.Timezone,
-                "is_active": row.IsActive, "deleted_at": row.DeletedAt,
+                "is_active": row.IsActive, "email_enabled": row.EmailEnabled,
+                "latest_email_status": None, "deleted_at": row.DeletedAt,
                 "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 
     async def list_reminders(self, actor_id: UUID, child_id: UUID):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
-        return [self.reminder_dict(row) for row in await self.repository.reminders(child_id)]
+        result = []
+        for row in await self.repository.reminders(child_id):
+            item = self.reminder_dict(row)
+            item["latest_email_status"] = await self.repository.latest_email_status(row.Id)
+            result.append(item)
+        return result
 
     async def create_reminder(self, actor_id: UUID, payload: ReadingReminderCreate):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
         return self.reminder_dict(await self.repository.save(ReadingReminder(
             ChildId=payload.child_id, RemindAt=payload.remind_at, Weekdays=payload.weekdays,
-            Timezone=payload.timezone, IsActive=payload.is_active, DeletedAt=None,
+            Timezone=payload.timezone, IsActive=payload.is_active,
+            EmailEnabled=payload.email_enabled,
+            EmailEnabledAt=datetime.now(timezone.utc) if payload.email_enabled else None,
+            DeletedAt=None,
         )))
 
     async def update_reminder(self, actor_id: UUID, reminder_id: UUID, payload: ReadingReminderUpdate):
@@ -198,6 +212,12 @@ class ReadingManagementService:
             elif key == "weekdays": reminder.Weekdays = value
             elif key == "timezone": reminder.Timezone = value
             elif key == "is_active": reminder.IsActive = value
+            elif key == "email_enabled":
+                if value and not reminder.EmailEnabled:
+                    reminder.EmailEnabledAt = datetime.now(timezone.utc)
+                elif not value:
+                    reminder.EmailEnabledAt = None
+                reminder.EmailEnabled = value
         return self.reminder_dict(await self.repository.save(reminder))
 
     async def delete_reminder(self, actor_id: UUID, reminder_id: UUID):
@@ -232,3 +252,28 @@ class ReadingManagementService:
         return {"id": occurrence.Id, "reminder_id": occurrence.ReminderId,
                 "scheduled_local_date": occurrence.ScheduledLocalDate, "scheduled_for": occurrence.ScheduledFor,
                 "status": occurrence.Status, "acknowledged_at": occurrence.AcknowledgedAt, "reminder": None}
+
+
+    async def reminder_email_status(self, actor_id: UUID):
+        """Return readiness metadata only; never return the recipient's email address."""
+        await self.require_parent(actor_id)
+        contact = await SupabaseAuthContactProvider().get_contact_info(actor_id)
+        provider_configured = bool(RESEND_API_KEY)
+        sender_configured = bool(READING_REMINDER_FROM_EMAIL)
+        app_url_configured = bool(READING_REMINDER_APP_URL)
+        auth_admin_configured = bool(SUPABASE_ADMIN_KEY)
+        email_available = bool(contact.get("email"))
+        email_verified = contact.get("email_verified")
+        ready = (
+            provider_configured and sender_configured and app_url_configured
+            and auth_admin_configured and email_available and email_verified is True
+        )
+        return {
+            "provider_configured": provider_configured,
+            "sender_configured": sender_configured,
+            "app_url_configured": app_url_configured,
+            "auth_admin_configured": auth_admin_configured,
+            "email_available": email_available,
+            "email_verified": email_verified,
+            "ready": ready,
+        }
