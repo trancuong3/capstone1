@@ -111,33 +111,36 @@ describe("AdminNewBookScreen", () => {
     },
   );
 
-  it("blocks duplicate submissions while the create request is pending", async () => {
-    const services = createAdminServiceFixture();
-    let resolveCreate: ((book: typeof adminBookFixture) => void) | undefined;
-    vi.mocked(services.books.create).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveCreate = resolve;
-        }),
-    );
-    const user = userEvent.setup();
-    render(withAdminFixture(<AdminNewBookScreen />, services));
-
-    await user.type(
-      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
-      "Sách một lần",
-    );
-    const submitButton = screen.getByRole("button", { name: "Tạo sách" });
-    await user.click(submitButton);
-    await waitFor(() => expect(services.books.create).toHaveBeenCalledOnce());
-    await user.click(submitButton);
-    expect(services.books.create).toHaveBeenCalledOnce();
-
-    resolveCreate?.(adminBookFixture);
-    await waitFor(() => {
-      expect(routerMock.push).toHaveBeenCalledWith(
-        `/admin/books/${adminBookFixture.id}`,
+  it(
+    "blocks duplicate submissions while the create request is pending",
+    async () => {
+      const services = createAdminServiceFixture();
+      let resolveCreate: ((book: typeof adminBookFixture) => void) | undefined;
+      vi.mocked(services.books.create).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveCreate = resolve;
+          }),
       );
-    });
-  });
+      const user = userEvent.setup();
+      render(withAdminFixture(<AdminNewBookScreen />, services));
+
+      await user.type(
+        screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
+        "Sách một lần",
+      );
+      const submitButton = screen.getByRole("button", { name: "Tạo sách" });
+      await user.click(submitButton);
+      await waitFor(() => expect(services.books.create).toHaveBeenCalledOnce());
+      await user.click(submitButton);
+      expect(services.books.create).toHaveBeenCalledOnce();
+
+      resolveCreate?.(adminBookFixture);
+      await waitFor(() => {
+        expect(routerMock.push).toHaveBeenCalledWith(
+          `/admin/books/${adminBookFixture.id}`,
+        );
+      });
+    },
+  );
 });
