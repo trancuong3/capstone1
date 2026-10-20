@@ -183,8 +183,8 @@ export function AdminBooksScreen() {
             value={lifecycle}
           >
             <option value="">Tất cả</option>
-            <option value="ACTIVE">Đang hoạt động</option>
-            <option value="RETIRED">Đã ngừng</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="RETIRED">RETIRED</option>
           </SelectField>
           <SelectField
             label="Trạng thái OCR"
