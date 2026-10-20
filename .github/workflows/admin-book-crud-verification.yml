@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/admin-book-crud-metadata-quality-20261020
+      - fix/admin-book-crud-title-and-ci-20261020
   pull_request:
     branches:
       - main
