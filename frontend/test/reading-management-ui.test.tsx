@@ -36,6 +36,8 @@ beforeEach(() => {
       const url = new URL(String(input));
       if (url.pathname === "/profiles/children") return Response.json([child]);
       if (url.pathname === "/books/catalog") return Response.json([]);
+      if (url.pathname === "/reading-management/reminders/email-status")
+        return Response.json({ provider_configured: false, sender_configured: false, app_url_configured: false, auth_admin_configured: false, email_available: false, email_verified: null, ready: false });
       if (
         url.pathname === "/reading-management/goals" &&
         init?.method === "POST"
