@@ -1,0 +1,56 @@
+name: Reading Reminder Email
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Avoid concurrent claims from this workflow while preserving any running job.
+concurrency:
+  group: reading-reminder-email-worker
+  cancel-in-progress: false
+
+jobs:
+  send-reading-reminders:
+    name: Process due reading reminder emails
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      # This must point to the same Supabase PostgreSQL database used by the local API.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      # Configure one Admin key; the new Secret key takes precedence over the legacy key.
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      READING_REMINDER_FROM_EMAIL: ${{ secrets.READING_REMINDER_FROM_EMAIL }}
+      READING_REMINDER_APP_URL: ${{ secrets.READING_REMINDER_APP_URL }}
+      READING_REMINDER_CATCH_UP_MINUTES: ${{ secrets.READING_REMINDER_CATCH_UP_MINUTES }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run the one-shot email worker
+        run: python -m app.jobs.send_reading_reminder_emails
