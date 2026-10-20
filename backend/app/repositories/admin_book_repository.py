@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, BookPage, Profile
+from app.models import Book, Profile
 
 
 class AdminBookRepository:
@@ -60,8 +60,3 @@ class AdminBookRepository:
             raise
         return book
 
-    async def next_page_number(self, book_id: UUID) -> int:
-        current = await self.db.scalar(
-            select(func.max(BookPage.PageNumber)).where(BookPage.BookId == book_id)
-        )
-        return int(current or 0) + 1
