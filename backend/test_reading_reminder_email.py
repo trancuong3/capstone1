@@ -14,7 +14,10 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from app.providers.resend_email_provider import ResendEmailProvider, ResendEmailProviderError, build_reminder_message
 from app.repositories.reading_reminder_email_repository import scheduled_occurrences
-from app.services.reading_reminder_email_service import ReadingReminderEmailService
+from app.services.reading_reminder_email_service import (
+    ReadingReminderEmailConfigurationError,
+    ReadingReminderEmailService,
+)
 
 
 NOW = datetime(2026, 10, 19, 12, 10, tzinfo=timezone.utc)
@@ -45,9 +48,8 @@ class FakeRepository:
     async def skip_ineligible_deliveries(self, now):
         return 0
 
-    async def skip_waiting_deliveries(self, reason, now):
-        self.calls.append(("skip_waiting", reason))
-        return 1
+    async def release_delivery_for_configuration_error(self, delivery_id, reason, now):
+        self.calls.append(("release_configuration_error", delivery_id, reason))
 
     async def claim_next_delivery(self, now):
         if self.claimed:
@@ -125,13 +127,26 @@ class ReminderEmailTests(unittest.TestCase):
         self.assertNotIn("Bé An", text_body)
         self.assertNotIn("đã hoàn thành", text_body)
 
-    def test_missing_provider_config_is_not_reported_as_sent(self):
+    def test_missing_provider_config_fails_run_without_skipping_pending_delivery(self):
         repo = FakeRepository()
         mailer = ResendEmailProvider(api_key=None, from_email=None, app_url=None)
-        stats = asyncio.run(ReadingReminderEmailService(repo, mailer, FakeAuth({})).run_once(now=NOW))
-        self.assertEqual(stats["provider_accepted"], 0)
-        self.assertEqual(stats["skipped"], 1)
-        self.assertIn(("skip_waiting", "email_provider_not_configured"), repo.calls)
+        with self.assertRaises(ReadingReminderEmailConfigurationError) as caught:
+            asyncio.run(ReadingReminderEmailService(repo, mailer, FakeAuth({})).run_once(now=NOW))
+        self.assertEqual(str(caught.exception), "email_provider_not_configured")
+        self.assertIn(("enqueue", 120), repo.calls)
+        self.assertEqual(repo.skipped, [])
+        self.assertFalse(repo.claimed)
+
+    def test_missing_auth_admin_config_releases_claim_without_skipping(self):
+        repo, mailer = FakeRepository(), FakeMailer()
+        auth = FakeAuth({"contact_info_status": "not_configured"})
+        with self.assertRaises(ReadingReminderEmailConfigurationError) as caught:
+            asyncio.run(ReadingReminderEmailService(repo, mailer, auth).run_once(now=NOW))
+        self.assertEqual(str(caught.exception), "supabase_auth_admin_not_configured")
+        self.assertIn(("release_configuration_error", DELIVERY_ID,
+                       "supabase_auth_admin_not_configured"), repo.calls)
+        self.assertEqual(repo.skipped, [])
+        self.assertEqual(mailer.sent_to, [])
 
     def test_parent_without_verified_email_is_skipped(self):
         repo, mailer = FakeRepository(), FakeMailer()
