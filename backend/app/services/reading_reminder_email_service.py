@@ -12,6 +12,11 @@ MAX_ATTEMPTS = 5
 DEFAULT_BATCH_SIZE = 100
 
 
+class ReadingReminderEmailConfigurationError(RuntimeError):
+    """Required worker configuration is missing; queued deliveries must remain recoverable."""
+
+
+
 class ReadingReminderEmailService:
     def __init__(self, repository, mailer=None, auth_provider=None):
         self.repository = repository
@@ -31,10 +36,12 @@ class ReadingReminderEmailService:
             stats[key] = queued.get(key, 0)
         stats["skipped"] += await self.repository.skip_ineligible_deliveries(now)
 
+        # Configuration failures must never consume or skip queued deliveries. Fail this
+        # scheduled run so GitHub Actions reports a failure, leaving the outbox recoverable.
         if not self.mailer.is_configured:
-            stats["skipped"] += await self.repository.skip_waiting_deliveries(
-                "email_provider_not_configured", now)
-            return stats
+            raise ReadingReminderEmailConfigurationError("email_provider_not_configured")
+        if getattr(self.auth_provider, "is_configured", True) is False:
+            raise ReadingReminderEmailConfigurationError("supabase_auth_admin_not_configured")
 
         processed = 0
         while processed < batch_size:
@@ -59,6 +66,12 @@ class ReadingReminderEmailService:
                 continue
 
             contact_status = contact.get("contact_info_status")
+            if contact_status == "not_configured":
+                # This is an operator/configuration problem, not an ineligible recipient.
+                # Release the claim without consuming an attempt, then fail the run.
+                await self.repository.release_delivery_for_configuration_error(
+                    delivery_id, "supabase_auth_admin_not_configured", now)
+                raise ReadingReminderEmailConfigurationError("supabase_auth_admin_not_configured")
             if contact_status == "lookup_failed":
                 retry = await self.repository.mark_failed(
                     delivery_id, "parent_auth_lookup_failed", retryable=True, now=now,
@@ -67,9 +80,7 @@ class ReadingReminderEmailService:
                 stats["retried"] += int(retry)
                 continue
             if contact_status != "available":
-                reason = ("supabase_auth_admin_not_configured" if contact_status == "not_configured"
-                          else "parent_auth_user_unavailable")
-                await self.repository.mark_skipped(delivery_id, reason, now)
+                await self.repository.mark_skipped(delivery_id, "parent_auth_user_unavailable", now)
                 stats["skipped"] += 1
                 continue
 
