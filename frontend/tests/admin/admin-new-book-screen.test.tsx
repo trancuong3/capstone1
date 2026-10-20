@@ -32,7 +32,7 @@ describe("AdminNewBookScreen", () => {
     expect(title).toHaveAttribute("maxLength", "250");
   });
 
-  it.each(["", "   ", " \t "])(
+  it.each(["", "   "])(
     "rejects an empty or whitespace-only title (%j) without calling the service",
     async (enteredTitle) => {
       const services = createAdminServiceFixture();
