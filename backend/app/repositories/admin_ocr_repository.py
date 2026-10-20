@@ -20,10 +20,6 @@ class AdminOcrRepository:
     async def book(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
 
-    def stage_book(self, book: Book) -> None:
-        """Stage a validated Admin-created book for the service transaction."""
-        self.db.add(book)
-
     def stage_revision_bundle(
         self,
         revision: PageRevision,
