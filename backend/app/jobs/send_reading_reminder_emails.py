@@ -7,7 +7,10 @@ from uuid import uuid4
 
 from app.database.session import AsyncSessionLocal, engine
 from app.repositories.reading_reminder_email_repository import ReadingReminderEmailRepository
-from app.services.reading_reminder_email_service import ReadingReminderEmailService
+from app.services.reading_reminder_email_service import (
+    ReadingReminderEmailConfigurationError,
+    ReadingReminderEmailService,
+)
 
 logger = logging.getLogger("viread.reading_reminder_email_worker")
 
@@ -28,6 +31,11 @@ async def run() -> int:
             stats["failed"], stats["retried"], stats["stale_claims_recovered"],
         )
         return 0
+    except ReadingReminderEmailConfigurationError as error:
+        # The message is a fixed, normalized error code and contains no secret or recipient data.
+        logger.error("reading_reminder_email_job_failed job_id=%s error_code=%s",
+                     job_id, str(error))
+        return 1
     except Exception as error:
         # Avoid exception text because provider or database errors can contain sensitive values.
         logger.error("reading_reminder_email_job_failed job_id=%s exception_type=%s",
