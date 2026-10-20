@@ -143,11 +143,14 @@ describe("real Admin adapters", () => {
     expect(url.searchParams.get("lifecycle_status")).toBe("RETIRED");
     expect(url.searchParams.get("verification_status")).toBe("VERIFIED");
   });
-  it("reads book metadata and next page number from the admin route", async () => {
+  it(
+    "reads book metadata and next page number from the admin route",
+    async () => {
     const adminBookDetail = { ...book, next_page_number: 8 };
     fetchMock.mockResolvedValue(Response.json(adminBookDetail));
     expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
-  });
+    },
+  );
   it("rejects a book belonging to a different requested ID", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...book, id: pageId }));
     await expect(createAdminBookService().get(bookId)).rejects.toMatchObject({
@@ -186,7 +189,9 @@ describe("real Admin adapters", () => {
       createAdminPageService().getImage(pageId),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
   });
-  it("rejects image and processing IDs that differ from the request", async () => {
+  it(
+    "rejects image and processing IDs that differ from the request",
+    async () => {
     fetchMock
       .mockResolvedValueOnce(Response.json({ ...image, page_id: bookId }))
       .mockResolvedValueOnce(Response.json({ ...processing, page_id: bookId }));
@@ -196,8 +201,11 @@ describe("real Admin adapters", () => {
     await expect(createAdminPageService().reload(pageId)).rejects.toMatchObject(
       { code: "NETWORK_ERROR" },
     );
-  });
-  it("reads revision summaries without changing status or version", async () => {
+    },
+  );
+  it(
+    "reads revision summaries without changing status or version",
+    async () => {
     const summary = {
       page_revision_id: revisionId,
       revision_no: 2,
@@ -207,7 +215,8 @@ describe("real Admin adapters", () => {
     };
     fetchMock.mockResolvedValue(Response.json([summary]));
     expect(await createRevisionService().list(pageId)).toEqual([summary]);
-  });
+    },
+  );
   it("reads nullable stored text, not generated OCR text", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...detail, draft_text: null }));
     expect(
@@ -225,7 +234,9 @@ describe("real Admin adapters", () => {
       createOcrReviewService().getRevision(pageId, revisionId),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
   });
-  it("rejects pixel bounding boxes rather than guessing normalization", async () => {
+  it(
+    "rejects pixel bounding boxes rather than guessing normalization",
+    async () => {
     fetchMock.mockResolvedValue(
       Response.json({
         ...detail,
@@ -244,7 +255,8 @@ describe("real Admin adapters", () => {
     await expect(
       createOcrReviewService().getRevision(pageId, revisionId),
     ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
-  });
+    },
+  );
   it.each(["id", "actor_id", "resource_id"] as const)(
     "preserves PostgreSQL audit UUID in %s",
     async (field) => {
@@ -276,7 +288,9 @@ describe("real Admin adapters", () => {
       });
     },
   );
-  it("reads audit nullable actors and forwards filters and cursor", async () => {
+  it(
+    "reads audit nullable actors and forwards filters and cursor",
+    async () => {
     const result = {
       items: [
         {
@@ -304,7 +318,8 @@ describe("real Admin adapters", () => {
     const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
     expect(query.get("cursor")).toBe("page-2");
     expect(query.get("action")).toBe("book.read");
-  });
+    },
+  );
   it("reads actual backend health snapshot", async () => {
     const result = {
       overall_status: "DEGRADED",
@@ -335,7 +350,9 @@ describe("real Admin adapters", () => {
       });
     },
   );
-  it("shows a mapped safe message for a known OCR configuration error", async () => {
+  it(
+    "shows a mapped safe message for a known OCR configuration error",
+    async () => {
     fetchMock.mockResolvedValue(
       Response.json(
         { detail: "Supabase Storage is not configured" },
@@ -346,9 +363,12 @@ describe("real Admin adapters", () => {
       status: 503,
       message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
     });
-  });
+    },
+  );
 
-  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+  it(
+    "shows the safe Storage bucket reason and includes its request ID",
+    async () => {
     fetchMock.mockResolvedValue(
       Response.json(
         {
@@ -367,7 +387,8 @@ describe("real Admin adapters", () => {
       message:
         "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
     });
-  });
+    },
+  );
 
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
@@ -393,7 +414,9 @@ describe("real Admin adapters", () => {
     });
   });
 
-  it("uploads each page as multipart data and reloads the server page list", async () => {
+  it(
+    "uploads each page as multipart data and reloads the server page list",
+    async () => {
     const needsReviewDetail = {
       ...detail,
       verification_status: "NEEDS_REVIEW",
@@ -446,7 +469,8 @@ describe("real Admin adapters", () => {
       { status: "UPLOADING", progress_percent: 0 },
       { status: "PROCESSING", progress_percent: 100 },
     ]);
-  });
+    },
+  );
 
   it("shows a safe Storage reason for a failed page upload", async () => {
     const file = new File(["image-bytes"], "page-3.png", {
@@ -490,7 +514,9 @@ describe("real Admin adapters", () => {
     });
   });
 
-  it("persists an OCR draft using the validated revision contract", async () => {
+  it(
+    "persists an OCR draft using the validated revision contract",
+    async () => {
     const word = {
       word_index: 0,
       line_index: 0,
@@ -525,9 +551,12 @@ describe("real Admin adapters", () => {
       draft_text: "Chú",
       words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
     });
-  });
+    },
+  );
 
-  it("verifies a revision and can request a new immutable OCR revision", async () => {
+  it(
+    "verifies a revision and can request a new immutable OCR revision",
+    async () => {
     const word = {
       word_index: 0,
       line_index: 0,
@@ -580,12 +609,20 @@ describe("real Admin adapters", () => {
       `/books/admin/pages/${pageId}/reprocess`,
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
-  });
+    },
+  );
 
-  it("updates metadata and lifecycle through the real book API adapters", async () => {
+  it(
+    "updates metadata and lifecycle through the real book API adapters",
+    async () => {
     const books = createAdminBookService();
     fetchMock.mockResolvedValueOnce(
-      Response.json({ ...book, title: "Updated title", min_grade: 2, max_grade: 4 }),
+      Response.json({
+        ...book,
+        title: "Updated title",
+        min_grade: 2,
+        max_grade: 4,
+      }),
     );
 
     const updated = await books.update(bookId, {
@@ -621,7 +658,8 @@ describe("real Admin adapters", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       status: "RETIRED",
     });
-  });
+    },
+  );
 
   it("keeps unsupported page lifecycle updates unavailable", async () => {
     await expect(
