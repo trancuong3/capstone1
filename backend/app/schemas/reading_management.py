@@ -9,6 +9,7 @@ GoalPeriod = Literal["DAILY", "WEEKLY"]
 GoalStatus = Literal["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]
 CollectionType = Literal["FAVORITE", "WANT_TO_READ"]
 ReminderStatus = Literal["PENDING", "ACKNOWLEDGED"]
+EmailDeliveryStatus = Literal["PENDING", "PROCESSING", "SENT", "FAILED", "SKIPPED"]
 
 
 def validate_timezone(value: str) -> str:
@@ -111,6 +112,7 @@ class ReadingReminderCreate(BaseModel):
     weekdays: list[int] = Field(min_length=1, max_length=7)
     timezone: str = "Asia/Ho_Chi_Minh"
     is_active: bool = True
+    email_enabled: bool = False
 
     @field_validator("weekdays")
     @classmethod
@@ -133,6 +135,7 @@ class ReadingReminderUpdate(BaseModel):
     weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
     timezone: str | None = None
     is_active: bool | None = None
+    email_enabled: bool | None = None
 
     @field_validator("weekdays")
     @classmethod
@@ -152,7 +155,7 @@ class ReadingReminderUpdate(BaseModel):
     def require_changes(self):
         if not self.model_fields_set:
             raise ValueError("At least one field must be supplied")
-        for field_name in ("remind_at", "weekdays", "timezone", "is_active"):
+        for field_name in ("remind_at", "weekdays", "timezone", "is_active", "email_enabled"):
             if field_name in self.model_fields_set and getattr(self, field_name) is None:
                 raise ValueError(f"{field_name} cannot be null")
         return self
@@ -165,6 +168,8 @@ class ReadingReminderRead(BaseModel):
     weekdays: list[int]
     timezone: str
     is_active: bool
+    email_enabled: bool = False
+    latest_email_status: EmailDeliveryStatus | None = None
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -182,3 +187,13 @@ class ReadingReminderOccurrenceRead(BaseModel):
 
 class DeletedResponse(BaseModel):
     deleted: Literal[True] = True
+
+
+class ReadingReminderEmailStatusRead(BaseModel):
+    provider_configured: bool
+    sender_configured: bool
+    app_url_configured: bool
+    auth_admin_configured: bool
+    email_available: bool
+    email_verified: bool | None
+    ready: bool
