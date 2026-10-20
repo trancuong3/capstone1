@@ -15,6 +15,7 @@ from app.repositories.book_repository import (
 )
 from app.schemas import BookCreate
 from app.schemas.book import (
+    AdminBookMetadataResponse,
     AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
@@ -116,7 +117,7 @@ class AdminCatalogService:
         if row is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         try:
-            return CatalogBookResponse.model_validate(row)
+            return AdminBookMetadataResponse.model_validate(row)
         except ValidationError:
             raise HTTPException(status_code=501, detail="Book contract is not available yet") from None
 
@@ -151,7 +152,7 @@ class AdminCatalogService:
                 continue
             try:
                 output.append(AdminCatalogBookResponse(
-                book=CatalogBookResponse.model_validate(book), page_count=len(pages),
+                book=AdminBookMetadataResponse.model_validate(book), page_count=len(pages),
                 processing_count=statuses.count("PROCESSING"), needs_review_count=statuses.count("NEEDS_REVIEW"),
                 verified_count=statuses.count("VERIFIED"), parent_catalog_eligible=await self.repository.is_eligible(book.Id),
                 ))
