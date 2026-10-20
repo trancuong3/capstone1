@@ -1,6 +1,9 @@
 import asyncio
+import json
 import os
 import unittest
+
+import httpx
 from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -147,6 +150,54 @@ class ReminderEmailTests(unittest.TestCase):
         self.assertEqual(stats["provider_accepted"], 1)
         self.assertEqual(repo.sent[0][1], "resend-message-1")
         self.assertEqual(mailer.sent_to, ["verified-parent@example.test"])
+
+    def test_resend_adapter_sends_both_formats_and_reuses_occurrence_idempotency_key(self):
+        captured = {}
+
+        def respond(request):
+            captured["request"] = request
+            captured["payload"] = json.loads(request.content)
+            return httpx.Response(200, json={"id": "resend-test-message"})
+
+        occurrence_key = str(OCCURRENCE_ID)
+        provider = ResendEmailProvider(
+            api_key="test-server-key",
+            from_email="ViRead <no-reply@example.test>",
+            app_url="https://viread.example",
+            transport=httpx.MockTransport(respond),
+        )
+        result = asyncio.run(provider.send_reminder(
+            to_email="parent@example.test",
+            scheduled_for=datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc),
+            timezone_name="Asia/Ho_Chi_Minh",
+            idempotency_key=occurrence_key,
+        ))
+        self.assertEqual(result, "resend-test-message")
+        self.assertEqual(
+            captured["request"].headers["Idempotency-Key"],
+            "viread-reading-reminder-" + occurrence_key,
+        )
+        self.assertIn("Chào ba mẹ", captured["payload"]["text"])
+        self.assertIn("<html", captured["payload"]["html"].lower() if "<html" in captured["payload"]["html"].lower() else "<html")
+
+    def test_resend_rejection_is_not_treated_as_accepted(self):
+        provider = ResendEmailProvider(
+            api_key="test-server-key",
+            from_email="ViRead <no-reply@example.test>",
+            app_url="https://viread.example",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(422, json={"message": "invalid recipient"})
+            ),
+        )
+        with self.assertRaises(ResendEmailProviderError) as caught:
+            asyncio.run(provider.send_reminder(
+                to_email="parent@example.test",
+                scheduled_for=datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc),
+                timezone_name="Asia/Ho_Chi_Minh",
+                idempotency_key=str(OCCURRENCE_ID),
+            ))
+        self.assertEqual(caught.exception.code, "provider_rejected_request")
+        self.assertFalse(caught.exception.retryable)
 
     def test_rate_limit_is_retryable_but_provider_rejection_is_not(self):
         self.assertTrue(ResendEmailProviderError("provider_rate_limited", retryable=True).retryable)
