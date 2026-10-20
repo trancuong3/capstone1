@@ -178,7 +178,8 @@ class ReminderEmailTests(unittest.TestCase):
             "viread-reading-reminder-" + occurrence_key,
         )
         self.assertIn("Chào ba mẹ", captured["payload"]["text"])
-        self.assertIn("<html", captured["payload"]["html"].lower() if "<html" in captured["payload"]["html"].lower() else "<html")
+        self.assertIn("Mở ViRead", captured["payload"]["html"])
+        self.assertIn("href=", captured["payload"]["html"])
 
     def test_resend_rejection_is_not_treated_as_accepted(self):
         provider = ResendEmailProvider(
