@@ -582,24 +582,51 @@ describe("real Admin adapters", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 
-  it("keeps unsupported edit and lifecycle operations explicitly unavailable", async () => {
+  it("updates metadata and lifecycle through the real book API adapters", async () => {
     const books = createAdminBookService();
-    const pages = createAdminPageService();
-    const operations = [
-      books.update(bookId, {
-        title: "X",
-        author: null,
-        min_grade: 1,
-        max_grade: 3,
-      }),
-      books.updateStatus(bookId, { status: "RETIRED" }),
-      pages.updateStatus(pageId, { status: "RETIRED" }),
-    ];
-    await Promise.all(
-      operations.map((operation) =>
-        expect(operation).rejects.toMatchObject({ status: 501 }),
-      ),
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...book, title: "Updated title", min_grade: 2, max_grade: 4 }),
     );
+
+    const updated = await books.update(bookId, {
+      title: "  Updated title  ",
+      author: "  Author  ",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    expect(updated.title).toBe("Updated title");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "Updated title",
+      author: "Author",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...book, lifecycle_status: "RETIRED" }),
+    );
+    const retired = await books.updateStatus(bookId, { status: "RETIRED" });
+
+    expect(retired.lifecycle_status).toBe("RETIRED");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}/status`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      status: "RETIRED",
+    });
+  });
+
+  it("keeps unsupported page lifecycle updates unavailable", async () => {
+    await expect(
+      createAdminPageService().updateStatus(pageId, { status: "RETIRED" }),
+    ).rejects.toMatchObject({ status: 501 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
