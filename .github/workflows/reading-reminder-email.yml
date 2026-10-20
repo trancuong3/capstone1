@@ -37,20 +37,47 @@ jobs:
       READING_REMINDER_CATCH_UP_MINUTES: ${{ secrets.READING_REMINDER_CATCH_UP_MINUTES }}
 
     steps:
+      - name: Validate required cloud worker configuration without printing values
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          required = [
+              "DATABASE_URL",
+              "SUPABASE_URL",
+              "SUPABASE_KEY",
+              "RESEND_API_KEY",
+              "READING_REMINDER_FROM_EMAIL",
+              "READING_REMINDER_APP_URL",
+          ]
+          missing = [key for key in required if not os.getenv(key, "").strip()]
+          if not (os.getenv("SUPABASE_SECRET_KEY", "").strip()
+                  or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()):
+              missing.append("SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY")
+          if missing:
+              raise SystemExit("Missing required GitHub Actions secrets: " + ", ".join(missing))
+
+          database_url = os.environ["DATABASE_URL"].strip()
+          hostname = urlparse(database_url).hostname
+          if not hostname or hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
+              raise SystemExit("DATABASE_URL must point to the shared cloud PostgreSQL database, not localhost")
+          PY
+
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt
 
       - name: Run the one-shot email worker
         run: python -m app.jobs.send_reading_reminder_emails
