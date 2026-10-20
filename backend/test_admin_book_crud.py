@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.deps import get_current_parent_id, get_db
+from app.api.routes import admin_ocr as admin_ocr_routes
 from app.api.routes import book as book_routes
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.admin_book import AdminBookWriteRequest
@@ -217,6 +218,7 @@ class AdminBookAuthHttpTests(unittest.TestCase):
         self.db.scalar = AsyncMock(return_value="parent")
         self.app = FastAPI()
         self.app.include_router(book_routes.router, prefix="/books")
+        self.app.include_router(admin_ocr_routes.router, prefix="/books")
         self.app.dependency_overrides[get_current_parent_id] = lambda: PARENT_ID
         self.app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(self.app)
