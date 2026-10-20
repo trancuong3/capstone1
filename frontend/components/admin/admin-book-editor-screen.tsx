@@ -5,7 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AdminLoading, AdminPageHeader, AdminStatusBadge } from "@/components/admin/admin-ui";
+import {
+  AdminLoading,
+  AdminPageHeader,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -91,7 +95,8 @@ export function AdminBookEditorScreen({
 
   async function changeLifecycle() {
     if (!book || statusBusy) return;
-    const nextStatus = book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
+    const nextStatus =
+      book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
     const confirmation =
       nextStatus === "RETIRED"
         ? "Ngừng hoạt động sách này? Trang sách và lịch sử đọc sẽ được giữ nguyên."
@@ -108,7 +113,10 @@ export function AdminBookEditorScreen({
       setBook(updated);
       setNotice({
         tone: "info",
-        title: nextStatus === "RETIRED" ? "Đã ngừng hoạt động sách" : "Đã kích hoạt lại sách",
+        title:
+          nextStatus === "RETIRED"
+            ? "Đã ngừng hoạt động sách"
+            : "Đã kích hoạt lại sách",
         message:
           nextStatus === "RETIRED"
             ? "Sách không còn xuất hiện trong catalog Parent. Metadata, trang sách, revision và lịch sử đọc vẫn được giữ nguyên."
@@ -117,9 +125,14 @@ export function AdminBookEditorScreen({
     } catch (cause) {
       setNotice({
         tone: "error",
-        title: nextStatus === "ACTIVE" ? "Không thể kích hoạt sách" : "Không thể ngừng hoạt động sách",
+        title:
+          nextStatus === "ACTIVE"
+            ? "Không thể kích hoạt sách"
+            : "Không thể ngừng hoạt động sách",
         message:
-          nextStatus === "ACTIVE" && isServiceError(cause) && cause.status === 422
+          nextStatus === "ACTIVE" &&
+          isServiceError(cause) &&
+          cause.status === 422
             ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
             : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
       });
@@ -134,7 +147,11 @@ export function AdminBookEditorScreen({
     return (
       <EmptyState
         headingLevel={1}
-        title={error === "not-found" ? "Không tìm thấy sách" : "Không thể tải metadata sách"}
+        title={
+          error === "not-found"
+            ? "Không tìm thấy sách"
+            : "Không thể tải metadata sách"
+        }
         description={
           error === "not-found"
             ? "Sách không tồn tại hoặc không còn trong dữ liệu quản trị."
@@ -142,7 +159,9 @@ export function AdminBookEditorScreen({
         }
         action={
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => void load()} variant="secondary">Thử lại</Button>
+            <Button onClick={() => void load()} variant="secondary">
+              Thử lại
+            </Button>
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
@@ -171,14 +190,25 @@ export function AdminBookEditorScreen({
       />
       <Link
         className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
-        href={returnTo === "metadata-quality" ? "/admin/metadata-quality" : `/admin/books/${encodeURIComponent(bookId)}`}
+        href={
+          returnTo === "metadata-quality"
+            ? "/admin/metadata-quality"
+            : `/admin/books/${encodeURIComponent(bookId)}`
+        }
       >
         <ArrowLeft aria-hidden className="size-5" />
-        {returnTo === "metadata-quality" ? "Quay lại chất lượng metadata" : "Quay lại chi tiết sách"}
+        {returnTo === "metadata-quality"
+          ? "Quay lại chất lượng metadata"
+          : "Quay lại chi tiết sách"}
       </Link>
       {issue && issueLabels[issue] ? (
-        <StatusMessage className="mb-5" tone="info" title={`Cần xử lý: ${issueLabels[issue]}`}>
-          Kiểm tra trường liên quan bên dưới. Dashboard chỉ xóa cảnh báo sau khi tải lại dữ liệu từ Backend và điều kiện đó đã được khắc phục.
+        <StatusMessage
+          className="mb-5"
+          tone="info"
+          title={`Cần xử lý: ${issueLabels[issue]}`}
+        >
+          Kiểm tra trường liên quan bên dưới. Dashboard chỉ xóa cảnh báo sau khi
+          tải lại dữ liệu từ Backend và điều kiện đó đã được khắc phục.
         </StatusMessage>
       ) : null}
       <div className="mb-5 flex flex-wrap items-center gap-3">
@@ -190,7 +220,9 @@ export function AdminBookEditorScreen({
           onClick={() => void changeLifecycle()}
           variant="secondary"
         >
-          {book.lifecycle_status === "ACTIVE" ? "Ngừng hoạt động" : "Kích hoạt lại"}
+          {book.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động"
+            : "Kích hoạt lại"}
         </Button>
       </div>
       {notice ? (
@@ -200,7 +232,11 @@ export function AdminBookEditorScreen({
       ) : null}
       <Card className="max-w-3xl bg-white">
         <h2 className="mb-5 text-xl font-black">Thông tin sách</h2>
-        <AdminBookForm initial={initial} onSubmit={saveMetadata} submitLabel="Lưu metadata" />
+        <AdminBookForm
+          initial={initial}
+          onSubmit={saveMetadata}
+          submitLabel="Lưu metadata"
+        />
       </Card>
     </>
   );

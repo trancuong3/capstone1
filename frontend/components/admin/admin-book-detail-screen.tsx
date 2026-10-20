@@ -90,8 +90,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       }
       // Remove the row immediately after Backend confirmation, then reload from
       // PostgreSQL so the UI never relies on an optimistic-only deletion.
-      setItems((current) =>
-        current?.filter((entry) => entry.processing.page_id !== pageId) ?? [],
+      setItems(
+        (current) =>
+          current?.filter((entry) => entry.processing.page_id !== pageId) ?? [],
       );
       setPendingRetire(null);
       setRetiringPageId(null);

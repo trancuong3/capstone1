@@ -351,7 +351,9 @@ export function AdminMetadataQualityScreen() {
                         </td>
                         <td className="px-3 py-4">
                           <div className="flex flex-wrap gap-x-3 gap-y-1">
-                            {book.issues.some((issue) => issue !== "POSSIBLE_DUPLICATE") ? (
+                            {book.issues.some(
+                              (issue) => issue !== "POSSIBLE_DUPLICATE",
+                            ) ? (
                               <Link
                                 className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                                 href={
@@ -359,8 +361,9 @@ export function AdminMetadataQualityScreen() {
                                   encodeURIComponent(book.id) +
                                   "/edit?returnTo=metadata-quality&issue=" +
                                   encodeURIComponent(
-                                    book.issues.find((issue) => issue !== "POSSIBLE_DUPLICATE") ??
-                                      book.issues[0],
+                                    book.issues.find(
+                                      (issue) => issue !== "POSSIBLE_DUPLICATE",
+                                    ) ?? book.issues[0],
                                   )
                                 }
                               >
@@ -372,7 +375,9 @@ export function AdminMetadataQualityScreen() {
                             {book.issues.includes("POSSIBLE_DUPLICATE") ? (
                               <Link
                                 className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                                href={"/admin/books/" + encodeURIComponent(book.id)}
+                                href={
+                                  "/admin/books/" + encodeURIComponent(book.id)
+                                }
                               >
                                 So sánh sách
                               </Link>

@@ -37,9 +37,16 @@ describe("AdminBookEditorScreen", () => {
     });
     const user = userEvent.setup();
 
-    render(withAdminFixture(<AdminBookEditorScreen bookId={adminBookFixture.id} />, services));
+    render(
+      withAdminFixture(
+        <AdminBookEditorScreen bookId={adminBookFixture.id} />,
+        services,
+      ),
+    );
 
-    const title = await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
+    const title = await screen.findByRole("textbox", {
+      name: "Tên sách (bắt buộc)",
+    });
     expect(title).toHaveValue(adminBookFixture.title);
     await user.clear(title);
     await user.type(title, "Tên sách đã sửa");
@@ -79,7 +86,9 @@ describe("AdminBookEditorScreen", () => {
       ),
     );
 
-    const title = await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
+    const title = await screen.findByRole("textbox", {
+      name: "Tên sách (bắt buộc)",
+    });
     await user.clear(title);
     await user.type(title, "Đã bổ sung tiêu đề");
     await user.click(screen.getByRole("button", { name: "Lưu metadata" }));
@@ -100,7 +109,12 @@ describe("AdminBookEditorScreen", () => {
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const user = userEvent.setup();
 
-    render(withAdminFixture(<AdminBookEditorScreen bookId={adminBookFixture.id} />, services));
+    render(
+      withAdminFixture(
+        <AdminBookEditorScreen bookId={adminBookFixture.id} />,
+        services,
+      ),
+    );
     await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
     await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
 
@@ -110,8 +124,12 @@ describe("AdminBookEditorScreen", () => {
         { status: "RETIRED" },
       );
     });
-    expect(await screen.findByRole("button", { name: "Kích hoạt lại" })).toBeInTheDocument();
-    expect(screen.getByText(/lịch sử đọc vẫn được giữ nguyên/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Kích hoạt lại" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/lịch sử đọc vẫn được giữ nguyên/),
+    ).toBeInTheDocument();
   });
 
   it("does not claim reactivation when the backend rejects invalid metadata", async () => {
@@ -132,7 +150,12 @@ describe("AdminBookEditorScreen", () => {
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const user = userEvent.setup();
 
-    render(withAdminFixture(<AdminBookEditorScreen bookId={adminBookFixture.id} />, services));
+    render(
+      withAdminFixture(
+        <AdminBookEditorScreen bookId={adminBookFixture.id} />,
+        services,
+      ),
+    );
     await screen.findByRole("textbox", { name: "Tên sách (bắt buộc)" });
     await user.click(screen.getByRole("button", { name: "Kích hoạt lại" }));
 

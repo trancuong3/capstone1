@@ -19,7 +19,9 @@ export default async function Page({
       <AdminBookEditorScreen
         bookId={bookId}
         issue={query.issue}
-        returnTo={query.returnTo === "metadata-quality" ? "metadata-quality" : "detail"}
+        returnTo={
+          query.returnTo === "metadata-quality" ? "metadata-quality" : "detail"
+        }
       />
     </AdminServicesProvider>
   );
