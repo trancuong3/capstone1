@@ -175,7 +175,7 @@ export function AdminBooksScreen() {
                         </span>
                       ) : null}
                     </div>
-                    <h2 className="text-2xl font-black">{item.book.title}</h2>
+                    <h2 className="text-2xl font-black">{item.book.title.trim() ? item.book.title : "Chưa có tiêu đề"}</h2>
                     <p className="text-muted">
                       {item.book.author ?? "Chưa có tác giả"} · Khối{" "}
                       {item.book.min_grade}–{item.book.max_grade}
