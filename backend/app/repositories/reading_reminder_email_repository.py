@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import exists, select, update
+from sqlalchemy import case, exists, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,13 +111,6 @@ class ReadingReminderEmailRepository:
             delivery.Status.in_(("PENDING", "FAILED")), ~eligible
         ).values(Status="SKIPPED", NextAttemptAt=None,
                  LastErrorCode="reminder_disabled_deleted_or_owner_changed", UpdatedAt=now))
-        await self.db.commit()
-        return int(result.rowcount or 0)
-
-    async def skip_waiting_deliveries(self, reason: str, now: datetime) -> int:
-        result = await self.db.execute(update(ReadingReminderEmailDelivery).where(
-            ReadingReminderEmailDelivery.Status.in_(("PENDING", "FAILED"))
-        ).values(Status="SKIPPED", NextAttemptAt=None, LastErrorCode=reason[:80], UpdatedAt=now))
         await self.db.commit()
         return int(result.rowcount or 0)
 
