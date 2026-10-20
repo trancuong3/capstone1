@@ -20,12 +20,23 @@ class MetadataQualityRepository:
         )
 
     @staticmethod
-    def _normalized_title(book):
-        return func.lower(func.trim(func.coalesce(book.Title, "")))
+    def _trim_whitespace(value):
+        # PostgreSQL trim() removes ordinary spaces only. POSIX [[:space:]]
+        # also handles tabs/newlines so whitespace-only metadata is not missed.
+        return func.regexp_replace(
+            value,
+            r"^[[:space:]]+|[[:space:]]+$",
+            "",
+            "g",
+        )
 
-    @staticmethod
-    def _normalized_author(book):
-        return func.lower(func.trim(func.coalesce(book.Author, "")))
+    @classmethod
+    def _normalized_title(cls, book):
+        return func.lower(cls._trim_whitespace(func.coalesce(book.Title, "")))
+
+    @classmethod
+    def _normalized_author(cls, book):
+        return func.lower(cls._trim_whitespace(func.coalesce(book.Author, "")))
 
     @classmethod
     def _possible_duplicate(cls):
@@ -52,10 +63,10 @@ class MetadataQualityRepository:
     def _issue_conditions(cls):
         return {
             "MISSING_TITLE": func.length(
-                func.trim(func.coalesce(Book.Title, ""))
+                cls._trim_whitespace(func.coalesce(Book.Title, ""))
             ) == 0,
             "MISSING_AUTHOR": func.length(
-                func.trim(func.coalesce(Book.Author, ""))
+                cls._trim_whitespace(func.coalesce(Book.Author, ""))
             ) == 0,
             "INVALID_GRADE_RANGE": or_(
                 Book.MinGrade.is_(None),

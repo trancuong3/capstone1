@@ -90,22 +90,31 @@ class MetadataQualityRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(db.execute.await_count, 1)
         self.assertEqual(db.scalar.await_count, 1)
-        group_sql = str(
-            db.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
-        ).lower()
+        group_statement = db.scalar.await_args.args[0]
+        compiled_group = group_statement.compile(dialect=postgresql.dialect())
+        group_sql = str(compiled_group).lower()
         self.assertIn("books.title", group_sql)
         self.assertIn("books.author", group_sql)
         self.assertIn("having count(books.id) > ", group_sql)
+        self.assertIn(
+            r"^[[:space:]]+|[[:space:]]+$",
+            compiled_group.params.values(),
+        )
 
     async def test_duplicate_candidate_requires_non_empty_title_and_author(self):
         statement = MetadataQualityRepository._possible_duplicate()
-        sql = str(statement.compile(dialect=postgresql.dialect())).lower()
+        compiled = statement.compile(dialect=postgresql.dialect())
+        sql = str(compiled).lower()
 
         # Both the current and candidate records must have non-empty normalized
         # title and author values before they can be treated as duplicate candidates.
         self.assertGreaterEqual(sql.count("length("), 4)
         self.assertIn("books.author", sql)
         self.assertIn("books.title", sql)
+        self.assertIn(
+            r"^[[:space:]]+|[[:space:]]+$",
+            compiled.params.values(),
+        )
 
 
 class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -126,8 +135,8 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_dashboard_classifies_issues_without_mutating_book(self):
         book = SimpleNamespace(
             Id=BOOK_ID,
-            Title="   ",
-            Author=None,
+            Title=" \t\r\n ",
+            Author="\n\t",
             MinGrade=5,
             MaxGrade=2,
             LifecycleStatus="ACTIVE",
