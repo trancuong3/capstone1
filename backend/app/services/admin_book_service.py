@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.admin_book import AdminBookWriteRequest
@@ -29,6 +29,11 @@ class AdminBookService:
                 values=payload.model_dump(),
             )
             return AdminBookMetadataResponse.model_validate(book)
+        except IntegrityError:
+            raise HTTPException(
+                status_code=409,
+                detail="Could not create book with the current database constraints",
+            ) from None
         except SQLAlchemyError:
             raise HTTPException(
                 status_code=500,
