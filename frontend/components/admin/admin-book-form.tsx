@@ -60,9 +60,10 @@ export function AdminBookForm({
       {errors.root?.message ? (
         <StatusMessage tone="error">{errors.root.message}</StatusMessage>
       ) : null}
+      <p className="text-sm text-muted">Tiêu đề sách là trường bắt buộc.</p>
       <TextField
         error={errors.title?.message}
-        label="Tên sách (bắt buộc)"
+        label="Tên sách"
         required
         {...register("title")}
       />
