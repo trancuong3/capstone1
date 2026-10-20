@@ -70,6 +70,8 @@ Hiện workflow được commit trên branch `feature/reading-reminder-zero-cost
 
 Theo quy tắc GitHub Actions, file workflow cũng phải tồn tại trên nhánh mặc định để event `workflow_dispatch` được kích hoạt. Vì vậy không thể cam kết chạy worker email qua nút Actions trên feature branch trước khi merge. Trước khi merge, có thể kiểm tra CI/unit test và review YAML; chỉ chạy email thật sau khi đã merge, khai báo secrets và xác nhận sender. Lần chạy thủ công chỉ dành cho người có quyền write phù hợp trong repository.
 
+GitHub có thể trì hoãn lịch chạy khi hệ thống bận. Với repository public, workflow có event `schedule` cũng có thể tự động bị vô hiệu hóa nếu repository không có hoạt động trong 60 ngày; cần kiểm tra tab Actions và bật lại khi cần. Cửa sổ catch-up mặc định 120 phút chỉ xử lý các occurrence nằm trong khoảng đó nếu worker chưa từng tạo outbox record.
+
 ### Giới hạn chi phí quan trọng với repository hiện tại
 
 Metadata GitHub hiện tại cho biết repository `trancuong3/capstone1` đang ở trạng thái **private**. GitHub-hosted standard runner miễn phí không giới hạn cho repository public; repository private sử dụng hạn mức phút miễn phí theo plan rồi có thể bị tính phí vượt hạn mức nếu billing cho phép. Với lịch 5 phút, 30 ngày tương đương khoảng 8.640 lần khởi chạy; trung bình 15 giây runner-time mỗi lần đã tương đương khoảng 2.160 phút/tháng, chưa tính phần setup/install.
