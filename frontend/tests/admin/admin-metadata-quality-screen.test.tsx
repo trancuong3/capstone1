@@ -130,4 +130,57 @@ describe("AdminMetadataQualityScreen", () => {
       await screen.findByText("Chưa phát hiện vấn đề metadata"),
     ).toBeInTheDocument();
   });
+
+  it("sends search text to the backend service", async () => {
+    const services = createAdminServiceFixture();
+    vi.mocked(services.metadataQuality.get).mockResolvedValue(dashboardFixture);
+    const user = userEvent.setup();
+
+    render(withAdminFixture(<AdminMetadataQualityScreen />, services));
+    await screen.findByRole("heading", { name: "Sách cần kiểm tra" });
+    await user.type(
+      screen.getByRole("textbox", { name: "Tìm theo tiêu đề hoặc tác giả" }),
+      "Sách",
+    );
+
+    await waitFor(() => {
+      expect(services.metadataQuality.get).toHaveBeenLastCalledWith({
+        search: "Sách",
+        issue_type: undefined,
+        lifecycle_status: undefined,
+        limit: 10,
+        offset: 0,
+      });
+    });
+  });
+
+  it("requests the next backend page instead of paging a local array", async () => {
+    const services = createAdminServiceFixture();
+    vi.mocked(services.metadataQuality.get)
+      .mockResolvedValueOnce({ ...dashboardFixture, total: 21 })
+      .mockResolvedValueOnce({
+        ...dashboardFixture,
+        items: [],
+        total: 21,
+        offset: 10,
+      });
+    const user = userEvent.setup();
+
+    render(withAdminFixture(<AdminMetadataQualityScreen />, services));
+    await screen.findByRole("heading", { name: "Sách cần kiểm tra" });
+    await user.click(screen.getByRole("button", { name: "Tiếp" }));
+
+    await waitFor(() => {
+      expect(services.metadataQuality.get).toHaveBeenLastCalledWith({
+        search: undefined,
+        issue_type: undefined,
+        lifecycle_status: undefined,
+        limit: 10,
+        offset: 10,
+      });
+    });
+    expect(
+      await screen.findByText("Hiển thị 11–20 trên 21 kết quả"),
+    ).toBeInTheDocument();
+  });
 });

@@ -32,6 +32,8 @@ class MetadataQualityRepository:
         other = aliased(Book)
         current_title = cls._normalized_title(Book)
         other_title = cls._normalized_title(other)
+        current_author = cls._normalized_author(Book)
+        other_author = cls._normalized_author(other)
         return exists(
             select(1)
             .select_from(other)
@@ -39,8 +41,10 @@ class MetadataQualityRepository:
                 other.Id != Book.Id,
                 func.length(current_title) > 0,
                 func.length(other_title) > 0,
+                func.length(current_author) > 0,
+                func.length(other_author) > 0,
                 current_title == other_title,
-                cls._normalized_author(Book) == cls._normalized_author(other),
+                current_author == other_author,
             )
         )
 
@@ -90,7 +94,10 @@ class MetadataQualityRepository:
                 normalized_title.label("normalized_title"),
                 normalized_author.label("normalized_author"),
             )
-            .where(func.length(normalized_title) > 0)
+            .where(
+                func.length(normalized_title) > 0,
+                func.length(normalized_author) > 0,
+            )
             .group_by(normalized_title, normalized_author)
             .having(func.count(Book.Id) > 1)
             .subquery()

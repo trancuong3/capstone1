@@ -11,9 +11,11 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.dialects import postgresql
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes import book as book_routes
+from app.repositories.metadata_quality_repository import MetadataQualityRepository
 from app.services.metadata_quality_service import MetadataQualityService
 
 ADMIN_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -55,6 +57,55 @@ def make_client():
 
     app.dependency_overrides[get_db] = fake_db
     return TestClient(app)
+
+
+class MetadataQualityRepositoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_uses_global_aggregates_and_excludes_blank_authors_from_duplicate_groups(self):
+        row = SimpleNamespace(
+            total_books=10,
+            books_with_issues=4,
+            missing_title=1,
+            missing_author=2,
+            invalid_grade_range=1,
+            books_in_duplicate_groups=3,
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(one=lambda: row)),
+            scalar=AsyncMock(return_value=1),
+        )
+
+        summary = await MetadataQualityRepository(db).summary_counts()
+
+        self.assertEqual(
+            summary,
+            {
+                "total_books": 10,
+                "books_with_issues": 4,
+                "missing_title": 1,
+                "missing_author": 2,
+                "invalid_grade_range": 1,
+                "possible_duplicate_groups": 1,
+                "books_in_duplicate_groups": 3,
+            },
+        )
+        self.assertEqual(db.execute.await_count, 1)
+        self.assertEqual(db.scalar.await_count, 1)
+        group_sql = str(
+            db.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
+        ).lower()
+        self.assertIn("books.title", group_sql)
+        self.assertIn("books.author", group_sql)
+        self.assertIn("having count(books.id) > ", group_sql)
+
+    async def test_duplicate_candidate_requires_non_empty_title_and_author(self):
+        statement = MetadataQualityRepository._possible_duplicate()
+        sql = str(statement.compile(dialect=postgresql.dialect())).lower()
+
+        # Both the current and candidate records must have non-empty normalized
+        # title and author values before they can be treated as duplicate candidates.
+        self.assertGreaterEqual(sql.count("length("), 4)
+        self.assertIn("books.author", sql)
+        self.assertIn("books.title", sql)
 
 
 class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -106,6 +157,30 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
         with make_client() as client:
             response = client.get("/books/admin/metadata-quality")
         self.assertEqual(response.status_code, 401)
+
+    async def test_grade_values_outside_one_to_five_are_invalid(self):
+        book = SimpleNamespace(
+            Id=BOOK_ID,
+            Title="Truyện kiểm thử",
+            Author="Tác giả",
+            MinGrade=0,
+            MaxGrade=6,
+            LifecycleStatus="ACTIVE",
+        )
+        repository = FakeMetadataQualityRepository(rows=[(book, False)])
+
+        result = await MetadataQualityService(repository).dashboard(
+            ADMIN_ID,
+            search=None,
+            issue_type=None,
+            lifecycle_status=None,
+            limit=10,
+            offset=0,
+        )
+
+        self.assertEqual(result.items[0].issues, ["INVALID_GRADE_RANGE"])
+        self.assertEqual(book.MinGrade, 0)
+        self.assertEqual(book.MaxGrade, 6)
 
 
 if __name__ == "__main__":
