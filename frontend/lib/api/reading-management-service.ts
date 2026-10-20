@@ -10,6 +10,7 @@ import type {
   ReadingReminderDTO,
   ReadingReminderOccurrenceDTO,
   ReadingReminderWriteDTO,
+  ReadingReminderEmailStatusDTO,
 } from "@/types/reading-management";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -54,6 +55,8 @@ const reminderSchema = z.object({
   weekdays: z.array(z.number().int().min(0).max(6)),
   timezone: z.string().min(1),
   is_active: z.boolean(),
+  email_enabled: z.boolean(),
+  latest_email_status: z.enum(["PENDING", "PROCESSING", "SENT", "FAILED", "SKIPPED"]).nullable(),
   deleted_at: dateTimeSchema.nullable(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
@@ -66,6 +69,15 @@ const occurrenceSchema = z.object({
   status: z.enum(["PENDING", "ACKNOWLEDGED"]),
   acknowledged_at: dateTimeSchema.nullable(),
   reminder: reminderSchema.nullable(),
+});
+const emailStatusSchema = z.object({
+  provider_configured: z.boolean(),
+  sender_configured: z.boolean(),
+  app_url_configured: z.boolean(),
+  auth_admin_configured: z.boolean(),
+  email_available: z.boolean(),
+  email_verified: z.boolean().nullable(),
+  ready: z.boolean(),
 });
 const deletedSchema = z.object({ deleted: z.literal(true) });
 
@@ -98,13 +110,14 @@ export interface ReadingManagementService {
     childId: string,
     signal?: AbortSignal,
   ): Promise<ReadingReminderDTO[]>;
+  reminderEmailStatus(signal?: AbortSignal): Promise<ReadingReminderEmailStatusDTO>;
   createReminder(
     payload: Required<
       Pick<
         ReadingReminderWriteDTO,
         "child_id" | "remind_at" | "weekdays" | "timezone"
       >
-    > & { is_active?: boolean },
+    > & { is_active?: boolean; email_enabled?: boolean },
   ): Promise<ReadingReminderDTO>;
   updateReminder(
     reminderId: string,
@@ -176,6 +189,8 @@ export function createReadingManagementService(): ReadingManagementService {
         z.array(reminderSchema),
         signal,
       ),
+    reminderEmailStatus: (signal) =>
+      requestApi("/reading-management/reminders/email-status", emailStatusSchema, signal),
     createReminder: (payload) =>
       requestApi("/reading-management/reminders", reminderSchema, undefined, {
         method: "POST",
