@@ -156,7 +156,7 @@ export function AdminBookEditorScreen({
   }
 
   const initial: AdminBookCreateDTO = {
-    title: book.title,
+    title: book.title.trim() ? book.title : "",
     author: book.author ?? "",
     min_grade: book.min_grade,
     max_grade: book.max_grade,
