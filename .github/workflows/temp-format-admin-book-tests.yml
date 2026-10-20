@@ -1,0 +1,58 @@
+name: Temporary Admin Book Test Formatter
+
+on:
+  push:
+    branches:
+      - fix/admin-book-crud-title-and-ci-20261020
+
+permissions:
+  contents: write
+
+jobs:
+  format-admin-book-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/admin-book-crud-title-and-ci-20261020
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format only the two failing Admin book test files
+        run: |
+          npx prettier --write \
+            test/real-admin-services.test.ts \
+            tests/admin/admin-components.test.tsx
+
+      - name: Commit only the exact formatter output
+        shell: bash
+        run: |
+          git -C .. diff --check -- \
+            frontend/test/real-admin-services.test.ts \
+            frontend/tests/admin/admin-components.test.tsx
+          if git -C .. diff --quiet -- \
+            frontend/test/real-admin-services.test.ts \
+            frontend/tests/admin/admin-components.test.tsx; then
+            echo "Both Admin book test files already match Prettier."
+            exit 0
+          fi
+          git -C .. config user.name "github-actions[bot]"
+          git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C .. add -- \
+            frontend/test/real-admin-services.test.ts \
+            frontend/tests/admin/admin-components.test.tsx
+          git -C .. commit -m "style: apply Prettier to Admin book tests"
+          git -C .. push origin HEAD:fix/admin-book-crud-title-and-ci-20261020
