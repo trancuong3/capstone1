@@ -71,10 +71,6 @@ export function AdminBooksScreen() {
       );
       setItems([]);
       return false;
-    } finally {
-      if (requestId === requestIdRef.current) {
-        // The latest request owns the visible loading state.
-      }
     }
   }, [books, lifecycle, search, verification]);
 
