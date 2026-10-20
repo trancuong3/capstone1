@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from datetime import date, datetime, time, timezone
@@ -18,6 +19,7 @@ from app.services.reading_reminder_email_service import (
     ReadingReminderEmailConfigurationError,
     ReadingReminderEmailService,
 )
+import app.jobs.send_reading_reminder_emails as reminder_worker
 
 
 NOW = datetime(2026, 10, 19, 12, 10, tzinfo=timezone.utc)
@@ -229,6 +231,49 @@ class ReminderEmailTests(unittest.TestCase):
         self.assertEqual(stats["failed"], 1)
         self.assertEqual(stats["retried"], 1)
         self.assertEqual(repo.failed[0][1], "provider_rate_limited")
+
+    def test_worker_returns_nonzero_when_database_session_fails(self):
+        class BrokenSessionContext:
+            async def __aenter__(self):
+                raise RuntimeError("database connection unavailable")
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(reminder_worker, "AsyncSessionLocal",
+                          return_value=BrokenSessionContext()), \
+             patch.object(reminder_worker.engine, "dispose", new_callable=AsyncMock):
+            with self.assertLogs(reminder_worker.logger, level="ERROR") as captured:
+                exit_code = asyncio.run(reminder_worker.run())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("exception_type=RuntimeError", captured.output[0])
+        self.assertNotIn("database connection unavailable", captured.output[0])
+
+    def test_worker_logs_only_normalized_code_for_configuration_errors(self):
+        class FakeSessionContext:
+            async def __aenter__(self):
+                return object()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        service = SimpleNamespace(
+            run_once=AsyncMock(side_effect=ReadingReminderEmailConfigurationError(
+                "email_provider_not_configured"
+            ))
+        )
+        with patch.object(reminder_worker, "AsyncSessionLocal",
+                          return_value=FakeSessionContext()), \
+             patch.object(reminder_worker, "ReadingReminderEmailService",
+                          return_value=service), \
+             patch.object(reminder_worker.engine, "dispose", new_callable=AsyncMock):
+            with self.assertLogs(reminder_worker.logger, level="ERROR") as captured:
+                exit_code = asyncio.run(reminder_worker.run())
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("error_code=email_provider_not_configured", captured.output[0])
+        self.assertNotIn("RESEND_API_KEY", captured.output[0])
 
 
 if __name__ == "__main__":
