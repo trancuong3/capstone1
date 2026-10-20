@@ -149,9 +149,10 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).image(PAGE)
         self.assertEqual(caught.exception.status_code, 501)
         repo.get.return_value.MinGrade = -1
-        with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repository=repo).book(BOOK)
-        self.assertEqual(caught.exception.status_code, 501)
+        # Admin must be able to load and repair legacy metadata that violates
+        # current input constraints; Parent-facing catalog contracts stay strict.
+        result = await AdminCatalogService(repository=repo).book(BOOK)
+        self.assertEqual(result.min_grade, -1)
 
     async def test_unknown_book_page_and_revision_are_404(self):
         for method, args, missing in (("book", (BOOK,), "get"), ("page", (PAGE,), "page"), ("revision", (PAGE, REVISION), "revision")):
