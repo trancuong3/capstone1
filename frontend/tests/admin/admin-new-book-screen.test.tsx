@@ -53,63 +53,67 @@ describe("AdminNewBookScreen", () => {
     },
   );
 
-  it("trims the title, sends the expected payload, and navigates after success", async () => {
-    const services = createAdminServiceFixture();
-    vi.mocked(services.books.create).mockResolvedValue({
-      ...adminBookFixture,
-      id: "81000000-0000-4000-8000-000000000099",
-      title: "Sách mới",
-    });
-    const user = userEvent.setup();
-    render(withAdminFixture(<AdminNewBookScreen />, services));
-
-    await user.type(
-      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
-      "  Sách mới  ",
-    );
-    await user.type(screen.getByRole("textbox", { name: /Tác giả/ }), "  ");
-    await user.click(screen.getByRole("button", { name: "Tạo sách" }));
-
-    await waitFor(() => {
-      expect(services.books.create).toHaveBeenCalledWith({
+  it(
+    "trims the title, sends the expected payload, and navigates after success",
+    async () => {
+      const services = createAdminServiceFixture();
+      vi.mocked(services.books.create).mockResolvedValue({
+        ...adminBookFixture,
+        id: "81000000-0000-4000-8000-000000000099",
         title: "Sách mới",
-        author: null,
-        min_grade: 1,
-        max_grade: 5,
       });
-    });
-    expect(routerMock.push).toHaveBeenCalledWith(
-      "/admin/books/81000000-0000-4000-8000-000000000099",
-    );
-  });
+      const user = userEvent.setup();
+      render(withAdminFixture(<AdminNewBookScreen />, services));
 
-  it("keeps entered form values and shows an error when the API rejects creation", async () => {
-    const services = createAdminServiceFixture();
-    vi.mocked(services.books.create).mockRejectedValue(
-      new Error("server details must not be exposed"),
-    );
-    const user = userEvent.setup();
-    render(withAdminFixture(<AdminNewBookScreen />, services));
+      await user.type(
+        screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
+        "  Sách mới  ",
+      );
+      await user.type(screen.getByRole("textbox", { name: /Tác giả/ }), "  ");
+      await user.click(screen.getByRole("button", { name: "Tạo sách" }));
 
-    const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
-    await user.type(title, "Sách chưa được tạo");
-    await user.click(screen.getByRole("button", { name: "Tạo sách" }));
+      await waitFor(() => {
+        expect(services.books.create).toHaveBeenCalledWith({
+          title: "Sách mới",
+          author: null,
+          min_grade: 1,
+          max_grade: 5,
+        });
+      });
+      expect(routerMock.push).toHaveBeenCalledWith(
+        "/admin/books/81000000-0000-4000-8000-000000000099",
+      );
+    },
+  );
 
-    expect(
-      await screen.findByText(
-        "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
-      ),
-    ).toBeInTheDocument();
-    expect(title).toHaveValue("Sách chưa được tạo");
-    expect(screen.getByRole("textbox", { name: "Tác giả" })).toHaveValue("");
-    expect(routerMock.push).not.toHaveBeenCalled();
-  });
+  it(
+    "keeps entered form values and shows an error when the API rejects creation",
+    async () => {
+      const services = createAdminServiceFixture();
+      vi.mocked(services.books.create).mockRejectedValue(
+        new Error("server details must not be exposed"),
+      );
+      const user = userEvent.setup();
+      render(withAdminFixture(<AdminNewBookScreen />, services));
+
+      const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
+      await user.type(title, "Sách chưa được tạo");
+      await user.click(screen.getByRole("button", { name: "Tạo sách" }));
+
+      expect(
+        await screen.findByText(
+          "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
+        ),
+      ).toBeInTheDocument();
+      expect(title).toHaveValue("Sách chưa được tạo");
+      expect(screen.getByRole("textbox", { name: "Tác giả" })).toHaveValue("");
+      expect(routerMock.push).not.toHaveBeenCalled();
+    },
+  );
 
   it("blocks duplicate submissions while the create request is pending", async () => {
     const services = createAdminServiceFixture();
-    let resolveCreate:
-      | ((book: typeof adminBookFixture) => void)
-      | undefined;
+    let resolveCreate: ((book: typeof adminBookFixture) => void) | undefined;
     vi.mocked(services.books.create).mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -119,7 +123,10 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
-    await user.type(screen.getByRole("textbox", { name: "Tiêu đề sách *" }), "Sách một lần");
+    await user.type(
+      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
+      "Sách một lần",
+    );
     const submitButton = screen.getByRole("button", { name: "Tạo sách" });
     await user.click(submitButton);
     await waitFor(() => expect(services.books.create).toHaveBeenCalledOnce());
