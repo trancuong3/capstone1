@@ -7,7 +7,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, ChildProfile, PageRevision, Profile, ReadingSession
-from app.models.reading_management import ChildBookCollection, ReadingGoal, ReadingReminder, ReadingReminderOccurrence
+from app.models.reading_management import (
+    ChildBookCollection, ReadingGoal, ReadingReminder, ReadingReminderOccurrence,
+    ReadingReminderEmailDelivery,
+)
 
 
 class ReadingManagementRepository:
@@ -124,6 +127,19 @@ class ReadingManagementRepository:
                    ReadingReminder.IsActive.is_(True), ReadingReminderOccurrence.Status == "PENDING", ReadingReminderOccurrence.ScheduledFor <= now)
             .order_by(ReadingReminderOccurrence.ScheduledFor, ReadingReminderOccurrence.Id))
         return [(row[0], row[1]) for row in result.all()]
+
+
+    async def latest_email_status(self, reminder_id: UUID) -> str | None:
+        """Return the most recently updated delivery state for a reminder."""
+        return await self.db.scalar(
+            select(ReadingReminderEmailDelivery.Status)
+            .where(ReadingReminderEmailDelivery.ReminderId == reminder_id)
+            .order_by(
+                ReadingReminderEmailDelivery.CreatedAt.desc(),
+                ReadingReminderEmailDelivery.Id.desc(),
+            )
+            .limit(1)
+        )
 
     async def occurrence_for_parent(self, occurrence_id: UUID, actor_id: UUID) -> ReadingReminderOccurrence | None:
         return await self.db.scalar(select(ReadingReminderOccurrence)
