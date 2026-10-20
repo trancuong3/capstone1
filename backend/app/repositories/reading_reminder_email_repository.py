@@ -27,7 +27,7 @@ def scheduled_occurrences(reminder: ReadingReminder, now: datetime, catch_up_min
         if day.weekday() in (reminder.Weekdays or []):
             local_time = datetime.combine(day, reminder.RemindAt, tzinfo=zone)
             scheduled_utc = local_time.astimezone(timezone.utc)
-            if earliest <= scheduled_utc <= now_utc and (enabled_at is None or scheduled_utc >= enabled_at):
+            if enabled_at is not None and earliest <= scheduled_utc <= now_utc and scheduled_utc >= enabled_at:
                 output.append((day, scheduled_utc))
         day += timedelta(days=1)
     return output
