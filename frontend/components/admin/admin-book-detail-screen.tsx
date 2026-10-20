@@ -154,7 +154,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     <>
       <AdminPageHeader
         eyebrow="Chi tiết sách"
-        title={book.title}
+        title={book.title.trim() ? book.title : "Chưa có tiêu đề"}
         description={`${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
       />
       <Link
