@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
@@ -125,6 +125,71 @@ describe("admin components", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("offers title repair and metadata editing directly from the inventory", async () => {
+    const services = createAdminServiceFixture();
+    const missingTitle = {
+      ...adminBookListItemFixture,
+      book: { ...adminBookListItemFixture.book, title: "" },
+    };
+    services.books.list.mockResolvedValue([missingTitle]);
+    render(withAdminFixture(<AdminBooksScreen />, services));
+
+    expect(
+      await screen.findByRole("link", { name: "Bổ sung tiêu đề" }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/books/${missingTitle.book.id}/edit?issue=MISSING_TITLE`,
+    );
+
+    services.books.list.mockResolvedValueOnce([
+      adminBookListItemFixture,
+    ]);
+    // The screen has already loaded; verify the normal edit link using the existing book row.
+    expect(
+      screen.getByRole("link", { name: "Chỉnh sửa thông tin" }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/books/${adminBookListItemFixture.book.id}/edit`,
+    );
+  });
+
+  it("retires a book from the inventory and reloads the lifecycle from the service", async () => {
+    const services = createAdminServiceFixture();
+    const retired = {
+      ...adminBookListItemFixture,
+      book: {
+        ...adminBookListItemFixture.book,
+        lifecycle_status: "RETIRED" as const,
+      },
+      parent_catalog_eligible: false,
+    };
+    services.books.list
+      .mockResolvedValueOnce([adminBookListItemFixture])
+      .mockResolvedValueOnce([retired]);
+    services.books.updateStatus.mockResolvedValue({
+      ...adminBookListItemFixture.book,
+      lifecycle_status: "RETIRED",
+    });
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    const user = userEvent.setup();
+
+    render(withAdminFixture(<AdminBooksScreen />, services));
+    await screen.findByRole("button", { name: "Ngừng hoạt động" });
+    await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
+
+    await waitFor(() => {
+      expect(services.books.updateStatus).toHaveBeenCalledWith(
+        adminBookListItemFixture.book.id,
+        { status: "RETIRED" },
+      );
+    });
+    expect(
+      await screen.findByRole("button", { name: "Kích hoạt lại" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
+    expect(await screen.findByText("Đã ngừng hoạt động sách")).toBeInTheDocument();
+  });
+
   it("renders lifecycle and OCR metrics from typed service responses and forwards filters", async () => {
     const services = createAdminServiceFixture();
     const retired = {
@@ -141,14 +206,11 @@ describe("admin components", () => {
       name: adminBookListItemFixture.book.title,
     });
     expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
-    const card = screen.getByRole("link", { name: /Sách kiểm thử/ });
-    expect(
-      within(card).getByText("Trang").nextElementSibling,
-    ).toHaveTextContent("3");
+    expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent(
+      "3",
+    );
     for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-      expect(
-        within(card).getByText(label).nextElementSibling,
-      ).toHaveTextContent("1");
+      expect(screen.getByText(label).nextElementSibling).toHaveTextContent("1");
     }
     services.books.list.mockResolvedValueOnce([retired]);
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
