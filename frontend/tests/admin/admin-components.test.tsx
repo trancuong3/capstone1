@@ -131,7 +131,10 @@ describe("admin components", () => {
       ...adminBookListItemFixture,
       book: { ...adminBookListItemFixture.book, title: "" },
     };
-    services.books.list.mockResolvedValue([missingTitle]);
+    services.books.list.mockResolvedValue([
+      missingTitle,
+      adminBookListItemFixture,
+    ]);
     render(withAdminFixture(<AdminBooksScreen />, services));
 
     expect(
@@ -141,10 +144,6 @@ describe("admin components", () => {
       `/admin/books/${missingTitle.book.id}/edit?issue=MISSING_TITLE`,
     );
 
-    services.books.list.mockResolvedValueOnce([
-      adminBookListItemFixture,
-    ]);
-    // The screen has already loaded; verify the normal edit link using the existing book row.
     expect(
       screen.getByRole("link", { name: "Chỉnh sửa thông tin" }),
     ).toHaveAttribute(
