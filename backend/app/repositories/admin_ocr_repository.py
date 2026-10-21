@@ -129,6 +129,10 @@ class AdminOcrRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    async def flush(self) -> None:
+        """Flush staged ORM changes while leaving transaction ownership to the Service."""
+        await self.db.flush()
+
     @staticmethod
     def set_page_number(page: BookPage, page_number: int) -> BookPage:
         """Persist a page's display/order number selected by the Service."""

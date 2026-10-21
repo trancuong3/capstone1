@@ -167,6 +167,9 @@ class AdminOcrService:
         for expected_number, page in enumerate(active_pages, start=1):
             if page.PageNumber != expected_number:
                 self.repo.set_page_number(page, expected_number)
+                # Execute each move in ascending old-number order so the partial
+                # unique index never observes a transient collision.
+                await self.repo.flush()
                 changed = True
         return changed
 
@@ -958,17 +961,20 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
 
         changed = False
-        if page.LifecycleStatus != "RETIRED":
-            self.repo.set_page_lifecycle_status(page, "RETIRED")
-            changed = True
-        changed = await self._renumber_active_pages(page.BookId, lock=True) or changed
-        if changed:
-            try:
+        try:
+            if page.LifecycleStatus != "RETIRED":
+                self.repo.set_page_lifecycle_status(page, "RETIRED")
+                # Free the retiring page's active unique-index entry before moving
+                # the next active page into its number.
+                await self.repo.flush()
+                changed = True
+            changed = await self._renumber_active_pages(page.BookId, lock=True) or changed
+            if changed:
                 await self.db.commit()
                 await self.db.refresh(page)
-            except Exception:
-                await self.db.rollback()
-                raise
+        except Exception:
+            await self.db.rollback()
+            raise
         return AdminPageLifecycleRead(
             page_id=page.Id,
             book_id=page.BookId,

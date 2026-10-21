@@ -45,6 +45,7 @@ def make_service(page, role="admin"):
     service.repo.book = AsyncMock(return_value=SimpleNamespace(Id=BOOK, LifecycleStatus="ACTIVE"))
     service.repo.page = AsyncMock(return_value=page)
     service.repo.active_pages_for_renumber = AsyncMock(return_value=[])
+    service.repo.flush = AsyncMock()
     service.repo.set_page_number = MagicMock(
         side_effect=lambda current, number: setattr(current, "PageNumber", number)
     )
@@ -183,6 +184,7 @@ class ActivePageRenumberingTests(unittest.IsolatedAsyncioTestCase):
         service.repo.active_pages_for_renumber = AsyncMock(
             return_value=[page1, page3, page4]
         )
+        service.repo.flush = AsyncMock()
 
         changed = await service._renumber_active_pages(BOOK, lock=True)
 
@@ -190,6 +192,7 @@ class ActivePageRenumberingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([page1.PageNumber, page3.PageNumber, page4.PageNumber], [1, 2, 3])
         service.repo.set_page_number.assert_any_call(page3, 2)
         service.repo.set_page_number.assert_any_call(page4, 3)
+        self.assertEqual(service.repo.flush.await_count, 2)
 
 
 if __name__ == "__main__":
