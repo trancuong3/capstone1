@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
-import { readingPageDtoSchema } from "@/lib/api/reading-service";
+import { readingPageDtoSchema, sessionPageProgressSchema } from "@/lib/api/reading-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -80,9 +80,17 @@ export function createPageMatchService(): PageMatchService {
       sessionId: string,
       selectedPageId: string,
     ): Promise<ReadingPageDTO> {
-      const query = new URLSearchParams({ session_id: sessionId });
+      await requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/navigate`,
+        sessionPageProgressSchema,
+        undefined,
+        {
+          method: "POST",
+          body: { target_page_id: selectedPageId },
+        },
+      );
       return requestApi(
-        `/reading/pages/${encodeURIComponent(selectedPageId)}?${query.toString()}`,
+        `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
         readingPageDtoSchema,
       );
     },
