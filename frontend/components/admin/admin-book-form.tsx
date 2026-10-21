@@ -97,7 +97,7 @@ export function AdminBookForm({
       />
       <TextField
         error={errors.author?.message}
-        label="Tác giả (không bắt buộc)"
+        label="Tác giả"
         {...register("author")}
       />
       <div className="grid gap-5 sm:grid-cols-2">
