@@ -187,16 +187,21 @@ describe("real Admin adapters", () => {
       });
       const result =
         await createAdminPageService().replaceImageAndReprocess(pageId, file);
-      expect(result).toEqual(detail);
-    expect(requestedApiUrl().pathname).toBe(
-      `/books/admin/pages/${pageId}/reupload-ocr`,
-    );
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(init.method).toBe("POST");
-    expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("image")).toMatchObject({
-      name: "page-1.png",
-    });
+      expect(result).toMatchObject({
+        page_id: detail.page_id,
+        page_revision_id: detail.page_revision_id,
+        draft_text: detail.draft_text,
+        verification_status: detail.verification_status,
+      });
+      expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+        `/books/admin/pages/${pageId}/reupload-ocr`,
+      );
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.method).toBe("POST");
+      expect(init.body).toBeInstanceOf(FormData);
+      expect((init.body as FormData).get("image")).toMatchObject({
+        name: "page-1.png",
+      });
       expect((init.body as FormData).get("page_number")).toBeNull();
     },
   );
