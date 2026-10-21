@@ -175,14 +175,22 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   expect(api.unexpected).toEqual([]);
 });
 
-test("Admin book creation requires a title and sends normalized metadata", async ({
+test("Admin book creation requires separate name and title and sends normalized metadata", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
   await setRole(page, "admin");
   await page.goto("/admin/books/new");
 
+  const name = page.getByRole("textbox", { name: "Tên sách *" });
   const title = page.getByRole("textbox", { name: "Tiêu đề sách *" });
+  await page.getByRole("button", { name: "Tạo sách" }).click();
+  await expect(
+    page.getByText("Vui lòng nhập tên sách.", { exact: true }),
+  ).toBeVisible();
+  expect(api.createBookRequest).toBeNull();
+
+  await name.fill("  Tên hiển thị mới  ");
   await page.getByRole("button", { name: "Tạo sách" }).click();
   await expect(
     page.getByText("Vui lòng nhập tiêu đề sách.", { exact: true }),
@@ -203,6 +211,7 @@ test("Admin book creation requires a title and sends normalized metadata", async
     page.getByRole("heading", { name: "Sách chưa có trang" }),
   ).toBeVisible();
   expect(api.createBookRequest).toEqual({
+    name: "Tên hiển thị mới",
     title: "Cuốn sách mới",
     author: "Tác giả A",
     min_grade: 1,
