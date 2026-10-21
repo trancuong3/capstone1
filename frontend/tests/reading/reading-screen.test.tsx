@@ -276,6 +276,52 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toBeInTheDocument();
   });
 
+  it("shows the selected range and navigates only to a saved next page", async () => {
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    expect(await screen.findByText(/Phạm vi đọc: Trang 4–5/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Trang trước" })).toBeDisabled();
+    const nextButton = screen.getByRole("button", { name: "Trang tiếp theo" });
+    expect(nextButton).toBeEnabled();
+
+    await user.click(nextButton);
+
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFive.page_id,
+      );
+    });
+  });
+
+  it("lets the child explicitly confirm the current page completion", async () => {
+    const user = userEvent.setup();
+    services.readingService.getCurrentPage.mockResolvedValue(pageFive);
+    services.readingService.getPageProgress.mockResolvedValue({
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: pageFive.page_number,
+      current_index: 1,
+      pages: [
+        { ...pageProgressFixture.pages[0], status: "COMPLETED", completed_at: "2026-10-21T07:00:00Z" },
+        { ...pageProgressFixture.pages[1], status: "IN_PROGRESS", started_at: "2026-10-21T07:00:00Z" },
+      ],
+      completed_pages: 1,
+    });
+    renderReading("reading");
+
+    const completePageButton = await screen.findByRole("button", { name: "Đánh dấu trang đã đọc xong" });
+    await user.click(completePageButton);
+
+    await waitFor(() => {
+      expect(services.readingService.completeCurrentPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFive.page_id,
+      );
+    });
+  });
+
   it("displays supplied paused/reconnecting safety status without adding evidence", async () => {
     const user = userEvent.setup();
     const { container, unmount } = renderReading("paused");
