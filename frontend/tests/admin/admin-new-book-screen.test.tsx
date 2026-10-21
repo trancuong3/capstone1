@@ -42,7 +42,10 @@ describe("AdminNewBookScreen", () => {
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
     const name = screen.getByRole("textbox", { name: "Tên sách *" });
-    await user.type(screen.getByRole("textbox", { name: "Tiêu đề sách *" }), "Tiêu đề hợp lệ");
+    await user.type(
+      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
+      "Tiêu đề hợp lệ",
+    );
     await user.click(screen.getByRole("button", { name: "Tạo sách" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
