@@ -205,6 +205,7 @@ export interface ReadingRealtimeSnapshotUI {
 export interface ReadingCompletionSummaryUI {
   readonly duration_minutes: number | null;
   readonly pages_explored: number | null;
+  readonly selected_range_pages?: number | null;
   readonly practiced_words: number | null;
   readonly spoken_words?: readonly string[] | null;
   readonly transcripts?: readonly string[] | null;
