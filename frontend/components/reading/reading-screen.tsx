@@ -140,7 +140,6 @@ export function ReadingScreen({
   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
-  const exploredPageIdsRef = useRef<Set<string>>(new Set());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -244,11 +243,9 @@ export function ReadingScreen({
   }, [countdown]);
 
   useEffect(() => {
-    if (page?.page_id) {
-      exploredPageIdsRef.current.add(page.page_id);
-      for (const word of page.words) {
-        wordTextByIdRef.current.set(word.word_id, word.text);
-      }
+    if (!page) return;
+    for (const word of page.words) {
+      wordTextByIdRef.current.set(word.word_id, word.text);
     }
   }, [page]);
 
@@ -275,17 +272,21 @@ export function ReadingScreen({
           services.readingService.getPageProgress(sessionId),
         ]);
 
-        const selectedPage =
-          initialPageId && initialProgress.pages.some((item) => item.page_id === initialPageId)
-            ? await services.pageMatchService.selectPage(sessionId, initialPageId)
-            : currentPage;
-        const progress = await services.readingService.getPageProgress(sessionId);
+        // Server-side progress is authoritative on reload. A stale pageId query
+        // must not reset a session that was already advanced to another page.
+        const requestedPageIsOutsideRange =
+          Boolean(initialPageId) &&
+          !initialProgress.pages.some((item) => item.page_id === initialPageId);
 
         if (!active) return;
 
-        setPage(selectedPage);
-        setPageProgress(progress);
-        setPageNavigationError(null);
+        setPage(currentPage);
+        setPageProgress(initialProgress);
+        setPageNavigationError(
+          requestedPageIsOutsideRange
+            ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
+            : null,
+        );
         setCurrentWordId(selectedPage.words[3]?.word_id ?? null);
         setSelectedManualPageId(selectedPage.page_id);
         setCanonicalState(session.state);
@@ -855,6 +856,26 @@ export function ReadingScreen({
     }
   }
 
+  async function confirmCurrentPageCompleted() {
+    if (!pageProgress?.persisted || !page || isBusy) return;
+    setIsBusy(true);
+    setPageNavigationError(null);
+    try {
+      const progress = await services.readingService.completeCurrentPage(
+        sessionId,
+        page.page_id,
+      );
+      if (!mountedRef.current) return;
+      setPageProgress(progress);
+    } catch {
+      if (mountedRef.current) {
+        setPageNavigationError("Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.");
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
   async function retryPageMatch() {
     if (isBusy) return;
     setIsBusy(true);
@@ -991,7 +1012,9 @@ export function ReadingScreen({
     if (!mountedRef.current) return;
     const wordsList = Array.from(spokenWordsSetRef.current);
     const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
-    const pagesExplored = exploredPageIdsRef.current.size || null;
+    const persistedCompletion = await services.readingService
+      .getCompletionSummary(sessionId)
+      .catch(() => null);
 
     const correctWordsList = Array.from(correctWordIdsRef.current)
       .map((wordId) => wordTextByIdRef.current.get(wordId))
@@ -1009,7 +1032,7 @@ export function ReadingScreen({
       correct_words: correctWordsList,
       duration_minutes: durationMinutes,
       mispronounced_words: mispronouncedWordsList,
-      pages_explored: pagesExplored,
+      pages_explored: persistedCompletion?.pages_explored ?? null,
       practiced_words: wordsList.length,
       score,
       spoken_words: wordsList,
@@ -1132,7 +1155,7 @@ export function ReadingScreen({
           </div>
           <div className="flex shrink-0 gap-2">
             <Button
-              disabled={isBusy || pageProgress.current_index <= 0}
+              disabled={isBusy || uiState !== "reading" || pageProgress.current_index <= 0}
               onClick={() => void navigateWithinRange(pageProgress.current_index - 1)}
               variant="secondary"
             >
@@ -1140,7 +1163,7 @@ export function ReadingScreen({
               Trang trước
             </Button>
             <Button
-              disabled={isBusy || pageProgress.current_index >= pageProgress.total_pages - 1}
+              disabled={isBusy || uiState !== "reading" || pageProgress.current_index >= pageProgress.total_pages - 1}
               onClick={() => void navigateWithinRange(pageProgress.current_index + 1)}
               variant="secondary"
             >
@@ -1148,6 +1171,17 @@ export function ReadingScreen({
               <ChevronRight aria-hidden="true" className="size-5" />
             </Button>
           </div>
+          {pageProgress.persisted &&
+          pageProgress.pages[pageProgress.current_index]?.status !== "COMPLETED" ? (
+            <Button
+              className="sm:self-start"
+              disabled={isBusy || uiState !== "reading"}
+              onClick={() => void confirmCurrentPageCompleted()}
+              variant="quiet"
+            >
+              Đánh dấu trang đã đọc xong
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {pageNavigationError ? (
