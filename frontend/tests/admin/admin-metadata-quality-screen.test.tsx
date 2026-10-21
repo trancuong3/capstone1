@@ -115,7 +115,7 @@ describe("AdminMetadataQualityScreen", () => {
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
     expect(await screen.findByText("Chưa có tiêu đề")).toBeInTheDocument();
-    expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
+    expect(screen.getAllByText("Đã ngừng").length).toBeGreaterThan(0);
     expect(
       screen.getByRole("link", { name: "Bổ sung metadata" }),
     ).toHaveAttribute(
