@@ -79,9 +79,9 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        # Report only metrics that are actually persisted. The current schema
-        # does not persist a complete page-visit log, recognized words, or audio
-        # transcripts, so those fields remain null rather than fabricated zeroes.
+        # Page completion comes from the durable session-page table. The current
+        # schema still does not persist recognized words or audio transcripts, so
+        # those metrics remain null rather than fabricated zeroes.
         duration_min = None
         if session.EndedAt and session.StartedAt:
             start = session.StartedAt
