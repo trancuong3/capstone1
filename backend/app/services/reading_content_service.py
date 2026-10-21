@@ -383,12 +383,28 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
+        page_rows = await self.repository.session_page_rows(session.Id)
+        if page_rows:
+            current_id = session.CurrentPageId or next(
+                (row.PageId for row in page_rows if row.Status == "IN_PROGRESS"),
+                page_rows[0].PageId,
+            )
+            snapshot = next((row for row in page_rows if row.PageId == current_id), None)
+            if snapshot is None:
+                raise HTTPException(status_code=409, detail="Current page is not part of this session's range")
+            page = await self.repository.page_by_id(snapshot.PageId)
+            revision = await self.repository.revision_snapshot(
+                snapshot.PageId, snapshot.PageRevisionId
+            )
+            if page is None or revision is None or page.BookId != session.BookId:
+                raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+            return await self._build_page_dto(page, revision)
+
+        # Legacy sessions created before range persistence continue to use the
+        # original one-page selection and current verified-revision contract.
         page = None
         if session.SelectedPageId is not None:
-            page = await self.repository.verified_page(
-                session.SelectedPageId,
-                session.BookId,
-            )
+            page = await self.repository.verified_page(session.SelectedPageId, session.BookId)
             if page is None:
                 raise HTTPException(
                     status_code=409,
@@ -398,8 +414,6 @@ class ReadingContentService:
                     },
                 )
         else:
-            # Legacy sessions without a selection may use the first verified
-            # page; never fall back to an arbitrary unverified page.
             page = await self.repository.first_verified_page(session.BookId)
         if page is None:
             raise HTTPException(
@@ -409,7 +423,6 @@ class ReadingContentService:
                     "message": "No active page verified by an administrator is available.",
                 },
             )
-
         revision_id = (
             session.SelectedPageRevisionId
             if session.SelectedPageId == page.Id
@@ -438,21 +451,152 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        # Manual page selection is scoped to the book already bound to the
-        # session. It can never redirect a child to another book's content.
+        session_rows = await self.repository.session_page_rows(session.Id)
+        if session_rows:
+            snapshot = await self.repository.session_page(session.Id, page_id)
+            if snapshot is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Page is outside this reading session's selected range",
+                )
+            page = await self.repository.page_by_id(snapshot.PageId)
+            revision = await self.repository.revision_snapshot(
+                snapshot.PageId, snapshot.PageRevisionId
+            )
+            if page is None or revision is None or page.BookId != session.BookId:
+                raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+            return await self._build_page_dto(page, revision)
+
+        # Legacy one-page sessions retain the existing same-book eligibility rule.
         page = await self.repository.verified_page(page_id, session.BookId)
         if page is None:
             raise HTTPException(
                 status_code=404,
                 detail="Active verified page not found in this reading session's book",
             )
-        revision = await self.repository.verified_revision(
-            page.Id,
-            page.CurrentVerifiedRevisionId,
-        )
+        revision = await self.repository.verified_revision(page.Id, page.CurrentVerifiedRevisionId)
         if revision is None:
             raise HTTPException(status_code=409, detail="Verified page revision is unavailable")
         return await self._build_page_dto(page, revision)
+
+    async def get_session_progress(
+        self, session_id: UUID, actor_id: UUID
+    ) -> ReadingSessionPageProgressDTO:
+        await self.require_parent(actor_id)
+        session = await self.repository.session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+        rows = await self.repository.session_page_rows(session.Id)
+        if not rows:
+            # Stable compatibility response for sessions created before this
+            # feature: expose their selected page as a one-page range.
+            page = await self.get_session_page(session_id, actor_id)
+            completed = session.State in ("COMPLETED", "FINISHED")
+            return ReadingSessionPageProgressDTO(
+                session_id=session.Id,
+                start_page_id=page.page_id,
+                end_page_id=page.page_id,
+                current_page_id=page.page_id,
+                start_page_number=page.page_number,
+                end_page_number=page.page_number,
+                current_page_number=page.page_number,
+                current_index=0,
+                total_pages=1,
+                completed_pages=1 if completed else 0,
+                pages=[ReadingSessionPageProgressItem(
+                    page_id=page.page_id,
+                    page_revision_id=page.page_revision_id,
+                    page_number=page.page_number,
+                    page_order=0,
+                    status="COMPLETED" if completed else "IN_PROGRESS",
+                    started_at=session.StartedAt,
+                    completed_at=session.EndedAt if completed else None,
+                )],
+            )
+
+        current_id = session.CurrentPageId or next(
+            (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
+            rows[0].PageId,
+        )
+        current_index = next(
+            (i for i, row in enumerate(rows) if row.PageId == current_id), 0
+        )
+        current_row = rows[current_index]
+        return ReadingSessionPageProgressDTO(
+            session_id=session.Id,
+            start_page_id=rows[0].PageId,
+            end_page_id=rows[-1].PageId,
+            current_page_id=current_row.PageId,
+            start_page_number=rows[0].PageNumber,
+            end_page_number=rows[-1].PageNumber,
+            current_page_number=current_row.PageNumber,
+            current_index=current_index,
+            total_pages=len(rows),
+            completed_pages=sum(1 for row in rows if row.Status == "COMPLETED"),
+            pages=[
+                ReadingSessionPageProgressItem(
+                    page_id=row.PageId,
+                    page_revision_id=row.PageRevisionId,
+                    page_number=row.PageNumber,
+                    page_order=row.PageOrder,
+                    status=row.Status,
+                    started_at=row.StartedAt,
+                    completed_at=row.CompletedAt,
+                )
+                for row in rows
+            ],
+        )
+
+    async def navigate_session_page(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+        payload: ReadingPageNavigationCreate,
+    ) -> ReadingSessionPageProgressDTO:
+        await self.require_parent(actor_id)
+        session = await self.repository.session_for_update(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+        if session.State in ("COMPLETED", "FINISHED", "ABORTED"):
+            raise HTTPException(status_code=409, detail="A finished session cannot change its current page")
+
+        rows = await self.repository.session_page_rows(session.Id)
+        if not rows:
+            page = await self.get_session_page(session_id, actor_id)
+            if payload.target_page_id != page.page_id:
+                raise HTTPException(status_code=409, detail="Legacy session is limited to its selected page")
+            return await self.get_session_progress(session_id, actor_id)
+
+        target = next((row for row in rows if row.PageId == payload.target_page_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Page is outside this reading session's selected range")
+        current_id = session.CurrentPageId or next(
+            (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
+            rows[0].PageId,
+        )
+        current = next((row for row in rows if row.PageId == current_id), None)
+        if current is None:
+            raise HTTPException(status_code=409, detail="Saved current page is not in this reading session")
+        if current.PageId == target.PageId:
+            return await self.get_session_progress(session_id, actor_id)
+
+        now = datetime.now(timezone.utc)
+        if target.PageOrder == current.PageOrder + 1:
+            # Explicitly continuing to the next page is the completion action.
+            # Merely opening or revisiting a page is not completion.
+            current.Status = "COMPLETED"
+            current.CompletedAt = current.CompletedAt or now
+        elif current.Status == "IN_PROGRESS":
+            current.Status = "PENDING"
+
+        if target.Status == "PENDING":
+            target.Status = "IN_PROGRESS"
+            target.StartedAt = target.StartedAt or now
+        session.CurrentPageId = target.PageId
+        await self.repository.save_session_progress(session, rows)
+        return await self.get_session_progress(session_id, actor_id)
 
     async def _build_page_dto(self, page: BookPage, revision) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
