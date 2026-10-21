@@ -1147,6 +1147,7 @@ export function ReadingScreen({
   }
 
   return (
+    <>
     <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
       {pageProgress ? (
         <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1400,6 +1401,7 @@ export function ReadingScreen({
         tạo trong khoảng này: 0.
       </span>
     </div>
+    </>
   );
 }
 
