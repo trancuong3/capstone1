@@ -213,7 +213,9 @@ export function AdminPageUploader({
           quyết định thứ tự gửi; số trang cuối cùng được xác định từ
           PostgreSQL.
         </p>
-        <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
+        <label
+          className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center"
+        >
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />
           <span className="font-extrabold">
             Chọn một hoặc nhiều ảnh trang sách
