@@ -103,10 +103,12 @@ class CatalogRepository:
 
 class AdminCatalogRepository(CatalogRepository):
     async def max_page_number(self, book_id: UUID) -> int | None:
-        # Include retired rows so the Admin upload form never suggests reusing a
-        # historical page number after retired pages are hidden from the list.
+        """Return the maximum page number among active pages only."""
         value = await self.db.scalar(
-            select(func.max(BookPage.PageNumber)).where(BookPage.BookId == book_id)
+            select(func.max(BookPage.PageNumber)).where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
         )
         return int(value) if value is not None else None
 

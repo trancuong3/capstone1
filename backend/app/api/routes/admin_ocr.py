@@ -28,12 +28,27 @@ async def create_admin_book(
 @router.post("/admin/catalog/{book_id}/pages", response_model=AdminRevisionDetailRead, status_code=201)
 async def upload_admin_page(
     book_id: UUID,
-    page_number: int = Form(..., ge=1, le=32767),
+    page_number: int | None = Form(default=None, ge=1, le=32767),
     image: UploadFile = File(...),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminOcrService(db).upload_page(actor_id, book_id, page_number, image)
+
+
+@router.post(
+    "/admin/pages/{page_id}/reupload-ocr",
+    response_model=AdminRevisionDetailRead,
+    status_code=201,
+)
+async def reupload_admin_page_image(
+    page_id: UUID,
+    image: UploadFile = File(...),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the candidate image and OCR only this page; retain the live source until verification."""
+    return await AdminOcrService(db).replace_page_image(actor_id, page_id, image)
 
 
 @router.post("/admin/pages/{page_id}/revisions/draft", response_model=AdminRevisionDetailRead, status_code=201)
