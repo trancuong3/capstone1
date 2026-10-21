@@ -523,6 +523,7 @@ class ReadingContentService:
             # feature: expose their selected page as a one-page range.
             page = await self.get_session_page(session_id, actor_id)
             completed = session.State in ("COMPLETED", "FINISHED")
+            # Legacy sessions have no durable page-completion evidence.
             return ReadingSessionPageProgressDTO(
                 session_id=session.Id,
                 persisted=False,
