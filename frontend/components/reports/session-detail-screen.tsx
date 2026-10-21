@@ -218,9 +218,21 @@ export function SessionDetailScreen({
           Chỉ hiển thị điểm/chỉ số đọc được, không tự quy đổi dữ liệu thiếu.
         </StatusMessage>
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
           ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
+          [
+            "Trang trong phạm vi",
+            detail.selected_range_pages == null
+              ? "Chưa ghi nhận"
+              : `${detail.selected_range_pages} trang`,
+          ],
+          [
+            "Trang đã xác nhận hoàn thành",
+            detail.pages_completed == null
+              ? "Chưa ghi nhận"
+              : `${detail.pages_completed} trang`,
+          ],
           ["Độ chính xác", formatPercent(metrics?.accuracy_percent ?? null)],
           [
             "Tốc độ đọc",
