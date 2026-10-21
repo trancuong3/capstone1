@@ -46,7 +46,7 @@ jobs:
             "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
             "app/admin/(protected)/books/new/page.tsx" \
             components/admin/admin-book-detail-screen.tsx \
-            components/admin/admin-book-editor-screen.tsx
+            components/admin/admin-book-editor-screen.tsx \
             components/admin/admin-book-form.tsx \
             components/admin/admin-books-screen.tsx \
             components/admin/admin-metadata-quality-screen.tsx \

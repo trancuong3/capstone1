@@ -118,7 +118,7 @@ class MetadataQualityRepositoryTests(unittest.IsolatedAsyncioTestCase):
         statement = db.execute.await_args.args[0]
         compiled = statement.compile(dialect=postgresql.dialect())
         sql = str(compiled).lower()
-        where_clause = sql.split(" where ", 1)[1]
+        where_clause = sql.split("where", 1)[1]
         self.assertIn("regexp_replace", where_clause)
         self.assertIn("books.title", where_clause)
         self.assertNotIn("books.lifecyclestatus =", where_clause)
