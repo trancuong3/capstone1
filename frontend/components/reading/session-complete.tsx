@@ -40,8 +40,8 @@ export function SessionComplete({
   const rangeWasPartial =
     summary.selected_range_pages !== undefined &&
     summary.selected_range_pages !== null &&
-    summary.pages_explored !== null &&
-    summary.pages_explored < summary.selected_range_pages;
+    (summary.pages_explored === null ||
+      summary.pages_explored < summary.selected_range_pages);
   const spokenWords = summary.spoken_words ?? [];
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? spokenWords;
