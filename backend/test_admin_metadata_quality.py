@@ -212,7 +212,7 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             SimpleNamespace(
                 Id=UUID("44444444-4444-4444-8444-444444444443"),
-                Title=" \\t\\r\\n ",
+                Title=" \t\r\n ",
                 Author="Tác giả",
                 MinGrade=1,
                 MaxGrade=3,
@@ -246,7 +246,7 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.items[0].lifecycle_status, "RETIRED")
         self.assertIsNone(entries[0].Title)
         self.assertEqual(entries[1].Title, "")
-        self.assertEqual(entries[2].Title, " \\t\\r\\n ")
+        self.assertEqual(entries[2].Title, " \t\r\n ")
         self.assertEqual(entries[3].Title, "  Tiêu đề hợp lệ  ")
 
     async def test_grade_values_outside_one_to_five_are_invalid(self):
