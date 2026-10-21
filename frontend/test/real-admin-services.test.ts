@@ -428,7 +428,6 @@ describe("real Admin adapters", () => {
       file_name: file.name,
       mime_type: "image/png" as const,
       size_bytes: file.size,
-      page_number: 2,
       width: 800,
       height: 1000,
       file,

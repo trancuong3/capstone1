@@ -376,6 +376,10 @@ export function AdminOcrReviewScreen({
       setHistory(await revisions.list(pageId));
       setImage(await pages.getImage(pageId));
       setReplacementFile(null);
+      const input = document.getElementById(
+        "replacement-page-image",
+      ) as HTMLInputElement | null;
+      if (input) input.value = "";
       setNotice(
         "Đã OCR ảnh mới cho đúng trang này. Bản mới đang chờ duyệt; ảnh và nội dung dùng cho lượt đọc chỉ chuyển sang bản mới sau khi xác minh.",
       );

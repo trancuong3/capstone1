@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
+import type { AdminPageRevisionDetailDTO } from "@/types/admin";
 import {
   ADMIN_BOOK_ID,
   ADMIN_PAGE_ID,
@@ -79,6 +80,52 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       await screen.findByText(/Không thể chạy lại OCR/),
     ).toBeInTheDocument();
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
+  });
+
+  it("reuploads an image for only the selected page and presents its unverified OCR", async () => {
+    const services = createAdminServiceFixture();
+    const user = userEvent.setup();
+    const replacementDetail: AdminPageRevisionDetailDTO = {
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "Nội.",
+    };
+    services.pages.replaceImageAndReprocess.mockResolvedValue(replacementDetail);
+
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+    ).toBeInTheDocument();
+
+    const file = new File(["replacement image"], "replacement.png", {
+      type: "image/png",
+    });
+    await user.upload(
+      screen.getByLabelText(/Tải ảnh mới cho riêng trang này/),
+      file,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Tải ảnh mới và chạy OCR/ }),
+    );
+
+    expect(services.pages.replaceImageAndReprocess).toHaveBeenCalledWith(
+      ADMIN_PAGE_ID,
+      file,
+    );
+    expect(
+      await screen.findByText(/Bản mới đang chờ duyệt/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Nội.");
+    expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
+    expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
   it("classifies confidence levels and synchronizes word-list and image selection", async () => {

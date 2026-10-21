@@ -221,6 +221,6 @@ export type AdminMockScenario =
 
 export type AdminBookDTO = BookListItemDTO & {
   readonly name: string | null;
-  /** Next available page number, calculated across active and retired pages. */
+  /** Next available page number, calculated from active pages only. */
   readonly next_page_number?: number;
 };
