@@ -79,8 +79,9 @@ export function AdminOcrReviewScreen({
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | null
+    "edit" | "save" | "verify" | "reprocess" | "reupload" | null
   >(null);
+  const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
@@ -343,6 +344,44 @@ export function AdminOcrReviewScreen({
     } catch {
       setNotice(
         "Không thể chạy lại OCR. Kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function replaceImageAndReprocess() {
+    if (
+      !replacementFile ||
+      !detail ||
+      detail.lifecycle_status !== "ACTIVE" ||
+      busy !== null
+    ) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(replacementFile.type)) {
+      setNotice("Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP.");
+      return;
+    }
+    if (replacementFile.size <= 0 || replacementFile.size > 12 * 1024 * 1024) {
+      setNotice("Ảnh phải có dung lượng lớn hơn 0 và không quá 12 MB.");
+      return;
+    }
+    setBusy("reupload");
+    setNotice(null);
+    try {
+      const result = await pages.replaceImageAndReprocess(pageId, replacementFile);
+      if (result.page_id !== pageId || result.lifecycle_status !== "ACTIVE") {
+        throw new Error("Unexpected page OCR response");
+      }
+      applyDetail(result);
+      setHistory(await revisions.list(pageId));
+      setImage(await pages.getImage(pageId));
+      setReplacementFile(null);
+      setNotice(
+        "Đã OCR ảnh mới cho đúng trang này. Bản mới đang chờ duyệt; ảnh và nội dung dùng cho lượt đọc chỉ chuyển sang bản mới sau khi xác minh.",
+      );
+    } catch {
+      setNotice(
+        "Không thể tải ảnh mới hoặc chạy OCR. Dữ liệu hiện tại được giữ lại; hãy kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
       );
     } finally {
       setBusy(null);
@@ -776,6 +815,32 @@ export function AdminOcrReviewScreen({
                   </span>
                 </button>
               ))}
+            </div>
+            <div className="mt-4 grid gap-3">
+              <label className="grid gap-2 text-sm font-bold" htmlFor="replacement-page-image">
+                Tải ảnh mới cho riêng trang này
+                <input
+                  id="replacement-page-image"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="block w-full rounded-control border border-border bg-white p-3 text-sm"
+                  disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
+                  onChange={(event) => setReplacementFile(event.target.files?.[0] ?? null)}
+                  type="file"
+                />
+              </label>
+              {replacementFile ? (
+                <p className="text-sm text-muted">Đã chọn: {replacementFile.name}</p>
+              ) : null}
+              <Button
+                className="sm:w-auto"
+                disabled={busy !== null || !replacementFile || detail.lifecycle_status !== "ACTIVE"}
+                isLoading={busy === "reupload"}
+                onClick={() => void replaceImageAndReprocess()}
+                type="button"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và chạy OCR
+              </Button>
             </div>
             <Button
               className="mt-4 sm:w-auto"

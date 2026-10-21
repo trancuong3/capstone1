@@ -177,6 +177,21 @@ describe("real Admin adapters", () => {
     expect(await createAdminPageService().getImage(pageId)).toEqual(image);
     expect(await createAdminPageService().reload(pageId)).toEqual(processing);
   });
+
+  it("uploads a replacement image for the existing page without sending a page number", async () => {
+    fetchMock.mockResolvedValue(Response.json(detail));
+    const file = new File(["new page image"], "page-1.png", { type: "image/png" });
+    const result = await createAdminPageService().replaceImageAndReprocess(pageId, file);
+    expect(result).toEqual(detail);
+    expect(requestedApiUrl().pathname).toBe(
+      `/books/admin/pages/${pageId}/reupload-ocr`,
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("image")).toMatchObject({ name: "page-1.png" });
+    expect((init.body as FormData).get("page_number")).toBeNull();
+  });
   it.each([
     "bucket/image.png",
     "https://user:password@example.test/image",
@@ -438,7 +453,7 @@ describe("real Admin adapters", () => {
     expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("page_number")).toBe("2");
+    expect((init.body as FormData).get("page_number")).toBeNull();
     expect((init.body as FormData).get("image")).toMatchObject({
       name: "page-2.png",
     });

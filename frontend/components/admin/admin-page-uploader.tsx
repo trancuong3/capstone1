@@ -25,7 +25,6 @@ export function AdminPageUploader({
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
   const [files, setFiles] = useState<File[]>([]);
-  const [startNumber, setStartNumber] = useState(String(nextPageNumber));
   const [progress, setProgress] = useState<AdminPageUploadProgressUI[]>([]);
   const progressRef = useRef<AdminPageUploadProgressUI[]>([]);
   const [retryEntries, setRetryEntries] = useState<AdminPageUploadInputUI[]>(
@@ -87,7 +86,7 @@ export function AdminPageUploader({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    const start = Number(startNumber);
+    const start = nextPageNumber;
     if (!files.length) {
       setError("Hãy chọn ít nhất một ảnh trang sách.");
       return;
@@ -140,7 +139,6 @@ export function AdminPageUploader({
           file_name: file.name,
           mime_type: file.type as AdminPageUploadInputUI["mime_type"],
           size_bytes: file.size,
-          page_number: start + index,
           width,
           height,
           file,
@@ -222,17 +220,11 @@ export function AdminPageUploader({
         </StatusMessage>
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
-        <label className="grid gap-2 font-bold" htmlFor="page-number-start">
-          Số trang đầu tiên
-          <input
-            id="page-number-start"
-            className="min-h-12 max-w-40 rounded-control border border-border bg-white px-3"
-            min={1}
-            onChange={(event) => setStartNumber(event.target.value)}
-            type="number"
-            value={startNumber}
-          />
-        </label>
+        <p className="text-sm font-semibold text-ink">
+          Số trang được Backend tự động sắp xếp liên tục. Với dữ liệu hiện tại,
+          trang tiếp theo dự kiến là {nextPageNumber}; Backend sẽ quyết định số
+          trang cuối cùng dựa trên dữ liệu trong PostgreSQL.
+        </p>
         <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />
           <span className="font-extrabold">
