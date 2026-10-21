@@ -331,11 +331,9 @@ export function ReadingScreen({
     }
 
     const nextPage = pageProgress.pages[pageProgress.current_index + 1];
-    if (!nextPage) {
-      setPageNavigationError("Bé đã đến trang cuối của phạm vi đọc đã chọn.");
-      setUiState("reading");
-      return;
-    }
+    // The final-page message and disabled Next button are rendered from
+    // pageProgress; do not set state synchronously inside this effect.
+    if (!nextPage) return;
 
     let active = true;
     void services.pageMatchService
