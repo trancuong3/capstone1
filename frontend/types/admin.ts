@@ -48,6 +48,7 @@ export interface AdminParentDetailDTO {
 }
 
 export interface AdminBookCreateDTO {
+  readonly name: string;
   readonly title: string;
   readonly author: string | null;
   readonly min_grade: number;
@@ -63,7 +64,7 @@ export interface AdminBookQueryUI {
 }
 
 export interface AdminBookListItemUI {
-  readonly book: BookListItemDTO;
+  readonly book: AdminBookDTO;
   readonly page_count: number;
   readonly processing_count: number;
   readonly needs_review_count: number;
@@ -220,6 +221,7 @@ export type AdminMockScenario =
   | "unavailable";
 
 export type AdminBookDTO = BookListItemDTO & {
+  readonly name: string | null;
   /** Next available page number, calculated across active and retired pages. */
   readonly next_page_number?: number;
 };

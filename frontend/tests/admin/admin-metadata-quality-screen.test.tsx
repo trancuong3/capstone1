@@ -66,6 +66,7 @@ describe("AdminMetadataQualityScreen", () => {
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
     expect(await screen.findByText("12")).toBeInTheDocument();
+    expect(await screen.findByText("Chưa có tiêu đề")).toBeInTheDocument();
     expect(screen.getAllByText("Chưa có tác giả").length).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Khoảng lớp không hợp lệ").length,
@@ -89,6 +90,47 @@ describe("AdminMetadataQualityScreen", () => {
     });
   });
 
+  it("shows retired books with NULL titles so Admin can repair their metadata", async () => {
+    const services = createAdminServiceFixture();
+    const retiredBookId = "44444444-4444-4444-8444-444444444444";
+    vi.mocked(services.metadataQuality.get).mockResolvedValue({
+      ...dashboardFixture,
+      summary: { ...dashboardFixture.summary, missing_title: 1 },
+      items: [
+        {
+          id: retiredBookId,
+          title: null,
+          author: "Tác giả",
+          min_grade: 1,
+          max_grade: 3,
+          lifecycle_status: "RETIRED",
+          issues: ["MISSING_TITLE"],
+        },
+      ],
+      total: 1,
+      limit: 10,
+      offset: 0,
+    });
+
+    render(withAdminFixture(<AdminMetadataQualityScreen />, services));
+
+    expect(await screen.findByText("Chưa có tiêu đề")).toBeInTheDocument();
+    expect(screen.getAllByText("Đã ngừng").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: "Bổ sung metadata" }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/books/${retiredBookId}/edit?returnTo=metadata-quality&issue=MISSING_TITLE`,
+    );
+    expect(services.metadataQuality.get).toHaveBeenCalledWith({
+      search: undefined,
+      issue_type: undefined,
+      lifecycle_status: undefined,
+      limit: 10,
+      offset: 0,
+    });
+  });
+
   it("sends issue filters to the API service", async () => {
     const services = createAdminServiceFixture();
     vi.mocked(services.metadataQuality.get).mockResolvedValue(dashboardFixture);
@@ -98,13 +140,13 @@ describe("AdminMetadataQualityScreen", () => {
     await screen.findByRole("heading", { name: "Sách cần kiểm tra" });
     await user.selectOptions(
       screen.getByLabelText("Loại vấn đề"),
-      "MISSING_AUTHOR",
+      "MISSING_TITLE",
     );
 
     await waitFor(() => {
       expect(services.metadataQuality.get).toHaveBeenLastCalledWith({
         search: undefined,
-        issue_type: "MISSING_AUTHOR",
+        issue_type: "MISSING_TITLE",
         lifecycle_status: undefined,
         limit: 10,
         offset: 0,

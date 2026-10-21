@@ -82,6 +82,7 @@ export function AdminBookEditorScreen({
   async function saveMetadata(value: AdminBookCreateDTO) {
     await books.update(bookId, {
       ...value,
+      name: value.name.trim(),
       title: value.title.trim(),
       author: value.author?.trim() || null,
     });
@@ -175,6 +176,7 @@ export function AdminBookEditorScreen({
   }
 
   const initial: AdminBookCreateDTO = {
+    name: book.name ?? "",
     title: book.title.trim() ? book.title : "",
     author: book.author ?? "",
     min_grade: book.min_grade,

@@ -8,6 +8,7 @@ class Book(Base):
     __tablename__ = "books"
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    Name = Column("name", String, nullable=True)
     Title = Column("title", String, nullable=False)
     Author = Column("author", String)
     MinGrade = Column("mingrade", SmallInteger, nullable=False)

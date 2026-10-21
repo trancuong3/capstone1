@@ -78,7 +78,7 @@ class CatalogRepository:
         query = select(Book).where(self.eligible_book())
         if search and search.strip():
             pattern = self.search_pattern(search)
-            query = query.where(or_(Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
+            query = query.where(or_(Book.Name.ilike(pattern, escape="\\"), Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
         if author is not None:
             query = query.where(Book.Author == author)
         if grade is not None:
@@ -114,7 +114,7 @@ class AdminCatalogRepository(CatalogRepository):
         query = select(Book)
         if search and search.strip():
             pattern = self.search_pattern(search)
-            query = query.where(or_(Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
+            query = query.where(or_(Book.Name.ilike(pattern, escape="\\"), Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
         if lifecycle_status is not None:
             query = query.where(Book.LifecycleStatus == lifecycle_status)
         result = await self.db.execute(query.order_by(Book.Title, Book.Id))

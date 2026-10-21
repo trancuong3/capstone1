@@ -21,6 +21,7 @@ export const child = {
 };
 export const book = {
   id: ids.book,
+  name: "Tên sách từ API",
   title: "Câu chuyện từ API",
   author: "Tác giả API",
   min_grade: 1,
@@ -70,6 +71,7 @@ export interface BrowserApiState {
   unexpected: string[];
   requests: string[];
   createBookRequest: {
+    name: string;
     title: string;
     author: string | null;
     min_grade: number;
@@ -77,6 +79,7 @@ export interface BrowserApiState {
   } | null;
   createdBook: {
     id: string;
+    name: string;
     title: string;
     author: string | null;
     min_grade: number;
@@ -178,6 +181,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       expect(request.headers().authorization).toMatch(/^Bearer /);
       const body = request.postDataJSON() as Record<string, unknown>;
       if (
+        typeof body.name !== "string" ||
+        !body.name.trim() ||
         typeof body.title !== "string" ||
         !body.title.trim() ||
         !(body.author === null || typeof body.author === "string") ||
@@ -190,7 +195,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         return respond(route, { detail: "Invalid create book payload" }, 422);
       }
       const requestPayload = {
-        title: body.title,
+        name: body.name.trim(),
+        title: body.title.trim(),
         author: body.author as string | null,
         min_grade: Number(body.min_grade),
         max_grade: Number(body.max_grade),

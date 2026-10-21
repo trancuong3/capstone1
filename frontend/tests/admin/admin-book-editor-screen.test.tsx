@@ -45,7 +45,7 @@ describe("AdminBookEditorScreen", () => {
     );
 
     const title = await screen.findByRole("textbox", {
-      name: "Tên sách",
+      name: "Tiêu đề sách *",
     });
     expect(title).toHaveValue(adminBookFixture.title);
     await user.clear(title);
@@ -54,6 +54,7 @@ describe("AdminBookEditorScreen", () => {
 
     await waitFor(() => {
       expect(services.books.update).toHaveBeenCalledWith(adminBookFixture.id, {
+        name: "Tên sách kiểm thử",
         title: "Tên sách đã sửa",
         author: adminBookFixture.author,
         min_grade: 1,
@@ -87,7 +88,7 @@ describe("AdminBookEditorScreen", () => {
     );
 
     const title = await screen.findByRole("textbox", {
-      name: "Tên sách",
+      name: "Tiêu đề sách *",
     });
     await user.clear(title);
     await user.type(title, "Đã bổ sung tiêu đề");
@@ -115,7 +116,7 @@ describe("AdminBookEditorScreen", () => {
         services,
       ),
     );
-    await screen.findByRole("textbox", { name: "Tên sách" });
+    await screen.findByRole("textbox", { name: "Tiêu đề sách *" });
     await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
 
     await waitFor(() => {
@@ -156,7 +157,7 @@ describe("AdminBookEditorScreen", () => {
         services,
       ),
     );
-    await screen.findByRole("textbox", { name: "Tên sách" });
+    await screen.findByRole("textbox", { name: "Tiêu đề sách *" });
     await user.click(screen.getByRole("button", { name: "Kích hoạt lại" }));
 
     expect(

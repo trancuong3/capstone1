@@ -150,7 +150,7 @@ export function AdminBooksScreen() {
       <AdminPageHeader
         eyebrow="Quản trị nội dung"
         title="Kho sách"
-        description="Tạo sách, bổ sung tiêu đề còn thiếu, chỉnh sửa metadata và quản lý trạng thái hoạt động của từng sách."
+        description="Quản lý tên sách, tiêu đề riêng biệt, metadata và trạng thái hoạt động của từng sách."
         actions={
           <ButtonLink className="sm:w-auto" href="/admin/books/new">
             Tạo sách mới
@@ -170,7 +170,7 @@ export function AdminBooksScreen() {
               className="pointer-events-none absolute right-5 top-9 size-5 text-muted"
             />
             <TextField
-              label="Tìm theo tên sách hoặc tác giả"
+              label="Tìm theo tên sách, tiêu đề hoặc tác giả"
               onChange={(event) => setSearch(event.target.value)}
               value={search}
             />
@@ -271,6 +271,10 @@ export function AdminBooksScreen() {
                           </span>
                         ) : null}
                       </div>
+                      <p className="mb-1 text-sm text-muted">
+                        Tên sách:{" "}
+                        {book.name?.trim() ? book.name : "Chưa có tên sách"}
+                      </p>
                       <Link
                         className="inline-block rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
                         href={`/admin/books/${encodeURIComponent(book.id)}`}

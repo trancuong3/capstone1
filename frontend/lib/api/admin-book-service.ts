@@ -10,6 +10,7 @@ import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 const adminBookDtoSchema = z.object({
   id: z.guid(),
+  name: z.string().nullable(),
   title: z.string(),
   author: z.string().nullable(),
   min_grade: z.number().int(),
@@ -52,6 +53,7 @@ export function createAdminBookService(): AdminBookService {
       requestApi("/books/admin/catalog", adminBookDtoSchema, undefined, {
         method: "POST",
         body: {
+          name: request.name.trim(),
           title: request.title.trim(),
           author: request.author?.trim() || null,
           min_grade: request.min_grade,
@@ -66,6 +68,7 @@ export function createAdminBookService(): AdminBookService {
         {
           method: "PUT",
           body: {
+            name: request.name.trim(),
             title: request.title.trim(),
             author: request.author?.trim() || null,
             min_grade: request.min_grade,

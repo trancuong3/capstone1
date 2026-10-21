@@ -32,6 +32,7 @@ const newRevisionId = "55555555-5555-4555-8555-555555555555";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
+  name: "Tên sách Admin từ database",
   title: "Sách Admin từ database",
   author: null,
   min_grade: 1,
@@ -243,7 +244,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     await screen.findByRole("heading", { name: book.title });
     await user.type(
-      screen.getByLabelText("Tìm theo tên sách hoặc tác giả"),
+      screen.getByLabelText("Tìm theo tên sách, tiêu đề hoặc tác giả"),
       "Mèo",
     );
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");

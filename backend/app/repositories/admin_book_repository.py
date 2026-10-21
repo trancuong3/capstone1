@@ -21,6 +21,7 @@ class AdminBookRepository:
 
     async def create(self, *, actor_id: UUID, values: dict[str, object]) -> Book:
         book = Book(
+            Name=str(values["name"]),
             Title=str(values["title"]),
             Author=values.get("author"),
             MinGrade=int(values["min_grade"]),
@@ -38,6 +39,7 @@ class AdminBookRepository:
         return book
 
     async def update_metadata(self, book: Book, *, values: dict[str, object]) -> Book:
+        book.Name = str(values["name"])
         book.Title = str(values["title"])
         book.Author = values.get("author")
         book.MinGrade = int(values["min_grade"])
