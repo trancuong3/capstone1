@@ -36,6 +36,35 @@ export interface ReadingSessionCreateDTO {
   readonly mode: "realtime";
   readonly selected_page_id?: UUID;
   readonly selected_page_revision_id?: UUID;
+  /** Last page selected for this session; omitted requests remain one-page sessions. */
+  readonly end_page_id?: UUID;
+}
+
+export type ReadingSessionPageStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED";
+
+export interface ReadingSessionPageProgressItemDTO {
+  readonly page_id: UUID;
+  readonly page_revision_id: UUID;
+  readonly page_number: number;
+  readonly page_order: number;
+  readonly status: ReadingSessionPageStatus;
+  readonly started_at: ISODateTime | null;
+  readonly completed_at: ISODateTime | null;
+}
+
+export interface ReadingSessionPageProgressDTO {
+  readonly session_id: UUID;
+  readonly persisted: boolean;
+  readonly start_page_id: UUID;
+  readonly end_page_id: UUID;
+  readonly current_page_id: UUID;
+  readonly start_page_number: number;
+  readonly end_page_number: number;
+  readonly current_page_number: number;
+  readonly current_index: number;
+  readonly total_pages: number;
+  readonly completed_pages: number;
+  readonly pages: readonly ReadingSessionPageProgressItemDTO[];
 }
 
 export interface ReadingSessionCreateResponseDTO {
@@ -176,6 +205,7 @@ export interface ReadingRealtimeSnapshotUI {
 export interface ReadingCompletionSummaryUI {
   readonly duration_minutes: number | null;
   readonly pages_explored: number | null;
+  readonly selected_range_pages?: number | null;
   readonly practiced_words: number | null;
   readonly spoken_words?: readonly string[] | null;
   readonly transcripts?: readonly string[] | null;
@@ -264,6 +294,8 @@ export interface HistoryFluencyAssessmentDTO extends Omit<
 }
 
 export interface ReadingSessionDetailDTO extends HistorySessionSummaryDTO {
+  readonly selected_range_pages?: number | null;
+  readonly pages_completed?: number | null;
   readonly selected_page_revision_ids: readonly UUID[];
   readonly reference_page_revision_ids: readonly UUID[];
   readonly events: readonly HistoryEventDTO[];

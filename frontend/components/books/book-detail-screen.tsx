@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight, BookX, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
@@ -55,13 +55,16 @@ export function BookDetailScreen({
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetPageId = searchParams.get("pageId");
-  const startButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [selectedPage, setSelectedPage] = useState<BookPagePreviewDTO | null>(
     null,
   );
+  const [selectedEndPageId, setSelectedEndPageId] = useState<string | null>(
+    null,
+  );
+  const [startError, setStartError] = useState<string | null>(null);
   const [startState, setStartState] = useState<"idle" | "starting" | "error">(
     "idle",
   );
@@ -72,6 +75,8 @@ export function BookDetailScreen({
     async function loadDetail() {
       setState({ status: "loading" });
       setSelectedPage(null);
+      setSelectedEndPageId(null);
+      setStartError(null);
       setStartState("idle");
 
       try {
@@ -86,6 +91,7 @@ export function BookDetailScreen({
         let previewUnavailable = false;
         try {
           pages = await bookService.listPages(bookId);
+          pages.sort((left, right) => left.page_number - right.page_number);
           previewUnavailable = pages.length === 0;
         } catch (error) {
           if (isServiceError(error) && error.status === 503) {
@@ -101,7 +107,11 @@ export function BookDetailScreen({
           const matchedPage = targetPageId
             ? pages.find((p) => p.page_id === targetPageId)
             : null;
-          setSelectedPage(matchedPage ?? pages[0] ?? null);
+          const startPage = matchedPage ?? pages[0] ?? null;
+          setSelectedPage(startPage);
+          setSelectedEndPageId(
+            pages[pages.length - 1]?.page_id ?? startPage?.page_id ?? null,
+          );
         }
       } catch (error) {
         if (!isActive) {
@@ -126,7 +136,14 @@ export function BookDetailScreen({
     return () => {
       isActive = false;
     };
-  }, [bookId, bookService, childService, requestKey, requestedChildId]);
+  }, [
+    bookId,
+    bookService,
+    childService,
+    requestKey,
+    requestedChildId,
+    targetPageId,
+  ]);
 
   useEffect(() => {
     if (state.status === "ready" && targetPageId) {
@@ -137,18 +154,20 @@ export function BookDetailScreen({
       }
     }
   }, [state.status, targetPageId]);
-  
+
   async function handleStartReading() {
     if (
       state.status !== "ready" ||
       !state.child ||
       !selectedPage ||
+      !selectedEndPageId ||
       startState === "starting"
     ) {
       return;
     }
 
     setStartState("starting");
+    setStartError(null);
     try {
       const session = await readingService.create({
         book_id: state.book.id,
@@ -156,11 +175,15 @@ export function BookDetailScreen({
         mode: "realtime",
         selected_page_id: selectedPage.page_id,
         selected_page_revision_id: selectedPage.current_verified_revision_id,
+        end_page_id: selectedEndPageId,
       });
       router.push(
         `/reading/${encodeURIComponent(session.session_id)}?state=ready&pageId=${encodeURIComponent(selectedPage.page_id)}`,
       );
     } catch {
+      setStartError(
+        "Chưa thể chuẩn bị buổi đọc với phạm vi này. Ba mẹ hãy kiểm tra các trang rồi thử lại.",
+      );
       setStartState("error");
     }
   }
@@ -249,6 +272,31 @@ export function BookDetailScreen({
   }
 
   const { book, child, pages, previewUnavailable } = state;
+  const selectedEndPage =
+    pages.find((candidate) => candidate.page_id === selectedEndPageId) ?? null;
+  const selectedRangePages =
+    selectedPage && selectedEndPage
+      ? pages.filter(
+          (candidate) =>
+            candidate.page_number >= selectedPage.page_number &&
+            candidate.page_number <= selectedEndPage.page_number,
+        )
+      : [];
+  const selectedRangeHasGap =
+    selectedRangePages.some(
+      (candidate, index) =>
+        candidate.page_number !==
+        (index === 0
+          ? selectedPage?.page_number
+          : (selectedRangePages[index - 1]?.page_number ?? 0) + 1),
+    ) ||
+    Boolean(
+      selectedPage &&
+      selectedEndPage &&
+      (selectedRangePages[0]?.page_number !== selectedPage.page_number ||
+        selectedRangePages[selectedRangePages.length - 1]?.page_number !==
+          selectedEndPage.page_number),
+    );
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -283,10 +331,80 @@ export function BookDetailScreen({
             {invitationFor(book)}
           </p>
 
+          <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-bold text-ink">Trang bắt đầu</span>
+              <span className="text-body text-primary">
+                {selectedPage
+                  ? `Trang ${selectedPage.page_number}`
+                  : "Chưa chọn trang"}
+              </span>
+              <span className="text-sm text-muted">
+                Chọn hình trang bên dưới để thay đổi trang bắt đầu.
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-sm font-bold text-ink"
+                htmlFor="reading-end-page"
+              >
+                Trang kết thúc
+              </label>
+              <select
+                className="min-h-11 rounded-control border border-line bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                disabled={
+                  !selectedPage ||
+                  pages.length === 0 ||
+                  startState === "starting"
+                }
+                id="reading-end-page"
+                onChange={(event) => {
+                  setSelectedEndPageId(event.target.value || null);
+                  setStartState("idle");
+                  setStartError(null);
+                }}
+                value={selectedEndPageId ?? ""}
+              >
+                {pages
+                  .filter((candidate) =>
+                    selectedPage
+                      ? candidate.page_number >= selectedPage.page_number
+                      : false,
+                  )
+                  .map((candidate) => (
+                    <option key={candidate.page_id} value={candidate.page_id}>
+                      Trang {candidate.page_number}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {selectedPage && selectedEndPage ? (
+              <p className="text-sm text-muted sm:col-span-2">
+                Phạm vi đọc: Trang {selectedPage.page_number}–
+                {selectedEndPage.page_number} ({selectedRangePages.length} trang
+                hợp lệ)
+              </p>
+            ) : null}
+            {selectedRangeHasGap ? (
+              <div className="sm:col-span-2">
+                <StatusMessage title="Khoảng trang chưa liên tục" tone="error">
+                  Trong phạm vi đã chọn có trang thiếu hoặc chưa đủ điều kiện
+                  đọc. Hãy chọn khoảng khác.
+                </StatusMessage>
+              </div>
+            ) : null}
+          </div>
+
           <Button
             id="start-reading-button"
             className="order-6 sm:order-none sm:w-[360px]"
-            disabled={!selectedPage || !child}
+            disabled={
+              !selectedPage ||
+              !selectedEndPageId ||
+              !child ||
+              selectedRangeHasGap ||
+              pages.length === 0
+            }
             isLoading={startState === "starting"}
             onClick={handleStartReading}
           >
@@ -326,7 +444,17 @@ export function BookDetailScreen({
                   key={page.page_id}
                   onSelect={(nextPage) => {
                     setSelectedPage(nextPage);
+                    setSelectedEndPageId((currentEndId) => {
+                      const currentEnd = pages.find(
+                        (candidate) => candidate.page_id === currentEndId,
+                      );
+                      return !currentEnd ||
+                        currentEnd.page_number < nextPage.page_number
+                        ? nextPage.page_id
+                        : currentEnd.page_id;
+                    });
                     setStartState("idle");
+                    setStartError(null);
                   }}
                   page={page}
                 />
@@ -336,7 +464,8 @@ export function BookDetailScreen({
 
           {startState === "error" ? (
             <StatusMessage className="order-7 sm:order-none" tone="error">
-              Chưa thể chuẩn bị buổi đọc. Ba mẹ vui lòng thử lại.
+              {startError ??
+                "Chưa thể chuẩn bị buổi đọc. Ba mẹ vui lòng thử lại."}
             </StatusMessage>
           ) : null}
         </div>

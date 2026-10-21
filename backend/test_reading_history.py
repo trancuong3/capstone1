@@ -57,6 +57,32 @@ class HistoryCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         detail = await HistoryService(history_repo()).get(SESSION, ACTOR)
         self.assertEqual(detail.availability.model_dump(), dict(events="absent", fluency="absent", comprehension="absent"))
 
+    async def test_selected_range_and_completed_page_counts_are_distinct(self):
+        repo = history_repo()
+        repo.session_page_rows.return_value = [
+            SimpleNamespace(
+                PageRevisionId=BOOK,
+                Status="COMPLETED",
+            ),
+            SimpleNamespace(
+                PageRevisionId=CHILD,
+                Status="PENDING",
+            ),
+            SimpleNamespace(
+                PageRevisionId=QUESTION,
+                Status="IN_PROGRESS",
+            ),
+        ]
+
+        detail = await HistoryService(repo).get(SESSION, ACTOR)
+
+        self.assertEqual(detail.selected_range_pages, 3)
+        self.assertEqual(detail.pages_completed, 1)
+        self.assertEqual(
+            detail.selected_page_revision_ids,
+            [BOOK, CHILD, QUESTION],
+        )
+
     async def test_real_event_statuses_are_not_confirmed_or_reclassified(self):
         for status in ("DETECTED", "FEEDBACK_GIVEN", "IGNORED_BY_GATE"):
             repo = history_repo()

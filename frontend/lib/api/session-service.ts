@@ -42,6 +42,8 @@ const summarySchema = z.object({
   duration_ms: z.number().int().nonnegative().nullable(),
 });
 const detailSchema = summarySchema.extend({
+  selected_range_pages: z.number().int().nonnegative().nullable().optional(),
+  pages_completed: z.number().int().nonnegative().nullable().optional(),
   selected_page_revision_ids: z.array(z.uuid()),
   reference_page_revision_ids: z.array(z.uuid()),
   events: z.array(
