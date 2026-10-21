@@ -1145,8 +1145,13 @@ export function ReadingScreen({
   }
 
   return (
-    <>
-    <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
+    <div
+      data-canonical-state={canonicalState}
+      data-child-error-count={safety.child_error_events.length}
+      data-evidence-valid={safety.evidence_valid}
+      data-scoring-active={safety.scoring_active}
+    >
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
       {pageProgress ? (
         <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -1198,12 +1203,6 @@ export function ReadingScreen({
       ) : null}
     </div>
 
-    <div
-      data-canonical-state={canonicalState}
-      data-child-error-count={safety.child_error_events.length}
-      data-evidence-valid={safety.evidence_valid}
-      data-scoring-active={safety.scoring_active}
-    >
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
@@ -1399,7 +1398,6 @@ export function ReadingScreen({
         tạo trong khoảng này: 0.
       </span>
     </div>
-    </>
   );
 }
 
