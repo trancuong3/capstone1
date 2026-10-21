@@ -37,6 +37,11 @@ export function SessionComplete({
   summary,
 }: SessionCompleteProps) {
   const [showWordList, setShowWordList] = useState(false);
+  const rangeWasPartial =
+    summary.selected_range_pages !== undefined &&
+    summary.selected_range_pages !== null &&
+    summary.pages_explored !== null &&
+    summary.pages_explored < summary.selected_range_pages;
   const spokenWords = summary.spoken_words ?? [];
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? spokenWords;
@@ -66,10 +71,12 @@ export function SessionComplete({
           />
           <div>
             <h1 className="text-heading font-extrabold text-ink">
-              Bé đọc xong rồi!
+              {rangeWasPartial ? "Đã lưu buổi đọc" : "Bé đọc xong rồi!"}
             </h1>
             <p className="mt-2 text-body text-muted">
-              Giỏi lắm, hôm nay bé đã hoàn thành một buổi đọc.
+              {rangeWasPartial
+                ? "Mình đã lưu phần bé đã đọc. Một số trang trong phạm vi vẫn chưa được xác nhận hoàn thành."
+                : "Giỏi lắm, hôm nay bé đã hoàn thành một buổi đọc."}
             </p>
           </div>
         </div>
@@ -124,7 +131,7 @@ export function SessionComplete({
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className={`grid gap-4 ${summary.selected_range_pages !== undefined && summary.selected_range_pages !== null ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
           <div className="rounded-card bg-cream p-5 text-center">
             <Clock3
               aria-hidden="true"
@@ -137,8 +144,21 @@ export function SessionComplete({
             </p>
             <p className="text-label text-muted">thời lượng buổi đọc</p>
           </div>
+          {summary.selected_range_pages !== undefined &&
+          summary.selected_range_pages !== null ? (
+            <div className="rounded-card bg-cream p-5 text-center">
+              <BookOpen
+                aria-hidden="true"
+                className="mx-auto size-7 text-purple-ink"
+              />
+              <p className="mt-3 text-[26px] font-extrabold">
+                {summary.selected_range_pages} trang
+              </p>
+              <p className="text-label text-muted">trong phạm vi đã chọn</p>
+            </div>
+          ) : null}
           <div className="rounded-card bg-cream p-5 text-center">
-            <BookOpen
+            <CheckCircle2
               aria-hidden="true"
               className="mx-auto size-7 text-purple-ink"
             />
@@ -147,7 +167,7 @@ export function SessionComplete({
                 ? "Chưa ghi nhận"
                 : `${summary.pages_explored} trang`}
             </p>
-            <p className="text-label text-muted">đã mở trong buổi đọc</p>
+            <p className="text-label text-muted">đã xác nhận hoàn thành</p>
           </div>
           <button
             type="button"
