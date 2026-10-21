@@ -270,6 +270,8 @@ class HistoryAvailabilityRead(BaseModel):
 
 
 class SessionDetailRead(HistorySessionSummaryRead):
+    selected_range_pages: int | None = Field(default=None, ge=0)
+    pages_completed: int | None = Field(default=None, ge=0)
     selected_page_revision_ids: list[UUID]
     reference_page_revision_ids: list[UUID]
     events: list[HistoryEventRead]
