@@ -294,6 +294,8 @@ export interface HistoryFluencyAssessmentDTO extends Omit<
 }
 
 export interface ReadingSessionDetailDTO extends HistorySessionSummaryDTO {
+  readonly selected_range_pages?: number | null;
+  readonly pages_completed?: number | null;
   readonly selected_page_revision_ids: readonly UUID[];
   readonly reference_page_revision_ids: readonly UUID[];
   readonly events: readonly HistoryEventDTO[];
