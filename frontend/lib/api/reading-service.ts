@@ -7,6 +7,7 @@ import type {
   ReadingSessionCreateDTO,
   ReadingSessionCreateResponseDTO,
   ReadingSessionSummaryDTO,
+  ReadingSessionPageProgressDTO,
 } from "@/types/reading";
 
 export interface ReadingService {
@@ -15,6 +16,11 @@ export interface ReadingService {
   ): Promise<ReadingSessionCreateResponseDTO>;
   get(sessionId: string): Promise<ReadingSessionSummaryDTO>;
   getCurrentPage(sessionId: string): Promise<ReadingPageDTO>;
+  getPageProgress(sessionId: string): Promise<ReadingSessionPageProgressDTO>;
+  navigateToPage(
+    sessionId: string,
+    targetPageId: string,
+  ): Promise<ReadingSessionPageProgressDTO>;
   getCompletionSummary(sessionId: string): Promise<ReadingCompletionSummaryUI>;
   finish(sessionId: string): Promise<ReadingSessionSummaryDTO>;
 }
@@ -25,6 +31,28 @@ const sessionCreateResponseSchema = z.object({
   SelectedPageId: z.uuid(),
   SelectedPageRevisionId: z.uuid(),
   StartedAt: z.iso.datetime({ offset: true }),
+});
+
+export const sessionPageProgressSchema = z.object({
+  session_id: z.uuid(),
+  start_page_id: z.uuid(),
+  end_page_id: z.uuid(),
+  current_page_id: z.uuid(),
+  start_page_number: z.number().int().positive(),
+  end_page_number: z.number().int().positive(),
+  current_page_number: z.number().int().positive(),
+  current_index: z.number().int().nonnegative(),
+  total_pages: z.number().int().positive(),
+  completed_pages: z.number().int().nonnegative(),
+  pages: z.array(z.object({
+    page_id: z.uuid(),
+    page_revision_id: z.uuid(),
+    page_number: z.number().int().positive(),
+    page_order: z.number().int().nonnegative(),
+    status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED"]),
+    started_at: z.iso.datetime({ offset: true }).nullable(),
+    completed_at: z.iso.datetime({ offset: true }).nullable(),
+  })),
 });
 
 const sessionSummarySchema = z.object({
@@ -106,6 +134,7 @@ export function createReadingService(): ReadingService {
             state: "CREATED",
             selected_page_id: input.selected_page_id,
             selected_page_revision_id: input.selected_page_revision_id,
+            end_page_id: input.end_page_id,
           },
         },
       );
@@ -138,6 +167,30 @@ export function createReadingService(): ReadingService {
       return requestApi(
         `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
         readingPageDtoSchema,
+      );
+    },
+
+    async getPageProgress(
+      sessionId: string,
+    ): Promise<ReadingSessionPageProgressDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/progress`,
+        sessionPageProgressSchema,
+      );
+    },
+
+    async navigateToPage(
+      sessionId: string,
+      targetPageId: string,
+    ): Promise<ReadingSessionPageProgressDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/navigate`,
+        sessionPageProgressSchema,
+        undefined,
+        {
+          method: "POST",
+          body: { target_page_id: targetPageId },
+        },
       );
     },
 
