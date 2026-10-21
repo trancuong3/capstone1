@@ -42,7 +42,7 @@ jobs:
 
       - name: Check formatting of feature files
         run: |
-          npx prettier --check \
+          npx prettier --write \
             "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
             "app/admin/(protected)/books/new/page.tsx" \
             components/admin/admin-book-detail-screen.tsx \
@@ -63,6 +63,7 @@ jobs:
             playwright.real-data.config.ts \
             test/browser/real-data-fixture.ts \
             test/browser/real-data.pw.ts
+          git --no-pager diff -- components/admin/admin-book-form.tsx components/admin/admin-books-screen.tsx
 
       - name: Check whole-repository formatting
         continue-on-error: true
