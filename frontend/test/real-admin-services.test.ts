@@ -178,11 +178,16 @@ describe("real Admin adapters", () => {
     expect(await createAdminPageService().reload(pageId)).toEqual(processing);
   });
 
-  it("uploads a replacement image for the existing page without sending a page number", async () => {
-    fetchMock.mockResolvedValue(Response.json(detail));
-    const file = new File(["new page image"], "page-1.png", { type: "image/png" });
-    const result = await createAdminPageService().replaceImageAndReprocess(pageId, file);
-    expect(result).toEqual(detail);
+  it(
+    "uploads a replacement image for the existing page without sending a page number",
+    async () => {
+      fetchMock.mockResolvedValue(Response.json(detail));
+      const file = new File(["new page image"], "page-1.png", {
+        type: "image/png",
+      });
+      const result =
+        await createAdminPageService().replaceImageAndReprocess(pageId, file);
+      expect(result).toEqual(detail);
     expect(requestedApiUrl().pathname).toBe(
       `/books/admin/pages/${pageId}/reupload-ocr`,
     );
@@ -192,8 +197,9 @@ describe("real Admin adapters", () => {
     expect((init.body as FormData).get("image")).toMatchObject({
       name: "page-1.png",
     });
-    expect((init.body as FormData).get("page_number")).toBeNull();
-  });
+      expect((init.body as FormData).get("page_number")).toBeNull();
+    },
+  );
   it.each([
     "bucket/image.png",
     "https://user:password@example.test/image",
