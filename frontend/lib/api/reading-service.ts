@@ -21,6 +21,10 @@ export interface ReadingService {
     sessionId: string,
     targetPageId: string,
   ): Promise<ReadingSessionPageProgressDTO>;
+  completeCurrentPage(
+    sessionId: string,
+    pageId: string,
+  ): Promise<ReadingSessionPageProgressDTO>;
   getCompletionSummary(sessionId: string): Promise<ReadingCompletionSummaryUI>;
   finish(sessionId: string): Promise<ReadingSessionSummaryDTO>;
 }
@@ -35,6 +39,7 @@ const sessionCreateResponseSchema = z.object({
 
 export const sessionPageProgressSchema = z.object({
   session_id: z.uuid(),
+  persisted: z.boolean(),
   start_page_id: z.uuid(),
   end_page_id: z.uuid(),
   current_page_id: z.uuid(),
@@ -191,6 +196,18 @@ export function createReadingService(): ReadingService {
           method: "POST",
           body: { target_page_id: targetPageId },
         },
+      );
+    },
+
+    async completeCurrentPage(
+      sessionId: string,
+      pageId: string,
+    ): Promise<ReadingSessionPageProgressDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/pages/${encodeURIComponent(pageId)}/complete`,
+        sessionPageProgressSchema,
+        undefined,
+        { method: "POST" },
       );
     },
 
