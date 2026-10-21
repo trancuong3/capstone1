@@ -13,11 +13,13 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 export function AdminNewBookScreen() {
   const { books } = useAdminServices();
   const router = useRouter();
+  const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [minGrade, setMinGrade] = useState("1");
   const [maxGrade, setMaxGrade] = useState("5");
   const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const savingRef = useRef(false);
@@ -27,11 +29,17 @@ export function AdminNewBookScreen() {
     if (savingRef.current) return;
 
     setError(null);
+    setNameError(null);
     setTitleError(null);
+    const normalizedName = name.trim();
     const normalizedTitle = title.trim();
     const min = Number(minGrade);
     const max = Number(maxGrade);
 
+    if (!normalizedName) {
+      setNameError("Vui lòng nhập tên sách.");
+      return;
+    }
     if (!normalizedTitle) {
       setTitleError("Vui lòng nhập tiêu đề sách.");
       return;
@@ -40,11 +48,13 @@ export function AdminNewBookScreen() {
       !Number.isInteger(min) ||
       !Number.isInteger(max) ||
       min < 1 ||
+      min > 5 ||
+      max < 1 ||
       max > 5 ||
       min > max
     ) {
       setError(
-        "Khối lớp phải từ 1 đến 5 và khối nhỏ nhất không được lớn hơn khối lớn nhất.",
+        "Khối lớp nhỏ nhất và lớn nhất phải là số nguyên từ 1 đến 5, đồng thời khối nhỏ nhất không được lớn hơn khối lớn nhất.",
       );
       return;
     }
@@ -53,6 +63,7 @@ export function AdminNewBookScreen() {
     setSaving(true);
     try {
       const created = await books.create({
+        name: normalizedName,
         title: normalizedTitle,
         author: author.trim() || null,
         min_grade: min,
@@ -89,6 +100,31 @@ export function AdminNewBookScreen() {
           </StatusMessage>
         ) : null}
         <form className="grid gap-5" noValidate onSubmit={submit}>
+          <label className="grid gap-2 font-bold" htmlFor="book-name">
+            Tên sách *
+            <input
+              id="book-name"
+              aria-describedby={nameError ? "book-name-error" : undefined}
+              aria-invalid={nameError ? true : undefined}
+              className="min-h-12 rounded-control border border-border px-4 font-normal focus:border-primary focus:outline-3 focus:outline-primary/30"
+              maxLength={250}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (nameError) setNameError(null);
+              }}
+              required
+              value={name}
+            />
+            {nameError ? (
+              <span
+                className="font-normal text-danger"
+                id="book-name-error"
+                role="alert"
+              >
+                {nameError}
+              </span>
+            ) : null}
+          </label>
           <label className="grid gap-2 font-bold" htmlFor="book-title">
             Tiêu đề sách *
             <input
@@ -127,11 +163,12 @@ export function AdminNewBookScreen() {
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 font-bold" htmlFor="book-min-grade">
-              Khối lớp nhỏ nhất
+              Khối lớp nhỏ nhất *
               <select
                 id="book-min-grade"
                 className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMinGrade(event.target.value)}
+                required
                 value={minGrade}
               >
                 {[1, 2, 3, 4, 5].map((grade) => (
@@ -142,11 +179,12 @@ export function AdminNewBookScreen() {
               </select>
             </label>
             <label className="grid gap-2 font-bold" htmlFor="book-max-grade">
-              Khối lớp lớn nhất
+              Khối lớp lớn nhất *
               <select
                 id="book-max-grade"
                 className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMaxGrade(event.target.value)}
+                required
                 value={maxGrade}
               >
                 {[1, 2, 3, 4, 5].map((grade) => (

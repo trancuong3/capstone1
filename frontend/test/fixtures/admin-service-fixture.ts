@@ -21,7 +21,8 @@ const createdAt = "2026-10-01T00:00:00Z";
 
 export const adminBookFixture: AdminBookDTO = {
   id: ADMIN_BOOK_ID,
-  title: "Sách kiểm thử",
+  name: "Tên sách kiểm thử",
+  title: "Tiêu đề kiểm thử",
   author: "Tác giả kiểm thử",
   min_grade: 1,
   max_grade: 3,

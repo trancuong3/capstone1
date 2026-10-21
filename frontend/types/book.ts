@@ -4,6 +4,7 @@ export type BookLifecycleStatus = "ACTIVE" | "RETIRED";
 
 export interface BookListItemDTO {
   readonly id: UUID;
+  readonly name?: string | null;
   readonly title: string;
   readonly author: string | null;
   readonly min_grade: number;

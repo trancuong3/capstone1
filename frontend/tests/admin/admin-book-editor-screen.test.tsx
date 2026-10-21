@@ -54,6 +54,7 @@ describe("AdminBookEditorScreen", () => {
 
     await waitFor(() => {
       expect(services.books.update).toHaveBeenCalledWith(adminBookFixture.id, {
+        name: "Tên sách kiểm thử",
         title: "Tên sách đã sửa",
         author: adminBookFixture.author,
         min_grade: 1,

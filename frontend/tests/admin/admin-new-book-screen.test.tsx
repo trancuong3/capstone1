@@ -24,10 +24,13 @@ describe("AdminNewBookScreen", () => {
     routerMock.refresh.mockReset();
   });
 
-  it("renders the required title field", () => {
+  it("renders separate required name and title fields", () => {
     const services = createAdminServiceFixture();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    const name = screen.getByRole("textbox", { name: "Tên sách *" });
+    expect(name).toBeRequired();
+    expect(name).toHaveAttribute("maxLength", "250");
     const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
     expect(title).toBeRequired();
     expect(title).toHaveAttribute("maxLength", "250");
@@ -38,6 +41,7 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    await user.type(screen.getByRole("textbox", { name: "Tên sách *" }), "Tên riêng");
     const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
     await user.click(screen.getByRole("button", { name: "Tạo sách" }));
 
@@ -55,6 +59,7 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    await user.type(screen.getByRole("textbox", { name: "Tên sách *" }), "Tên riêng");
     const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
     await user.type(title, "   ");
     await user.click(screen.getByRole("button", { name: "Tạo sách" }));
@@ -78,6 +83,7 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    await user.type(screen.getByRole("textbox", { name: "Tên sách *" }), "  Tên hiển thị  ");
     await user.type(
       screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
       "  Sách mới  ",
@@ -87,6 +93,7 @@ describe("AdminNewBookScreen", () => {
 
     await waitFor(() => {
       expect(services.books.create).toHaveBeenCalledWith({
+        name: "Tên hiển thị",
         title: "Sách mới",
         author: null,
         min_grade: 1,
@@ -106,6 +113,8 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    const name = screen.getByRole("textbox", { name: "Tên sách *" });
+    await user.type(name, "Tên chưa được tạo");
     const title = screen.getByRole("textbox", { name: "Tiêu đề sách *" });
     await user.type(title, "Sách chưa được tạo");
     await user.click(screen.getByRole("button", { name: "Tạo sách" }));
@@ -115,6 +124,7 @@ describe("AdminNewBookScreen", () => {
         "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
       ),
     ).toBeInTheDocument();
+    expect(name).toHaveValue("Tên chưa được tạo");
     expect(title).toHaveValue("Sách chưa được tạo");
     const author = screen.getByRole("textbox", { name: /Tác giả/ });
     expect(author).toHaveValue("");
@@ -133,6 +143,7 @@ describe("AdminNewBookScreen", () => {
     const user = userEvent.setup();
     render(withAdminFixture(<AdminNewBookScreen />, services));
 
+    await user.type(screen.getByRole("textbox", { name: "Tên sách *" }), "Tên một lần");
     await user.type(
       screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
       "Sách một lần",
