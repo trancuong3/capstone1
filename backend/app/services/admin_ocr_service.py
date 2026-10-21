@@ -431,24 +431,34 @@ class AdminOcrService:
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=metadata,
         )
         self.repo.stage_page_revision_bundle(page, revision, words)
+        # Build and validate the response before commit. If response construction
+        # fails, the page/revision must roll back and the new Storage object is
+        # cleaned up instead of leaving a committed page after an HTTP error.
+        stage = "database_persist"
         try:
             log_diagnostic(
                 logger,
                 logging.INFO,
                 event="admin_ocr_database_persist_started",
-                stage="database_persist",
+                stage=stage,
                 book_id=str(book_id),
                 page_id=str(page_id),
                 word_count=len(words),
             )
-            await self.db.commit()
+            await self.repo.flush()
             await self.db.refresh(page)
             await self.db.refresh(revision)
+
+            stage = "response_validation"
+            result = await self.revision_detail(page, revision)
+
+            stage = "database_commit"
+            await self.db.commit()
             log_diagnostic(
                 logger,
                 logging.INFO,
                 event="admin_ocr_database_commit_succeeded",
-                stage="database_commit",
+                stage=stage,
                 book_id=str(book_id),
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
@@ -458,7 +468,7 @@ class AdminOcrService:
                 logger,
                 logging.WARNING,
                 event="admin_ocr_upload_failed",
-                stage="database_commit",
+                stage=stage,
                 exception=exc,
                 book_id=str(book_id),
                 page_id=str(page_id),
@@ -477,9 +487,10 @@ class AdminOcrService:
             log_diagnostic(
                 logger,
                 logging.ERROR,
-                event="admin_ocr_upload_failed",
-                stage="database_commit",
+                event="admin_ocr_response_failed" if stage == "response_validation" else "admin_ocr_upload_failed",
+                stage=stage,
                 exception=exc,
+                include_traceback=stage == "response_validation",
                 book_id=str(book_id),
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
@@ -494,21 +505,6 @@ class AdminOcrService:
             )
             raise
 
-        try:
-            result = await self.revision_detail(page, revision)
-        except Exception as exc:
-            log_diagnostic(
-                logger,
-                logging.ERROR,
-                event="admin_ocr_response_failed",
-                stage="response_validation",
-                exception=exc,
-                include_traceback=True,
-                book_id=str(book_id),
-                page_id=str(page_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
         log_diagnostic(
             logger,
             logging.INFO,
@@ -640,9 +636,13 @@ class AdminOcrService:
                 DraftText=text_value, ContentHash=content_hash, ProcessingMeta=processing_meta,
             )
             self.repo.stage_revision_bundle(revision, words)
-            await self.db.commit()
+            # Flush and validate the response before commit so an invalid response
+            # contract cannot leave a persisted revision after the client sees an error.
+            await self.repo.flush()
             await self.db.refresh(revision)
             await self.db.refresh(page)
+            result = await self.revision_detail(page, revision)
+            await self.db.commit()
         except IntegrityError as exc:
             await self.db.rollback()
             await self._cleanup_uploaded_object(
@@ -658,7 +658,7 @@ class AdminOcrService:
             )
             raise
 
-        return await self.revision_detail(page, revision)
+        return result
 
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
