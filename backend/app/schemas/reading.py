@@ -51,6 +51,7 @@ class ReadingCompletionSummaryDTO(BaseModel):
     # Null means the current database schema has no persisted evidence for this metric.
     duration_minutes: int | None = Field(default=None, ge=0)
     pages_explored: int | None = Field(default=None, ge=0)
+    selected_range_pages: int | None = Field(default=None, ge=0)
     practiced_words: int | None = Field(default=None, ge=0)
     spoken_words: list[str] | None = None
     transcripts: list[str] | None = None
