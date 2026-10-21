@@ -36,6 +36,34 @@ export interface ReadingSessionCreateDTO {
   readonly mode: "realtime";
   readonly selected_page_id?: UUID;
   readonly selected_page_revision_id?: UUID;
+  /** Last page selected for this session; omitted requests remain one-page sessions. */
+  readonly end_page_id?: UUID;
+}
+
+export type ReadingSessionPageStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED";
+
+export interface ReadingSessionPageProgressItemDTO {
+  readonly page_id: UUID;
+  readonly page_revision_id: UUID;
+  readonly page_number: number;
+  readonly page_order: number;
+  readonly status: ReadingSessionPageStatus;
+  readonly started_at: ISODateTime | null;
+  readonly completed_at: ISODateTime | null;
+}
+
+export interface ReadingSessionPageProgressDTO {
+  readonly session_id: UUID;
+  readonly start_page_id: UUID;
+  readonly end_page_id: UUID;
+  readonly current_page_id: UUID;
+  readonly start_page_number: number;
+  readonly end_page_number: number;
+  readonly current_page_number: number;
+  readonly current_index: number;
+  readonly total_pages: number;
+  readonly completed_pages: number;
+  readonly pages: readonly ReadingSessionPageProgressItemDTO[];
 }
 
 export interface ReadingSessionCreateResponseDTO {
