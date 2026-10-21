@@ -55,7 +55,6 @@ export function BookDetailScreen({
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetPageId = searchParams.get("pageId");
-  const startButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -170,7 +169,7 @@ export function BookDetailScreen({
       router.push(
         `/reading/${encodeURIComponent(session.session_id)}?state=ready&pageId=${encodeURIComponent(selectedPage.page_id)}`,
       );
-    } catch (error) {
+    } catch {
       setStartError(
         "Chưa thể chuẩn bị buổi đọc với phạm vi này. Ba mẹ hãy kiểm tra các trang rồi thử lại.",
       );
