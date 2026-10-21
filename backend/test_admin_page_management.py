@@ -42,7 +42,12 @@ def make_service(page, role="admin"):
     db.rollback = AsyncMock()
     service = AdminOcrService(db)
     service.repo.role = AsyncMock(return_value=role)
+    service.repo.book = AsyncMock(return_value=SimpleNamespace(Id=BOOK, LifecycleStatus="ACTIVE"))
     service.repo.page = AsyncMock(return_value=page)
+    service.repo.active_pages_for_renumber = AsyncMock(return_value=[])
+    service.repo.set_page_number = MagicMock(
+        side_effect=lambda current, number: setattr(current, "PageNumber", number)
+    )
     service.repo.set_page_lifecycle_status = MagicMock(
         side_effect=lambda current, status: setattr(current, "LifecycleStatus", status)
     )
@@ -132,18 +137,19 @@ class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
-    async def test_max_page_number_query_includes_retired_page_numbers(self):
+    async def test_max_page_number_query_uses_active_pages_only(self):
         db = MagicMock()
-        db.scalar = AsyncMock(return_value=9)
+        db.scalar = AsyncMock(return_value=4)
 
         result = await AdminCatalogRepository(db).max_page_number(BOOK)
 
-        self.assertEqual(result, 9)
+        self.assertEqual(result, 4)
         statement = db.scalar.await_args.args[0]
         compiled = statement.compile(dialect=postgresql.dialect())
         self.assertIn("max(bookpages.pagenumber)", str(compiled))
+        self.assertIn("lifecyclestatus", str(compiled).lower())
+        self.assertIn("ACTIVE", compiled.params.values())
         self.assertIn(BOOK, compiled.params.values())
-        self.assertNotIn("lifecyclestatus", str(compiled).lower())
 
     async def test_admin_page_list_query_excludes_retired_pages(self):
         db = MagicMock()
@@ -160,6 +166,30 @@ class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lifecyclestatus", str(compiled))
         self.assertIn("ACTIVE", compiled.params.values())
 
+
+
+class ActivePageRenumberingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_service_renumbers_active_pages_in_existing_order(self):
+        page1 = make_page(PageNumber=1)
+        page3 = make_page(
+            Id=UUID("55555555-5555-4555-8555-555555555555"),
+            PageNumber=3,
+        )
+        page4 = make_page(
+            Id=UUID("66666666-6666-4666-8666-666666666666"),
+            PageNumber=4,
+        )
+        service, _ = make_service(page1)
+        service.repo.active_pages_for_renumber = AsyncMock(
+            return_value=[page1, page3, page4]
+        )
+
+        changed = await service._renumber_active_pages(BOOK, lock=True)
+
+        self.assertTrue(changed)
+        self.assertEqual([page1.PageNumber, page3.PageNumber, page4.PageNumber], [1, 2, 3])
+        service.repo.set_page_number.assert_any_call(page3, 2)
+        service.repo.set_page_number.assert_any_call(page4, 3)
 
 
 if __name__ == "__main__":

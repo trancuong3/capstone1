@@ -24,6 +24,9 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service.repo = MagicMock()
         service.repo.role = AsyncMock(return_value="admin")
         service.repo.book = AsyncMock(return_value=SimpleNamespace(LifecycleStatus="ACTIVE"))
+        service.repo.next_active_page_number = AsyncMock(return_value=1)
+        service.repo.active_pages_for_renumber = AsyncMock(return_value=[])
+        service.repo.set_page_number = MagicMock()
         service.repo.page_number_exists = AsyncMock(return_value=False)
         service._read_validate_image = AsyncMock(
             return_value=(b"valid-image-data", "image/png", "png", 100, 100)
