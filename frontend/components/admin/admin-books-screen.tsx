@@ -272,7 +272,10 @@ export function AdminBooksScreen() {
                         ) : null}
                       </div>
                       <p className="mb-1 text-sm text-muted">
-                        Tên sách: {book.name?.trim() ? book.name : "Chưa có tên sách"}
+                        Tên sách:{" "}
+                        {book.name?.trim()
+                          ? book.name
+                          : "Chưa có tên sách"}
                       </p>
                       <Link
                         className="inline-block rounded-sm focus-visible:outline-3 focus-visible:outline-primary"

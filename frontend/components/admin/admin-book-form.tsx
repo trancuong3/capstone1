@@ -80,7 +80,8 @@ export function AdminBookForm({
         <StatusMessage tone="error">{errors.root.message}</StatusMessage>
       ) : null}
       <p className="text-sm text-muted">
-        Tên sách và tiêu đề sách là hai thông tin riêng biệt; cả hai đều bắt buộc.
+        Tên sách và tiêu đề sách là hai thông tin riêng biệt; cả hai đều
+        bắt buộc.
       </p>
       <TextField
         error={errors.name?.message}

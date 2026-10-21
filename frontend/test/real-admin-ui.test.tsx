@@ -244,7 +244,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     await screen.findByRole("heading", { name: book.title });
     await user.type(
-      screen.getByLabelText("Tìm theo tên sách hoặc tác giả"),
+      screen.getByLabelText("Tìm theo tên sách, tiêu đề hoặc tác giả"),
       "Mèo",
     );
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
