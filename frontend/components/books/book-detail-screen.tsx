@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight, BookX, RefreshCw } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
