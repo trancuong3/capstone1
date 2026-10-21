@@ -171,7 +171,6 @@ describe("Phase 5 real-data runtime cleanup", () => {
       <AdminServicesProvider>
         <AdminPageUploader
           bookId={bookId}
-          nextPageNumber={1}
           onUploaded={onUploaded}
         />
       </AdminServicesProvider>,

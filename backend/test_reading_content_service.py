@@ -10,6 +10,9 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.reading_content_repository import ReadingContentRepository
 
 from app.schemas.reading import (
     FluencyAssessmentCreate,
@@ -562,6 +565,26 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             await service._build_page_dto(page, revision)
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["code"], "CONTENT_NOT_READY")
+
+
+class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_page_range_query_excludes_retired_rows_with_reused_page_numbers(self):
+        db = MagicMock()
+        result = MagicMock()
+        active_page = SimpleNamespace(PageNumber=2, LifecycleStatus="ACTIVE")
+        result.scalars.return_value.all.return_value = [active_page]
+        db.execute = AsyncMock(return_value=result)
+
+        rows = await ReadingContentRepository(db).all_pages_between_numbers(
+            BOOK_ID, 2, 2
+        )
+
+        self.assertEqual(rows, [active_page])
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("bookpages.lifecyclestatus", str(compiled).lower())
+        self.assertIn("ACTIVE", compiled.params.values())
+        self.assertIn(BOOK_ID, compiled.params.values())
 
 
 if __name__ == "__main__":
