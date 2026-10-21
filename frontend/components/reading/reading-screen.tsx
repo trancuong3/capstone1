@@ -287,8 +287,8 @@ export function ReadingScreen({
             ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
             : null,
         );
-        setCurrentWordId(selectedPage.words[3]?.word_id ?? null);
-        setSelectedManualPageId(selectedPage.page_id);
+        setCurrentWordId(currentPage.words[3]?.word_id ?? null);
+        setSelectedManualPageId(currentPage.page_id);
         setCanonicalState(session.state);
         setLoadState({
           status: "ready",
