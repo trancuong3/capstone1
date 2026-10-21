@@ -121,7 +121,7 @@ describe("admin components", () => {
     await user.selectOptions(screen.getByLabelText("Khối lớp lớn nhất *"), "2");
     await user.click(screen.getByRole("button", { name: "Lưu sách" }));
     expect(
-      await screen.findByText(/Khối tối đa phải lớn hơn/),
+      await screen.findByText(/Khối lớp nhỏ nhất không được lớn hơn khối lớp lớn nhất/),
     ).toBeInTheDocument();
     expect(submit).not.toHaveBeenCalled();
   });
