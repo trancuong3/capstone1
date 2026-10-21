@@ -93,7 +93,11 @@ class ReadingContentService:
             duration_min = max(0, int((end - start).total_seconds() // 60))
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
-            pages_explored=None,
+            pages_explored=(
+                sum(1 for row in page_rows if row.Status == "COMPLETED")
+                if (page_rows := await self.repository.session_page_rows(session.Id))
+                else None
+            ),
             practiced_words=None,
             spoken_words=None,
             transcripts=None,
@@ -110,30 +114,44 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        page = await self.repository.verified_page(payload.PageId, session.BookId)
-        if page is None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "Reading events must reference an active verified page in this session's book.",
-                },
+        session_rows = await self.repository.session_page_rows(session.Id)
+        if session_rows:
+            snapshot = await self.repository.session_page(session.Id, payload.PageId)
+            if snapshot is None or snapshot.PageRevisionId != payload.PageRevisionId:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": "Reading events must reference a page and revision in this session's selected range.",
+                    },
+                )
+            page = await self.repository.page_by_id(snapshot.PageId)
+            revision = await self.repository.revision_snapshot(
+                snapshot.PageId, snapshot.PageRevisionId
             )
-        revision = await self.repository.verified_revision(
-            page.Id,
-            payload.PageRevisionId,
-        )
-        if revision is None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "Reading events must reference a verified revision of the selected page.",
-                },
-            )
+            if page is None or page.BookId != session.BookId or revision is None:
+                raise HTTPException(status_code=409, detail="Saved page revision is unavailable")
+        else:
+            page = await self.repository.verified_page(payload.PageId, session.BookId)
+            if page is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": "Reading events must reference an active verified page in this session's book.",
+                    },
+                )
+            revision = await self.repository.verified_revision(page.Id, payload.PageRevisionId)
+            if revision is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": "Reading events must reference a verified revision of the selected page.",
+                    },
+                )
         if payload.WordId is not None and not await self.repository.revision_word_exists(
-            revision.Id,
-            payload.WordId,
+            revision.Id, payload.WordId
         ):
             raise HTTPException(status_code=422, detail="Word does not belong to the referenced page revision")
 
@@ -349,19 +367,32 @@ class ReadingContentService:
         actor_id: UUID,
     ) -> SessionSummaryRead:
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self.repository.session_for_update(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        # Keep finish idempotent so retries do not rewrite the original end time.
         if session.State not in ("COMPLETED", "FINISHED"):
-            self.repository.update_session_state(
-                session,
-                state="COMPLETED",
-                ended_at=datetime.now(timezone.utc),
-            )
-            session = await self.repository.save_session(session)
+            rows = await self.repository.session_page_rows(session.Id)
+            ended_at = datetime.now(timezone.utc)
+            if rows:
+                current_id = session.CurrentPageId or next(
+                    (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
+                    rows[0].PageId,
+                )
+                if current_id == rows[-1].PageId:
+                    last = rows[-1]
+                    last.Status = "COMPLETED"
+                    last.CompletedAt = last.CompletedAt or ended_at
+                self.repository.update_session_state(
+                    session, state="COMPLETED", ended_at=ended_at
+                )
+                session = await self.repository.save_session_progress(session, rows)
+            else:
+                self.repository.update_session_state(
+                    session, state="COMPLETED", ended_at=ended_at
+                )
+                session = await self.repository.save_session(session)
         return self._summary(session)
 
     async def get_session_summary(
