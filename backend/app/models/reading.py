@@ -65,6 +65,7 @@ class ReadingSessionPage(Base):
     __table_args__ = (
         UniqueConstraint("sessionid", "pageorder", name="uq_readingsessionpages_session_order"),
         UniqueConstraint("sessionid", "pageid", name="uq_readingsessionpages_session_page"),
+        CheckConstraint("pagenumber >= 1", name="ck_readingsessionpages_pagenumber"),
         CheckConstraint("pageorder >= 0", name="ck_readingsessionpages_pageorder"),
         CheckConstraint("status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED')", name="ck_readingsessionpages_status"),
     )
