@@ -105,8 +105,11 @@ export function ReadingScreen({
   const [canonicalState, setCanonicalState] =
     useState<ReadingSessionState>("CREATED");
   const [page, setPage] = useState<ReadingPageDTO | null>(null);
-  const [pageProgress, setPageProgress] = useState<ReadingSessionPageProgressDTO | null>(null);
-  const [pageNavigationError, setPageNavigationError] = useState<string | null>(null);
+  const [pageProgress, setPageProgress] =
+    useState<ReadingSessionPageProgressDTO | null>(null);
+  const [pageNavigationError, setPageNavigationError] = useState<string | null>(
+    null,
+  );
   const [currentWordId, setCurrentWordId] = useState<string | null>(null);
   const [selectedManualPageId, setSelectedManualPageId] = useState<
     string | null
@@ -339,7 +342,8 @@ export function ReadingScreen({
     void services.pageMatchService
       .selectPage(sessionId, nextPage.page_id)
       .then(async (matchedPage) => {
-        const progress = await services.readingService.getPageProgress(sessionId);
+        const progress =
+          await services.readingService.getPageProgress(sessionId);
         if (!active) return;
         setPage(matchedPage);
         setPageProgress(progress);
@@ -351,14 +355,24 @@ export function ReadingScreen({
       })
       .catch(() => {
         if (!active) return;
-        setPageNavigationError("Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.");
+        setPageNavigationError(
+          "Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.",
+        );
         setUiState("reading");
       });
 
     return () => {
       active = false;
     };
-  }, [loadState, page, pageProgress, services.pageMatchService, services.readingService, sessionId, uiState]);
+  }, [
+    loadState,
+    page,
+    pageProgress,
+    services.pageMatchService,
+    services.readingService,
+    sessionId,
+    uiState,
+  ]);
 
   function normalizeVietnamese(text: string): string {
     return text
@@ -818,7 +832,12 @@ export function ReadingScreen({
   }
 
   async function navigateWithinRange(targetIndex: number) {
-    if (!pageProgress || isBusy || targetIndex < 0 || targetIndex >= pageProgress.pages.length) {
+    if (
+      !pageProgress ||
+      isBusy ||
+      targetIndex < 0 ||
+      targetIndex >= pageProgress.pages.length
+    ) {
       return;
     }
     const target = pageProgress.pages[targetIndex];
@@ -847,7 +866,9 @@ export function ReadingScreen({
       setUiState("reading");
     } catch {
       if (mountedRef.current) {
-        setPageNavigationError("Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.");
+        setPageNavigationError(
+          "Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.",
+        );
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -867,7 +888,9 @@ export function ReadingScreen({
       setPageProgress(progress);
     } catch {
       if (mountedRef.current) {
-        setPageNavigationError("Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.");
+        setPageNavigationError(
+          "Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.",
+        );
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -1152,56 +1175,75 @@ export function ReadingScreen({
       data-scoring-active={safety.scoring_active}
     >
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
-      {pageProgress ? (
-        <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="font-bold text-ink">
-              Phạm vi đọc: Trang {pageProgress.start_page_number}–{pageProgress.end_page_number}
-            </p>
-            <p className="text-sm text-muted" aria-live="polite">
-              Trang {pageProgress.current_page_number} · {pageProgress.current_index + 1}/{pageProgress.total_pages} trong phạm vi · {pageProgress.completed_pages}/{pageProgress.total_pages} trang đã hoàn thành
-            </p>
+        {pageProgress ? (
+          <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-bold text-ink">
+                Phạm vi đọc: Trang {pageProgress.start_page_number}–
+                {pageProgress.end_page_number}
+              </p>
+              <p className="text-sm text-muted" aria-live="polite">
+                Trang {pageProgress.current_page_number} ·{" "}
+                {pageProgress.current_index + 1}/{pageProgress.total_pages}{" "}
+                trong phạm vi · {pageProgress.completed_pages}/
+                {pageProgress.total_pages} trang đã hoàn thành
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index <= 0
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index - 1)
+                }
+                variant="secondary"
+              >
+                <ChevronLeft aria-hidden="true" className="size-5" />
+                Trang trước
+              </Button>
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index >= pageProgress.total_pages - 1
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index + 1)
+                }
+                variant="secondary"
+              >
+                Trang tiếp theo
+                <ChevronRight aria-hidden="true" className="size-5" />
+              </Button>
+            </div>
+            {pageProgress.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                className="sm:self-start"
+                disabled={isBusy || uiState !== "reading"}
+                onClick={() => void confirmCurrentPageCompleted()}
+                variant="quiet"
+              >
+                Đánh dấu trang đã đọc xong
+              </Button>
+            ) : null}
           </div>
-          <div className="flex shrink-0 gap-2">
-            <Button
-              disabled={isBusy || uiState !== "reading" || pageProgress.current_index <= 0}
-              onClick={() => void navigateWithinRange(pageProgress.current_index - 1)}
-              variant="secondary"
-            >
-              <ChevronLeft aria-hidden="true" className="size-5" />
-              Trang trước
-            </Button>
-            <Button
-              disabled={isBusy || uiState !== "reading" || pageProgress.current_index >= pageProgress.total_pages - 1}
-              onClick={() => void navigateWithinRange(pageProgress.current_index + 1)}
-              variant="secondary"
-            >
-              Trang tiếp theo
-              <ChevronRight aria-hidden="true" className="size-5" />
-            </Button>
-          </div>
-          {pageProgress.persisted &&
-          pageProgress.pages[pageProgress.current_index]?.status !== "COMPLETED" ? (
-            <Button
-              className="sm:self-start"
-              disabled={isBusy || uiState !== "reading"}
-              onClick={() => void confirmCurrentPageCompleted()}
-              variant="quiet"
-            >
-              Đánh dấu trang đã đọc xong
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {pageNavigationError ? (
-        <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
-      ) : null}
-      {pageProgress && pageProgress.current_index === pageProgress.total_pages - 1 ? (
-        <p className="text-sm font-semibold text-primary" role="status">
-          Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn sàng.
-        </p>
-      ) : null}
-    </div>
+        ) : null}
+        {pageNavigationError ? (
+          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+        ) : null}
+        {pageProgress &&
+        pageProgress.current_index === pageProgress.total_pages - 1 ? (
+          <p className="text-sm font-semibold text-primary" role="status">
+            Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
+            sàng.
+          </p>
+        ) : null}
+      </div>
 
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}

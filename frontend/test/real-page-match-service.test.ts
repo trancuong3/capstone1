@@ -88,7 +88,9 @@ describe("real PageMatchService", () => {
 
     const navigationUrl = new URL(String(fetchMock.mock.calls[0][0]));
     expect(navigationUrl.origin).toBe("http://127.0.0.1:8000");
-    expect(navigationUrl.pathname).toBe(`/reading/sessions/${sessionId}/navigate`);
+    expect(navigationUrl.pathname).toBe(
+      `/reading/sessions/${sessionId}/navigate`,
+    );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: {

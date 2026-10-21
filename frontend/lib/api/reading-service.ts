@@ -49,15 +49,17 @@ export const sessionPageProgressSchema = z.object({
   current_index: z.number().int().nonnegative(),
   total_pages: z.number().int().positive(),
   completed_pages: z.number().int().nonnegative(),
-  pages: z.array(z.object({
-    page_id: z.uuid(),
-    page_revision_id: z.uuid(),
-    page_number: z.number().int().positive(),
-    page_order: z.number().int().nonnegative(),
-    status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED"]),
-    started_at: z.iso.datetime({ offset: true }).nullable(),
-    completed_at: z.iso.datetime({ offset: true }).nullable(),
-  })),
+  pages: z.array(
+    z.object({
+      page_id: z.uuid(),
+      page_revision_id: z.uuid(),
+      page_number: z.number().int().positive(),
+      page_order: z.number().int().nonnegative(),
+      status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED"]),
+      started_at: z.iso.datetime({ offset: true }).nullable(),
+      completed_at: z.iso.datetime({ offset: true }).nullable(),
+    }),
+  ),
 });
 
 const sessionSummarySchema = z.object({

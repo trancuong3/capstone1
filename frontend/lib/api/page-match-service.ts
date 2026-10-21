@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
-import { readingPageDtoSchema, sessionPageProgressSchema } from "@/lib/api/reading-service";
+import {
+  readingPageDtoSchema,
+  sessionPageProgressSchema,
+} from "@/lib/api/reading-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {

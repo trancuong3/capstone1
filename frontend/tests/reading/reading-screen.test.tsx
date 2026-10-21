@@ -11,7 +11,11 @@ import {
   sessionSummaryFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
-import type { ReadingPageDTO, ReadingSessionPageProgressDTO, TutorAction } from "@/types/reading";
+import type {
+  ReadingPageDTO,
+  ReadingSessionPageProgressDTO,
+  TutorAction,
+} from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
 const { servicesHook } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
@@ -192,7 +196,11 @@ function createReadingFixtures() {
           ...pageProgressFixture,
           completed_pages: 1,
           pages: [
-            { ...pageProgressFixture.pages[0], status: "COMPLETED", completed_at: "2026-10-21T07:00:00Z" },
+            {
+              ...pageProgressFixture.pages[0],
+              status: "COMPLETED",
+              completed_at: "2026-10-21T07:00:00Z",
+            },
             pageProgressFixture.pages[1],
           ],
         }),
@@ -280,7 +288,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     const user = userEvent.setup();
     renderReading("reading");
 
-    expect(await screen.findByText(/Phạm vi đọc: Trang 4–5/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Phạm vi đọc: Trang 4–5/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Trang trước" })).toBeDisabled();
     const nextButton = screen.getByRole("button", { name: "Trang tiếp theo" });
     expect(nextButton).toBeEnabled();
@@ -304,14 +314,24 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       current_page_number: pageFive.page_number,
       current_index: 1,
       pages: [
-        { ...pageProgressFixture.pages[0], status: "COMPLETED", completed_at: "2026-10-21T07:00:00Z" },
-        { ...pageProgressFixture.pages[1], status: "IN_PROGRESS", started_at: "2026-10-21T07:00:00Z" },
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        {
+          ...pageProgressFixture.pages[1],
+          status: "IN_PROGRESS",
+          started_at: "2026-10-21T07:00:00Z",
+        },
       ],
       completed_pages: 1,
     });
     renderReading("reading");
 
-    const completePageButton = await screen.findByRole("button", { name: "Đánh dấu trang đã đọc xong" });
+    const completePageButton = await screen.findByRole("button", {
+      name: "Đánh dấu trang đã đọc xong",
+    });
     await user.click(completePageButton);
 
     await waitFor(() => {

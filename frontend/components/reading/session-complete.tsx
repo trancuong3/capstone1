@@ -131,7 +131,9 @@ export function SessionComplete({
           </div>
         )}
 
-        <div className={`grid gap-4 ${summary.selected_range_pages !== undefined && summary.selected_range_pages !== null ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+        <div
+          className={`grid gap-4 ${summary.selected_range_pages !== undefined && summary.selected_range_pages !== null ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}
+        >
           <div className="rounded-card bg-cream p-5 text-center">
             <Clock3
               aria-hidden="true"

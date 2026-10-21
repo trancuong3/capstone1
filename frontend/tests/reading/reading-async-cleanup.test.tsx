@@ -8,7 +8,11 @@ import {
   sessionSummaryFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
-import type { ReadingPageDTO, ReadingSessionPageProgressDTO, TutorAction } from "@/types/reading";
+import type {
+  ReadingPageDTO,
+  ReadingSessionPageProgressDTO,
+  TutorAction,
+} from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
 const { servicesHook } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
@@ -189,7 +193,11 @@ function createReadingFixtures() {
           ...pageProgressFixture,
           completed_pages: 1,
           pages: [
-            { ...pageProgressFixture.pages[0], status: "COMPLETED", completed_at: "2026-10-21T07:00:00Z" },
+            {
+              ...pageProgressFixture.pages[0],
+              status: "COMPLETED",
+              completed_at: "2026-10-21T07:00:00Z",
+            },
             pageProgressFixture.pages[1],
           ],
         }),
