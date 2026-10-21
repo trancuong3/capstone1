@@ -176,11 +176,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       </div>
       <AdminPageUploader
         bookId={book.id}
-        nextPageNumber={Math.max(
-          1,
-          book.next_page_number ?? 1,
-          ...(items ?? []).map((item) => item.page_number + 1),
-        )}
         onUploaded={() => void load()}
       />
       <section className="mt-8" aria-labelledby="pages-title">

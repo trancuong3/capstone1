@@ -12,7 +12,6 @@ import type {
 
 interface AdminPageUploaderProps {
   bookId: string;
-  nextPageNumber: number;
   onUploaded: () => void;
 }
 
@@ -20,7 +19,6 @@ const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export function AdminPageUploader({
   bookId,
-  nextPageNumber,
   onUploaded,
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
@@ -86,20 +84,10 @@ export function AdminPageUploader({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    const start = nextPageNumber;
     if (!files.length) {
       setError("Hãy chọn ít nhất một ảnh trang sách.");
       return;
     }
-    if (
-      !Number.isInteger(start) ||
-      start < 1 ||
-      start + files.length - 1 > 32767
-    ) {
-      setError("Số trang bắt đầu không hợp lệ.");
-      return;
-    }
-
     setBusy(true);
     const entries: AdminPageUploadInputUI[] = [];
     const localFailures: AdminPageUploadProgressUI[] = [];
@@ -221,9 +209,8 @@ export function AdminPageUploader({
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
         <p className="text-sm font-semibold text-ink">
-          Số trang được Backend tự động sắp xếp liên tục. Với dữ liệu hiện tại,
-          trang tiếp theo dự kiến là {nextPageNumber}; Backend sẽ quyết định số
-          trang cuối cùng dựa trên dữ liệu trong PostgreSQL.
+          Backend tự động đánh số trang liên tục từ 1. Thứ tự chọn ảnh quyết định
+          thứ tự gửi; số trang cuối cùng được xác định từ PostgreSQL.
         </p>
         <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />

@@ -87,6 +87,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const user = userEvent.setup();
     const replacementDetail: AdminPageRevisionDetailDTO = {
       ...adminR2Fixture,
+      page_revision_id: "55555555-5555-4555-8555-555555555555",
+      revision_no: 3,
       verification_status: "NEEDS_REVIEW",
       draft_text: "Nội.",
     };
@@ -121,7 +123,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       await screen.findByText(/Bản mới đang chờ duyệt/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+      screen.getByRole("heading", { name: /Kiểm tra OCR · R3/ }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Nội.");
     expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
