@@ -102,6 +102,7 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
   it("creates a book through the API and validates the returned book", async () => {
     apiFetchFixture.mockResolvedValueOnce(Response.json(adminBookFixture));
     const created = await createAdminBookService().create({
+      name: "  Tên sách kiểm thử  ",
       title: "  Sách kiểm thử  ",
       author: "  ",
       min_grade: 1,
@@ -112,6 +113,7 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("POST");
     const body = JSON.parse(String(apiFetchFixture.mock.calls[0][1]?.body));
     expect(body).toEqual({
+      name: "Tên sách kiểm thử",
       title: "Sách kiểm thử",
       author: null,
       min_grade: 1,
@@ -245,18 +247,21 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
       Response.json({ ...adminBookFixture, title: "Updated title" }),
     );
     const updated = await createAdminBookService().update(ADMIN_BOOK_ID, {
+      name: "Tên sách kiểm thử",
       title: "  Updated title  ",
       author: "  Author  ",
       min_grade: 2,
       max_grade: 4,
     });
 
+    expect(updated.name).toBe("Tên sách kiểm thử");
     expect(updated.title).toBe("Updated title");
     expect(requestedApiUrl().pathname).toBe(
       `/books/admin/catalog/${ADMIN_BOOK_ID}`,
     );
     expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("PUT");
     expect(JSON.parse(String(apiFetchFixture.mock.calls[0][1]?.body))).toEqual({
+      name: "Tên sách kiểm thử",
       title: "Updated title",
       author: "Author",
       min_grade: 2,
