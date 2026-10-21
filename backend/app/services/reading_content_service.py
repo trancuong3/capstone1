@@ -91,13 +91,15 @@ class ReadingContentService:
             if end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
             duration_min = max(0, int((end - start).total_seconds() // 60))
+        page_rows = await self.repository.session_page_rows(session.Id)
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
             pages_explored=(
                 sum(1 for row in page_rows if row.Status == "COMPLETED")
-                if (page_rows := await self.repository.session_page_rows(session.Id))
+                if page_rows
                 else None
             ),
+            selected_range_pages=len(page_rows) if page_rows else None,
             practiced_words=None,
             spoken_words=None,
             transcripts=None,
