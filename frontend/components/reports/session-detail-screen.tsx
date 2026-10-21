@@ -153,6 +153,10 @@ export function SessionDetailScreen({
 
   const { detail } = state;
   const metrics = detail.fluency_assessment?.metrics;
+  const rangeIsPartial =
+    detail.selected_range_pages != null &&
+    (detail.pages_completed == null ||
+      detail.pages_completed < detail.selected_range_pages);
   const returnPage =
     requestedChildId === detail.child_id &&
     Number.isSafeInteger(page) &&
@@ -179,12 +183,21 @@ export function SessionDetailScreen({
         eyebrow="Chi tiết buổi đọc"
         title={
           detail.state === "FINISHED"
-            ? "Buổi đọc đã hoàn thành"
+            ? rangeIsPartial
+              ? "Buổi đọc đã lưu"
+              : "Buổi đọc đã hoàn thành"
             : detail.state === "ABORTED"
               ? "Buổi đọc đã dừng"
               : `Buổi đọc: ${historyStateLabel(detail.state)}`
         }
       />
+      {rangeIsPartial ? (
+        <StatusMessage title="Một phần phạm vi chưa hoàn thành" tone="info">
+          Phạm vi đã chọn có {detail.selected_range_pages} trang, nhưng mới có{" "}
+          {detail.pages_completed ?? 0} trang được xác nhận hoàn thành. Lịch sử
+          vẫn được giữ nguyên và không tính các trang chưa đọc là hoàn thành.
+        </StatusMessage>
+      ) : null}
       {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
         <StatusMessage title="Dữ liệu đang dở dang" tone="warning">
           Buổi đọc chưa kết thúc nên thời lượng, chỉ số trôi chảy và báo cáo có
