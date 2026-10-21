@@ -1032,8 +1032,12 @@ export function ReadingScreen({
       correct_words: correctWordsList,
       duration_minutes: durationMinutes,
       mispronounced_words: mispronouncedWordsList,
-      pages_explored: persistedCompletion?.pages_explored ?? null,
-      selected_range_pages: persistedCompletion?.selected_range_pages ?? null,
+      pages_explored:
+        persistedCompletion?.pages_explored ??
+        (pageProgress?.persisted ? pageProgress.completed_pages : null),
+      selected_range_pages:
+        persistedCompletion?.selected_range_pages ??
+        (pageProgress?.persisted ? pageProgress.total_pages : null),
       practiced_words: wordsList.length,
       score,
       spoken_words: wordsList,
