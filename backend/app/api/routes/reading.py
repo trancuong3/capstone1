@@ -5,7 +5,7 @@ from typing import List
 from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
-from app.models import ReadingSession, ReadingEvent, FluencyAssessment
+from app.models import ReadingSession, ReadingEvent, FluencyAssessment, ReadingSessionPage
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
     ReadingEventResponse, ReadingEventCreate,
@@ -17,7 +17,8 @@ from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
 from app.schemas.reading import (
     ReadingPageDTO, ReadingCompletionSummaryDTO,
-    SessionSummaryRead,
+    SessionSummaryRead, ReadingPageNavigationCreate,
+    ReadingSessionPageProgressDTO,
 )
 
 router = APIRouter()
@@ -60,6 +61,50 @@ async def get_session_current_page(
 ):
     return await ReadingContentService(ReadingContentRepository(db)).get_session_page(
         session_id, actor_id
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/progress",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def get_session_page_progress(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_progress(
+        session_id, actor_id
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/pages/{page_id}/complete",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def complete_session_page(
+    session_id: UUID,
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).complete_session_page(
+        session_id, page_id, actor_id
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/navigate",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def navigate_session_page(
+    session_id: UUID,
+    navigation_in: ReadingPageNavigationCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).navigate_session_page(
+        session_id, actor_id, navigation_in
     )
 
 
@@ -169,6 +214,14 @@ class HistoryRepository:
     async def fluency(self, session_id: UUID):
         return await self.db.scalar(select(FluencyAssessment).where(FluencyAssessment.SessionId == session_id).order_by(FluencyAssessment.CreatedAt.desc(), FluencyAssessment.Id.desc()).limit(1))
 
+    async def session_page_rows(self, session_id: UUID):
+        result = await self.db.execute(
+            select(ReadingSessionPage)
+            .where(ReadingSessionPage.SessionId == session_id)
+            .order_by(ReadingSessionPage.PageOrder, ReadingSessionPage.Id)
+        )
+        return result.scalars().all()
+
     async def questions(self, session_id: UUID):
         result = await self.db.execute(select(ComprehensionQuestion).where(ComprehensionQuestion.SessionId == session_id).order_by(ComprehensionQuestion.CreatedAt, ComprehensionQuestion.Id))
         return result.scalars().all()
@@ -227,6 +280,7 @@ class HistoryService:
         if row is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         summary = self.summary(row)
+        page_rows = await self.repository.session_page_rows(session_id)
         events = await self.repository.events(session_id)
         assessment = await self.repository.fluency(session_id)
         questions = await self.repository.questions(session_id)
@@ -307,7 +361,17 @@ class HistoryService:
 
         return SessionDetailRead(
             **summary.model_dump(),
-            selected_page_revision_ids=[] if row.SelectedPageRevisionId is None else [row.SelectedPageRevisionId],
+            selected_range_pages=len(page_rows) if page_rows else None,
+            pages_completed=(
+                sum(1 for page_row in page_rows if page_row.Status == "COMPLETED")
+                if page_rows
+                else None
+            ),
+            selected_page_revision_ids=(
+                [page_row.PageRevisionId for page_row in page_rows]
+                if page_rows
+                else ([] if row.SelectedPageRevisionId is None else [row.SelectedPageRevisionId])
+            ),
             reference_page_revision_ids=list(dict.fromkeys(event.PageRevisionId for event in events if event.SessionId == session_id)),
             events=event_dtos, fluency_assessment=fluency, comprehension=comprehension,
             availability={

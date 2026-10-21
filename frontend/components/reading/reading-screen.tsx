@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
@@ -30,6 +30,7 @@ import type {
   ReadingPageWordDTO,
   ReadingReconnectDemoMode,
   ReadingSessionState,
+  ReadingSessionPageProgressDTO,
   ReadingUiState,
   TutorAction,
 } from "@/types/reading";
@@ -104,6 +105,11 @@ export function ReadingScreen({
   const [canonicalState, setCanonicalState] =
     useState<ReadingSessionState>("CREATED");
   const [page, setPage] = useState<ReadingPageDTO | null>(null);
+  const [pageProgress, setPageProgress] =
+    useState<ReadingSessionPageProgressDTO | null>(null);
+  const [pageNavigationError, setPageNavigationError] = useState<string | null>(
+    null,
+  );
   const [currentWordId, setCurrentWordId] = useState<string | null>(null);
   const [selectedManualPageId, setSelectedManualPageId] = useState<
     string | null
@@ -136,7 +142,7 @@ export function ReadingScreen({
   const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
-  const exploredPageIdsRef = useRef<Set<string>>(new Set());
+  const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -240,10 +246,11 @@ export function ReadingScreen({
   }, [countdown]);
 
   useEffect(() => {
-    if (page?.page_id) {
-      exploredPageIdsRef.current.add(page.page_id);
+    if (!page) return;
+    for (const word of page.words) {
+      wordTextByIdRef.current.set(word.word_id, word.text);
     }
-  }, [page?.page_id]);
+  }, [page]);
 
   useEffect(() => {
     let active = true;
@@ -257,6 +264,7 @@ export function ReadingScreen({
           pagePreviews,
           permissions,
           completion,
+          initialProgress,
         ] = await Promise.all([
           services.bookService.get(session.book_id),
           services.childService.get(session.child_id),
@@ -264,17 +272,26 @@ export function ReadingScreen({
           services.bookService.listPages(session.book_id),
           services.devicePermissionService.getSnapshot(),
           services.readingService.getCompletionSummary(sessionId),
+          services.readingService.getPageProgress(sessionId),
         ]);
 
-        const selectedPage = initialPageId
-          ? await services.pageMatchService.selectPage(sessionId, initialPageId)
-          : currentPage;
+        // Server-side progress is authoritative on reload. A stale pageId query
+        // must not reset a session that was already advanced to another page.
+        const requestedPageIsOutsideRange =
+          Boolean(initialPageId) &&
+          !initialProgress.pages.some((item) => item.page_id === initialPageId);
 
         if (!active) return;
 
-        setPage(selectedPage);
-        setCurrentWordId(selectedPage.words[3]?.word_id ?? null);
-        setSelectedManualPageId(selectedPage.page_id);
+        setPage(currentPage);
+        setPageProgress(initialProgress);
+        setPageNavigationError(
+          requestedPageIsOutsideRange
+            ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
+            : null,
+        );
+        setCurrentWordId(currentPage.words[3]?.word_id ?? null);
+        setSelectedManualPageId(currentPage.page_id);
         setCanonicalState(session.state);
         setLoadState({
           status: "ready",
@@ -307,31 +324,55 @@ export function ReadingScreen({
   }, [loadState.status, services.readingSocketAdapter, sessionId]);
 
   useEffect(() => {
-    if (loadState.status !== "ready" || uiState !== "page-turn" || !page) {
+    if (
+      loadState.status !== "ready" ||
+      uiState !== "page-turn" ||
+      !page ||
+      !pageProgress
+    ) {
       return;
     }
 
-    const nextPage = loadState.data.pagePreviews.find(
-      (candidate) => candidate.page_id !== page.page_id,
-    );
+    const nextPage = pageProgress.pages[pageProgress.current_index + 1];
+    // The final-page message and disabled Next button are rendered from
+    // pageProgress; do not set state synchronously inside this effect.
     if (!nextPage) return;
 
     let active = true;
     void services.pageMatchService
       .selectPage(sessionId, nextPage.page_id)
-      .then((matchedPage) => {
+      .then(async (matchedPage) => {
+        const progress =
+          await services.readingService.getPageProgress(sessionId);
         if (!active) return;
         setPage(matchedPage);
+        setPageProgress(progress);
+        setPageNavigationError(null);
         setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
         setSelectedManualPageId(matchedPage.page_id);
         setCanonicalState("LISTENING");
+        setUiState("reading");
+      })
+      .catch(() => {
+        if (!active) return;
+        setPageNavigationError(
+          "Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.",
+        );
         setUiState("reading");
       });
 
     return () => {
       active = false;
     };
-  }, [loadState, page, services.pageMatchService, sessionId, uiState]);
+  }, [
+    loadState,
+    page,
+    pageProgress,
+    services.pageMatchService,
+    services.readingService,
+    sessionId,
+    uiState,
+  ]);
 
   function normalizeVietnamese(text: string): string {
     return text
@@ -790,6 +831,72 @@ export function ReadingScreen({
     setIsBusy(false);
   }
 
+  async function navigateWithinRange(targetIndex: number) {
+    if (
+      !pageProgress ||
+      isBusy ||
+      targetIndex < 0 ||
+      targetIndex >= pageProgress.pages.length
+    ) {
+      return;
+    }
+    const target = pageProgress.pages[targetIndex];
+    if (!target || target.page_id === page?.page_id) return;
+
+    setIsBusy(true);
+    setPageNavigationError(null);
+    speechPlayer.stop();
+    setIsReadingWord(false);
+    try {
+      if (isMicRecording) {
+        await stopListeningAndTranscribe();
+        if (mountedRef.current) setIsMicRecording(false);
+      }
+      const nextProgress = await services.readingService.navigateToPage(
+        sessionId,
+        target.page_id,
+      );
+      const nextPage = await services.readingService.getCurrentPage(sessionId);
+      if (!mountedRef.current) return;
+      setPageProgress(nextProgress);
+      setPage(nextPage);
+      setCurrentWordId(nextPage.words[3]?.word_id ?? null);
+      setSelectedManualPageId(nextPage.page_id);
+      setCountdown(null);
+      setUiState("reading");
+    } catch {
+      if (mountedRef.current) {
+        setPageNavigationError(
+          "Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
+  async function confirmCurrentPageCompleted() {
+    if (!pageProgress?.persisted || !page || isBusy) return;
+    setIsBusy(true);
+    setPageNavigationError(null);
+    try {
+      const progress = await services.readingService.completeCurrentPage(
+        sessionId,
+        page.page_id,
+      );
+      if (!mountedRef.current) return;
+      setPageProgress(progress);
+    } catch {
+      if (mountedRef.current) {
+        setPageNavigationError(
+          "Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
   async function retryPageMatch() {
     if (isBusy) return;
     setIsBusy(true);
@@ -799,6 +906,8 @@ export function ReadingScreen({
     setPage(matchedPage);
     setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
     setSelectedManualPageId(matchedPage.page_id);
+    setPageProgress(await services.readingService.getPageProgress(sessionId));
+    setPageNavigationError(null);
     setCanonicalState("LISTENING");
     setConnectionState("connected");
     setUiState("reading");
@@ -814,6 +923,8 @@ export function ReadingScreen({
     );
     if (!mountedRef.current) return;
     setPage(matchedPage);
+    setPageProgress(await services.readingService.getPageProgress(sessionId));
+    setPageNavigationError(null);
     setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
     setCanonicalState("LISTENING");
     setConnectionState("connected");
@@ -922,13 +1033,13 @@ export function ReadingScreen({
     if (!mountedRef.current) return;
     const wordsList = Array.from(spokenWordsSetRef.current);
     const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
-    const pagesExplored = exploredPageIdsRef.current.size || null;
+    const persistedCompletion = await services.readingService
+      .getCompletionSummary(sessionId)
+      .catch(() => null);
 
-    const correctWordsList = page
-      ? page.words
-          .filter((w) => correctWordIdsRef.current.has(w.word_id))
-          .map((w) => w.text)
-      : wordsList;
+    const correctWordsList = Array.from(correctWordIdsRef.current)
+      .map((wordId) => wordTextByIdRef.current.get(wordId))
+      .filter((word): word is string => Boolean(word));
     const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
 
     const totalTracked =
@@ -942,7 +1053,12 @@ export function ReadingScreen({
       correct_words: correctWordsList,
       duration_minutes: durationMinutes,
       mispronounced_words: mispronouncedWordsList,
-      pages_explored: pagesExplored,
+      pages_explored:
+        persistedCompletion?.pages_explored ??
+        (pageProgress?.persisted ? pageProgress.completed_pages : null),
+      selected_range_pages:
+        persistedCompletion?.selected_range_pages ??
+        (pageProgress?.persisted ? pageProgress.total_pages : null),
       practiced_words: wordsList.length,
       score,
       spoken_words: wordsList,
@@ -1007,6 +1123,11 @@ export function ReadingScreen({
   }
 
   const { book, child, completion, pagePreviews, permissions } = loadState.data;
+  const rangePagePreviews = pageProgress
+    ? pagePreviews.filter((candidate) =>
+        pageProgress.pages.some((entry) => entry.page_id === candidate.page_id),
+      )
+    : pagePreviews;
   const detailHref = `/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(child.id)}`;
   const booksHref = `/books?childId=${encodeURIComponent(child.id)}`;
   const safety = services.readingSocketAdapter.getSafetySnapshot(uiState);
@@ -1053,6 +1174,77 @@ export function ReadingScreen({
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
+        {pageProgress ? (
+          <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-bold text-ink">
+                Phạm vi đọc: Trang {pageProgress.start_page_number}–
+                {pageProgress.end_page_number}
+              </p>
+              <p className="text-sm text-muted" aria-live="polite">
+                Trang {pageProgress.current_page_number} ·{" "}
+                {pageProgress.current_index + 1}/{pageProgress.total_pages}{" "}
+                trong phạm vi · {pageProgress.completed_pages}/
+                {pageProgress.total_pages} trang đã hoàn thành
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index <= 0
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index - 1)
+                }
+                variant="secondary"
+              >
+                <ChevronLeft aria-hidden="true" className="size-5" />
+                Trang trước
+              </Button>
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index >= pageProgress.total_pages - 1
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index + 1)
+                }
+                variant="secondary"
+              >
+                Trang tiếp theo
+                <ChevronRight aria-hidden="true" className="size-5" />
+              </Button>
+            </div>
+            {pageProgress.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                className="sm:self-start"
+                disabled={isBusy || uiState !== "reading"}
+                onClick={() => void confirmCurrentPageCompleted()}
+                variant="quiet"
+              >
+                Đánh dấu trang đã đọc xong
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {pageNavigationError ? (
+          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+        ) : null}
+        {pageProgress &&
+        pageProgress.current_index === pageProgress.total_pages - 1 ? (
+          <p className="text-sm font-semibold text-primary" role="status">
+            Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
+            sàng.
+          </p>
+        ) : null}
+      </div>
+
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
@@ -1186,7 +1378,7 @@ export function ReadingScreen({
           onCancel={() => setUiState("reading")}
           onConfirm={() => void confirmManualPage()}
           onSelect={setSelectedManualPageId}
-          pages={pagePreviews}
+          pages={rangePagePreviews}
           selectedPageId={selectedManualPageId}
         />
       ) : uiState === "reconnecting" || uiState === "stt-error" ? (

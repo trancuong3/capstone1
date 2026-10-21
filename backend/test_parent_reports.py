@@ -46,6 +46,7 @@ def history_repo():
     repo.fluency = AsyncMock(return_value=None)
     repo.questions = AsyncMock(return_value=[])
     repo.answer = AsyncMock(return_value=None)
+    repo.session_page_rows = AsyncMock(return_value=[])
     return repo
 
 

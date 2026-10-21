@@ -20,6 +20,8 @@ class ReadingSessionCreate(ReadingSessionBase):
     selected_page_id: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
     selected_page_revision_id: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    end_page_id: Optional[UUID] = None
     EndedAt: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
@@ -49,6 +51,7 @@ class ReadingCompletionSummaryDTO(BaseModel):
     # Null means the current database schema has no persisted evidence for this metric.
     duration_minutes: int | None = Field(default=None, ge=0)
     pages_explored: int | None = Field(default=None, ge=0)
+    selected_range_pages: int | None = Field(default=None, ge=0)
     practiced_words: int | None = Field(default=None, ge=0)
     spoken_words: list[str] | None = None
     transcripts: list[str] | None = None
@@ -59,6 +62,9 @@ class ReadingSessionResponse(ReadingSessionBase):
     BookId: UUID
     SelectedPageId: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
+    StartPageId: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    CurrentPageId: Optional[UUID] = None
     StartedAt: datetime
     EndedAt: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
@@ -117,6 +123,35 @@ class SessionSummaryRead(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     duration_ms: int | None = Field(ge=0)
+
+
+class ReadingPageNavigationCreate(BaseModel):
+    target_page_id: UUID
+
+
+class ReadingSessionPageProgressItem(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(ge=1)
+    page_order: int = Field(ge=0)
+    status: Literal["PENDING", "IN_PROGRESS", "COMPLETED"]
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ReadingSessionPageProgressDTO(BaseModel):
+    session_id: UUID
+    persisted: bool = True
+    start_page_id: UUID
+    end_page_id: UUID
+    current_page_id: UUID
+    start_page_number: int = Field(ge=1)
+    end_page_number: int = Field(ge=1)
+    current_page_number: int = Field(ge=1)
+    current_index: int = Field(ge=0)
+    total_pages: int = Field(ge=1)
+    completed_pages: int = Field(ge=0)
+    pages: list[ReadingSessionPageProgressItem]
 
 
 class HistorySessionSummaryRead(SessionSummaryRead):
@@ -235,6 +270,8 @@ class HistoryAvailabilityRead(BaseModel):
 
 
 class SessionDetailRead(HistorySessionSummaryRead):
+    selected_range_pages: int | None = Field(default=None, ge=0)
+    pages_completed: int | None = Field(default=None, ge=0)
     selected_page_revision_ids: list[UUID]
     reference_page_revision_ids: list[UUID]
     events: list[HistoryEventRead]

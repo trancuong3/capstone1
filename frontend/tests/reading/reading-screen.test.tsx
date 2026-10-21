@@ -11,7 +11,11 @@ import {
   sessionSummaryFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
-import type { ReadingPageDTO, TutorAction } from "@/types/reading";
+import type {
+  ReadingPageDTO,
+  ReadingSessionPageProgressDTO,
+  TutorAction,
+} from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
 const { servicesHook } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
@@ -53,6 +57,39 @@ const previews = [pageFour, pageFive].map((page) => ({
   current_verified_revision_id: page.page_revision_id,
   preview_url: "https://example.com/test-page.png",
 }));
+const pageProgressFixture: ReadingSessionPageProgressDTO = {
+  session_id: TEST_SESSION_ID,
+  persisted: true,
+  start_page_id: pageFour.page_id,
+  end_page_id: pageFive.page_id,
+  current_page_id: pageFour.page_id,
+  start_page_number: pageFour.page_number,
+  end_page_number: pageFive.page_number,
+  current_page_number: pageFour.page_number,
+  current_index: 0,
+  total_pages: 2,
+  completed_pages: 0,
+  pages: [
+    {
+      page_id: pageFour.page_id,
+      page_revision_id: pageFour.page_revision_id,
+      page_number: pageFour.page_number,
+      page_order: 0,
+      status: "IN_PROGRESS",
+      started_at: null,
+      completed_at: null,
+    },
+    {
+      page_id: pageFive.page_id,
+      page_revision_id: pageFive.page_revision_id,
+      page_number: pageFive.page_number,
+      page_order: 1,
+      status: "PENDING",
+      started_at: null,
+      completed_at: null,
+    },
+  ],
+};
 const tutorAction: TutorAction = {
   action: "READ_EXAMPLE",
   action_id: "70000000-0000-4000-8000-000000000001",
@@ -147,6 +184,26 @@ function createReadingFixtures() {
       getCurrentPage: vi
         .fn<ReadingServices["readingService"]["getCurrentPage"]>()
         .mockResolvedValue(pageFour),
+      getPageProgress: vi
+        .fn<ReadingServices["readingService"]["getPageProgress"]>()
+        .mockResolvedValue(pageProgressFixture),
+      navigateToPage: vi
+        .fn<ReadingServices["readingService"]["navigateToPage"]>()
+        .mockResolvedValue(pageProgressFixture),
+      completeCurrentPage: vi
+        .fn<ReadingServices["readingService"]["completeCurrentPage"]>()
+        .mockResolvedValue({
+          ...pageProgressFixture,
+          completed_pages: 1,
+          pages: [
+            {
+              ...pageProgressFixture.pages[0],
+              status: "COMPLETED",
+              completed_at: "2026-10-21T07:00:00Z",
+            },
+            pageProgressFixture.pages[1],
+          ],
+        }),
       getCompletionSummary: vi
         .fn<ReadingServices["readingService"]["getCompletionSummary"]>()
         .mockResolvedValue({
@@ -225,6 +282,64 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(
       screen.getByText(/Trạng thái kết nối: đã kết nối\./),
     ).toBeInTheDocument();
+  });
+
+  it("shows the selected range and navigates only to a saved next page", async () => {
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    expect(
+      await screen.findByText(/Phạm vi đọc: Trang 4–5/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Trang trước" })).toBeDisabled();
+    const nextButton = screen.getByRole("button", { name: "Trang tiếp theo" });
+    expect(nextButton).toBeEnabled();
+
+    await user.click(nextButton);
+
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFive.page_id,
+      );
+    });
+  });
+
+  it("lets the child explicitly confirm the current page completion", async () => {
+    const user = userEvent.setup();
+    services.readingService.getCurrentPage.mockResolvedValue(pageFive);
+    services.readingService.getPageProgress.mockResolvedValue({
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: pageFive.page_number,
+      current_index: 1,
+      pages: [
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        {
+          ...pageProgressFixture.pages[1],
+          status: "IN_PROGRESS",
+          started_at: "2026-10-21T07:00:00Z",
+        },
+      ],
+      completed_pages: 1,
+    });
+    renderReading("reading");
+
+    const completePageButton = await screen.findByRole("button", {
+      name: "Đánh dấu trang đã đọc xong",
+    });
+    await user.click(completePageButton);
+
+    await waitFor(() => {
+      expect(services.readingService.completeCurrentPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFive.page_id,
+      );
+    });
   });
 
   it("displays supplied paused/reconnecting safety status without adding evidence", async () => {
