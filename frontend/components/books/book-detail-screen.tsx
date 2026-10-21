@@ -171,7 +171,9 @@ export function BookDetailScreen({
         `/reading/${encodeURIComponent(session.session_id)}?state=ready&pageId=${encodeURIComponent(selectedPage.page_id)}`,
       );
     } catch (error) {
-      setStartError(error instanceof Error ? error.message : null);
+      setStartError(
+        "Chưa thể chuẩn bị buổi đọc với phạm vi này. Ba mẹ hãy kiểm tra các trang rồi thử lại.",
+      );
       setStartState("error");
     }
   }
@@ -429,7 +431,7 @@ export function BookDetailScreen({
 
           {startState === "error" ? (
             <StatusMessage className="order-7 sm:order-none" tone="error">
-              Chưa thể chuẩn bị buổi đọc. Ba mẹ vui lòng thử lại.
+              {startError ?? "Chưa thể chuẩn bị buổi đọc. Ba mẹ vui lòng thử lại."}
             </StatusMessage>
           ) : null}
         </div>
