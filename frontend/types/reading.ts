@@ -54,6 +54,7 @@ export interface ReadingSessionPageProgressItemDTO {
 
 export interface ReadingSessionPageProgressDTO {
   readonly session_id: UUID;
+  readonly persisted: boolean;
   readonly start_page_id: UUID;
   readonly end_page_id: UUID;
   readonly current_page_id: UUID;
