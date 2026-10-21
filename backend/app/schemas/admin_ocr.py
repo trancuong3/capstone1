@@ -3,32 +3,9 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 
+from app.schemas.admin_book import AdminBookWriteRequest as AdminBookCreateRequest
 
-class AdminBookCreateRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=250)
-    author: str | None = Field(default=None, max_length=250)
-    min_grade: int = Field(ge=1, le=5)
-    max_grade: int = Field(ge=1, le=5)
 
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("title must not be blank")
-        return value
-
-    @field_validator("author")
-    @classmethod
-    def normalize_author(cls, value: str | None) -> str | None:
-        value = value.strip() if value is not None else None
-        return value or None
-
-    @model_validator(mode="after")
-    def grade_range_is_valid(self):
-        if self.min_grade > self.max_grade:
-            raise ValueError("min_grade must be less than or equal to max_grade")
-        return self
 
 
 class AdminOcrWordInput(BaseModel):

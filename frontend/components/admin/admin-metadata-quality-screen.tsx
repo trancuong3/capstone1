@@ -350,12 +350,39 @@ export function AdminMetadataQualityScreen() {
                           </div>
                         </td>
                         <td className="px-3 py-4">
-                          <Link
-                            className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                            href={"/admin/books/" + encodeURIComponent(book.id)}
-                          >
-                            Xem chi tiết
-                          </Link>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {book.issues.some(
+                              (issue) => issue !== "POSSIBLE_DUPLICATE",
+                            ) ? (
+                              <Link
+                                className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                href={
+                                  "/admin/books/" +
+                                  encodeURIComponent(book.id) +
+                                  "/edit?returnTo=metadata-quality&issue=" +
+                                  encodeURIComponent(
+                                    book.issues.find(
+                                      (issue) => issue !== "POSSIBLE_DUPLICATE",
+                                    ) ?? book.issues[0],
+                                  )
+                                }
+                              >
+                                {book.issues.includes("MISSING_TITLE")
+                                  ? "Bổ sung metadata"
+                                  : "Sửa metadata"}
+                              </Link>
+                            ) : null}
+                            {book.issues.includes("POSSIBLE_DUPLICATE") ? (
+                              <Link
+                                className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                href={
+                                  "/admin/books/" + encodeURIComponent(book.id)
+                                }
+                              >
+                                So sánh sách
+                              </Link>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))}

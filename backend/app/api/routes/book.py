@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas import BookCreate, BookPageResponse, BookResponse
 from app.schemas.book import (
+    AdminBookMetadataResponse,
     AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
@@ -21,8 +22,11 @@ from app.schemas.book import (
     CatalogPagePreviewResponse,
 )
 from app.repositories.metadata_quality_repository import MetadataQualityRepository
+from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.metadata_quality import MetadataQualityIssueType, MetadataQualityResponse
+from app.schemas.admin_book import AdminBookLifecycleRequest, AdminBookWriteRequest
 from app.services.book_service import AdminCatalogService, BookService, CatalogService
+from app.services.admin_book_service import AdminBookService
 from app.services.metadata_quality_service import MetadataQualityService
 
 router = APIRouter()
@@ -104,6 +108,48 @@ async def get_parent_catalog_previews(
     service = CatalogService(db)
     await service.require_parent(actor_id)
     return await service.previews(book_id)
+
+
+@router.post(
+    "/admin/catalog",
+    response_model=AdminBookMetadataResponse,
+    status_code=201,
+)
+async def create_admin_book(
+    payload: AdminBookWriteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an Admin catalog entry through schema, service, and repository layers."""
+    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
+
+
+@router.put(
+    "/admin/catalog/{book_id}",
+    response_model=AdminBookMetadataResponse,
+)
+async def update_admin_book(
+    book_id: UUID,
+    payload: AdminBookWriteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminBookService(AdminBookRepository(db)).update(actor_id, book_id, payload)
+
+
+@router.patch(
+    "/admin/catalog/{book_id}/status",
+    response_model=AdminBookMetadataResponse,
+)
+async def update_admin_book_status(
+    book_id: UUID,
+    payload: AdminBookLifecycleRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminBookService(AdminBookRepository(db)).update_lifecycle(
+        actor_id, book_id, payload.status
+    )
 
 
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])

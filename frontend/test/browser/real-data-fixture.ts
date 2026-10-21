@@ -21,6 +21,7 @@ export const child = {
 };
 export const book = {
   id: ids.book,
+  name: "Tên sách từ API",
   title: "Câu chuyện từ API",
   author: "Tác giả API",
   min_grade: 1,
@@ -69,6 +70,22 @@ export interface BrowserApiState {
   historyStatus: number;
   unexpected: string[];
   requests: string[];
+  createBookRequest: {
+    name: string;
+    title: string;
+    author: string | null;
+    min_grade: number;
+    max_grade: number;
+  } | null;
+  createdBook: {
+    id: string;
+    name: string;
+    title: string;
+    author: string | null;
+    min_grade: number;
+    max_grade: number;
+    lifecycle_status: "ACTIVE";
+  } | null;
 }
 
 export async function setRole(page: Page, role: "parent" | "admin") {
@@ -131,12 +148,14 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     historyStatus: 200,
     unexpected: [],
     requests: [],
+    createBookRequest: null,
+    createdBook: null,
   };
   await seedBrowserSession(page);
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers": "authorization,content-type,accept",
-    "access-control-allow-methods": "GET,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
     await route.fulfill({
@@ -157,12 +176,44 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     }
     if (request.method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
+    const path = url.pathname;
+    if (request.method() === "POST" && path === "/books/admin/catalog") {
+      expect(request.headers().authorization).toMatch(/^Bearer /);
+      const body = request.postDataJSON() as Record<string, unknown>;
+      if (
+        typeof body.name !== "string" ||
+        !body.name.trim() ||
+        typeof body.title !== "string" ||
+        !body.title.trim() ||
+        !(body.author === null || typeof body.author === "string") ||
+        !Number.isInteger(body.min_grade) ||
+        !Number.isInteger(body.max_grade) ||
+        Number(body.min_grade) < 1 ||
+        Number(body.max_grade) > 5 ||
+        Number(body.min_grade) > Number(body.max_grade)
+      ) {
+        return respond(route, { detail: "Invalid create book payload" }, 422);
+      }
+      const requestPayload = {
+        name: body.name.trim(),
+        title: body.title.trim(),
+        author: body.author as string | null,
+        min_grade: Number(body.min_grade),
+        max_grade: Number(body.max_grade),
+      };
+      state.createBookRequest = requestPayload;
+      state.createdBook = {
+        id: "88888888-8888-4888-8888-888888888888",
+        ...requestPayload,
+        lifecycle_status: "ACTIVE",
+      };
+      return respond(route, state.createdBook);
+    }
     if (request.method() !== "GET") {
       state.unexpected.push(`write:${request.method()}:${url.pathname}`);
       return respond(route, { detail: "Test forbids writes" }, 405);
     }
     state.requests.push(`${url.pathname}${url.search}`);
-    const path = url.pathname;
     if (path === "/test-page.svg")
       return route.fulfill({
         headers,
@@ -170,6 +221,13 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect width="800" height="1000" fill="#fff9e8"/><text x="100" y="220" font-size="38">Stored page - test fixture</text></svg>',
       });
     expect(request.headers().authorization).toMatch(/^Bearer /);
+    if (
+      path === "/reading-management/collections" ||
+      path === "/reading-management/goals" ||
+      path === "/reading-management/reminders" ||
+      path === "/reading-management/reminders/due"
+    )
+      return respond(route, []);
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,
@@ -292,16 +350,29 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (path.startsWith("/system/difficult-words/"))
       return respond(route, [word], state.reportStatus);
     if (path === "/books/admin/catalog")
-      return respond(route, [
-        {
-          book,
-          page_count: 1,
-          processing_count: 0,
-          needs_review_count: 0,
-          verified_count: 1,
-          parent_catalog_eligible: true,
-        },
-      ]);
+      return respond(
+        route,
+        [book, ...(state.createdBook ? [state.createdBook] : [])].map(
+          (catalogBook) => ({
+            book: catalogBook,
+            page_count: catalogBook.id === book.id ? 1 : 0,
+            processing_count: 0,
+            needs_review_count: 0,
+            verified_count: catalogBook.id === book.id ? 1 : 0,
+            parent_catalog_eligible: catalogBook.id === book.id,
+          }),
+        ),
+      );
+    if (
+      state.createdBook &&
+      path === `/books/admin/catalog/${state.createdBook.id}`
+    )
+      return respond(route, state.createdBook);
+    if (
+      state.createdBook &&
+      path === `/books/admin/catalog/${state.createdBook.id}/pages`
+    )
+      return respond(route, []);
     if (path === `/books/admin/catalog/${ids.book}`)
       return respond(route, book);
     if (path === `/books/admin/catalog/${ids.book}/pages`)

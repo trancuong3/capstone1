@@ -27,6 +27,7 @@ const revisionId = "44444444-4444-4444-8444-444444444444";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
+  name: "Real book name",
   title: "Real retired book",
   author: null,
   min_grade: 1,
@@ -372,6 +373,7 @@ describe("real Admin adapters", () => {
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
     const created = await createAdminBookService().create({
+      name: "  Tên mèo nhỏ  ",
       title: "  Chú mèo nhỏ  ",
       author: "  ",
       min_grade: 1,
@@ -386,6 +388,7 @@ describe("real Admin adapters", () => {
       "Bearer test-token",
     );
     expect(JSON.parse(String(init.body))).toEqual({
+      name: "Tên mèo nhỏ",
       title: "Chú mèo nhỏ",
       author: null,
       min_grade: 1,
@@ -582,24 +585,59 @@ describe("real Admin adapters", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 
-  it("keeps unsupported edit and lifecycle operations explicitly unavailable", async () => {
+  it("updates metadata and lifecycle through the real book API adapters", async () => {
     const books = createAdminBookService();
-    const pages = createAdminPageService();
-    const operations = [
-      books.update(bookId, {
-        title: "X",
-        author: null,
-        min_grade: 1,
-        max_grade: 3,
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...book,
+        title: "Updated title",
+        min_grade: 2,
+        max_grade: 4,
       }),
-      books.updateStatus(bookId, { status: "RETIRED" }),
-      pages.updateStatus(pageId, { status: "RETIRED" }),
-    ];
-    await Promise.all(
-      operations.map((operation) =>
-        expect(operation).rejects.toMatchObject({ status: 501 }),
-      ),
     );
+
+    const updated = await books.update(bookId, {
+      name: "Real book name",
+      title: "  Updated title  ",
+      author: "  Author  ",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    expect(updated.name).toBe("Real book name");
+    expect(updated.title).toBe("Updated title");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      name: "Real book name",
+      title: "Updated title",
+      author: "Author",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...book, lifecycle_status: "RETIRED" }),
+    );
+    const retired = await books.updateStatus(bookId, { status: "RETIRED" });
+
+    expect(retired.lifecycle_status).toBe("RETIRED");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}/status`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      status: "RETIRED",
+    });
+  });
+
+  it("keeps unsupported page lifecycle updates unavailable", async () => {
+    await expect(
+      createAdminPageService().updateStatus(pageId, { status: "RETIRED" }),
+    ).rejects.toMatchObject({ status: 501 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

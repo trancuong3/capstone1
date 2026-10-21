@@ -24,7 +24,7 @@ test("admin login reaches the book catalog and logout returns safely", async ({
 
 test("admin creates a book and reaches its detail", async ({ page }) => {
   await page.goto("/admin/books/new");
-  await page.getByLabel("Tên sách").fill("Cuốn sách kiểm thử");
+  await page.getByLabel("Tiêu đề sách *").fill("Cuốn sách kiểm thử");
   await page.getByRole("button", { name: "Tạo sách" }).click();
   await expect(page).toHaveURL(/\/admin\/books\/82000000-/);
   await expect(
