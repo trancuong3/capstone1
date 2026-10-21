@@ -189,7 +189,9 @@ describe("real Admin adapters", () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("image")).toMatchObject({ name: "page-1.png" });
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-1.png",
+    });
     expect((init.body as FormData).get("page_number")).toBeNull();
   });
   it.each([
