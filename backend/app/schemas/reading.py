@@ -140,6 +140,7 @@ class ReadingSessionPageProgressItem(BaseModel):
 
 class ReadingSessionPageProgressDTO(BaseModel):
     session_id: UUID
+    persisted: bool = True
     start_page_id: UUID
     end_page_id: UUID
     current_page_id: UUID
