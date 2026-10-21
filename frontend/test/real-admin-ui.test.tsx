@@ -32,6 +32,7 @@ const newRevisionId = "55555555-5555-4555-8555-555555555555";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
+  name: "Tên sách Admin từ database",
   title: "Sách Admin từ database",
   author: null,
   min_grade: 1,

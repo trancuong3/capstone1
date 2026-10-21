@@ -27,6 +27,7 @@ const revisionId = "44444444-4444-4444-8444-444444444444";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
+  name: "Real book name",
   title: "Real retired book",
   author: null,
   min_grade: 1,
@@ -372,6 +373,7 @@ describe("real Admin adapters", () => {
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
     const created = await createAdminBookService().create({
+      name: "  Tên mèo nhỏ  ",
       title: "  Chú mèo nhỏ  ",
       author: "  ",
       min_grade: 1,
@@ -386,6 +388,7 @@ describe("real Admin adapters", () => {
       "Bearer test-token",
     );
     expect(JSON.parse(String(init.body))).toEqual({
+      name: "Tên mèo nhỏ",
       title: "Chú mèo nhỏ",
       author: null,
       min_grade: 1,
@@ -594,18 +597,21 @@ describe("real Admin adapters", () => {
     );
 
     const updated = await books.update(bookId, {
+      name: "Real book name",
       title: "  Updated title  ",
       author: "  Author  ",
       min_grade: 2,
       max_grade: 4,
     });
 
+    expect(updated.name).toBe("Real book name");
     expect(updated.title).toBe("Updated title");
     expect(fetchMock.mock.calls[0][0]).toContain(
       `/books/admin/catalog/${bookId}`,
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      name: "Real book name",
       title: "Updated title",
       author: "Author",
       min_grade: 2,
