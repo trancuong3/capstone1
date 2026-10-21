@@ -376,10 +376,6 @@ class ReadingContentService:
             rows = await self.repository.session_page_rows(session.Id)
             ended_at = datetime.now(timezone.utc)
             if rows:
-                current_id = session.CurrentPageId or next(
-                    (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
-                    rows[0].PageId,
-                )
                 # Finishing a session is not, by itself, proof that its
                 # current page was read. Page completion is persisted by explicit
                 # confirmation or when the child advances to the next page.
@@ -522,7 +518,6 @@ class ReadingContentService:
             # Stable compatibility response for sessions created before this
             # feature: expose their selected page as a one-page range.
             page = await self.get_session_page(session_id, actor_id)
-            completed = session.State in ("COMPLETED", "FINISHED")
             # Legacy sessions have no durable page-completion evidence.
             return ReadingSessionPageProgressDTO(
                 session_id=session.Id,
@@ -535,15 +530,15 @@ class ReadingContentService:
                 current_page_number=page.page_number,
                 current_index=0,
                 total_pages=1,
-                completed_pages=1 if completed else 0,
+                completed_pages=0,
                 pages=[ReadingSessionPageProgressItem(
                     page_id=page.page_id,
                     page_revision_id=page.page_revision_id,
                     page_number=page.page_number,
                     page_order=0,
-                    status="COMPLETED" if completed else "IN_PROGRESS",
+                    status="IN_PROGRESS",
                     started_at=session.StartedAt,
-                    completed_at=session.EndedAt if completed else None,
+                    completed_at=None,
                 )],
             )
 
