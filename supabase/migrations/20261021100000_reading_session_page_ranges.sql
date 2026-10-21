@@ -21,3 +21,8 @@ CREATE TABLE IF NOT EXISTS public.readingsessionpages (
 
 CREATE INDEX IF NOT EXISTS ix_readingsessionpages_session_status
     ON public.readingsessionpages (sessionid, status);
+
+-- Page snapshots are backend-owned reading-session state.
+-- Do not expose this table directly to anon/authenticated clients.
+ALTER TABLE public.readingsessionpages ENABLE ROW LEVEL SECURITY;
+GRANT ALL PRIVILEGES ON TABLE public.readingsessionpages TO service_role;
