@@ -27,9 +27,9 @@ jobs:
         shell: bash
         run: |
           git fetch origin main
-          mapfile -t files < <(git diff --name-only origin/main...HEAD -- frontend/ | sed 's#^frontend/##' | grep -E '\\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)$' || true)
+          mapfile -t files < <(git diff --name-only origin/main...HEAD -- frontend/ | sed 's#^frontend/##' | grep -E '\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)$' || true)
           if [ "${#files[@]}" -gt 0 ]; then
-            printf '%s\\n' "${files[@]}" | (cd frontend && xargs -r npx prettier --write --)
+            printf '%s\n' "${files[@]}" | (cd frontend && xargs -r npx prettier --write --)
           fi
       - name: Commit and push formatting only
         shell: bash
