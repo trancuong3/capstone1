@@ -38,8 +38,8 @@ jobs:
 
       - name: Temporary Prettier diff for OCR changes
         run: |
-          npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
-          git -C .. diff -- frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/ocr/sync-page-text-words.ts
+          npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts components/admin/admin-page-uploader.tsx tests/admin/admin-ocr-review-screen.test.tsx
+          git -C .. diff -- frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/ocr/sync-page-text-words.ts frontend/components/admin/admin-page-uploader.tsx frontend/tests/admin/admin-ocr-review-screen.test.tsx
 
       - name: Format check (changed frontend files)
         id: format
