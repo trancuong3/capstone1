@@ -5,10 +5,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AdminBookWriteRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=250)
     title: str = Field(min_length=1, max_length=250)
     author: str | None = Field(default=None, max_length=250)
     min_grade: int = Field(ge=1, le=5)
     max_grade: int = Field(ge=1, le=5)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Vui lòng nhập tên sách.")
+        return value
 
     @field_validator("title")
     @classmethod

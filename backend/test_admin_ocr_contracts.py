@@ -79,7 +79,7 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
     def test_all_write_routes_require_bearer_identity(self):
         headers = {}
         response_cases = [
-            self.client.post("/books/admin/catalog", json={"title": "Book", "author": None, "min_grade": 1, "max_grade": 2}, headers=headers),
+            self.client.post("/books/admin/catalog", json={"name": "Book name", "title": "Book", "author": None, "min_grade": 1, "max_grade": 2}, headers=headers),
             self.client.post(f"/books/admin/catalog/{BOOK}/pages", data={"page_number": "1"}, files={"image": ("page.png", b"not-an-image", "image/png")}, headers=headers),
             self.client.put(f"/books/admin/pages/{PAGE}/revisions/{REVISION}/draft", json={"draft_text": "text", "words": []}, headers=headers),
             self.client.post(f"/books/admin/pages/{PAGE}/verify", json={

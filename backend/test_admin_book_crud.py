@@ -30,7 +30,8 @@ CREATED_AT = "2026-10-01T00:00:00Z"
 def make_book(**overrides):
     values = {
         "Id": BOOK_ID,
-        "Title": "Sách cũ",
+        "Name": "Tên sách cũ",
+        "Title": "Tiêu đề cũ",
         "Author": "Tác giả cũ",
         "MinGrade": 1,
         "MaxGrade": 3,
@@ -62,6 +63,7 @@ class FakeAdminBookRepository:
     async def _create(self, *, actor_id, values):
         self.created = {"actor_id": actor_id, **values}
         return make_book(
+            Name=values["name"],
             Title=values["title"],
             Author=values.get("author"),
             MinGrade=values["min_grade"],
@@ -71,6 +73,7 @@ class FakeAdminBookRepository:
 
     async def _update(self, book, *, values):
         self.updated_values = dict(values)
+        book.Name = values["name"]
         book.Title = values["title"]
         book.Author = values.get("author")
         book.MinGrade = values["min_grade"]
@@ -86,15 +89,18 @@ class FakeAdminBookRepository:
 class AdminBookSchemaTests(unittest.TestCase):
     def test_title_is_trimmed_and_blank_title_is_rejected(self):
         payload = AdminBookWriteRequest(
+            name="  Tên truyện  ",
             title="  Truyện của bé  ",
             author="  Tác giả  ",
             min_grade=1,
             max_grade=2,
         )
+        self.assertEqual(payload.name, "Tên truyện")
         self.assertEqual(payload.title, "Truyện của bé")
         self.assertEqual(payload.author, "Tác giả")
         with self.assertRaises(ValidationError):
             AdminBookWriteRequest(
+                name="Tên sách",
                 title=" \t\r\n ",
                 author=None,
                 min_grade=1,
@@ -103,6 +109,7 @@ class AdminBookSchemaTests(unittest.TestCase):
 
     def test_author_can_be_empty_and_grade_range_must_be_valid(self):
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="Sách hợp lệ",
             author="   ",
             min_grade=1,
@@ -116,6 +123,7 @@ class AdminBookSchemaTests(unittest.TestCase):
         ):
             with self.subTest(values=values), self.assertRaises(ValidationError):
                 AdminBookWriteRequest(
+                    name="Tên sách",
                     title="Sách",
                     author=None,
                     **values,
@@ -127,6 +135,7 @@ class AdminBookServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeAdminBookRepository(role="parent")
         service = AdminBookService(repository)
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="Sách", author=None, min_grade=1, max_grade=3
         )
         for operation in (
@@ -144,9 +153,11 @@ class AdminBookServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_uses_authenticated_actor_and_stores_trimmed_metadata(self):
         repository = FakeAdminBookRepository()
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="  Sách mới  ", author="  ", min_grade=1, max_grade=4
         )
         response = await AdminBookService(repository).create(ADMIN_ID, payload)
+        self.assertEqual(response.name, "Tên sách")
         self.assertEqual(response.title, "Sách mới")
         self.assertIsNone(response.author)
         self.assertEqual(repository.created["actor_id"], ADMIN_ID)
@@ -157,10 +168,13 @@ class AdminBookServiceTests(unittest.IsolatedAsyncioTestCase):
         row = make_book()
         repository = FakeAdminBookRepository(book=row)
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="  Sách đã sửa ", author=None, min_grade=2, max_grade=4
         )
         response = await AdminBookService(repository).update(ADMIN_ID, BOOK_ID, payload)
+        self.assertEqual(response.name, "Tên sách")
         self.assertEqual(response.title, "Sách đã sửa")
+        self.assertEqual(row.Name, "Tên sách")
         self.assertEqual(row.Id, BOOK_ID)
         self.assertEqual(row.CreatedBy, ADMIN_ID)
         self.assertEqual(row.CreatedAt, CREATED_AT)
@@ -194,22 +208,87 @@ class AdminBookServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = FakeAdminBookRepository()
         repository.get = AsyncMock(return_value=None)
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="Sách", author=None, min_grade=1, max_grade=3
         )
         with self.assertRaises(HTTPException) as caught:
             await AdminBookService(repository).update(ADMIN_ID, BOOK_ID, payload)
         self.assertEqual(caught.exception.status_code, 404)
 
+    async def test_business_layer_rejects_a_blank_name_before_persistence(self):
+        repository = FakeAdminBookRepository()
+        invalid_payload = AdminBookWriteRequest.model_construct(
+            name=" \t\r\n ",
+            title="Tiêu đề hợp lệ",
+            author=None,
+            min_grade=1,
+            max_grade=3,
+        )
+        with self.assertRaises(HTTPException) as caught:
+            await AdminBookService(repository).create(ADMIN_ID, invalid_payload)
+        self.assertEqual(caught.exception.status_code, 422)
+        repository.create.assert_not_awaited()
+
     async def test_database_error_response_does_not_expose_database_details(self):
         repository = FakeAdminBookRepository()
         repository.create.side_effect = SQLAlchemyError("private-db-connection-detail")
         payload = AdminBookWriteRequest(
+            name="Tên sách",
             title="Sách", author=None, min_grade=1, max_grade=3
         )
         with self.assertRaises(HTTPException) as caught:
             await AdminBookService(repository).create(ADMIN_ID, payload)
         self.assertEqual(caught.exception.status_code, 500)
         self.assertNotIn("private-db-connection-detail", str(caught.exception.detail))
+
+
+
+class AdminBookRepositoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_and_update_persist_name_and_title_independently(self):
+        db = MagicMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        repository = AdminBookRepository(db)
+        book = await repository.create(
+            actor_id=ADMIN_ID,
+            values={
+                "name": "Tên hiển thị",
+                "title": "Tiêu đề riêng",
+                "author": None,
+                "min_grade": 1,
+                "max_grade": 3,
+            },
+        )
+        self.assertEqual(book.Name, "Tên hiển thị")
+        self.assertEqual(book.Title, "Tiêu đề riêng")
+
+        await repository.update_metadata(
+            book,
+            values={
+                "name": "Tên hiển thị mới",
+                "title": "Tiêu đề riêng",
+                "author": None,
+                "min_grade": 1,
+                "max_grade": 3,
+            },
+        )
+        self.assertEqual(book.Name, "Tên hiển thị mới")
+        self.assertEqual(book.Title, "Tiêu đề riêng")
+
+        await repository.update_metadata(
+            book,
+            values={
+                "name": "Tên hiển thị mới",
+                "title": "Tiêu đề riêng mới",
+                "author": None,
+                "min_grade": 1,
+                "max_grade": 3,
+            },
+        )
+        self.assertEqual(book.Name, "Tên hiển thị mới")
+        self.assertEqual(book.Title, "Tiêu đề riêng mới")
+        self.assertEqual(db.commit.await_count, 3)
+        self.assertEqual(db.refresh.await_count, 3)
 
 
 class AdminBookAuthHttpTests(unittest.TestCase):
@@ -227,12 +306,12 @@ class AdminBookAuthHttpTests(unittest.TestCase):
         self.app.dependency_overrides.pop(get_current_parent_id, None)
         response = self.client.post(
             "/books/admin/catalog",
-            json={"title": "Sách", "author": None, "min_grade": 1, "max_grade": 3},
+            json={"name": "Tên sách", "title": "Tiêu đề sách", "author": None, "min_grade": 1, "max_grade": 3},
         )
         self.assertEqual(response.status_code, 401)
 
     def test_parent_cannot_create_update_or_change_book_lifecycle(self):
-        payload = {"title": "Sách", "author": None, "min_grade": 1, "max_grade": 3}
+        payload = {"name": "Tên sách", "title": "Tiêu đề sách", "author": None, "min_grade": 1, "max_grade": 3}
         responses = (
             self.client.post("/books/admin/catalog", json=payload),
             self.client.put(f"/books/admin/catalog/{BOOK_ID}", json=payload),

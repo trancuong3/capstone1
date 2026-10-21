@@ -5,11 +5,22 @@ from uuid import UUID
 
 # --- BOOK ---
 class BookBase(BaseModel):
+    Name: str | None = Field(default=None, max_length=250)
     Title: str = Field(..., min_length=1)
     Author: Optional[str] = None
     MinGrade: int = Field(..., ge=1, le=5)
     MaxGrade: int = Field(..., ge=1, le=5)
     LifecycleStatus: Literal["ACTIVE", "RETIRED"] = Field(..., example="ACTIVE")
+
+    @field_validator("Name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Vui lòng nhập tên sách.")
+        return normalized
 
     @field_validator("Title")
     @classmethod
@@ -26,6 +37,7 @@ class BookBase(BaseModel):
         return self
 
 class BookCreate(BookBase):
+    Name: str = Field(..., min_length=1, max_length=250)
     CreatedBy: Optional[UUID] = None
 
 class BookResponse(BookBase):
@@ -100,6 +112,7 @@ from pydantic import AliasChoices
 
 class CatalogBookResponse(BaseModel):
     id: UUID = Field(validation_alias=AliasChoices("id", "Id"))
+    name: str | None = Field(default=None, validation_alias=AliasChoices("name", "Name"))
     title: str = Field(validation_alias=AliasChoices("title", "Title"))
     author: str | None = Field(validation_alias=AliasChoices("author", "Author"))
     min_grade: int = Field(ge=1, le=5, validation_alias=AliasChoices("min_grade", "MinGrade"))
@@ -114,6 +127,7 @@ class AdminBookMetadataResponse(BaseModel):
     """Admin metadata contract tolerates legacy values so invalid rows remain repairable."""
 
     id: UUID = Field(validation_alias=AliasChoices("id", "Id"))
+    name: str | None = Field(default=None, validation_alias=AliasChoices("name", "Name"))
     title: str = Field(validation_alias=AliasChoices("title", "Title"))
     author: str | None = Field(validation_alias=AliasChoices("author", "Author"))
     min_grade: int = Field(validation_alias=AliasChoices("min_grade", "MinGrade"))

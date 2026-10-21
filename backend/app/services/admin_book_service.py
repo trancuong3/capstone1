@@ -19,10 +19,16 @@ class AdminBookService:
         if await self.repository.role(actor_id) != "admin":
             raise HTTPException(status_code=403, detail="Admin access required")
 
+    @staticmethod
+    def validate_required_name(payload: AdminBookWriteRequest) -> None:
+        if not isinstance(payload.name, str) or not payload.name.strip():
+            raise HTTPException(status_code=422, detail="Vui lòng nhập tên sách.")
+
     async def create(
         self, actor_id: UUID, payload: AdminBookWriteRequest
     ) -> AdminBookMetadataResponse:
         await self.require_admin(actor_id)
+        self.validate_required_name(payload)
         try:
             book = await self.repository.create(
                 actor_id=actor_id,
@@ -44,6 +50,7 @@ class AdminBookService:
         self, actor_id: UUID, book_id: UUID, payload: AdminBookWriteRequest
     ) -> AdminBookMetadataResponse:
         await self.require_admin(actor_id)
+        self.validate_required_name(payload)
         try:
             book = await self.repository.get(book_id)
             if book is None:
@@ -71,11 +78,13 @@ class AdminBookService:
                 raise HTTPException(status_code=404, detail="Resource not found")
 
             if status == "ACTIVE":
+                name = book.Name.strip() if isinstance(getattr(book, "Name", None), str) else ""
                 title = book.Title.strip() if isinstance(book.Title, str) else ""
                 min_grade = book.MinGrade
                 max_grade = book.MaxGrade
                 if (
-                    not title
+                    not name
+                    or not title
                     or not isinstance(min_grade, int)
                     or not isinstance(max_grade, int)
                     or min_grade < 1
@@ -88,7 +97,7 @@ class AdminBookService:
                         status_code=422,
                         detail={
                             "code": "INVALID_BOOK_METADATA",
-                            "message": "Hãy sửa tiêu đề và khoảng lớp hợp lệ trước khi kích hoạt sách.",
+                            "message": "Hãy sửa tên sách, tiêu đề và khoảng lớp hợp lệ trước khi kích hoạt sách.",
                         },
                     )
 
