@@ -17,7 +17,8 @@ from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
 from app.schemas.reading import (
     ReadingPageDTO, ReadingCompletionSummaryDTO,
-    SessionSummaryRead,
+    SessionSummaryRead, ReadingPageNavigationCreate,
+    ReadingSessionPageProgressDTO,
 )
 
 router = APIRouter()
@@ -60,6 +61,35 @@ async def get_session_current_page(
 ):
     return await ReadingContentService(ReadingContentRepository(db)).get_session_page(
         session_id, actor_id
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/progress",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def get_session_page_progress(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_session_progress(
+        session_id, actor_id
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/navigate",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def navigate_session_page(
+    session_id: UUID,
+    navigation_in: ReadingPageNavigationCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).navigate_session_page(
+        session_id, actor_id, navigation_in
     )
 
 
