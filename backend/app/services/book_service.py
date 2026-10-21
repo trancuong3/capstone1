@@ -213,7 +213,11 @@ class AdminCatalogService:
         # Admin reviews the image that produced the latest revision, even when pending.
         # Parent/Child reading keeps BookPage.ImagePath until that revision is verified.
         revisions = await self.repository.revisions(page.Id)
-        metadata = dict(revisions[0].ProcessingMeta or {}) if revisions else {}
+        metadata = (
+            dict(getattr(revisions[0], "ProcessingMeta", None) or {})
+            if revisions
+            else {}
+        )
         candidate_path = metadata.get("source_image_path")
         image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
         candidate_width = metadata.get("source_image_width")

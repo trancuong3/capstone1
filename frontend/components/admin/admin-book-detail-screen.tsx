@@ -174,10 +174,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           Chỉnh sửa metadata / vòng đời
         </Link>
       </div>
-      <AdminPageUploader
-        bookId={book.id}
-        onUploaded={() => void load()}
-      />
+      <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-2xl font-black" id="pages-title">
