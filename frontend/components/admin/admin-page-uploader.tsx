@@ -209,8 +209,9 @@ export function AdminPageUploader({
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
         <p className="text-sm font-semibold text-ink">
-          Backend tự động đánh số trang liên tục từ 1. Thứ tự chọn ảnh quyết định
-          thứ tự gửi; số trang cuối cùng được xác định từ PostgreSQL.
+          Backend tự động đánh số trang liên tục từ 1. Thứ tự chọn ảnh
+          quyết định thứ tự gửi; số trang cuối cùng được xác định từ
+          PostgreSQL.
         </p>
         <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />

@@ -82,53 +82,56 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.queryByText(ADMIN_R1_ID)).not.toBeInTheDocument();
   });
 
-  it("reuploads an image for only the selected page and presents its unverified OCR", async () => {
-    const services = createAdminServiceFixture();
-    const user = userEvent.setup();
-    const replacementDetail: AdminPageRevisionDetailDTO = {
-      ...adminR2Fixture,
-      page_revision_id: "55555555-5555-4555-8555-555555555555",
-      revision_no: 3,
-      verification_status: "NEEDS_REVIEW",
-      draft_text: "Nội.",
-    };
-    services.pages.replaceImageAndReprocess.mockResolvedValue(replacementDetail);
+  it(
+    "reuploads an image for only the selected page and presents its unverified OCR",
+    async () => {
+      const services = createAdminServiceFixture();
+      const user = userEvent.setup();
+      const replacementDetail: AdminPageRevisionDetailDTO = {
+        ...adminR2Fixture,
+        page_revision_id: "55555555-5555-4555-8555-555555555555",
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        draft_text: "Nội.",
+      };
+      services.pages.replaceImageAndReprocess.mockResolvedValue(replacementDetail);
 
-    render(
-      withAdminFixture(
-        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
-        services,
-      ),
-    );
-    expect(
-      await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
-    ).toBeInTheDocument();
+      render(
+        withAdminFixture(
+          <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+          services,
+        ),
+      );
+      expect(
+        await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ }),
+      ).toBeInTheDocument();
 
-    const file = new File(["replacement image"], "replacement.png", {
-      type: "image/png",
-    });
-    await user.upload(
-      screen.getByLabelText(/Tải ảnh mới cho riêng trang này/),
-      file,
-    );
-    await user.click(
-      screen.getByRole("button", { name: /Tải ảnh mới và chạy OCR/ }),
-    );
+      const file = new File(["replacement image"], "replacement.png", {
+        type: "image/png",
+      });
+      await user.upload(
+        screen.getByLabelText(/Tải ảnh mới cho riêng trang này/),
+        file,
+      );
+      await user.click(
+        screen.getByRole("button", { name: /Tải ảnh mới và chạy OCR/ }),
+      );
 
-    expect(services.pages.replaceImageAndReprocess).toHaveBeenCalledWith(
-      ADMIN_PAGE_ID,
-      file,
-    );
-    expect(
-      await screen.findByText(/Bản mới đang chờ duyệt/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: /Kiểm tra OCR · R3/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Nội.");
-    expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
-    expect(services.revisions.verify).not.toHaveBeenCalled();
-  });
+      expect(services.pages.replaceImageAndReprocess).toHaveBeenCalledWith(
+        ADMIN_PAGE_ID,
+        file,
+      );
+      expect(
+        await screen.findByText(/Bản mới đang chờ duyệt/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Nội.");
+      expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
+      expect(services.revisions.verify).not.toHaveBeenCalled();
+    },
+  );
 
   it("classifies confidence levels and synchronizes word-list and image selection", async () => {
     const services = createAdminServiceFixture();
