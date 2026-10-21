@@ -75,6 +75,36 @@ class AdminPageRetirementTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(page)
         db.rollback.assert_not_awaited()
 
+    async def test_retiring_middle_page_renumbers_following_active_pages(self):
+        retired = make_page(PageNumber=2)
+        first = make_page(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            PageNumber=1,
+        )
+        third = make_page(
+            Id=UUID("55555555-5555-4555-8555-555555555555"),
+            PageNumber=3,
+        )
+        fourth = make_page(
+            Id=UUID("66666666-6666-4666-8666-666666666666"),
+            PageNumber=4,
+        )
+        service, db = make_service(retired)
+        service.repo.active_pages_for_renumber = AsyncMock(
+            return_value=[first, third, fourth]
+        )
+
+        result = await service.retire_page(ACTOR, PAGE)
+
+        self.assertEqual(result.lifecycle_status, "RETIRED")
+        self.assertEqual(retired.LifecycleStatus, "RETIRED")
+        self.assertEqual(retired.PageNumber, 2)
+        self.assertEqual([first.PageNumber, third.PageNumber, fourth.PageNumber], [1, 2, 3])
+        db.commit.assert_awaited_once()
+        service.repo.flush.assert_awaited()
+        self.assertEqual(service.repo.flush.await_count, 3)
+        db.rollback.assert_not_awaited()
+
     async def test_non_admin_cannot_retire_page_or_mutate_database(self):
         page = make_page()
         service, db = make_service(page, role="parent")
