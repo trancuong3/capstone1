@@ -9,10 +9,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
+from urllib import response
 from urllib.parse import quote
 
 import httpx
+import logging
 
+logger = logging.getLogger(__name__)
 
 ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io/v1"
 # Public voice used in the current ElevenLabs API reference. Deployments should
@@ -125,6 +128,11 @@ class ElevenLabsVoiceProvider:
         if response.status_code == 429 or response.status_code >= 500:
             raise VoiceProviderUnavailable()
         if response.is_error:
+            logger.error(
+                "ElevenLabs STT HTTP error: status=%s, body=%s",
+                response.status_code,
+                response.text[:1000],
+            )
             raise VoiceProviderError()
 
         content_type = response.headers.get("content-type", "audio/mpeg").split(";", 1)[0]
@@ -146,7 +154,11 @@ class ElevenLabsVoiceProvider:
             form["language_code"] = lang
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
+            transport = httpx.AsyncHTTPTransport(
+                local_address="0.0.0.0"
+            )
+
+            async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(90.0, connect=10.0)) as client:
                 response = await client.post(
                     f"{ELEVENLABS_API_BASE_URL}/speech-to-text",
                     headers={**self._headers(), "Accept": "application/json"},
@@ -154,13 +166,25 @@ class ElevenLabsVoiceProvider:
                     files={"file": (filename, audio, content_type)},
                 )
         except httpx.TimeoutException as error:
+            logger.exception("ElevenLabs STT request timed out")
             raise VoiceProviderUnavailable() from error
         except httpx.HTTPError as error:
             raise VoiceProviderError() from error
 
+        if response.status_code >= 400:
+            logger.warning(
+                "ElevenLabs STT HTTP error: status=%s, request_id=%s",
+                response.status_code,
+                response.headers.get("request-id"),
+            )
         if response.status_code == 429 or response.status_code >= 500:
             raise VoiceProviderUnavailable()
         if response.is_error:
+            logger.error(
+                "ElevenLabs STT HTTP error: status=%s, body=%s",
+                response.status_code,
+                response.text[:1000],
+            )
             raise VoiceProviderError()
         try:
             return self._transcription_from_payload(response.json())
@@ -173,6 +197,12 @@ class ElevenLabsVoiceProvider:
         Returns (status: "HEALTHY" | "DEGRADED" | "UNAVAILABLE", safe_message: str).
         """
         if not self._api_key:
+            logger.error("ElevenLabs API key is missing")
+            logger.info(
+                "ElevenLabs key loaded: %s, length=%d",
+                bool(self._api_key),
+                len(self._api_key),
+            )
             return "UNAVAILABLE", "Chưa cấu hình ELEVENLABS_API_KEY trong hệ thống."
         voice_id = quote(self._voice_id(None), safe="")
         try:

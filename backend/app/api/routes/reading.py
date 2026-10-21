@@ -11,6 +11,8 @@ from app.schemas import (
     ReadingEventResponse, ReadingEventCreate,
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
+from app.schemas.reading import CompareReadingRequest
+from app.services.text_alignment import align_text, summarize_alignment
 
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
@@ -307,3 +309,47 @@ async def get_owned_session_book(
     db: AsyncSession = Depends(get_db),
 ):
     return await HistoryService(HistoryRepository(db)).book(session_id, actor_id)
+
+
+@router.post("/sessions/{session_id}/compare")
+async def compare_reading(
+    session_id: UUID,
+    request: CompareReadingRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Lấy trang sách hiện tại của session
+    page = await ReadingContentService(
+        ReadingContentRepository(db)
+    ).get_session_page(session_id, actor_id)
+
+    # 2. Lấy văn bản sách đã xác minh
+    reference_text = (
+        page.text
+        or " ".join(word.text for word in page.words)
+    )
+
+    if not reference_text.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Book text is empty",
+        )
+
+    # 3. So sánh văn bản sách với transcript
+    result = align_text(
+        reference_text,
+        request.transcript,
+    )
+
+    # 4. Tổng hợp từ thiếu, từ thừa, từ thay thế
+    summary = summarize_alignment(result["alignment"])
+
+    # 5. Trả kết quả cho frontend
+    return {
+        "session_id": str(session_id),
+        "page_id": str(page.page_id),
+        "page_revision_id": str(page.page_revision_id),
+        "distance": result["distance"],
+        "alignment": result["alignment"],
+        "summary": summary,
+    }

@@ -190,3 +190,6 @@ class SessionDetailRead(SessionSummaryRead):
     fluency_assessment: SessionFluencyRead | None
     comprehension: list[SessionComprehensionRead]
     report_id: UUID | None
+
+class CompareReadingRequest(BaseModel):
+    transcript: str = Field(..., min_length=1)
