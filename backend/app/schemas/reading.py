@@ -20,6 +20,8 @@ class ReadingSessionCreate(ReadingSessionBase):
     selected_page_id: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
     selected_page_revision_id: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    end_page_id: Optional[UUID] = None
     EndedAt: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
@@ -59,6 +61,9 @@ class ReadingSessionResponse(ReadingSessionBase):
     BookId: UUID
     SelectedPageId: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
+    StartPageId: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    CurrentPageId: Optional[UUID] = None
     StartedAt: datetime
     EndedAt: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
@@ -117,6 +122,34 @@ class SessionSummaryRead(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     duration_ms: int | None = Field(ge=0)
+
+
+class ReadingPageNavigationCreate(BaseModel):
+    target_page_id: UUID
+
+
+class ReadingSessionPageProgressItem(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(ge=1)
+    page_order: int = Field(ge=0)
+    status: Literal["PENDING", "IN_PROGRESS", "COMPLETED"]
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ReadingSessionPageProgressDTO(BaseModel):
+    session_id: UUID
+    start_page_id: UUID
+    end_page_id: UUID
+    current_page_id: UUID
+    start_page_number: int = Field(ge=1)
+    end_page_number: int = Field(ge=1)
+    current_page_number: int = Field(ge=1)
+    current_index: int = Field(ge=0)
+    total_pages: int = Field(ge=1)
+    completed_pages: int = Field(ge=0)
+    pages: list[ReadingSessionPageProgressItem]
 
 
 class HistorySessionSummaryRead(SessionSummaryRead):
