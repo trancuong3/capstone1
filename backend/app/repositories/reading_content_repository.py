@@ -161,6 +161,13 @@ class ReadingContentRepository:
             raise
         return session
 
+    async def session_for_update(self, session_id: UUID) -> ReadingSession | None:
+        return await self.db.scalar(
+            select(ReadingSession)
+            .where(ReadingSession.Id == session_id)
+            .with_for_update()
+        )
+
     async def session(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession).where(ReadingSession.Id == session_id)
