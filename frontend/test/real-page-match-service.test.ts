@@ -41,6 +41,31 @@ const page = {
   ],
 };
 
+const progress = {
+  session_id: sessionId,
+  persisted: true,
+  start_page_id: pageId,
+  end_page_id: pageId,
+  current_page_id: pageId,
+  start_page_number: 1,
+  end_page_number: 1,
+  current_page_number: 1,
+  current_index: 0,
+  total_pages: 1,
+  completed_pages: 0,
+  pages: [
+    {
+      page_id: pageId,
+      page_revision_id: revisionId,
+      page_number: 1,
+      page_order: 0,
+      status: "IN_PROGRESS",
+      started_at: null,
+      completed_at: null,
+    },
+  ],
+};
+
 const fetchMock = vi.fn();
 
 beforeEach(() => {
@@ -51,24 +76,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real PageMatchService", () => {
-  it("scopes page selection to a session", async () => {
-    fetchMock.mockResolvedValue(Response.json(page));
+  it("persists page selection within the session range before loading content", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json(progress))
+      .mockResolvedValueOnce(Response.json(page));
 
     expect(
       await createPageMatchService().selectPage(sessionId, pageId),
     ).toEqual(page);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    const url = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(url.origin).toBe("http://127.0.0.1:8000");
-    expect(url.pathname).toBe(`/reading/pages/${pageId}`);
-    expect(url.searchParams.get("session_id")).toBe(sessionId);
+    const navigationUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(navigationUrl.origin).toBe("http://127.0.0.1:8000");
+    expect(navigationUrl.pathname).toBe(`/reading/sessions/${sessionId}/navigate`);
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
-      method: "GET",
+      method: "POST",
       headers: {
         Authorization: "Bearer test-token",
         Accept: "application/json",
       },
+      body: JSON.stringify({ target_page_id: pageId }),
     });
+
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      `http://127.0.0.1:8000/reading/sessions/${sessionId}/page`,
+    );
   });
 
   it("retries the current session page", async () => {
