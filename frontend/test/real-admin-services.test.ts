@@ -183,8 +183,10 @@ describe("real Admin adapters", () => {
     const file = new File(["new page image"], "page-1.png", {
       type: "image/png",
     });
-    const result =
-      await createAdminPageService().replaceImageAndReprocess(pageId, file);
+    const result = await createAdminPageService().replaceImageAndReprocess(
+      pageId,
+      file,
+    );
     expect(result).toMatchObject({
       page_id: detail.page_id,
       page_revision_id: detail.page_revision_id,
