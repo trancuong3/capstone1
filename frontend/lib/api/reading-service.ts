@@ -113,6 +113,7 @@ export const readingPageDtoSchema = z.object({
 const completionSummarySchema = z.object({
   duration_minutes: z.number().int().nonnegative().nullable(),
   pages_explored: z.number().int().nonnegative().nullable(),
+  selected_range_pages: z.number().int().nonnegative().nullable().optional(),
   practiced_words: z.number().int().nonnegative().nullable(),
   spoken_words: z.array(z.string()).nullable().optional(),
   transcripts: z.array(z.string()).nullable().optional(),
