@@ -206,7 +206,7 @@ export function AdminOcrReviewScreen({
             ...patch,
             normalized_text:
               patch.text === undefined
-                ? patch.normalized_text ?? word.normalized_text
+                ? (patch.normalized_text ?? word.normalized_text)
                 : normalizeVietnameseWord(patch.text),
           }
         : word,
@@ -356,8 +356,11 @@ export function AdminOcrReviewScreen({
       !detail ||
       detail.lifecycle_status !== "ACTIVE" ||
       busy !== null
-    ) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(replacementFile.type)) {
+    )
+      return;
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(replacementFile.type)
+    ) {
       setNotice("Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP.");
       return;
     }
@@ -368,7 +371,10 @@ export function AdminOcrReviewScreen({
     setBusy("reupload");
     setNotice(null);
     try {
-      const result = await pages.replaceImageAndReprocess(pageId, replacementFile);
+      const result = await pages.replaceImageAndReprocess(
+        pageId,
+        replacementFile,
+      );
       if (result.page_id !== pageId || result.lifecycle_status !== "ACTIVE") {
         throw new Error("Unexpected page OCR response");
       }
@@ -821,29 +827,43 @@ export function AdminOcrReviewScreen({
               ))}
             </div>
             <div className="mt-4 grid gap-3">
-              <label className="grid gap-2 text-sm font-bold" htmlFor="replacement-page-image">
+              <label
+                className="grid gap-2 text-sm font-bold"
+                htmlFor="replacement-page-image"
+              >
                 Tải ảnh mới cho riêng trang này
                 <input
                   id="replacement-page-image"
                   accept="image/jpeg,image/png,image/webp"
                   className="block w-full rounded-control border border-border bg-white p-3 text-sm"
-                  disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
-                  onChange={(event) => setReplacementFile(event.target.files?.[0] ?? null)}
+                  disabled={
+                    busy !== null || detail.lifecycle_status !== "ACTIVE"
+                  }
+                  onChange={(event) =>
+                    setReplacementFile(event.target.files?.[0] ?? null)
+                  }
                   type="file"
                 />
               </label>
               {replacementFile ? (
-                <p className="text-sm text-muted">Đã chọn: {replacementFile.name}</p>
+                <p className="text-sm text-muted">
+                  Đã chọn: {replacementFile.name}
+                </p>
               ) : null}
               <Button
                 className="sm:w-auto"
-                disabled={busy !== null || !replacementFile || detail.lifecycle_status !== "ACTIVE"}
+                disabled={
+                  busy !== null ||
+                  !replacementFile ||
+                  detail.lifecycle_status !== "ACTIVE"
+                }
                 isLoading={busy === "reupload"}
                 onClick={() => void replaceImageAndReprocess()}
                 type="button"
                 variant="secondary"
               >
-                <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và chạy OCR
+                <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và chạy
+                OCR
               </Button>
             </div>
             <Button
