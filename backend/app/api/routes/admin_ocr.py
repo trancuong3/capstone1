@@ -33,7 +33,9 @@ async def upload_admin_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).upload_page(actor_id, book_id, page_number, image)
+    # Legacy clients may still submit page_number, but the Service intentionally ignores it.
+    # Page numbers are derived only from the locked PostgreSQL book/page records.
+    return await AdminOcrService(db).upload_page(actor_id, book_id, image)
 
 
 @router.post(

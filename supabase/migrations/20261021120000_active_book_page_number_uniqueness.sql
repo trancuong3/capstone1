@@ -16,7 +16,7 @@ BEGIN
         WHERE con.conrelid = 'public.bookpages'::regclass
           AND con.contype = 'u'
           AND (
-              SELECT array_agg(att.attname::text ORDER BY key.ordinality)
+              SELECT array_agg(att.attname::text ORDER BY att.attname)
               FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
               JOIN pg_attribute AS att
                 ON att.attrelid = con.conrelid AND att.attnum = key.attnum
@@ -35,7 +35,7 @@ BEGIN
           AND idx.indpred IS NULL
           AND idx.indexprs IS NULL
           AND (
-              SELECT array_agg(att.attname::text ORDER BY key.ordinality)
+              SELECT array_agg(att.attname::text ORDER BY att.attname)
               FROM unnest(idx.indkey) WITH ORDINALITY AS key(attnum, ordinality)
               JOIN pg_attribute AS att
                 ON att.attrelid = idx.indrelid AND att.attnum = key.attnum

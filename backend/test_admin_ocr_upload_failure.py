@@ -46,7 +46,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR") as captured,
         ):
             with self.assertRaises(HTTPException) as raised:
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         self.assertEqual(raised.exception.status_code, 503)
         cleanup.assert_not_awaited()
@@ -67,7 +67,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR"),
         ):
             with self.assertRaises(StorageUploadFailure):
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         cleanup.assert_awaited_once()
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
@@ -103,7 +103,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR"),
         ):
             with self.assertRaisesRegex(RuntimeError, "private database details"):
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         service.db.rollback.assert_awaited_once()
         cleanup.assert_awaited_once()
@@ -149,7 +149,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.admin_ocr_service.upload_object", uploaded),
             patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
         ):
-            response = await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+            response = await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()

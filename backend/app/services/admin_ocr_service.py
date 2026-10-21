@@ -171,7 +171,7 @@ class AdminOcrService:
         return changed
 
     async def upload_page(
-        self, actor_id: UUID, book_id: UUID, page_number: int | None, file: UploadFile
+        self, actor_id: UUID, book_id: UUID, file: UploadFile
     ) -> AdminRevisionDetailRead:
         """Create a new page with its number allocated exclusively by PostgreSQL state."""
         started_at = time.perf_counter()
@@ -181,7 +181,6 @@ class AdminOcrService:
             event="admin_ocr_upload_started",
             stage="request_received",
             book_id=str(book_id),
-            page_number=page_number,
         )
         try:
             await self.require_admin(actor_id)
