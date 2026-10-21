@@ -380,10 +380,9 @@ class ReadingContentService:
                     (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
                     rows[0].PageId,
                 )
-                if current_id == rows[-1].PageId:
-                    last = rows[-1]
-                    last.Status = "COMPLETED"
-                    last.CompletedAt = last.CompletedAt or ended_at
+                # Finishing a session is not, by itself, proof that its
+                # current page was read. Page completion is persisted by explicit
+                # confirmation or when the child advances to the next page.
                 self.repository.update_session_state(
                     session, state="COMPLETED", ended_at=ended_at
                 )
@@ -526,6 +525,7 @@ class ReadingContentService:
             completed = session.State in ("COMPLETED", "FINISHED")
             return ReadingSessionPageProgressDTO(
                 session_id=session.Id,
+                persisted=False,
                 start_page_id=page.page_id,
                 end_page_id=page.page_id,
                 current_page_id=page.page_id,
@@ -556,6 +556,7 @@ class ReadingContentService:
         current_row = rows[current_index]
         return ReadingSessionPageProgressDTO(
             session_id=session.Id,
+            persisted=True,
             start_page_id=rows[0].PageId,
             end_page_id=rows[-1].PageId,
             current_page_id=current_row.PageId,
@@ -578,6 +579,45 @@ class ReadingContentService:
                 for row in rows
             ],
         )
+
+    async def complete_session_page(
+        self,
+        session_id: UUID,
+        page_id: UUID,
+        actor_id: UUID,
+    ) -> ReadingSessionPageProgressDTO:
+        await self.require_parent(actor_id)
+        session = await self.repository.session_for_update(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+        if session.State in ("COMPLETED", "FINISHED", "ABORTED"):
+            raise HTTPException(status_code=409, detail="A finished session cannot complete another page")
+
+        rows = await self.repository.session_page_rows(session.Id)
+        if not rows:
+            raise HTTPException(
+                status_code=409,
+                detail="Page completion is not persisted for this legacy session",
+            )
+        current_id = session.CurrentPageId or next(
+            (row.PageId for row in rows if row.Status == "IN_PROGRESS"),
+            rows[0].PageId,
+        )
+        if page_id != current_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Only the current page can be explicitly marked as completed",
+            )
+        current = next((row for row in rows if row.PageId == page_id), None)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Page is outside this session's selected range")
+
+        if current.Status != "COMPLETED":
+            current.Status = "COMPLETED"
+            current.CompletedAt = current.CompletedAt or datetime.now(timezone.utc)
+            await self.repository.save_session_progress(session, rows)
+        return await self.get_session_progress(session_id, actor_id)
 
     async def navigate_session_page(
         self,
