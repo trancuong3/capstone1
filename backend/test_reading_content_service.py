@@ -15,6 +15,7 @@ from app.schemas.reading import (
     FluencyAssessmentCreate,
     ReadingEventCreate,
     ReadingSessionCreate,
+    ReadingPageNavigationCreate,
 )
 from app.services.reading_content_service import ReadingContentService
 
@@ -220,6 +221,79 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.State, "IN_PROGRESS")
         repo.create_session.assert_awaited_once()
         repo.first_verified_page.assert_not_awaited()
+
+    async def test_navigation_completes_the_previous_page_and_stays_in_range(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        second_page_id = UUID("66666666-6666-4666-8666-666666666666")
+        second_revision_id = UUID("77777777-7777-4777-8777-777777777777")
+        now = datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc)
+        session = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            CurrentPageId=PAGE_ID,
+            StartedAt=now,
+            EndedAt=None,
+        )
+        rows = [
+            SimpleNamespace(
+                PageId=PAGE_ID, PageRevisionId=REVISION_ID, PageNumber=1,
+                PageOrder=0, Status="IN_PROGRESS", StartedAt=now, CompletedAt=None,
+            ),
+            SimpleNamespace(
+                PageId=second_page_id, PageRevisionId=second_revision_id, PageNumber=2,
+                PageOrder=1, Status="PENDING", StartedAt=None, CompletedAt=None,
+            ),
+        ]
+        repo.session_for_update.return_value = session
+        repo.session.return_value = session
+        repo.session_page_rows.return_value = rows
+
+        progress = await service.navigate_session_page(
+            session_id,
+            PARENT_ID,
+            ReadingPageNavigationCreate(target_page_id=second_page_id),
+        )
+
+        self.assertEqual(progress.current_page_id, second_page_id)
+        self.assertEqual(progress.current_index, 1)
+        self.assertEqual(progress.completed_pages, 1)
+        self.assertEqual(rows[0].Status, "COMPLETED")
+        self.assertEqual(rows[1].Status, "IN_PROGRESS")
+        repo.save_session_progress.assert_awaited_once_with(session, rows)
+
+    async def test_finish_does_not_auto_complete_the_last_page(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        session = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            CurrentPageId=PAGE_ID,
+            StartedAt=datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        page_row = SimpleNamespace(
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            PageNumber=1,
+            PageOrder=0,
+            Status="IN_PROGRESS",
+            StartedAt=session.StartedAt,
+            CompletedAt=None,
+        )
+        repo.session_for_update.return_value = session
+        repo.session.return_value = session
+        repo.session_page_rows.return_value = [page_row]
+
+        await service.finish_session(session_id, PARENT_ID)
+
+        self.assertEqual(page_row.Status, "IN_PROGRESS")
+        self.assertIsNone(page_row.CompletedAt)
+        repo.save_session_progress.assert_awaited_once_with(session, [page_row])
 
     async def test_create_session_rejects_reversed_page_range(self):
         service, repo = self.make_service()
