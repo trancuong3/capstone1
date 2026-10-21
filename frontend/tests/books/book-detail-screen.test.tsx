@@ -77,6 +77,8 @@ describe("BookDetailScreen with real API adapters", () => {
     expect(
       screen.getByRole("button", { name: "Chọn trang 2" }),
     ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Trang kết thúc")).toHaveValue(secondPage.page_id);
+    expect(screen.getByText(/Phạm vi đọc: Trang 2–2/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Bắt đầu đọc/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Chưa thể chuẩn bị buổi đọc",
