@@ -115,7 +115,7 @@ describe("admin components", () => {
     const user = userEvent.setup();
     const submit = vi.fn();
     render(<AdminBookForm onSubmit={submit} />);
-    await user.type(screen.getByLabelText("Tên sách"), "Sách mới");
+    await user.type(screen.getByLabelText("Tiêu đề sách *"), "Sách mới");
     await user.selectOptions(screen.getByLabelText("Khối tối thiểu"), "5");
     await user.selectOptions(screen.getByLabelText("Khối tối đa"), "2");
     await user.click(screen.getByRole("button", { name: "Lưu sách" }));

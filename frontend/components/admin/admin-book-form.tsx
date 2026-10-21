@@ -11,7 +11,7 @@ import type { AdminBookCreateDTO } from "@/types/admin";
 
 const schema = z
   .object({
-    title: z.string().trim().min(1, "Vui lòng nhập tên sách."),
+    title: z.string().trim().min(1, "Vui lòng nhập tiêu đề sách."),
     author: z.string().nullable(),
     min_grade: z.number().int().min(1).max(5),
     max_grade: z.number().int().min(1).max(5),
@@ -63,7 +63,8 @@ export function AdminBookForm({
       <p className="text-sm text-muted">Tiêu đề sách là trường bắt buộc.</p>
       <TextField
         error={errors.title?.message}
-        label="Tên sách"
+        label="Tiêu đề sách *"
+        required
         required
         {...register("title")}
       />

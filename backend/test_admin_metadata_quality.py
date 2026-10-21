@@ -101,6 +101,30 @@ class MetadataQualityRepositoryTests(unittest.IsolatedAsyncioTestCase):
             compiled_group.params.values(),
         )
 
+    async def test_missing_title_query_uses_whitespace_normalization_and_keeps_retired_books_by_default(self):
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [])),
+            scalar=AsyncMock(return_value=0),
+        )
+
+        await MetadataQualityRepository(db).list_issues(
+            search=None,
+            issue_type="MISSING_TITLE",
+            lifecycle_status=None,
+            offset=0,
+            limit=10,
+        )
+
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        sql = str(compiled).lower()
+        where_clause = sql.split(" where ", 1)[1]
+        self.assertIn("regexp_replace", where_clause)
+        self.assertIn("books.title", where_clause)
+        self.assertNotIn("books.lifecyclestatus =", where_clause)
+        self.assertIn(r"^[[:space:]]+|[[:space:]]+$", compiled.params.values())
+        self.assertEqual(db.scalar.await_count, 1)
+
     async def test_duplicate_candidate_requires_non_empty_title_and_author(self):
         statement = MetadataQualityRepository._possible_duplicate()
         compiled = statement.compile(dialect=postgresql.dialect())
@@ -167,6 +191,63 @@ class MetadataQualityServiceTests(unittest.IsolatedAsyncioTestCase):
         with make_client() as client:
             response = client.get("/books/admin/metadata-quality")
         self.assertEqual(response.status_code, 401)
+
+    async def test_missing_title_detects_null_empty_and_whitespace_and_preserves_retired_rows(self):
+        entries = [
+            SimpleNamespace(
+                Id=UUID("44444444-4444-4444-8444-444444444441"),
+                Title=None,
+                Author="Tác giả",
+                MinGrade=1,
+                MaxGrade=3,
+                LifecycleStatus="RETIRED",
+            ),
+            SimpleNamespace(
+                Id=UUID("44444444-4444-4444-8444-444444444442"),
+                Title="",
+                Author="Tác giả",
+                MinGrade=1,
+                MaxGrade=3,
+                LifecycleStatus="ACTIVE",
+            ),
+            SimpleNamespace(
+                Id=UUID("44444444-4444-4444-8444-444444444443"),
+                Title=" \\t\\r\\n ",
+                Author="Tác giả",
+                MinGrade=1,
+                MaxGrade=3,
+                LifecycleStatus="ACTIVE",
+            ),
+            SimpleNamespace(
+                Id=UUID("44444444-4444-4444-8444-444444444444"),
+                Title="  Tiêu đề hợp lệ  ",
+                Author=None,
+                MinGrade=1,
+                MaxGrade=3,
+                LifecycleStatus="ACTIVE",
+            ),
+        ]
+        repository = FakeMetadataQualityRepository(rows=[(book, False) for book in entries])
+
+        result = await MetadataQualityService(repository).dashboard(
+            ADMIN_ID,
+            search=None,
+            issue_type=None,
+            lifecycle_status=None,
+            limit=10,
+            offset=0,
+        )
+
+        issues_by_id = {item.id: item.issues for item in result.items}
+        for book in entries[:3]:
+            self.assertIn("MISSING_TITLE", issues_by_id[book.Id])
+        self.assertNotIn("MISSING_TITLE", issues_by_id[entries[3].Id])
+        self.assertEqual(issues_by_id[entries[3].Id], ["MISSING_AUTHOR"])
+        self.assertEqual(result.items[0].lifecycle_status, "RETIRED")
+        self.assertIsNone(entries[0].Title)
+        self.assertEqual(entries[1].Title, "")
+        self.assertEqual(entries[2].Title, " \\t\\r\\n ")
+        self.assertEqual(entries[3].Title, "  Tiêu đề hợp lệ  ")
 
     async def test_grade_values_outside_one_to_five_are_invalid(self):
         book = SimpleNamespace(

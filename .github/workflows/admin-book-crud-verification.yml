@@ -5,6 +5,7 @@ on:
     branches:
       - feature/admin-book-crud-metadata-quality-20261020
       - fix/admin-book-crud-title-and-ci-20261020
+      - feature/admin-book-title-quality-check-20261021
   pull_request:
     branches:
       - main
@@ -45,7 +46,8 @@ jobs:
             "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
             "app/admin/(protected)/books/new/page.tsx" \
             components/admin/admin-book-detail-screen.tsx \
-            components/admin/admin-book-editor-screen.tsx \
+            components/admin/admin-book-editor-screen.tsx
+            components/admin/admin-book-form.tsx \
             components/admin/admin-books-screen.tsx \
             components/admin/admin-metadata-quality-screen.tsx \
             components/admin/admin-new-book-screen.tsx \
