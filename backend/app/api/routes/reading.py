@@ -79,6 +79,21 @@ async def get_session_page_progress(
 
 
 @router.post(
+    "/sessions/{session_id}/pages/{page_id}/complete",
+    response_model=ReadingSessionPageProgressDTO,
+)
+async def complete_session_page(
+    session_id: UUID,
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).complete_session_page(
+        session_id, page_id, actor_id
+    )
+
+
+@router.post(
     "/sessions/{session_id}/navigate",
     response_model=ReadingSessionPageProgressDTO,
 )
