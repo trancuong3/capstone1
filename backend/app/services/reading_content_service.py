@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession
+from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession, ReadingSessionPage
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
     FluencyAssessmentCreate,
@@ -16,6 +16,9 @@ from app.schemas.reading import (
     ReadingPageWordDTO,
     ReadingSessionCreate,
     SessionSummaryRead,
+    ReadingPageNavigationCreate,
+    ReadingSessionPageProgressDTO,
+    ReadingSessionPageProgressItem,
 )
 from app.services.storage_service import create_signed_image_url
 
@@ -177,7 +180,7 @@ class ReadingContentService:
                     status_code=409,
                     detail={
                         "code": "CONTENT_NOT_READY",
-                        "message": "The selected page is not an active, verified reading page.",
+                        "message": "Trang bắt đầu không còn ACTIVE và VERIFIED để đọc.",
                     },
                 )
         else:
@@ -187,53 +190,86 @@ class ReadingContentService:
                     status_code=409,
                     detail={
                         "code": "CONTENT_NOT_READY",
-                        "message": "This book has no active page verified by an administrator.",
+                        "message": "Sách chưa có trang ACTIVE và VERIFIED để đọc.",
                     },
                 )
 
-        # Starting a reading session must only reference the page's current
-        # verified revision. Never silently select a draft or create page data.
-        current_revision_id = page.CurrentVerifiedRevisionId
-        if current_revision_id is None or (
-            requested_revision_id is not None
-            and requested_revision_id != current_revision_id
-        ):
+        end_page_id = payload.EndPageId or payload.end_page_id
+        end_page = (
+            await self.repository.verified_page(end_page_id, book_id)
+            if end_page_id is not None
+            else page
+        )
+        if end_page is None:
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": "CONTENT_NOT_READY",
-                    "message": "The requested revision is not the current verified revision.",
+                    "message": "Trang kết thúc không thuộc sách hoặc chưa ACTIVE và VERIFIED.",
                 },
             )
-        revision = await self.repository.verified_revision(page.Id, current_revision_id)
-        if revision is None:
+        if end_page.PageNumber < page.PageNumber:
+            raise HTTPException(status_code=422, detail="Trang kết thúc không được đứng trước trang bắt đầu.")
+
+        # A selected range must be complete. Do not silently skip missing,
+        # retired, unverified, or duplicate-numbered pages in the middle.
+        raw_pages = await self.repository.all_pages_between_numbers(
+            book_id, page.PageNumber, end_page.PageNumber
+        )
+        eligible_pages = await self.repository.verified_pages_between_numbers(
+            book_id, page.PageNumber, end_page.PageNumber
+        )
+        expected_numbers = list(range(page.PageNumber, end_page.PageNumber + 1))
+        raw_numbers = [row.PageNumber for row in raw_pages]
+        eligible_numbers = [row.PageNumber for row in eligible_pages]
+        if raw_numbers != expected_numbers or eligible_numbers != expected_numbers:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "The page's verified revision is unavailable.",
+                    "code": "READING_RANGE_NOT_CONTIGUOUS",
+                    "message": "Khoảng trang có trang bị thiếu, ngừng hoạt động hoặc chưa được quản trị viên xác minh. Vui lòng chọn lại phạm vi.",
                 },
             )
-        if not (revision.VerifiedText or "").strip():
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "The verified revision does not contain reading text.",
-                },
+
+        verified_snapshots: list[tuple[BookPage, object]] = []
+        for index, candidate_page in enumerate(eligible_pages):
+            current_revision_id = candidate_page.CurrentVerifiedRevisionId
+            if current_revision_id is None or (
+                index == 0
+                and requested_revision_id is not None
+                and requested_revision_id != current_revision_id
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": "Revision của một trang trong phạm vi không còn là revision VERIFIED hiện tại.",
+                    },
+                )
+            revision = await self.repository.verified_revision(
+                candidate_page.Id, current_revision_id
             )
-        revision_words = await self.repository.revision_words(revision.Id)
-        if not any(
-            row.Text.strip() and self._valid_bbox(row.BoundingBox) is not None
-            for row in revision_words
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "The verified revision has no valid word-position data.",
-                },
-            )
+            if revision is None or not (revision.VerifiedText or "").strip():
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": f"Trang {candidate_page.PageNumber} không có nội dung đã xác minh để đọc.",
+                    },
+                )
+            revision_words = await self.repository.revision_words(revision.Id)
+            if not any(
+                row.Text.strip() and self._valid_bbox(row.BoundingBox) is not None
+                for row in revision_words
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_NOT_READY",
+                        "message": f"Trang {candidate_page.PageNumber} không có dữ liệu từ và vị trí hợp lệ.",
+                    },
+                )
+            verified_snapshots.append((candidate_page, revision))
 
         state = payload.state or payload.State or "CREATED"
         state_mapping = {
@@ -251,16 +287,32 @@ class ReadingContentService:
         if not mode:
             raise HTTPException(status_code=422, detail="Reading mode is required")
 
+        now = datetime.now(timezone.utc)
+        first_revision = verified_snapshots[0][1]
         session = ReadingSession(
             ChildId=child_id,
             BookId=book_id,
             SelectedPageId=page.Id,
-            SelectedPageRevisionId=revision.Id,
+            SelectedPageRevisionId=first_revision.Id,
+            StartPageId=page.Id,
+            EndPageId=end_page.Id,
+            CurrentPageId=page.Id,
             State=state_mapping[state],
             Mode=mode,
             ClientMeta=payload.ClientMeta or {},
         )
-        return await self.repository.create_session(session)
+        page_rows = [
+            ReadingSessionPage(
+                PageId=snapshot_page.Id,
+                PageRevisionId=snapshot_revision.Id,
+                PageNumber=snapshot_page.PageNumber,
+                PageOrder=order,
+                Status="IN_PROGRESS" if order == 0 else "PENDING",
+                StartedAt=now if order == 0 else None,
+            )
+            for order, (snapshot_page, snapshot_revision) in enumerate(verified_snapshots)
+        ]
+        return await self.repository.create_session(session, page_rows)
 
     @staticmethod
     def _summary(session: ReadingSession) -> SessionSummaryRead:
