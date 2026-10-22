@@ -677,6 +677,14 @@ export function ReadingScreen({
       cumulativeWeights.push(running);
     }
 
+    // Clear previous word tracking so sample read starts fresh
+    correctWordIdsRef.current.clear();
+    mispronouncedWordIdsRef.current.clear();
+    spokenWordsSetRef.current.clear();
+    setCorrectWordIds(new Set());
+    setMispronouncedWordIds(new Set());
+    setSpokenWords(new Set());
+
     // Set first word active immediately so user sees what is being queued
     setCurrentWordId(words[0].word_id);
 
@@ -697,9 +705,14 @@ export function ReadingScreen({
           const targetWord = words[idx];
           if (targetWord) {
             setCurrentWordId(targetWord.word_id);
-            for (let i = 0; i <= idx; i++) {
+            correctWordIdsRef.current.clear();
+            spokenWordsSetRef.current.clear();
+            for (let i = 0; i < idx; i++) {
+              correctWordIdsRef.current.add(words[i].word_id);
               spokenWordsSetRef.current.add(words[i].text);
             }
+            mispronouncedWordIdsRef.current.delete(targetWord.word_id);
+            setCorrectWordIds(new Set(correctWordIdsRef.current));
             setSpokenWords(new Set(spokenWordsSetRef.current));
           }
         },
@@ -710,8 +723,10 @@ export function ReadingScreen({
           if (lastWord) {
             setCurrentWordId(lastWord.word_id);
             for (const w of words) {
+              correctWordIdsRef.current.add(w.word_id);
               spokenWordsSetRef.current.add(w.text);
             }
+            setCorrectWordIds(new Set(correctWordIdsRef.current));
             setSpokenWords(new Set(spokenWordsSetRef.current));
           }
         },

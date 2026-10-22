@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -23,6 +23,24 @@ export function BookPageViewer({
   spokenWords,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
+  const currentWordRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (
+      currentWordRef.current &&
+      typeof currentWordRef.current.scrollIntoView === "function"
+    ) {
+      currentWordRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
+  }, [currentWordId]);
+
+  const currentIdx = currentWordId
+    ? page.words.findIndex((w) => w.word_id === currentWordId)
+    : -1;
 
   return (
     <article
@@ -52,15 +70,29 @@ export function BookPageViewer({
           {hasWords ? (
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
               {page.words.map((word, index) => {
-                const isCurrent = word.word_id === currentWordId;
+                const isCurrent = Boolean(
+                  currentWordId && word.word_id === currentWordId,
+                );
+                // A word is past only if its index is strictly before currentIdx,
+                // or if reading has finished and word is marked in correctWordIds.
+                const isPastWord =
+                  currentIdx >= 0
+                    ? index < currentIdx
+                    : Boolean(
+                        correctWordIds && correctWordIds.has(word.word_id),
+                      );
                 const isMispronounced = Boolean(
                   mispronouncedWordIds?.has(word.word_id),
                 );
-                const isCorrect = Boolean(
-                  correctWordIds?.has(word.word_id) ||
-                  spokenWords?.has(word.text) ||
-                  spokenWords?.has(word.text.toLowerCase()),
-                );
+                const isCorrect =
+                  !isCurrent &&
+                  isPastWord &&
+                  Boolean(
+                    correctWordIds
+                      ? correctWordIds.has(word.word_id)
+                      : spokenWords?.has(word.text) ||
+                          spokenWords?.has(word.text.toLowerCase()),
+                  );
                 const previousWord = page.words[index - 1];
                 const lineIndex = word.line_index ?? 0;
                 const previousLineIndex = previousWord?.line_index ?? 0;
@@ -95,25 +127,26 @@ export function BookPageViewer({
                       />
                     ) : null}
                     <span
+                      ref={isCurrent ? currentWordRef : null}
                       className={cn(
-                        "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150 cursor-pointer select-none active:scale-95",
+                        "mr-2 inline-block rounded-[10px] px-2.5 py-1 transition-all duration-150 cursor-pointer select-none active:scale-95",
                         isCurrent &&
                           isMispronounced &&
-                          "bg-rose-100 text-rose-700 font-black scale-105 ring-2 ring-rose-500 shadow-sm animate-pulse",
+                          "bg-rose-100 text-rose-800 font-black scale-105 ring-2 ring-rose-500 shadow-sm animate-pulse rounded-[10px]",
                         isCurrent &&
                           !isMispronounced &&
-                          "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
+                          "bg-amber-300 text-amber-950 font-black scale-105 shadow-[0_4px_14px_rgba(245,158,11,0.45)] ring-2 ring-amber-400 rounded-[10px]",
                         !isCurrent &&
                           isMispronounced &&
-                          "bg-rose-50 text-rose-800 font-bold border-b-2 border-rose-400",
+                          "bg-rose-50 text-rose-800 font-bold border-b-2 border-rose-400 rounded-[8px]",
                         !isCurrent &&
                           !isMispronounced &&
                           isCorrect &&
-                          "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
+                          "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400 rounded-[8px]",
                         !isCurrent &&
                           !isCorrect &&
                           !isMispronounced &&
-                          "hover:bg-highlight/40",
+                          "text-ink font-bold hover:bg-amber-100/40 rounded-[8px]",
                       )}
                       data-bbox={word.bbox.join(",")}
                       data-line-index={lineIndex}
