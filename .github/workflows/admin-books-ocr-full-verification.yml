@@ -36,10 +36,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Diagnostic - capture canonical Prettier changes for uploader and review tests
+      - name: Check Prettier formatting for OCR changes
         run: |
-          npx prettier --write components/admin/admin-page-uploader.tsx tests/admin/admin-ocr-review-screen.test.tsx
-          git -C .. diff -- frontend/components/admin/admin-page-uploader.tsx frontend/tests/admin/admin-ocr-review-screen.test.tsx
+          npx prettier --check components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
 
       - name: Format check (changed frontend files)
         id: format
