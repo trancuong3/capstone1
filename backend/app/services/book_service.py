@@ -210,14 +210,28 @@ class AdminCatalogService:
 
     async def image(self, page_id: UUID):
         page = await self.page(page_id)
-        preview_url = create_signed_image_url(page.ImagePath)
+        # Admin reviews the image that produced the latest revision, even when pending.
+        # Parent/Child reading keeps BookPage.ImagePath until that revision is verified.
+        revisions = await self.repository.revisions(page.Id)
+        metadata = (
+            dict(getattr(revisions[0], "ProcessingMeta", None) or {})
+            if revisions
+            else {}
+        )
+        candidate_path = metadata.get("source_image_path")
+        image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
+        candidate_width = metadata.get("source_image_width")
+        candidate_height = metadata.get("source_image_height")
+        width = candidate_width if type(candidate_width) is int and candidate_width > 0 else page.Width
+        height = candidate_height if type(candidate_height) is int and candidate_height > 0 else page.Height
+        preview_url = create_signed_image_url(image_path)
         try:
             return AdminPageImageRead(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 preview_url=preview_url,
-                width=page.Width,
-                height=page.Height,
+                width=width,
+                height=height,
             )
         except ValidationError:
             raise HTTPException(status_code=501, detail="Image metadata does not match the admin contract") from None

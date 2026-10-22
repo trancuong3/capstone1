@@ -86,7 +86,7 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
 
-    async def test_admin_book_detail_uses_max_page_number_including_retired_pages(self):
+    async def test_admin_book_detail_uses_next_active_page_number(self):
         repo = catalog_repo()
         repo.max_page_number = AsyncMock(return_value=7)
 

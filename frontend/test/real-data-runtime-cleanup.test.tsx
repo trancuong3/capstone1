@@ -169,11 +169,7 @@ describe("Phase 5 real-data runtime cleanup", () => {
     const onUploaded = vi.fn();
     render(
       <AdminServicesProvider>
-        <AdminPageUploader
-          bookId={bookId}
-          nextPageNumber={1}
-          onUploaded={onUploaded}
-        />
+        <AdminPageUploader bookId={bookId} onUploaded={onUploaded} />
       </AdminServicesProvider>,
     );
     const input = screen.getByLabelText(/Chọn một hoặc nhiều ảnh trang sách/);

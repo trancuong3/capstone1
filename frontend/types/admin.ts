@@ -141,7 +141,6 @@ export interface AdminPageUploadInputUI {
   readonly file_name: string;
   readonly mime_type: "image/jpeg" | "image/png" | "image/webp";
   readonly size_bytes: number;
-  readonly page_number: number;
   readonly width?: number;
   readonly height?: number;
   /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
@@ -222,6 +221,6 @@ export type AdminMockScenario =
 
 export type AdminBookDTO = BookListItemDTO & {
   readonly name: string | null;
-  /** Next available page number, calculated across active and retired pages. */
+  /** Next available page number, calculated from active pages only. */
   readonly next_page_number?: number;
 };

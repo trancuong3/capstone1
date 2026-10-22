@@ -160,7 +160,23 @@ class AdminOcrService:
             raise HTTPException(status_code=422, detail="OCR did not produce any valid word")
         return normalized
 
-    async def upload_page(self, actor_id: UUID, book_id: UUID, page_number: int, file: UploadFile) -> AdminRevisionDetailRead:
+    async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
+        """Normalize ACTIVE pages to 1..N in their existing page order."""
+        active_pages = await self.repo.active_pages_for_renumber(book_id, lock=lock)
+        changed = False
+        for expected_number, page in enumerate(active_pages, start=1):
+            if page.PageNumber != expected_number:
+                self.repo.set_page_number(page, expected_number)
+                # Execute each move in ascending old-number order so the partial
+                # unique index never observes a transient collision.
+                await self.repo.flush()
+                changed = True
+        return changed
+
+    async def upload_page(
+        self, actor_id: UUID, book_id: UUID, file: UploadFile
+    ) -> AdminRevisionDetailRead:
+        """Create a new page with its number allocated exclusively by PostgreSQL state."""
         started_at = time.perf_counter()
         log_diagnostic(
             logger,
@@ -168,7 +184,6 @@ class AdminOcrService:
             event="admin_ocr_upload_started",
             stage="request_received",
             book_id=str(book_id),
-            page_number=page_number,
         )
         try:
             await self.require_admin(actor_id)
@@ -192,15 +207,18 @@ class AdminOcrService:
             elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         )
 
-        book = await self.repo.book(book_id)
+        # Serialize page allocation and reindexing for this book at the database.
+        # The legacy form field is intentionally ignored; the backend owns numbering.
+        book = await self.repo.book(book_id, lock=True)
         if book is None:
             raise HTTPException(status_code=404, detail="Book not found")
         if book.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
-        if page_number < 1 or page_number > 32767:
-            raise HTTPException(status_code=422, detail="page_number is out of range")
-        if await self.repo.page_number_exists(book_id, page_number):
-            raise HTTPException(status_code=409, detail="This page number already exists for the book")
+        await self._renumber_active_pages(book_id, lock=True)
+        page_number = await self.repo.next_active_page_number(book_id)
+        if page_number > 32767:
+            await self.db.rollback()
+            raise HTTPException(status_code=422, detail="The book has reached the maximum number of pages")
         log_diagnostic(
             logger,
             logging.INFO,
@@ -413,24 +431,34 @@ class AdminOcrService:
             VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=metadata,
         )
         self.repo.stage_page_revision_bundle(page, revision, words)
+        # Build and validate the response before commit. If response construction
+        # fails, the page/revision must roll back and the new Storage object is
+        # cleaned up instead of leaving a committed page after an HTTP error.
+        stage = "database_persist"
         try:
             log_diagnostic(
                 logger,
                 logging.INFO,
                 event="admin_ocr_database_persist_started",
-                stage="database_persist",
+                stage=stage,
                 book_id=str(book_id),
                 page_id=str(page_id),
                 word_count=len(words),
             )
-            await self.db.commit()
+            await self.repo.flush()
             await self.db.refresh(page)
             await self.db.refresh(revision)
+
+            stage = "response_validation"
+            result = await self.revision_detail(page, revision)
+
+            stage = "database_commit"
+            await self.db.commit()
             log_diagnostic(
                 logger,
                 logging.INFO,
                 event="admin_ocr_database_commit_succeeded",
-                stage="database_commit",
+                stage=stage,
                 book_id=str(book_id),
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
@@ -440,7 +468,7 @@ class AdminOcrService:
                 logger,
                 logging.WARNING,
                 event="admin_ocr_upload_failed",
-                stage="database_commit",
+                stage=stage,
                 exception=exc,
                 book_id=str(book_id),
                 page_id=str(page_id),
@@ -459,9 +487,10 @@ class AdminOcrService:
             log_diagnostic(
                 logger,
                 logging.ERROR,
-                event="admin_ocr_upload_failed",
-                stage="database_commit",
+                event="admin_ocr_response_failed" if stage == "response_validation" else "admin_ocr_upload_failed",
+                stage=stage,
                 exception=exc,
+                include_traceback=stage == "response_validation",
                 book_id=str(book_id),
                 page_id=str(page_id),
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
@@ -476,21 +505,6 @@ class AdminOcrService:
             )
             raise
 
-        try:
-            result = await self.revision_detail(page, revision)
-        except Exception as exc:
-            log_diagnostic(
-                logger,
-                logging.ERROR,
-                event="admin_ocr_response_failed",
-                stage="response_validation",
-                exception=exc,
-                include_traceback=True,
-                book_id=str(book_id),
-                page_id=str(page_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise
         log_diagnostic(
             logger,
             logging.INFO,
@@ -502,6 +516,148 @@ class AdminOcrService:
             word_count=len(words),
             elapsed_ms=int((time.perf_counter() - started_at) * 1000),
         )
+        return result
+
+    async def replace_page_image(
+        self, actor_id: UUID, page_id: UUID, file: UploadFile
+    ) -> AdminRevisionDetailRead:
+        """OCR a replacement image as a new revision without changing the live source until verification."""
+        started_at = time.perf_counter()
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot replace the image of a retired page")
+
+        data, content_type, extension, width, height = await self._read_validate_image(file)
+        object_path = f"books/{page.BookId}/pages/{page.Id}/{uuid4().hex}.{extension}"
+        storage_uploaded = False
+        try:
+            await run_in_threadpool(upload_object, object_path, data, content_type)
+            storage_uploaded = True
+        except Exception as exc:
+            if bool(getattr(exc, "cleanup_may_be_needed", False)):
+                await self._cleanup_uploaded_object(
+                    object_path, object_may_exist=True, book_id=page.BookId,
+                    page_id=page.Id, started_at=started_at,
+                )
+            raise
+
+        try:
+            ocr = await run_in_threadpool(extract_text_and_boxes, data)
+            words = self._word_data(ocr["words"])
+            text_value = str(ocr["text"]).strip()
+            if not text_value:
+                raise HTTPException(status_code=422, detail="OCR produced empty text")
+        except OcrEngineUnavailable as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            await self.db.rollback()
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except OcrNoTextDetected as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            await self.db.rollback()
+            raise HTTPException(status_code=422, detail="No usable text was detected; check the replacement image") from exc
+        except HTTPException:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            await self.db.rollback()
+            raise
+        except ValueError as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            await self.db.rollback()
+            raise HTTPException(status_code=422, detail="Replacement image could not be decoded by OCR") from exc
+        except Exception as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            await self.db.rollback()
+            log_diagnostic(
+                logger, logging.ERROR, event="admin_ocr_reupload_failed",
+                stage="ocr_processing", exception=exc, include_traceback=True,
+                book_id=str(page.BookId), page_id=str(page.Id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise HTTPException(status_code=503, detail="Replacement OCR processing failed; check local OCR configuration") from exc
+
+        try:
+            next_number = await self.repo.next_revision_number(page.Id)
+        except ValueError as exc:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
+
+        processing_meta = dict(ocr["metadata"])
+        processing_meta.update({
+            "source_image_path": object_path,
+            "source_image_width": width,
+            "source_image_height": height,
+            "previous_image_path": page.ImagePath,
+            "previous_image_width": page.Width,
+            "previous_image_height": page.Height,
+        })
+        try:
+            if page.CurrentVerifiedRevisionId is not None:
+                current_verified = await self.repo.revision(
+                    page.Id, page.CurrentVerifiedRevisionId, lock=True
+                )
+                if current_verified is not None:
+                    current_metadata = dict(current_verified.ProcessingMeta or {})
+                    current_metadata.setdefault("source_image_path", page.ImagePath)
+                    current_metadata.setdefault("source_image_width", page.Width)
+                    current_metadata.setdefault("source_image_height", page.Height)
+                    current_verified.ProcessingMeta = current_metadata
+
+            content_hash = hashlib.sha256(
+                json.dumps(
+                    {"text": text_value, "words": words},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            revision = PageRevision(
+                Id=uuid4(), PageId=page.Id, RevisionNo=str(next_number),
+                VerificationStatus="NEEDS_REVIEW", VerifiedText=None,
+                DraftText=text_value, ContentHash=content_hash, ProcessingMeta=processing_meta,
+            )
+            self.repo.stage_revision_bundle(revision, words)
+            # Flush and validate the response before commit so an invalid response
+            # contract cannot leave a persisted revision after the client sees an error.
+            await self.repo.flush()
+            await self.db.refresh(revision)
+            await self.db.refresh(page)
+            result = await self.revision_detail(page, revision)
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            raise HTTPException(status_code=409, detail="A concurrent OCR revision was created; retry") from exc
+        except Exception:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded, book_id=page.BookId,
+                page_id=page.Id, started_at=started_at,
+            )
+            raise
+
         return result
 
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
@@ -522,11 +678,21 @@ class AdminOcrService:
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
             raise HTTPException(status_code=409, detail="Stored revision number is not a positive numeric string")
+        metadata = dict(revision.ProcessingMeta or {})
+        for internal_key in (
+            "source_image_path",
+            "source_image_width",
+            "source_image_height",
+            "previous_image_path",
+            "previous_image_width",
+            "previous_image_height",
+        ):
+            metadata.pop(internal_key, None)
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
             verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
             draft_text=revision.DraftText if revision.DraftText is not None else revision.VerifiedText,
-            words=words, ocr_metadata=revision.ProcessingMeta or {}, created_at=revision.CreatedAt,
+            words=words, ocr_metadata=metadata, created_at=revision.CreatedAt,
             verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
         )
 
@@ -685,6 +851,22 @@ class AdminOcrService:
                 verified_by=actor_id,
                 verified_at=datetime.now(timezone.utc),
             )
+            source_meta = dict(revision.ProcessingMeta or {})
+            source_path = source_meta.get("source_image_path")
+            source_width = source_meta.get("source_image_width")
+            source_height = source_meta.get("source_image_height")
+            if (
+                isinstance(source_path, str)
+                and source_path
+                and type(source_width) is int
+                and type(source_height) is int
+                and source_width > 0
+                and source_height > 0
+            ):
+                # Promote image + OCR only when verified. Until then, reading retains the old pair.
+                self.repo.set_page_image_source(
+                    page, image_path=source_path, width=source_width, height=source_height
+                )
             if page.LifecycleStatus == "ACTIVE":
                 self.repo.set_current_verified_revision(page, revision.Id)
             await self.db.commit()
@@ -702,8 +884,12 @@ class AdminOcrService:
             raise HTTPException(status_code=404, detail="Page not found")
         if page.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=409, detail="Cannot reprocess a retired page")
+        latest_revisions = await self.repo.revisions(page.Id)
+        latest_metadata = dict(latest_revisions[0].ProcessingMeta or {}) if latest_revisions else {}
+        candidate_path = latest_metadata.get("source_image_path")
+        source_image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
         try:
-            image_bytes = await run_in_threadpool(download_object, page.ImagePath)
+            image_bytes = await run_in_threadpool(download_object, source_image_path)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
             await self.db.rollback()
@@ -725,9 +911,21 @@ class AdminOcrService:
         content_hash = hashlib.sha256(
             json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
+        processing_meta = dict(ocr["metadata"])
+        if isinstance(candidate_path, str) and candidate_path:
+            for key in (
+                "source_image_path",
+                "source_image_width",
+                "source_image_height",
+                "previous_image_path",
+                "previous_image_width",
+                "previous_image_height",
+            ):
+                if key in latest_metadata:
+                    processing_meta[key] = latest_metadata[key]
         revision = PageRevision(
             Id=revision_id, PageId=page.Id, RevisionNo=str(next_number), VerificationStatus="NEEDS_REVIEW",
-            VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=dict(ocr["metadata"]),
+            VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=processing_meta,
         )
         self.repo.stage_revision_bundle(revision, words)
         try:
@@ -744,21 +942,39 @@ class AdminOcrService:
         return await self.revision_detail(page, revision)
 
     async def retire_page(self, actor_id: UUID, page_id: UUID) -> AdminPageLifecycleRead:
-        """Hide a page from new reading sessions while preserving all historical references."""
+        """Soft-retire a page and reindex ACTIVE pages without deleting historical data."""
         await self.require_admin(actor_id)
+        probe = await self.repo.page(page_id)
+        if probe is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        # Use a consistent Book -> Page lock order with upload allocation to avoid deadlocks.
+        book = await self.repo.book(probe.BookId, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Book not found")
         page = await self.repo.page(page_id, lock=True)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if page.BookId != book.Id:
+            raise HTTPException(status_code=409, detail="Page/book relationship changed; reload and retry")
         if page.LifecycleStatus not in ("ACTIVE", "RETIRED"):
             raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
-        if page.LifecycleStatus != "RETIRED":
-            self.repo.set_page_lifecycle_status(page, "RETIRED")
-            try:
+
+        changed = False
+        try:
+            if page.LifecycleStatus != "RETIRED":
+                self.repo.set_page_lifecycle_status(page, "RETIRED")
+                # Free the retiring page's active unique-index entry before moving
+                # the next active page into its number.
+                await self.repo.flush()
+                changed = True
+            changed = await self._renumber_active_pages(page.BookId, lock=True) or changed
+            if changed:
                 await self.db.commit()
                 await self.db.refresh(page)
-            except Exception:
-                await self.db.rollback()
-                raise
+        except Exception:
+            await self.db.rollback()
+            raise
         return AdminPageLifecycleRead(
             page_id=page.Id,
             book_id=page.BookId,
