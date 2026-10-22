@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Diagnostic: capture canonical Prettier changes for uploader and review tests
+      - name: Diagnostic - capture canonical Prettier changes for uploader and review tests
         run: |
           npx prettier --write components/admin/admin-page-uploader.tsx tests/admin/admin-ocr-review-screen.test.tsx
           git -C .. diff -- frontend/components/admin/admin-page-uploader.tsx frontend/tests/admin/admin-ocr-review-screen.test.tsx
