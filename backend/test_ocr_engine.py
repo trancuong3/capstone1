@@ -1,7 +1,12 @@
-"""Local Tesseract adapter tests using mocked engine output (no live OCR or Supabase)."""
+"""Unit tests for Dual-Engine OCR (PaddleOCR DBNet + VietOCR Transformer).
+
+Mocked engine output tests without requiring GPU, live models, or external services.
+"""
+from __future__ import annotations
+
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -13,264 +18,86 @@ import numpy as np
 from app.services import ocr_engine
 
 
-def sample_png() -> bytes:
-    image = np.full((200, 400, 3), 255, dtype=np.uint8)
+def sample_png_bytes(width: int = 400, height: int = 200) -> bytes:
+    """Tạo nhanh ảnh giả lập trắng trong bộ nhớ RAM."""
+    image = np.full((height, width, 3), 255, dtype=np.uint8)
     success, encoded = cv2.imencode(".png", image)
     if not success:
         raise AssertionError("Could not encode test image")
     return encoded.tobytes()
 
 
-def tesseract_tsv() -> dict[str, list[object]]:
-    return {
-        "text": ["Chú", "mèo", ""],
-        "left": [100, 200, 0],
-        "top": [50, 100, 0],
-        "width": [40, 50, 0],
-        "height": [20, 25, 0],
-        "conf": ["91.0", "-1", "-1"],
-        "block_num": [1, 1, 0],
-        "par_num": [1, 1, 0],
-        "line_num": [1, 2, 0],
-    }
+class DualEngineOcrTests(unittest.TestCase):
+    def test_normalize_word_canonical_vietnamese(self):
+        """Kiểm tra chuẩn hóa token tiếng Việt canonical."""
+        self.assertEqual(ocr_engine.normalize_word("  Chú,  "), "chú")
+        self.assertEqual(ocr_engine.normalize_word('"Mèo"'), "mèo")
+        self.assertEqual(ocr_engine.normalize_word("..."), "")  # Dấu chấm câu được loại bỏ sạch
+        self.assertEqual(ocr_engine.normalize_word("-"), "-")   # Giữ lại bullet gạch đầu dòng
+        self.assertEqual(ocr_engine.normalize_word("Việt-Nam"), "việt-nam")
 
+    def test_clean_ocr_punctuation(self):
+        """Kiểm tra làm sạch dấu câu tất định."""
+        self.assertEqual(ocr_engine.clean_ocr_punctuation("?Có phải không"), '"Có phải không')
+        self.assertEqual(ocr_engine.clean_ocr_punctuation("Thật sao...3?"), 'Thật sao...?"')
 
-class OcrEngineTests(unittest.TestCase):
-    def _configured_tesseract(self):
-        return (
-            patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"),
-            patch.object(ocr_engine.pytesseract, "get_tesseract_version", return_value="5.3.0"),
-            patch.object(ocr_engine.pytesseract, "get_languages", return_value=["eng", "vie"]),
-        )
+    def test_is_vietocr_reliable_filters_hallucination(self):
+        """VietOCR Transformer lặp từ tự hồi quy sẽ bị từ chối."""
+        self.assertFalse(ocr_engine.is_vietocr_reliable("từ từ từ", "từ hôm qua"))
+        self.assertTrue(ocr_engine.is_vietocr_reliable("Xin chào bạn", "Xin chao ban"))
 
-    def test_uses_real_tsv_boxes_and_never_invents_confidence(self):
-        patches = self._configured_tesseract()
-        with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=tesseract_tsv(),
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
+    def test_empty_paddle_output_raises_no_text_detected(self):
+        """Khi PaddleOCR không phát hiện được chữ nào, phải ném ngoại lệ OcrNoTextDetected."""
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[]]
+        mock_viet = MagicMock()
 
-        self.assertEqual(result["text"], "Chú\nmèo")
-        self.assertEqual(result["words"][0]["text"], "Chú")
-        first_bbox = result["words"][0]["bbox"]
-        for actual, expected in zip(first_bbox, (0.25, 0.25, 0.1, 0.1)):
-            self.assertAlmostEqual(actual, expected)
-        self.assertAlmostEqual(result["words"][0]["ocr_confidence"], 0.91)
-        self.assertIsNone(result["words"][1]["ocr_confidence"])
-        self.assertEqual(result["words"][0]["line_index"], 0)
-        self.assertEqual(result["words"][1]["line_index"], 1)
-        self.assertEqual(result["metadata"]["coordinate_space"], "normalized_original_dimensions")
-
-    def test_preserves_line_breaks_paragraphs_and_detected_indentation(self):
-        layout = {
-            "text": ["Ngày", "xưa", "có", "một", "cậu", "bé"],
-            "left": [80, 160, 80, 110, 195, 80],
-            "top": [30, 30, 80, 130, 130, 180],
-            "width": [40, 40, 30, 35, 35, 25],
-            "height": [20, 20, 20, 20, 20, 20],
-            "conf": ["90", "90", "85", "88", "87", "92"],
-            "block_num": [1, 1, 1, 1, 1, 1],
-            "par_num": [1, 1, 1, 2, 2, 2],
-            "line_num": [1, 1, 2, 1, 1, 2],
-        }
-        patches = self._configured_tesseract()
-        with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=layout,
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
-
-        self.assertEqual(result["text"], "Ngày xưa\ncó\n\n    một cậu\nbé")
-        self.assertEqual(
-            result["metadata"]["paragraph_start_line_indices"],
-            [2],
-        )
-        self.assertEqual(result["metadata"]["indented_line_indices"], [2])
-        self.assertEqual(
-            [word["line_index"] for word in result["words"]],
-            [0, 0, 1, 2, 2, 3],
-        )
-
-    def test_invalid_tesseract_confidence_is_null(self):
-        invalid_confidence = {
-            "text": ["Chú"],
-            "left": [100],
-            "top": [50],
-            "width": [40],
-            "height": [20],
-            "conf": ["150"],
-            "block_num": [1],
-            "par_num": [1],
-            "line_num": [1],
-        }
-        patches = self._configured_tesseract()
-        with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=invalid_confidence,
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
-
-        self.assertIsNone(result["words"][0]["ocr_confidence"])
-
-    def test_keeps_short_low_confidence_vietnamese_words_for_admin_review(self):
-        uncertain = {
-            "text": ["là"],
-            "left": [100],
-            "top": [50],
-            "width": [25],
-            "height": [20],
-            "conf": ["-1"],
-            "block_num": [1],
-            "par_num": [1],
-            "line_num": [1],
-        }
-        patches = self._configured_tesseract()
-        with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=uncertain,
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
-
-        self.assertEqual(result["text"], "là")
-        self.assertEqual(len(result["words"]), 1)
-        self.assertIsNone(result["words"][0]["ocr_confidence"])
-        self.assertEqual(result["words"][0]["normalized_text"], "là")
-
-    def test_uses_candidate_score_to_select_between_real_preprocessing_variants(self):
-        def result_for(token: str, confidence: str) -> dict[str, list[object]]:
-            return {
-                "text": [token],
-                "left": [200],
-                "top": [100],
-                "width": [50],
-                "height": [25],
-                "conf": [confidence],
-                "block_num": [1],
-                "par_num": [1],
-                "line_num": [1],
-            }
-
-        candidates = iter([
-            result_for("Chú", "35"),
-            result_for("mèo", "95"),
-            result_for("và", "80"),
-        ])
-
-        def fake_image_to_data(*_args, **_kwargs):
-            return next(candidates)
-
-        patches = self._configured_tesseract()
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patch.dict(os.environ, {"TESSERACT_PSM": "", "TESSERACT_LANG": ""}),
-            patch.object(
-                ocr_engine.pytesseract,
-                "image_to_data",
-                new=fake_image_to_data,
-            ),
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
-
-        self.assertEqual(result["text"], "mèo")
-        self.assertEqual(result["metadata"]["selected_psm"], 6)
-        self.assertEqual(result["metadata"]["candidate_count"], 4)
-        self.assertEqual(
-            [candidate["preprocessing"] for candidate in result["metadata"]["candidate_scores"]],
-            [
-                "otsu_threshold",
-                "clahe_grayscale",
-                "grayscale",
-                "adaptive_gaussian_threshold",
-            ],
-        )
-        # The test image is 400x200 and the OCR preprocessing upscale factor is 3.
-        for actual, expected in zip(
-            result["words"][0]["bbox"],
-            (200 / 1200, 100 / 600, 50 / 1200, 25 / 600),
-        ):
-            self.assertAlmostEqual(actual, expected)
-
-    def test_candidate_score_rejects_empty_or_non_text_output(self):
-        self.assertEqual(
-            ocr_engine._candidate_quality_score({"text": ["", "   "], "conf": ["-1"]}),
-            -1.0,
-        )
-        score = ocr_engine._candidate_quality_score({
-            "text": ["Chú", "mèo"],
-            "conf": ["92", "88"],
-            "block_num": [1, 1],
-            "par_num": [1, 1],
-            "line_num": [1, 1],
-        })
-        self.assertGreater(score, 0.75)
-        self.assertLessEqual(score, 1.0)
-
-    def test_candidate_score_penalizes_non_text_artifacts_from_illustrations(self):
-        clean = {
-            "text": ["Chú", "mèo"],
-            "conf": ["90", "90"],
-            "block_num": [1, 1],
-            "par_num": [1, 1],
-            "line_num": [1, 1],
-        }
-        noisy = {
-            "text": ["Chú", "~——^", "mèo", "|"],
-            "conf": ["90", "99", "90", "99"],
-            "block_num": [1, 1, 1, 1],
-            "par_num": [1, 1, 1, 1],
-            "line_num": [1, 1, 1, 1],
-        }
-
-        self.assertLess(
-            ocr_engine._candidate_quality_score(noisy),
-            ocr_engine._candidate_quality_score(clean),
-        )
-
-    def test_missing_vietnamese_language_data_fails_closed(self):
-        with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
-            ocr_engine.pytesseract, "get_tesseract_version", return_value="5.3.0"
-        ), patch.object(ocr_engine.pytesseract, "get_languages", return_value=["eng"]):
-            with self.assertRaises(ocr_engine.OcrEngineUnavailable):
-                ocr_engine.extract_text_and_boxes(sample_png())
-
-    def test_uses_vie_best_when_vie_not_available(self):
-        with patch.object(ocr_engine.shutil, "which", return_value="/usr/bin/tesseract"), patch.object(
-            ocr_engine.pytesseract, "get_tesseract_version", return_value="5.3.0"
-        ), patch.object(ocr_engine.pytesseract, "get_languages", return_value=["eng", "vie_best"]), patch.object(
-            ocr_engine.pytesseract, "image_to_data", return_value=tesseract_tsv()
-        ):
-            result = ocr_engine.extract_text_and_boxes(sample_png())
-        self.assertEqual(result["metadata"]["language"], "vie_best")
-
-    def test_empty_tesseract_output_does_not_return_fake_words(self):
-        empty = {
-            "text": ["", "  "],
-            "left": [0, 0],
-            "top": [0, 0],
-            "width": [0, 0],
-            "height": [0, 0],
-            "conf": ["-1", "-1"],
-            "block_num": [0, 0],
-            "par_num": [0, 0],
-            "line_num": [0, 0],
-        }
-        patches = self._configured_tesseract()
-        with patches[0], patches[1], patches[2], patch.object(
-            ocr_engine.pytesseract,
-            "image_to_data",
-            return_value=empty,
-        ):
+        with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
             with self.assertRaises(ocr_engine.OcrNoTextDetected):
-                ocr_engine.extract_text_and_boxes(sample_png())
+                ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+    def test_extract_text_and_boxes_dual_engine_contract(self):
+        """Kiểm tra hợp đồng dữ liệu chuẩn hóa của Dual-Engine."""
+        # Giả lập kết quả trả về từ DBNet của PaddleOCR: 1 dòng chữ gồm 2 từ
+        # Tọa độ hộp [tl, tr, br, bl] trên ảnh kích thước 400x200
+        quad = [[40.0, 30.0], [160.0, 30.0], [160.0, 70.0], [40.0, 70.0]]
+        paddle_raw = [[quad, ("Chu meo", 0.95)]]
+
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [paddle_raw]
+
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "Chú mèo"
+
+        with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        # Kiểm tra nội dung trích xuất
+        self.assertEqual(result["text"], "Chú mèo")
+        self.assertEqual(len(result["words"]), 2)
+
+        first_word = result["words"][0]
+        self.assertEqual(first_word["text"], "Chú")
+        self.assertEqual(first_word["normalized_text"], "chú")
+        self.assertEqual(first_word["line_index"], 0)
+        self.assertAlmostEqual(first_word["ocr_confidence"], 0.95, places=2)
+
+        # Bounding box chuẩn hóa trong không gian [0, 1]
+        bbox = first_word["bbox"]
+        self.assertEqual(len(bbox), 4)
+        self.assertTrue(0.0 <= bbox[0] <= 1.0)
+        self.assertTrue(0.0 <= bbox[1] <= 1.0)
+        self.assertTrue(bbox[0] + bbox[2] <= 1.0)
+        self.assertTrue(bbox[1] + bbox[3] <= 1.0)
+
+        # Metadata chuẩn xác của hệ thống Dual-Engine mới
+        meta = result["metadata"]
+        self.assertEqual(meta["engine"], "paddleocr_vietocr_dual")
+        self.assertEqual(meta["language"], "vi")
+        self.assertEqual(meta["coordinate_space"], "normalized_original_dimensions")
+        self.assertEqual(meta["word_count"], 2)
+        self.assertEqual(meta["line_count"], 1)
 
 
 if __name__ == "__main__":
     unittest.main()
-
