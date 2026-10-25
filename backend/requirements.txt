@@ -125,4 +125,4 @@ jsonpointer==3.0.0
 six==1.17.0
 deprecation==2.1.0
 
-setuptools>=69.5.1
+setuptools==77.0.3
