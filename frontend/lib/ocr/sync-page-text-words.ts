@@ -23,9 +23,7 @@ export function normalizeVietnameseWord(value: string): string {
     value.normalize("NFC").trim().toLocaleLowerCase("vi"),
   );
   const shouldTrim = (character: string) =>
-    /[\p{P}\p{S}]/u.test(character) &&
-    character !== "'" &&
-    character !== "-";
+    /[\p{P}\p{S}]/u.test(character) && character !== "'" && character !== "-";
 
   while (characters.length > 0 && shouldTrim(characters[0])) {
     characters.shift();

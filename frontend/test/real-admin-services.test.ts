@@ -177,6 +177,34 @@ describe("real Admin adapters", () => {
     expect(await createAdminPageService().getImage(pageId)).toEqual(image);
     expect(await createAdminPageService().reload(pageId)).toEqual(processing);
   });
+
+  it("uploads a replacement image without a page number", async () => {
+    fetchMock.mockResolvedValue(Response.json(detail));
+    const file = new File(["new page image"], "page-1.png", {
+      type: "image/png",
+    });
+    const result = await createAdminPageService().replaceImageAndReprocess(
+      pageId,
+      file,
+    );
+    expect(result).toMatchObject({
+      page_id: detail.page_id,
+      page_revision_id: detail.page_revision_id,
+      draft_text: detail.draft_text,
+      verification_status: detail.verification_status,
+    });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      `/books/admin/pages/${pageId}/reupload-ocr`,
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-1.png",
+    });
+    expect((init.body as FormData).get("page_number")).toBeNull();
+  });
+
   it.each([
     "bucket/image.png",
     "https://user:password@example.test/image",
@@ -413,7 +441,6 @@ describe("real Admin adapters", () => {
       file_name: file.name,
       mime_type: "image/png" as const,
       size_bytes: file.size,
-      page_number: 2,
       width: 800,
       height: 1000,
       file,
@@ -438,7 +465,7 @@ describe("real Admin adapters", () => {
     expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("page_number")).toBe("2");
+    expect((init.body as FormData).get("page_number")).toBeNull();
     expect((init.body as FormData).get("image")).toMatchObject({
       name: "page-2.png",
     });
@@ -460,7 +487,6 @@ describe("real Admin adapters", () => {
       file_name: file.name,
       mime_type: "image/png" as const,
       size_bytes: file.size,
-      page_number: 3,
       width: 800,
       height: 1000,
       file,

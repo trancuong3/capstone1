@@ -103,10 +103,12 @@ class CatalogRepository:
 
 class AdminCatalogRepository(CatalogRepository):
     async def max_page_number(self, book_id: UUID) -> int | None:
-        # Include retired rows so the Admin upload form never suggests reusing a
-        # historical page number after retired pages are hidden from the list.
+        """Return the maximum page number among active pages only."""
         value = await self.db.scalar(
-            select(func.max(BookPage.PageNumber)).where(BookPage.BookId == book_id)
+            select(func.max(BookPage.PageNumber)).where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
         )
         return int(value) if value is not None else None
 
@@ -137,8 +139,23 @@ class AdminCatalogRepository(CatalogRepository):
         return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
 
     async def revisions(self, page_id: UUID):
-        result = await self.db.execute(select(PageRevision).where(PageRevision.PageId == page_id).order_by(PageRevision.CreatedAt.desc(), PageRevision.Id.desc()))
-        return result.scalars().all()
+        result = await self.db.execute(
+            select(PageRevision)
+            .where(PageRevision.PageId == page_id)
+            .order_by(PageRevision.CreatedAt.desc(), PageRevision.Id.desc())
+        )
+        rows = list(result.scalars().all())
+
+        # RevisionNo is stored as TEXT, so UUID/timestamp order alone can put a
+        # concurrent lower revision ahead of a newer one. Match the OCR repository's
+        # established numeric ordering and keep malformed legacy revisions visible last.
+        def revision_order(row: PageRevision) -> tuple[int, int]:
+            value = str(row.RevisionNo)
+            if value.isascii() and value.isdecimal() and int(value) > 0:
+                return (1, int(value))
+            return (0, -1)
+
+        return sorted(rows, key=revision_order, reverse=True)
 
     async def revision(self, page_id: UUID, revision_id: UUID):
         return await self.db.scalar(select(PageRevision).where(PageRevision.Id == revision_id, PageRevision.PageId == page_id))

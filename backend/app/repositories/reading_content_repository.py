@@ -92,6 +92,7 @@ class ReadingContentRepository:
             select(BookPage)
             .where(
                 BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
                 BookPage.PageNumber >= start_page_number,
                 BookPage.PageNumber <= end_page_number,
             )

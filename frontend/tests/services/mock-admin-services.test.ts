@@ -148,7 +148,6 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
         file_name: file.name,
         mime_type: "image/png",
         size_bytes: file.size,
-        page_number: 1,
         file,
       },
     ]);
@@ -160,7 +159,7 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     const uploadInit = apiFetchFixture.mock.calls[0][1] as RequestInit;
     expect(uploadInit.method).toBe("POST");
     expect(uploadInit.body).toBeInstanceOf(FormData);
-    expect((uploadInit.body as FormData).get("page_number")).toBe("1");
+    expect((uploadInit.body as FormData).get("page_number")).toBeNull();
     expect((uploadInit.body as FormData).get("image")).toMatchObject({
       name: "page.png",
     });

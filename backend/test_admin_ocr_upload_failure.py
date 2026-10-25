@@ -24,7 +24,12 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service.repo = MagicMock()
         service.repo.role = AsyncMock(return_value="admin")
         service.repo.book = AsyncMock(return_value=SimpleNamespace(LifecycleStatus="ACTIVE"))
+        service.repo.next_active_page_number = AsyncMock(return_value=1)
+        service.repo.active_pages_for_renumber = AsyncMock(return_value=[])
+        service.repo.set_page_number = MagicMock()
         service.repo.page_number_exists = AsyncMock(return_value=False)
+        service.repo.flush = AsyncMock()
+        service.db.refresh = AsyncMock()
         service._read_validate_image = AsyncMock(
             return_value=(b"valid-image-data", "image/png", "png", 100, 100)
         )
@@ -43,7 +48,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR") as captured,
         ):
             with self.assertRaises(HTTPException) as raised:
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         self.assertEqual(raised.exception.status_code, 503)
         cleanup.assert_not_awaited()
@@ -64,7 +69,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR"),
         ):
             with self.assertRaises(StorageUploadFailure):
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         cleanup.assert_awaited_once()
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
@@ -78,6 +83,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service.db.rollback = AsyncMock()
         service.db.add_all = MagicMock()
         service.db.add = MagicMock()
+        service.revision_detail = AsyncMock(return_value=object())
         cleanup = AsyncMock()
         ocr_result = {
             "text": "Chú mèo",
@@ -100,12 +106,141 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("app.services.admin_ocr_service", level="ERROR"),
         ):
             with self.assertRaisesRegex(RuntimeError, "private database details"):
-                await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+                await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         service.db.rollback.assert_awaited_once()
         cleanup.assert_awaited_once()
         self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
         self.assertEqual(cleanup.await_args.kwargs["book_id"], BOOK_ID)
+
+    async def test_replacement_image_keeps_live_source_until_new_revision_is_verified(self):
+        service = self.make_service()
+        page_id = UUID("33333333-3333-4333-8333-333333333333")
+        verified_revision_id = UUID("44444444-4444-4444-8444-444444444444")
+        page = SimpleNamespace(
+            Id=page_id,
+            BookId=BOOK_ID,
+            LifecycleStatus="ACTIVE",
+            ImagePath="books/source/old.png",
+            Width=800,
+            Height=1000,
+            CurrentVerifiedRevisionId=verified_revision_id,
+        )
+        current_verified = SimpleNamespace(ProcessingMeta={})
+        service.repo.page = AsyncMock(return_value=page)
+        service.repo.revision = AsyncMock(return_value=current_verified)
+        service.repo.next_revision_number = AsyncMock(return_value=3)
+        service.repo.stage_revision_bundle = MagicMock()
+        service.db.commit = AsyncMock()
+        service.db.refresh = AsyncMock()
+        service.db.rollback = AsyncMock()
+        service._read_validate_image = AsyncMock(
+            return_value=(b"replacement-image", "image/png", "png", 1200, 1600)
+        )
+        expected_response = object()
+        service.revision_detail = AsyncMock(return_value=expected_response)
+        ocr_result = {
+            "text": "Chú mèo",
+            "words": [
+                {
+                    "word_index": 0,
+                    "line_index": 0,
+                    "text": "Chú",
+                    "normalized_text": "chú",
+                    "bbox": [0.1, 0.2, 0.1, 0.05],
+                    "ocr_confidence": 0.9,
+                }
+            ],
+            "metadata": {"engine": "tesseract", "language": "vie"},
+        }
+        with (
+            patch("app.services.admin_ocr_service.upload_object") as uploaded,
+            patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
+        ):
+            response = await service.replace_page_image(ACTOR_ID, page_id, MagicMock())
+
+        self.assertIs(response, expected_response)
+        uploaded.assert_called_once()
+        service.db.commit.assert_awaited_once()
+        service.db.rollback.assert_not_awaited()
+        self.assertEqual(page.Id, page_id)
+        self.assertEqual(page.ImagePath, "books/source/old.png")
+        self.assertEqual((page.Width, page.Height), (800, 1000))
+        self.assertEqual(
+            current_verified.ProcessingMeta,
+            {
+                "source_image_path": "books/source/old.png",
+                "source_image_width": 800,
+                "source_image_height": 1000,
+            },
+        )
+        revision, words = service.repo.stage_revision_bundle.call_args.args
+        self.assertEqual(revision.PageId, page_id)
+        self.assertEqual(revision.RevisionNo, "3")
+        self.assertEqual(revision.VerificationStatus, "NEEDS_REVIEW")
+        self.assertEqual(revision.DraftText, "Chú mèo")
+        self.assertEqual(
+            revision.ProcessingMeta["source_image_path"],
+            uploaded.call_args.args[0],
+        )
+        self.assertEqual(revision.ProcessingMeta["source_image_width"], 1200)
+        self.assertEqual(revision.ProcessingMeta["source_image_height"], 1600)
+        self.assertEqual(words[0]["bbox"], [0.1, 0.2, 0.1, 0.05])
+        service.repo.set_page_image_source.assert_not_called()
+
+
+    async def test_replacement_response_failure_rolls_back_and_cleans_candidate_before_commit(self):
+        service = self.make_service()
+        page_id = UUID("33333333-3333-4333-8333-333333333333")
+        verified_revision_id = UUID("44444444-4444-4444-8444-444444444444")
+        page = SimpleNamespace(
+            Id=page_id,
+            BookId=BOOK_ID,
+            LifecycleStatus="ACTIVE",
+            ImagePath="books/source/old.png",
+            Width=800,
+            Height=1000,
+            CurrentVerifiedRevisionId=verified_revision_id,
+        )
+        service.repo.page = AsyncMock(return_value=page)
+        service.repo.revision = AsyncMock(return_value=SimpleNamespace(ProcessingMeta={}))
+        service.repo.next_revision_number = AsyncMock(return_value=3)
+        service.repo.stage_revision_bundle = MagicMock()
+        service.revision_detail = AsyncMock(
+            side_effect=HTTPException(status_code=409, detail="Invalid response contract")
+        )
+        service.db.commit = AsyncMock()
+        service.db.rollback = AsyncMock()
+        service.db.refresh = AsyncMock()
+        cleanup = AsyncMock()
+        ocr_result = {
+            "text": "Chú mèo",
+            "words": [
+                {
+                    "word_index": 0,
+                    "line_index": 0,
+                    "text": "Chú",
+                    "normalized_text": "chú",
+                    "bbox": [0.1, 0.2, 0.1, 0.05],
+                    "ocr_confidence": 0.9,
+                }
+            ],
+            "metadata": {"engine": "tesseract", "language": "vie"},
+        }
+        with (
+            patch("app.services.admin_ocr_service.upload_object"),
+            patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
+            patch.object(service, "_cleanup_uploaded_object", cleanup),
+        ):
+            with self.assertRaises(HTTPException):
+                await service.replace_page_image(ACTOR_ID, page_id, MagicMock())
+
+        service.db.commit.assert_not_awaited()
+        service.db.rollback.assert_awaited_once()
+        cleanup.assert_awaited_once()
+        self.assertTrue(cleanup.await_args.kwargs["object_may_exist"])
+        self.assertEqual(page.ImagePath, "books/source/old.png")
+        self.assertEqual(page.CurrentVerifiedRevisionId, verified_revision_id)
 
     async def test_invalid_legacy_ocr_confidence_normalizes_to_null(self):
         from app.services.admin_ocr_service import AdminOcrService
@@ -146,7 +281,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.admin_ocr_service.upload_object", uploaded),
             patch("app.services.admin_ocr_service.extract_text_and_boxes", return_value=ocr_result),
         ):
-            response = await service.upload_page(ACTOR_ID, BOOK_ID, 1, MagicMock())
+            response = await service.upload_page(ACTOR_ID, BOOK_ID, MagicMock())
 
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()

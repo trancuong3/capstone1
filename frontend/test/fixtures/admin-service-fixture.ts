@@ -164,6 +164,9 @@ export function createAdminServiceFixture() {
         width: 600,
         height: 800,
       }),
+      replaceImageAndReprocess: vi
+        .fn<AdminServices["pages"]["replaceImageAndReprocess"]>()
+        .mockRejectedValue(unavailable()),
       upload: vi
         .fn<AdminServices["pages"]["upload"]>()
         .mockRejectedValue(unavailable()),
