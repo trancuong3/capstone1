@@ -99,7 +99,7 @@ Các endpoint ghi Admin dùng token Supabase và xác minh `profiles.role = 'adm
 Các endpoint:
 
 - `POST /books/admin/catalog`
-- `POST /books/admin/catalog/{book_id}/pages` (multipart `image`, `page_number`)
+- `POST /books/admin/catalog/{book_id}/pages` (multipart `image`; Backend tự cấp số trang; `page_number` cũ được bỏ qua để tương thích client cũ)
 - `PUT /books/admin/pages/{page_id}/revisions/{revision_id}/draft`
 - `POST /books/admin/pages/{page_id}/verify`
 - `POST /books/admin/pages/{page_id}/reprocess`

@@ -9,6 +9,8 @@ export const metadata: Metadata = { title: "Báo cáo tiến bộ" };
 interface ReportsPageProps {
   readonly searchParams: Promise<{
     childId?: string | string[];
+    period_start?: string | string[];
+    period_end?: string | string[];
   }>;
 }
 
@@ -16,7 +18,11 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const query = await searchParams;
   return (
     <AppServicesProvider>
-      <ProgressReportScreen requestedChildId={firstQueryValue(query.childId)} />
+      <ProgressReportScreen
+        requestedChildId={firstQueryValue(query.childId)}
+        requestedPeriodStart={query.period_start}
+        requestedPeriodEnd={query.period_end}
+      />
     </AppServicesProvider>
   );
 }

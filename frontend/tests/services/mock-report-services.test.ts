@@ -35,7 +35,7 @@ beforeEach(() => installApiFetchFixture());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Report/Session real API contracts", () => {
-  it("forwards an opaque cursor and preserves server session order", async () => {
+  it("forwards the supported page cursor and preserves server session order", async () => {
     const older = {
       ...sessionSummaryFixture,
       id: "12000000-0000-4000-8000-000000000002",
@@ -45,7 +45,7 @@ describe("Report/Session real API contracts", () => {
     apiFetchFixture.mockResolvedValueOnce(
       Response.json({
         sessions: [sessionSummaryFixture, older],
-        next_cursor: "opaque & next",
+        next_cursor: "page-2",
       }),
     );
     const first = await createSessionService().list(TEST_CHILD_ID, {
@@ -63,7 +63,7 @@ describe("Report/Session real API contracts", () => {
       limit: 2,
     });
     expect(second).toEqual({ sessions: [], next_cursor: null });
-    expect(requestedApiUrl(1).searchParams.get("cursor")).toBe("opaque & next");
+    expect(requestedApiUrl(1).searchParams.get("cursor")).toBe("page-2");
     expect(requestedApiUrl(1).searchParams.get("child_id")).toBe(TEST_CHILD_ID);
     expect(requestedApiUrl(1).searchParams.get("limit")).toBe("2");
   });
@@ -105,9 +105,7 @@ describe("Report/Session real API contracts", () => {
       reportWindowFixture,
     );
     expect(report.previous_period).toBeNull();
-    expect(
-      Object.values(report.trend_deltas).every((value) => value === null),
-    ).toBe(true);
+    expect(report.trend_deltas).toEqual(progressReportFixture.trend_deltas);
     const service = createDifficultWordService();
     const words = await service.list(TEST_CHILD_ID, reportWindowFixture);
     expect(words).toEqual([difficultWordFixture]);

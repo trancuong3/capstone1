@@ -46,6 +46,7 @@ def history_repo():
     repo.fluency = AsyncMock(return_value=None)
     repo.questions = AsyncMock(return_value=[])
     repo.answer = AsyncMock(return_value=None)
+    repo.session_page_rows = AsyncMock(return_value=[])
     return repo
 
 
@@ -103,7 +104,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(HistoryService.summary(session_row(EndedAt=None)).duration_ms)
 
     async def test_unknown_state_and_invalid_duration_are_not_guessed(self):
-        for row in (session_row(State="COMPLETED"), session_row(State="IN_PROGRESS"),
+        for row in (session_row(State="UNKNOWN_STATE"),
                     session_row(EndedAt=START - timedelta(seconds=1)),
                     session_row(EndedAt=datetime(2026, 10, 8, 1, 1))):
             with self.assertRaises(HTTPException) as caught:
@@ -128,7 +129,9 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         repo.fluency.return_value = SimpleNamespace(Metrics={"Accuracy": 80, "WCPM": 20},
                                                     Score=80, Uncertainty=None, ModelVersion="legacy")
         detail = await HistoryService(repo).get(SESSION, ACTOR)
-        self.assertIsNone(detail.fluency_assessment)
+        self.assertIsNone(detail.fluency_assessment.metrics)
+        self.assertEqual(detail.fluency_assessment.score, 80)
+        self.assertEqual(detail.availability.fluency, "partial")
         self.assertIsNone(detail.report_id)
         self.assertEqual(detail.reference_page_revision_ids, [])
 
@@ -143,14 +146,15 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.selected_page_revision_ids, [BOOK])
         self.assertEqual(detail.events[0].metadata, {})
 
-    async def test_unknown_event_enum_is_unavailable_not_remapped(self):
+    async def test_persisted_event_enum_is_preserved_not_remapped(self):
         repo = history_repo()
         repo.events.return_value = [SimpleNamespace(Id=QUESTION, SessionId=SESSION, PageId=BOOK,
             PageRevisionId=CHILD, WordId=None, Type="MISPRONUNCIATION", Status="DETECTED",
             StartMs=1000, EndMs=None, Confidence=None, Metadata={})]
-        with self.assertRaises(HTTPException) as caught:
-            await HistoryService(repo).get(SESSION, ACTOR)
-        self.assertEqual(caught.exception.status_code, 501)
+        detail = await HistoryService(repo).get(SESSION, ACTOR)
+        self.assertEqual(detail.events[0].type, "MISPRONUNCIATION")
+        self.assertEqual(detail.events[0].status, "DETECTED")
+        self.assertEqual(detail.availability.events, "available")
 
     async def test_expected_answers_are_never_returned(self):
         repo = history_repo()
@@ -195,7 +199,9 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.access = MagicMock()
         self.access.require_child = AsyncMock()
         self.repo.report = AsyncMock(return_value=SimpleNamespace(Summary=summary, ChildId=CHILD,
+            Id=SESSION, GeneratedAt=datetime(2026, 10, 8, tzinfo=timezone.utc),
             PeriodStart=date(2026, 9, 9), PeriodEnd=date(2026, 10, 8)))
+        self.repo.latest = AsyncMock(return_value=self.repo.report.return_value)
         return ProgressService(self.repo, self.access)
 
     async def test_complete_stored_report_preserves_actual_values(self):
@@ -208,16 +214,19 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_legacy_summary_is_not_converted_into_invented_metrics(self):
         service = self.setup_service({"avg_fluency": 80, "total_books": 2})
-        with self.assertRaises(HTTPException) as caught:
-            await service.read(CHILD, ACTOR, date(2026, 9, 9), date(2026, 10, 8))
-        self.assertEqual(caught.exception.status_code, 501)
+        report = await service.read(CHILD, ACTOR, date(2026, 9, 9), date(2026, 10, 8))
+        self.assertEqual(report.legacy.avg_fluency, 80)
+        self.assertEqual(report.legacy.total_books, 2)
+        self.assertIsNone(report.completed_sessions)
+        self.assertEqual(report.data_status, "partial")
 
     async def test_missing_report_is_unavailable_not_zero_report(self):
         service = self.setup_service({})
         self.repo.report.return_value = None
+        self.repo.latest.return_value = None
         with self.assertRaises(HTTPException) as caught:
             await service.read(CHILD, ACTOR, None, None)
-        self.assertEqual(caught.exception.status_code, 501)
+        self.assertEqual(caught.exception.status_code, 404)
 
     async def test_missing_word_key_is_not_an_empty_result(self):
         service = self.setup_service({"avg_fluency": 80})

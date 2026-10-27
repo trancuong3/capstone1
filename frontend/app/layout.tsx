@@ -6,10 +6,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "ReadAlong Vision",
-    template: "%s | ReadAlong Vision",
+    default: "ViRead",
+    template: "%s | ViRead",
   },
-  description: "Giao diện web responsive cho trải nghiệm đọc cùng bé.",
+  description: "Nền tảng đồng hành cùng ba mẹ và bé trên hành trình đọc sách.",
 };
 
 export default function RootLayout({

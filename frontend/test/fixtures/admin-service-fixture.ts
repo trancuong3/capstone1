@@ -21,7 +21,8 @@ const createdAt = "2026-10-01T00:00:00Z";
 
 export const adminBookFixture: AdminBookDTO = {
   id: ADMIN_BOOK_ID,
-  title: "Sách kiểm thử",
+  name: "Tên sách kiểm thử",
+  title: "Tiêu đề kiểm thử",
   author: "Tác giả kiểm thử",
   min_grade: 1,
   max_grade: 3,
@@ -100,6 +101,28 @@ function unavailable() {
 }
 
 // Test-only responses/spies, not a mutable store or a runtime adapter.
+function createMetadataQualityServiceFixture() {
+  const get = vi
+    .fn<AdminServices["metadataQuality"]["get"]>()
+    .mockResolvedValue({
+      summary: {
+        total_books: 0,
+        books_with_issues: 0,
+        missing_title: 0,
+        missing_author: 0,
+        invalid_grade_range: 0,
+        possible_duplicate_groups: 0,
+        books_in_duplicate_groups: 0,
+        checked_at: createdAt,
+      },
+      items: [],
+      total: 0,
+      limit: 10,
+      offset: 0,
+    });
+  return { get } satisfies AdminServices["metadataQuality"];
+}
+
 export function createAdminServiceFixture() {
   return {
     auth: {
@@ -112,6 +135,7 @@ export function createAdminServiceFixture() {
         .fn<AdminServices["auth"]["signOut"]>()
         .mockResolvedValue(undefined),
     },
+    metadataQuality: createMetadataQualityServiceFixture(),
     books: {
       list: vi
         .fn<AdminServices["books"]["list"]>()
@@ -140,6 +164,9 @@ export function createAdminServiceFixture() {
         width: 600,
         height: 800,
       }),
+      replaceImageAndReprocess: vi
+        .fn<AdminServices["pages"]["replaceImageAndReprocess"]>()
+        .mockRejectedValue(unavailable()),
       upload: vi
         .fn<AdminServices["pages"]["upload"]>()
         .mockRejectedValue(unavailable()),

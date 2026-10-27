@@ -69,7 +69,7 @@ export function AdminHealthScreen() {
                 <p className="text-sm font-bold text-muted">
                   Trạng thái các dịch vụ đã kiểm tra
                 </p>
-                <h2 className="text-2xl font-black">ReadAlong Vision</h2>
+                <h2 className="text-2xl font-black">ViRead</h2>
               </div>
               <AdminStatusBadge status={snapshot.overall_status} />
             </div>

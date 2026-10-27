@@ -25,14 +25,15 @@ REVISION = UUID("44444444-4444-4444-8444-444444444444")
 
 class AdminOcrSchemaTests(unittest.TestCase):
     def test_book_create_normalizes_strings_and_grade_range(self):
-        request = AdminBookCreateRequest(title="  Chú mèo  ", author="  Nguyễn Văn A  ", min_grade=1, max_grade=3)
+        request = AdminBookCreateRequest(name="  Tên mèo  ", title="  Chú mèo  ", author="  Nguyễn Văn A  ", min_grade=1, max_grade=3)
+        self.assertEqual(request.name, "Tên mèo")
         self.assertEqual(request.title, "Chú mèo")
         self.assertEqual(request.author, "Nguyễn Văn A")
 
     def test_book_create_rejects_blank_title_and_inverted_grades(self):
         for payload in (
-            dict(title="  ", min_grade=1, max_grade=2),
-            dict(title="Book", min_grade=4, max_grade=2),
+            dict(name="Tên sách", title="  ", min_grade=1, max_grade=2),
+            dict(name="Tên sách", title="Book", min_grade=4, max_grade=2),
         ):
             with self.subTest(payload=payload), self.assertRaises(ValidationError):
                 AdminBookCreateRequest(**payload)
@@ -79,7 +80,7 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
     def test_all_write_routes_require_bearer_identity(self):
         headers = {}
         response_cases = [
-            self.client.post("/books/admin/catalog", json={"title": "Book", "author": None, "min_grade": 1, "max_grade": 2}, headers=headers),
+            self.client.post("/books/admin/catalog", json={"name": "Book name", "title": "Book", "author": None, "min_grade": 1, "max_grade": 2}, headers=headers),
             self.client.post(f"/books/admin/catalog/{BOOK}/pages", data={"page_number": "1"}, files={"image": ("page.png", b"not-an-image", "image/png")}, headers=headers),
             self.client.put(f"/books/admin/pages/{PAGE}/revisions/{REVISION}/draft", json={"draft_text": "text", "words": []}, headers=headers),
             self.client.post(f"/books/admin/pages/{PAGE}/verify", json={
@@ -97,7 +98,7 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
     def test_parent_cannot_create_admin_book_even_with_role_in_body(self):
         self.app.dependency_overrides[get_current_parent_id] = lambda: ACTOR
         response = self.client.post("/books/admin/catalog", json={
-            "title": "Book", "author": None, "min_grade": 1, "max_grade": 2, "role": "admin",
+            "name": "Book name", "title": "Book", "author": None, "min_grade": 1, "max_grade": 2, "role": "admin",
             "createdby": str(ACTOR),
         })
         self.assertEqual(response.status_code, 403)

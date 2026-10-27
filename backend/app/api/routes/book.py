@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas import BookCreate, BookPageResponse, BookResponse
 from app.schemas.book import (
+    AdminBookMetadataResponse,
+    AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
     AdminPageListRead,
@@ -19,9 +21,36 @@ from app.schemas.book import (
     CatalogBookResponse,
     CatalogPagePreviewResponse,
 )
+from app.repositories.metadata_quality_repository import MetadataQualityRepository
+from app.repositories.admin_book_repository import AdminBookRepository
+from app.schemas.metadata_quality import MetadataQualityIssueType, MetadataQualityResponse
+from app.schemas.admin_book import AdminBookLifecycleRequest, AdminBookWriteRequest
 from app.services.book_service import AdminCatalogService, BookService, CatalogService
+from app.services.admin_book_service import AdminBookService
+from app.services.metadata_quality_service import MetadataQualityService
 
 router = APIRouter()
+
+
+@router.get("/admin/metadata-quality", response_model=MetadataQualityResponse)
+async def get_admin_metadata_quality(
+    search: str | None = Query(default=None, max_length=120),
+    issue_type: MetadataQualityIssueType | None = Query(default=None),
+    lifecycle_status: Literal["ACTIVE", "RETIRED"] | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MetadataQualityService(MetadataQualityRepository(db))
+    return await service.dashboard(
+        actor_id,
+        search=search,
+        issue_type=issue_type,
+        lifecycle_status=lifecycle_status,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/", response_model=List[BookResponse])
@@ -81,6 +110,48 @@ async def get_parent_catalog_previews(
     return await service.previews(book_id)
 
 
+@router.post(
+    "/admin/catalog",
+    response_model=AdminBookMetadataResponse,
+    status_code=201,
+)
+async def create_admin_book(
+    payload: AdminBookWriteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an Admin catalog entry through schema, service, and repository layers."""
+    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
+
+
+@router.put(
+    "/admin/catalog/{book_id}",
+    response_model=AdminBookMetadataResponse,
+)
+async def update_admin_book(
+    book_id: UUID,
+    payload: AdminBookWriteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminBookService(AdminBookRepository(db)).update(actor_id, book_id, payload)
+
+
+@router.patch(
+    "/admin/catalog/{book_id}/status",
+    response_model=AdminBookMetadataResponse,
+)
+async def update_admin_book_status(
+    book_id: UUID,
+    payload: AdminBookLifecycleRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminBookService(AdminBookRepository(db)).update_lifecycle(
+        actor_id, book_id, payload.status
+    )
+
+
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])
 async def get_admin_catalog(
     search: str | None = None,
@@ -94,7 +165,7 @@ async def get_admin_catalog(
     return await service.list(search, lifecycle_status, verification_status)
 
 
-@router.get("/admin/catalog/{book_id}", response_model=CatalogBookResponse)
+@router.get("/admin/catalog/{book_id}", response_model=AdminCatalogBookDetailResponse)
 async def get_admin_book(
     book_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
@@ -102,7 +173,7 @@ async def get_admin_book(
 ):
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
-    return await service.book(book_id)
+    return await service.book_detail(book_id)
 
 
 @router.get("/admin/catalog/{book_id}/pages", response_model=list[AdminPageListRead])

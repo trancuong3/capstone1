@@ -28,6 +28,9 @@ export function createAuthServiceFixture() {
     signIn: vi
       .fn<AuthService["signIn"]>()
       .mockResolvedValue(authSessionFixture),
+    signInWithOAuth: vi
+      .fn<AuthService["signInWithOAuth"]>()
+      .mockResolvedValue(undefined),
     requestPasswordReset: vi
       .fn<AuthService["requestPasswordReset"]>()
       .mockResolvedValue(undefined),

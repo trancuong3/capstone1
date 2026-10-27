@@ -6,31 +6,51 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
-from app.schemas.admin_ocr import AdminBookCreateRequest, AdminOcrDraftRequest, AdminOcrVerifyRequest
-from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead, CatalogBookResponse
+from app.schemas.admin_book import AdminBookWriteRequest
+from app.schemas.admin_ocr import AdminOcrDraftRequest, AdminOcrVerifyRequest
+from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
+from app.repositories.admin_book_repository import AdminBookRepository
+from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
 
 router = APIRouter()
 
 
-@router.post("/admin/catalog", response_model=CatalogBookResponse, status_code=201)
+@router.post("/admin/catalog", response_model=AdminBookMetadataResponse, status_code=201)
 async def create_admin_book(
-    payload: AdminBookCreateRequest,
+    payload: AdminBookWriteRequest,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).create_book(actor_id, payload)
+    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
 
 
 @router.post("/admin/catalog/{book_id}/pages", response_model=AdminRevisionDetailRead, status_code=201)
 async def upload_admin_page(
     book_id: UUID,
-    page_number: int = Form(..., ge=1, le=32767),
+    page_number: int | None = Form(default=None, ge=1, le=32767),
     image: UploadFile = File(...),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).upload_page(actor_id, book_id, page_number, image)
+    # Legacy clients may still submit page_number, but the Service intentionally ignores it.
+    # Page numbers are derived only from the locked PostgreSQL book/page records.
+    return await AdminOcrService(db).upload_page(actor_id, book_id, image)
+
+
+@router.post(
+    "/admin/pages/{page_id}/reupload-ocr",
+    response_model=AdminRevisionDetailRead,
+    status_code=201,
+)
+async def reupload_admin_page_image(
+    page_id: UUID,
+    image: UploadFile = File(...),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the candidate image and OCR only this page; retain the live source until verification."""
+    return await AdminOcrService(db).replace_page_image(actor_id, page_id, image)
 
 
 @router.post("/admin/pages/{page_id}/revisions/draft", response_model=AdminRevisionDetailRead, status_code=201)

@@ -10,11 +10,15 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
+
+from app.repositories.reading_content_repository import ReadingContentRepository
 
 from app.schemas.reading import (
     FluencyAssessmentCreate,
     ReadingEventCreate,
     ReadingSessionCreate,
+    ReadingPageNavigationCreate,
 )
 from app.services.reading_content_service import ReadingContentService
 
@@ -28,36 +32,28 @@ REVISION_ID = UUID("55555555-5555-4555-8555-555555555555")
 
 class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
     def make_service(self):
+        page = SimpleNamespace(
+            Id=PAGE_ID,
+            BookId=BOOK_ID,
+            PageNumber=1,
+            CurrentVerifiedRevisionId=REVISION_ID,
+            LifecycleStatus="ACTIVE",
+        )
+        revision = SimpleNamespace(
+            Id=REVISION_ID,
+            PageId=PAGE_ID,
+            VerificationStatus="VERIFIED",
+            VerifiedText="Chú",
+        )
         repo = SimpleNamespace(
             profile_role=AsyncMock(return_value="parent"),
             sessions_for_parent=AsyncMock(return_value=[]),
             child_belongs_to_parent=AsyncMock(return_value=True),
-            verified_page=AsyncMock(return_value=SimpleNamespace(
-                Id=PAGE_ID,
-                BookId=BOOK_ID,
-                CurrentVerifiedRevisionId=REVISION_ID,
-                LifecycleStatus="ACTIVE",
-            )),
+            verified_page=AsyncMock(return_value=page),
+            all_pages_between_numbers=AsyncMock(return_value=[page]),
+            verified_pages_between_numbers=AsyncMock(return_value=[page]),
             first_verified_page=AsyncMock(),
-            verified_revision=AsyncMock(return_value=SimpleNamespace(
-                Id=REVISION_ID,
-                PageId=PAGE_ID,
-                VerificationStatus="VERIFIED",
-                VerifiedText="Chú",
-            )),
-            create_session=AsyncMock(side_effect=lambda session: session),
-            save_session=AsyncMock(side_effect=lambda session: session),
-            update_session_state=MagicMock(
-                side_effect=lambda session, *, state, ended_at: (
-                    setattr(session, "State", state),
-                    setattr(session, "EndedAt", ended_at),
-                )
-            ),
-            session=AsyncMock(),
-            revision_word_exists=AsyncMock(return_value=True),
-            create_reading_event=AsyncMock(side_effect=lambda row: row),
-            create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
-            events_for_session=AsyncMock(return_value=[]),
+            verified_revision=AsyncMock(return_value=revision),
             revision_words=AsyncMock(
                 return_value=[
                     SimpleNamespace(
@@ -66,6 +62,25 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
                     )
                 ]
             ),
+            create_session=AsyncMock(side_effect=lambda session, page_rows=None: session),
+            save_session=AsyncMock(side_effect=lambda session: session),
+            save_session_progress=AsyncMock(side_effect=lambda session, rows: session),
+            update_session_state=MagicMock(
+                side_effect=lambda session, *, state, ended_at: (
+                    setattr(session, "State", state),
+                    setattr(session, "EndedAt", ended_at),
+                )
+            ),
+            session=AsyncMock(),
+            session_for_update=AsyncMock(),
+            session_page_rows=AsyncMock(return_value=[]),
+            session_page=AsyncMock(),
+            page_by_id=AsyncMock(),
+            revision_snapshot=AsyncMock(),
+            revision_word_exists=AsyncMock(return_value=True),
+            create_reading_event=AsyncMock(side_effect=lambda row: row),
+            create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
+            events_for_session=AsyncMock(return_value=[]),
         )
         return ReadingContentService(repo), repo
 
@@ -210,6 +225,138 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.create_session.assert_awaited_once()
         repo.first_verified_page.assert_not_awaited()
 
+    async def test_navigation_completes_the_previous_page_and_stays_in_range(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        second_page_id = UUID("66666666-6666-4666-8666-666666666666")
+        second_revision_id = UUID("77777777-7777-4777-8777-777777777777")
+        now = datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc)
+        session = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            CurrentPageId=PAGE_ID,
+            StartedAt=now,
+            EndedAt=None,
+        )
+        rows = [
+            SimpleNamespace(
+                PageId=PAGE_ID, PageRevisionId=REVISION_ID, PageNumber=1,
+                PageOrder=0, Status="IN_PROGRESS", StartedAt=now, CompletedAt=None,
+            ),
+            SimpleNamespace(
+                PageId=second_page_id, PageRevisionId=second_revision_id, PageNumber=2,
+                PageOrder=1, Status="PENDING", StartedAt=None, CompletedAt=None,
+            ),
+        ]
+        repo.session_for_update.return_value = session
+        repo.session.return_value = session
+        repo.session_page_rows.return_value = rows
+
+        progress = await service.navigate_session_page(
+            session_id,
+            PARENT_ID,
+            ReadingPageNavigationCreate(target_page_id=second_page_id),
+        )
+
+        self.assertEqual(progress.current_page_id, second_page_id)
+        self.assertEqual(progress.current_index, 1)
+        self.assertEqual(progress.completed_pages, 1)
+        self.assertEqual(rows[0].Status, "COMPLETED")
+        self.assertEqual(rows[1].Status, "IN_PROGRESS")
+        repo.save_session_progress.assert_awaited_once_with(session, rows)
+
+    async def test_finish_does_not_auto_complete_the_last_page(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        session = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            CurrentPageId=PAGE_ID,
+            StartedAt=datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        page_row = SimpleNamespace(
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            PageNumber=1,
+            PageOrder=0,
+            Status="IN_PROGRESS",
+            StartedAt=session.StartedAt,
+            CompletedAt=None,
+        )
+        repo.session_for_update.return_value = session
+        repo.session.return_value = session
+        repo.session_page_rows.return_value = [page_row]
+
+        await service.finish_session(session_id, PARENT_ID)
+
+        self.assertEqual(page_row.Status, "IN_PROGRESS")
+        self.assertIsNone(page_row.CompletedAt)
+        repo.save_session_progress.assert_awaited_once_with(session, [page_row])
+
+    async def test_create_session_rejects_reversed_page_range(self):
+        service, repo = self.make_service()
+        end_id = UUID("66666666-6666-4666-8666-666666666666")
+        start_page = SimpleNamespace(
+            Id=PAGE_ID, BookId=BOOK_ID, PageNumber=3,
+            CurrentVerifiedRevisionId=REVISION_ID, LifecycleStatus="ACTIVE",
+        )
+        end_page = SimpleNamespace(
+            Id=end_id, BookId=BOOK_ID, PageNumber=2,
+            CurrentVerifiedRevisionId=REVISION_ID, LifecycleStatus="ACTIVE",
+        )
+
+        async def select_page(page_id, book_id=None):
+            return start_page if page_id == PAGE_ID else end_page
+
+        repo.verified_page.side_effect = select_page
+        payload = ReadingSessionCreate(
+            ChildId=CHILD_ID, BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID, SelectedPageRevisionId=REVISION_ID,
+            end_page_id=end_id,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_session(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 422)
+        repo.create_session.assert_not_awaited()
+
+    async def test_create_session_rejects_gaps_in_selected_range(self):
+        service, repo = self.make_service()
+        end_id = UUID("66666666-6666-4666-8666-666666666666")
+        start_page = SimpleNamespace(
+            Id=PAGE_ID, BookId=BOOK_ID, PageNumber=1,
+            CurrentVerifiedRevisionId=REVISION_ID, LifecycleStatus="ACTIVE",
+        )
+        end_page = SimpleNamespace(
+            Id=end_id, BookId=BOOK_ID, PageNumber=3,
+            CurrentVerifiedRevisionId=REVISION_ID, LifecycleStatus="ACTIVE",
+        )
+
+        async def select_page(page_id, book_id=None):
+            return start_page if page_id == PAGE_ID else end_page
+
+        repo.verified_page.side_effect = select_page
+        repo.all_pages_between_numbers.return_value = [start_page, end_page]
+        repo.verified_pages_between_numbers.return_value = [start_page, end_page]
+        payload = ReadingSessionCreate(
+            ChildId=CHILD_ID, BookId=BOOK_ID,
+            SelectedPageId=PAGE_ID, SelectedPageRevisionId=REVISION_ID,
+            end_page_id=end_id,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_session(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "READING_RANGE_NOT_CONTIGUOUS")
+        repo.create_session.assert_not_awaited()
+
     async def test_create_session_rejects_stale_verified_revision(self):
         service, repo = self.make_service()
         old_revision_id = UUID("99999999-9999-4999-8999-999999999999")
@@ -298,6 +445,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             EndedAt=None,
         )
         repo.session.return_value = session
+        repo.session_for_update.return_value = session
 
         result = await service.finish_session(
             session.Id,
@@ -321,6 +469,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             EndedAt=ended_at,
         )
         repo.session.return_value = session
+        repo.session_for_update.return_value = session
 
         result = await service.finish_session(session.Id, PARENT_ID)
 
@@ -380,10 +529,11 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             Height=800,
             ImagePath="books/test/page.png",
         )
-        revision = SimpleNamespace(Id=REVISION_ID, VerifiedText="Chú mèo")
+        revision = SimpleNamespace(Id=REVISION_ID, VerifiedText="Chú mèo", ProcessingMeta={"paragraph_start_line_indices": [2, 2, -1, "3"], "indented_line_indices": [2]})
         word_row = SimpleNamespace(
             Id=UUID("66666666-6666-4666-8666-666666666666"),
             WordIndex=0,
+            LineIndex=3,
             Text="Chú",
             BoundingBox=[0.1, 0.2, 0.12, 0.04],
             OCRConfidence=0.93,
@@ -401,6 +551,9 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dto.height, 800)
         self.assertEqual(dto.confidence, 0.93)
         self.assertEqual(dto.words[0].bbox, (0.1, 0.2, 0.12, 0.04))
+        self.assertEqual(dto.words[0].line_index, 3)
+        self.assertEqual(dto.paragraph_start_line_indices, [2])
+        self.assertEqual(dto.indented_line_indices, [2])
 
         word_row.OCRConfidence = None
         repo.revision_words.return_value = [word_row]
@@ -412,6 +565,26 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             await service._build_page_dto(page, revision)
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["code"], "CONTENT_NOT_READY")
+
+
+class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_page_range_query_excludes_retired_rows_with_reused_page_numbers(self):
+        db = MagicMock()
+        result = MagicMock()
+        active_page = SimpleNamespace(PageNumber=2, LifecycleStatus="ACTIVE")
+        result.scalars.return_value.all.return_value = [active_page]
+        db.execute = AsyncMock(return_value=result)
+
+        rows = await ReadingContentRepository(db).all_pages_between_numbers(
+            BOOK_ID, 2, 2
+        )
+
+        self.assertEqual(rows, [active_page])
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("bookpages.lifecyclestatus", str(compiled).lower())
+        self.assertIn("ACTIVE", compiled.params.values())
+        self.assertIn(BOOK_ID, compiled.params.values())
 
 
 if __name__ == "__main__":

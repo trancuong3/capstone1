@@ -1,3 +1,5 @@
+import re
+
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, model_validator
 from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
@@ -95,6 +97,35 @@ class ProfileUpdate(ProfileBase):
 # 3. RESPONSE CHO CURRENT PARENT PROFILE
 # ==========================================
 
+class ParentProfileChildResponse(BaseModel):
+    """Safe child summary exposed on the authenticated parent's profile page."""
+
+    id: UUID
+    alias: str
+    grade: int = Field(ge=1, le=5)
+    created_at: datetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContactPhoneUpdateRequest(BaseModel):
+    """Request to change only the current user's unverified contact phone."""
+
+    contact_phone: str = Field(min_length=9, max_length=16)
+
+    @field_validator("contact_phone")
+    @classmethod
+    def validate_contact_phone(cls, value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", normalized):
+            raise ValueError(
+                "contact_phone must be in international E.164 format"
+            )
+        return normalized
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ParentProfileResponse(BaseModel):
     id: UUID = Field(
         validation_alias="Id",
@@ -117,7 +148,22 @@ class ParentProfileResponse(BaseModel):
         serialization_alias="created_at",
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    # Email and verification state come from Supabase Auth.
+    # The contact phone is stored separately on public.profiles and is unverified.
+    email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    pending_email: Optional[str] = None
+    email_verified: Optional[bool] = None
+    contact_info_status: Literal[
+        "available", "not_configured", "user_not_found", "lookup_failed"
+    ] = "lookup_failed"
+    children: List[ParentProfileChildResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        extra="forbid",
+    )
 
 
 class ProfileResponse(ProfileBase):

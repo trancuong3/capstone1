@@ -1,0 +1,98 @@
+name: Admin Book CRUD Verification
+
+on:
+  push:
+    branches:
+      - feature/admin-book-crud-metadata-quality-20261020
+      - fix/admin-book-crud-title-and-ci-20261020
+      - feature/admin-book-title-quality-check-20261021
+  pull_request:
+    branches:
+      - main
+      - feature/admin-book-crud-metadata-quality-20261020
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-verification:
+    name: Frontend format, lint, typecheck, tests, build and E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting of feature files
+        run: |
+          npx prettier --check \
+            "app/admin/(protected)/books/[bookId]/edit/page.tsx" \
+            "app/admin/(protected)/books/new/page.tsx" \
+            components/admin/admin-book-detail-screen.tsx \
+            components/admin/admin-book-editor-screen.tsx \
+            components/admin/admin-book-form.tsx \
+            components/admin/admin-books-screen.tsx \
+            components/admin/admin-metadata-quality-screen.tsx \
+            components/admin/admin-new-book-screen.tsx \
+            lib/api/admin-book-service.ts \
+            tests/admin/admin-book-editor-screen.test.tsx \
+            tests/admin/admin-metadata-quality-screen.test.tsx \
+            test/real-data-runtime-cleanup.test.tsx \
+            test/real-admin-services.test.ts \
+            tests/admin/admin-components.test.tsx \
+            tests/admin/admin-new-book-screen.test.tsx \
+            package.json \
+            playwright.config.ts \
+            playwright.real-data.config.ts \
+            test/browser/real-data-fixture.ts \
+            test/browser/real-data.pw.ts
+
+      - name: Check whole-repository formatting
+        continue-on-error: true
+        run: npm run format:check
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run unit and component tests
+        run: npm test
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: npx playwright test --config=playwright.real-data.config.ts
+
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics-${{ github.run_id }}
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

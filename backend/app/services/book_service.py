@@ -15,6 +15,8 @@ from app.repositories.book_repository import (
 )
 from app.schemas import BookCreate
 from app.schemas.book import (
+    AdminBookMetadataResponse,
+    AdminCatalogBookDetailResponse,
     AdminCatalogBookResponse,
     AdminPageImageRead,
     AdminPageListRead,
@@ -115,13 +117,23 @@ class AdminCatalogService:
         if row is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         try:
-            return CatalogBookResponse.model_validate(row)
+            return AdminBookMetadataResponse.model_validate(row)
         except ValidationError:
             raise HTTPException(status_code=501, detail="Book contract is not available yet") from None
 
+    async def book_detail(self, book_id: UUID) -> AdminCatalogBookDetailResponse:
+        book = await self.book(book_id)
+        max_page_number = await self.repository.max_page_number(book_id)
+        return AdminCatalogBookDetailResponse(
+            **book.model_dump(),
+            next_page_number=(max_page_number or 0) + 1,
+        )
+
     async def page(self, page_id: UUID):
         page = await self.repository.page(page_id)
-        if page is None:
+        # A retired page remains stored for history but is no longer part of the
+        # active Admin OCR workflow, including when an old detail URL is opened.
+        if page is None or page.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=404, detail="Resource not found")
         return page
 
@@ -140,7 +152,7 @@ class AdminCatalogService:
                 continue
             try:
                 output.append(AdminCatalogBookResponse(
-                book=CatalogBookResponse.model_validate(book), page_count=len(pages),
+                book=AdminBookMetadataResponse.model_validate(book), page_count=len(pages),
                 processing_count=statuses.count("PROCESSING"), needs_review_count=statuses.count("NEEDS_REVIEW"),
                 verified_count=statuses.count("VERIFIED"), parent_catalog_eligible=await self.repository.is_eligible(book.Id),
                 ))
@@ -198,14 +210,28 @@ class AdminCatalogService:
 
     async def image(self, page_id: UUID):
         page = await self.page(page_id)
-        preview_url = create_signed_image_url(page.ImagePath)
+        # Admin reviews the image that produced the latest revision, even when pending.
+        # Parent/Child reading keeps BookPage.ImagePath until that revision is verified.
+        revisions = await self.repository.revisions(page.Id)
+        metadata = (
+            dict(getattr(revisions[0], "ProcessingMeta", None) or {})
+            if revisions
+            else {}
+        )
+        candidate_path = metadata.get("source_image_path")
+        image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
+        candidate_width = metadata.get("source_image_width")
+        candidate_height = metadata.get("source_image_height")
+        width = candidate_width if type(candidate_width) is int and candidate_width > 0 else page.Width
+        height = candidate_height if type(candidate_height) is int and candidate_height > 0 else page.Height
+        preview_url = create_signed_image_url(image_path)
         try:
             return AdminPageImageRead(
                 page_id=page.Id,
                 page_number=page.PageNumber,
                 preview_url=preview_url,
-                width=page.Width,
-                height=page.Height,
+                width=width,
+                height=height,
             )
         except ValidationError:
             raise HTTPException(status_code=501, detail="Image metadata does not match the admin contract") from None

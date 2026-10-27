@@ -16,7 +16,10 @@ import {
 } from "@/test/fixtures/report-data-fixture";
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
@@ -74,6 +77,10 @@ describe("BookDetailScreen with real API adapters", () => {
     expect(
       screen.getByRole("button", { name: "Chọn trang 2" }),
     ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Trang kết thúc")).toHaveValue(
+      secondPage.page_id,
+    );
+    expect(screen.getByText(/Phạm vi đọc: Trang 2–2/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Bắt đầu đọc/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Chưa thể chuẩn bị buổi đọc",

@@ -46,7 +46,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setBook(nextBook);
       let nextPages: readonly AdminPageListItemUI[];
       try {
-        nextPages = await pages.list(bookId);
+        nextPages = (await pages.list(bookId)).filter(
+          (item) => item.processing.lifecycle_status === "ACTIVE",
+        );
       } catch (cause) {
         if (isServiceError(cause) && [501, 503].includes(cause.status)) {
           if (requestId !== requestIdRef.current) return;
@@ -79,9 +81,19 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       const result = await pages.retire(pageId);
       if (requestId !== requestIdRef.current) return;
-      if (result.lifecycle_status !== "RETIRED") {
+      if (
+        result.lifecycle_status !== "RETIRED" ||
+        result.page_id !== pageId ||
+        result.book_id !== bookId
+      ) {
         throw new Error("Unexpected page lifecycle response");
       }
+      // Remove the row immediately after Backend confirmation, then reload from
+      // PostgreSQL so the UI never relies on an optimistic-only deletion.
+      setItems(
+        (current) =>
+          current?.filter((entry) => entry.processing.page_id !== pageId) ?? [],
+      );
       setPendingRetire(null);
       setRetiringPageId(null);
       setPageActionNotice({
@@ -143,8 +155,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     <>
       <AdminPageHeader
         eyebrow="Chi tiết sách"
-        title={book.title}
-        description={`${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
+        title={book.title.trim() ? book.title : "Chưa có tiêu đề"}
+        description={`Tên sách: ${book.name?.trim() ? book.name : "Chưa có tên sách"} · ${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
       />
       <Link
         className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -152,18 +164,17 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       >
         <ArrowLeft aria-hidden className="size-5" /> Kho sách
       </Link>
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <AdminStatusBadge status={book.lifecycle_status} />
         <span className="text-sm text-muted">ID: {book.id}</span>
+        <Link
+          className="inline-flex min-h-11 items-center rounded-control border border-border px-4 font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
+          href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
+        >
+          Chỉnh sửa metadata / vòng đời
+        </Link>
       </div>
-      <AdminPageUploader
-        bookId={book.id}
-        nextPageNumber={Math.max(
-          1,
-          ...(items ?? []).map((item) => item.page_number + 1),
-        )}
-        onUploaded={() => void load()}
-      />
+      <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-2xl font-black" id="pages-title">

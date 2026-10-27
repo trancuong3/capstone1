@@ -1,7 +1,8 @@
 "use client";
 
 
-import { ArrowLeft, RefreshCw } from "lucide-react";
+
+import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ServiceError } from "@/lib/api/service-error";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -32,6 +33,7 @@ import type {
   ReadingPageWordDTO,
   ReadingReconnectDemoMode,
   ReadingSessionState,
+  ReadingSessionPageProgressDTO,
   ReadingUiState,
   TutorAction,
 } from "@/types/reading";
@@ -111,6 +113,11 @@ export function ReadingScreen({
   const [canonicalState, setCanonicalState] =
     useState<ReadingSessionState>("CREATED");
   const [page, setPage] = useState<ReadingPageDTO | null>(null);
+  const [pageProgress, setPageProgress] =
+    useState<ReadingSessionPageProgressDTO | null>(null);
+  const [pageNavigationError, setPageNavigationError] = useState<string | null>(
+    null,
+  );
   const [currentWordId, setCurrentWordId] = useState<string | null>(null);
   const [selectedManualPageId, setSelectedManualPageId] = useState<
     string | null
@@ -132,16 +139,34 @@ export function ReadingScreen({
     useState<ComparisonResult | null>(null);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isReadingWord, setIsReadingWord] = useState(false);
+  const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
+  const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [mispronouncedWordIds, setMispronouncedWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
+  const correctWordIdsRef = useRef<Set<string>>(new Set());
+  const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
+  const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
-  const exploredPageIdsRef = useRef<Set<string>>(new Set());
+  const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+
+  const startListeningRef = useRef<() => Promise<boolean>>(() =>
+    Promise.resolve(false),
+  );
+  const isUsingRecorderRef = useRef(false);
+
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -164,16 +189,39 @@ export function ReadingScreen({
     for (const w of words) {
       spokenWordsSetRef.current.add(w);
     }
+    setSpokenWords(new Set(spokenWordsSetRef.current));
   }, []);
 
   const handleWordClick = useCallback(
-    (word: ReadingPageWordDTO) => {
+    async (word: ReadingPageWordDTO) => {
       setCurrentWordId(word.word_id);
       setLatestTranscript(word.text);
-      recordSpokenText(word.text);
+
+      if (speechPlayer.isPlaying) {
+        speechPlayer.stop();
+      }
+
+      setIsReadingWord(true);
+      try {
+        await speechPlayer.play(word.text);
+      } catch (err) {
+        console.warn("Lỗi phát âm 1 từ:", err);
+      } finally {
+        if (mountedRef.current) {
+          setIsReadingWord(false);
+        }
+      }
     },
-    [recordSpokenText],
+    [speechPlayer],
   );
+
+  const handleReadCurrentWord = useCallback(() => {
+    if (!page || !currentWordId) return;
+    const word = page.words.find((w) => w.word_id === currentWordId);
+    if (word) {
+      void handleWordClick(word);
+    }
+  }, [currentWordId, handleWordClick, page]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -190,10 +238,34 @@ export function ReadingScreen({
   }, []);
 
   useEffect(() => {
-    if (page?.page_id) {
-      exploredPageIdsRef.current.add(page.page_id);
+    if (countdown === null) return;
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        if (mountedRef.current) {
+          setCountdown((c) => (c !== null ? c - 1 : null));
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-  }, [page?.page_id]);
+    const finishTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        setCountdown(null);
+        void startListeningRef.current().then((ok) => {
+          if (mountedRef.current && ok) {
+            setIsMicRecording(true);
+          }
+        });
+      }
+    }, 400);
+    return () => clearTimeout(finishTimer);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (!page) return;
+    for (const word of page.words) {
+      wordTextByIdRef.current.set(word.word_id, word.text);
+    }
+  }, [page]);
 
   useEffect(() => {
     let active = true;
@@ -207,6 +279,7 @@ export function ReadingScreen({
           pagePreviews,
           permissions,
           completion,
+          initialProgress,
         ] = await Promise.all([
           services.bookService.get(session.book_id),
           services.childService.get(session.child_id),
@@ -214,17 +287,26 @@ export function ReadingScreen({
           services.bookService.listPages(session.book_id),
           services.devicePermissionService.getSnapshot(),
           services.readingService.getCompletionSummary(sessionId),
+          services.readingService.getPageProgress(sessionId),
         ]);
 
-        const selectedPage = initialPageId
-          ? await services.pageMatchService.selectPage(sessionId, initialPageId)
-          : currentPage;
+        // Server-side progress is authoritative on reload. A stale pageId query
+        // must not reset a session that was already advanced to another page.
+        const requestedPageIsOutsideRange =
+          Boolean(initialPageId) &&
+          !initialProgress.pages.some((item) => item.page_id === initialPageId);
 
         if (!active) return;
 
-        setPage(selectedPage);
-        setCurrentWordId(selectedPage.words[3]?.word_id ?? null);
-        setSelectedManualPageId(selectedPage.page_id);
+        setPage(currentPage);
+        setPageProgress(initialProgress);
+        setPageNavigationError(
+          requestedPageIsOutsideRange
+            ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
+            : null,
+        );
+        setCurrentWordId(currentPage.words[3]?.word_id ?? null);
+        setSelectedManualPageId(currentPage.page_id);
         setCanonicalState(session.state);
         setLoadState({
           status: "ready",
@@ -257,31 +339,55 @@ export function ReadingScreen({
   }, [loadState.status, services.readingSocketAdapter, sessionId]);
 
   useEffect(() => {
-    if (loadState.status !== "ready" || uiState !== "page-turn" || !page) {
+    if (
+      loadState.status !== "ready" ||
+      uiState !== "page-turn" ||
+      !page ||
+      !pageProgress
+    ) {
       return;
     }
 
-    const nextPage = loadState.data.pagePreviews.find(
-      (candidate) => candidate.page_id !== page.page_id,
-    );
+    const nextPage = pageProgress.pages[pageProgress.current_index + 1];
+    // The final-page message and disabled Next button are rendered from
+    // pageProgress; do not set state synchronously inside this effect.
     if (!nextPage) return;
 
     let active = true;
     void services.pageMatchService
       .selectPage(sessionId, nextPage.page_id)
-      .then((matchedPage) => {
+      .then(async (matchedPage) => {
+        const progress =
+          await services.readingService.getPageProgress(sessionId);
         if (!active) return;
         setPage(matchedPage);
+        setPageProgress(progress);
+        setPageNavigationError(null);
         setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
         setSelectedManualPageId(matchedPage.page_id);
         setCanonicalState("LISTENING");
+        setUiState("reading");
+      })
+      .catch(() => {
+        if (!active) return;
+        setPageNavigationError(
+          "Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.",
+        );
         setUiState("reading");
       });
 
     return () => {
       active = false;
     };
-  }, [loadState, page, services.pageMatchService, sessionId, uiState]);
+  }, [
+    loadState,
+    page,
+    pageProgress,
+    services.pageMatchService,
+    services.readingService,
+    sessionId,
+    uiState,
+  ]);
 
   function normalizeVietnamese(text: string): string {
     return text
@@ -293,32 +399,83 @@ export function ReadingScreen({
       .trim();
   }
 
-  function matchSpokenWord(spokenText: string) {
+  function verifySpokenWord(spokenText: string) {
     if (!page || !page.words.length || !spokenText) return;
-
-    const tokens = normalizeVietnamese(spokenText)
-      .split(/\s+/)
-      .filter(Boolean);
-
+    const cleanSpoken = normalizeVietnamese(spokenText);
+    const tokens = cleanSpoken.split(/\s+/).filter((t) => t.length > 0);
     if (!tokens.length) return;
 
-    let matchedWordId: string | null = null;
+    const words = page.words;
+    const currentIdx = words.findIndex((w) => w.word_id === currentWordId);
+    const searchIdx = currentIdx >= 0 ? currentIdx : 0;
+    const targetWord = words[searchIdx];
+    if (!targetWord) return;
 
-    for (const token of tokens) {
-      for (const w of page.words) {
-        const cleanWord = normalizeVietnamese(w.text);
+    const targetClean = normalizeVietnamese(targetWord.text);
 
-        if (cleanWord === token) {
-          spokenWordsSetRef.current.add(w.text);
-          matchedWordId = w.word_id;
-          break;
-        }
+    // Look for target word match in the spoken tokens
+    let matchedTokenIdx = -1;
+    for (let t = 0; t < tokens.length; t++) {
+      const tok = tokens[t];
+      if (
+        tok === targetClean ||
+        (targetClean.length >= 2 && tok.includes(targetClean)) ||
+        (tok.length >= 2 && targetClean.includes(tok))
+      ) {
+        matchedTokenIdx = t;
+        break;
       }
     }
 
-    if (matchedWordId) {
-      setCurrentWordId(matchedWordId);
+    if (matchedTokenIdx >= 0) {
+      // Correct pronunciation!
+      correctWordIdsRef.current.add(targetWord.word_id);
+      mispronouncedWordIdsRef.current.delete(targetWord.word_id);
+      spokenWordsSetRef.current.add(targetWord.text);
+
+      let nextIdx = searchIdx + 1;
+      let nextTokIdx = matchedTokenIdx + 1;
+
+      // Match subsequent words if user spoke a fluent phrase in one go
+      while (nextIdx < words.length && nextTokIdx < tokens.length) {
+        const nextTargetClean = normalizeVietnamese(words[nextIdx].text);
+        const nextTok = tokens[nextTokIdx];
+        if (
+          nextTok === nextTargetClean ||
+          (nextTargetClean.length >= 2 && nextTok.includes(nextTargetClean)) ||
+          (nextTok.length >= 2 && nextTargetClean.includes(nextTok))
+        ) {
+          correctWordIdsRef.current.add(words[nextIdx].word_id);
+          mispronouncedWordIdsRef.current.delete(words[nextIdx].word_id);
+          spokenWordsSetRef.current.add(words[nextIdx].text);
+          nextIdx++;
+          nextTokIdx++;
+        } else {
+          // Child stumbled or mispronounced this subsequent word
+          mispronouncedWordIdsRef.current.add(words[nextIdx].word_id);
+          failedWordsSetRef.current.add(words[nextIdx].text);
+          break;
+        }
+      }
+
+      // Advance yellow highlight to the next word
+      if (nextIdx < words.length) {
+        setCurrentWordId(words[nextIdx].word_id);
+      } else {
+        setCurrentWordId(words[words.length - 1].word_id);
+      }
+    } else {
+      // Child spoke, but did not pronounce the target word correctly -> Alert RED!
+      mispronouncedWordIdsRef.current.add(targetWord.word_id);
+      failedWordsSetRef.current.add(targetWord.text);
+      // Keep currentWordId on targetWord (DO NOT jump forward)
+      setCurrentWordId(targetWord.word_id);
+
     }
+
+    setCorrectWordIds(new Set(correctWordIdsRef.current));
+    setMispronouncedWordIds(new Set(mispronouncedWordIdsRef.current));
+    setSpokenWords(new Set(spokenWordsSetRef.current));
   }
 
   async function startListening(): Promise<boolean> {
@@ -331,7 +488,24 @@ export function ReadingScreen({
     // 1. Record the full session. ElevenLabs STT runs once after recording stops.
     // Keep the recorder callback empty to avoid per-utterance API requests.
     try {
-      await speechRecorder.start(() => {});
+      await speechRecorder.start(async (utteranceBlob) => {
+        if (!mountedRef.current || !isListeningActiveRef.current) return;
+        try {
+          const transcript = await speechService.transcribe(utteranceBlob, {
+            languageCode: "vi",
+          });
+          if (!mountedRef.current || !transcript.text) return;
+          const cleanText = transcript.text.trim();
+          if (cleanText) {
+            setLatestTranscript(cleanText);
+            verifySpokenWord(cleanText);
+            recordSpokenText(cleanText);
+          }
+        } catch (e) {
+          console.warn("Live ElevenLabs STT utterance notice:", e);
+        }
+      });
+      isUsingRecorderRef.current = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message.includes("not supported")) {
@@ -378,7 +552,7 @@ export function ReadingScreen({
             const currentWord = latestWord.trim() || fullLive.trim();
             if (currentWord && mountedRef.current) {
               setLatestTranscript(currentWord);
-              matchSpokenWord(currentWord);
+              verifySpokenWord(currentWord);
               recordSpokenText(currentWord);
             }
           };
@@ -418,9 +592,12 @@ export function ReadingScreen({
     return true;
   }
 
-  async function transcribeRecording(
-    recording: Blob,
-  ): Promise<string> {
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  });
+
+  async function transcribeRecording(recording: Blob) {
     transcriptionAbortRef.current?.abort();
 
     const controller = new AbortController();
@@ -431,11 +608,12 @@ export function ReadingScreen({
         languageCode: "vi",
         signal: controller.signal,
       });
-      console.log("Full STT result:", transcript);
-      console.log("STT words:", transcript.words);
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (transcript.text) {
+        setLatestTranscript(transcript.text);
+        verifySpokenWord(transcript.text);
+        recordSpokenText(transcript.text);
 
-      if (!mountedRef.current || controller.signal.aborted) {
-        return "";
       }
 
       const text = transcript.text?.trim() ?? "";
@@ -450,7 +628,7 @@ export function ReadingScreen({
       setComparisonError(null);
 
       // Giữ chức năng cũ
-      matchSpokenWord(text);
+      
       recordSpokenText(text);
 
       // So sánh với nội dung sách
@@ -524,7 +702,15 @@ export function ReadingScreen({
   }
 
   async function handleReadSample() {
-    if (isBusy) return;
+    if (isBusy && !speechPlayer.isPlaying) return;
+    if (speechPlayer.isPlaying) {
+      speechPlayer.stop();
+      setIsReadingWord(false);
+      setIsBusy(false);
+      return;
+    }
+    if (!page) return;
+
     if (isMicRecording) {
       try {
         await stopListeningAndTranscribe();
@@ -533,29 +719,86 @@ export function ReadingScreen({
       }
       if (mountedRef.current) setIsMicRecording(false);
     }
-    if (speechPlayer.isPlaying) {
-      speechPlayer.stop();
-      return;
-    }
-    if (!page) return;
+
     const rawText = page.text || page.words.map((w) => w.text).join(" ") || "";
     const fullText = rawText.replace(/\s+/g, " ").trim();
     if (!fullText) return;
 
+    const words = page.words;
+    if (!words.length) return;
+
     setIsBusy(true);
+    setIsReadingWord(false);
+
+    // Calculate word duration weights for natural Vietnamese speech rhythm
+    const weights = words.map((w) => {
+      let weight = Math.max(2, w.text.length);
+      if (/[.,;:!?…"”]/.test(w.text)) {
+        weight += 4;
+      }
+      return weight;
+    });
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    const cumulativeWeights: number[] = [];
+    let running = 0;
+    for (const w of weights) {
+      running += w;
+      cumulativeWeights.push(running);
+    }
+
+    // Set first word active immediately so user sees what is being queued
+    setCurrentWordId(words[0].word_id);
+
     try {
-      await speechPlayer.play(fullText);
+      await speechPlayer.play(fullText, {
+        onPlay: () => {
+          if (!mountedRef.current) return;
+          setCurrentWordId(words[0].word_id);
+        },
+        onTimeUpdate: (currentTime, duration) => {
+          if (!mountedRef.current || !duration || duration <= 0) return;
+          const progress = Math.min(0.999, Math.max(0, currentTime / duration));
+          const targetWeight = progress * totalWeight;
+          let idx = cumulativeWeights.findIndex((cw) => cw >= targetWeight);
+          if (idx < 0) idx = 0;
+          if (idx >= words.length) idx = words.length - 1;
+
+          const targetWord = words[idx];
+          if (targetWord) {
+            setCurrentWordId(targetWord.word_id);
+            for (let i = 0; i <= idx; i++) {
+              spokenWordsSetRef.current.add(words[i].text);
+            }
+            setSpokenWords(new Set(spokenWordsSetRef.current));
+          }
+        },
+        onEnded: () => {
+          if (!mountedRef.current) return;
+          setIsBusy(false);
+          const lastWord = words[words.length - 1];
+          if (lastWord) {
+            setCurrentWordId(lastWord.word_id);
+            for (const w of words) {
+              spokenWordsSetRef.current.add(w.text);
+            }
+            setSpokenWords(new Set(spokenWordsSetRef.current));
+          }
+        },
+      });
     } catch {
-      if (mountedRef.current) setUiState("tts-error");
-    } finally {
-      if (mountedRef.current) setIsBusy(false);
+      if (mountedRef.current) {
+        setUiState("tts-error");
+        setIsBusy(false);
+      }
     }
   }
 
   async function handleToggleListening() {
-    if (isBusy) return;
+    if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      setIsReadingWord(false);
+      setIsBusy(false);
     }
     if (isMicRecording) {
       setIsBusy(true);
@@ -595,6 +838,17 @@ export function ReadingScreen({
     setUiState("reading");
     setIsMicRecording(false);
     setIsBusy(false);
+    setCountdown(3);
+    if (page && page.words.length > 0) {
+      setCurrentWordId(page.words[0].word_id);
+    }
+    correctWordIdsRef.current.clear();
+    mispronouncedWordIdsRef.current.clear();
+    failedWordsSetRef.current.clear();
+    spokenWordsSetRef.current.clear();
+    setCorrectWordIds(new Set());
+    setMispronouncedWordIds(new Set());
+    setSpokenWords(new Set());
   }
 
   async function resumeReading() {
@@ -646,6 +900,72 @@ export function ReadingScreen({
     setIsBusy(false);
   }
 
+  async function navigateWithinRange(targetIndex: number) {
+    if (
+      !pageProgress ||
+      isBusy ||
+      targetIndex < 0 ||
+      targetIndex >= pageProgress.pages.length
+    ) {
+      return;
+    }
+    const target = pageProgress.pages[targetIndex];
+    if (!target || target.page_id === page?.page_id) return;
+
+    setIsBusy(true);
+    setPageNavigationError(null);
+    speechPlayer.stop();
+    setIsReadingWord(false);
+    try {
+      if (isMicRecording) {
+        await stopListeningAndTranscribe();
+        if (mountedRef.current) setIsMicRecording(false);
+      }
+      const nextProgress = await services.readingService.navigateToPage(
+        sessionId,
+        target.page_id,
+      );
+      const nextPage = await services.readingService.getCurrentPage(sessionId);
+      if (!mountedRef.current) return;
+      setPageProgress(nextProgress);
+      setPage(nextPage);
+      setCurrentWordId(nextPage.words[3]?.word_id ?? null);
+      setSelectedManualPageId(nextPage.page_id);
+      setCountdown(null);
+      setUiState("reading");
+    } catch {
+      if (mountedRef.current) {
+        setPageNavigationError(
+          "Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
+  async function confirmCurrentPageCompleted() {
+    if (!pageProgress?.persisted || !page || isBusy) return;
+    setIsBusy(true);
+    setPageNavigationError(null);
+    try {
+      const progress = await services.readingService.completeCurrentPage(
+        sessionId,
+        page.page_id,
+      );
+      if (!mountedRef.current) return;
+      setPageProgress(progress);
+    } catch {
+      if (mountedRef.current) {
+        setPageNavigationError(
+          "Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
   async function retryPageMatch() {
     if (isBusy) return;
     setIsBusy(true);
@@ -655,6 +975,8 @@ export function ReadingScreen({
     setPage(matchedPage);
     setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
     setSelectedManualPageId(matchedPage.page_id);
+    setPageProgress(await services.readingService.getPageProgress(sessionId));
+    setPageNavigationError(null);
     setCanonicalState("LISTENING");
     setConnectionState("connected");
     setUiState("reading");
@@ -670,6 +992,8 @@ export function ReadingScreen({
     );
     if (!mountedRef.current) return;
     setPage(matchedPage);
+    setPageProgress(await services.readingService.getPageProgress(sessionId));
+    setPageNavigationError(null);
     setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
     setCanonicalState("LISTENING");
     setConnectionState("connected");
@@ -778,11 +1102,34 @@ export function ReadingScreen({
     if (!mountedRef.current) return;
     const wordsList = Array.from(spokenWordsSetRef.current);
     const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
-    const pagesExplored = exploredPageIdsRef.current.size || null;
+    const persistedCompletion = await services.readingService
+      .getCompletionSummary(sessionId)
+      .catch(() => null);
+
+    const correctWordsList = Array.from(correctWordIdsRef.current)
+      .map((wordId) => wordTextByIdRef.current.get(wordId))
+      .filter((word): word is string => Boolean(word));
+    const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
+
+    const totalTracked =
+      correctWordsList.length + mispronouncedWordsList.length;
+    const score =
+      totalTracked > 0
+        ? Math.round((correctWordsList.length / totalTracked) * 100)
+        : null;
+
     const updatedSummary: ReadingCompletionSummaryUI = {
+      correct_words: correctWordsList,
       duration_minutes: durationMinutes,
-      pages_explored: pagesExplored,
+      mispronounced_words: mispronouncedWordsList,
+      pages_explored:
+        persistedCompletion?.pages_explored ??
+        (pageProgress?.persisted ? pageProgress.completed_pages : null),
+      selected_range_pages:
+        persistedCompletion?.selected_range_pages ??
+        (pageProgress?.persisted ? pageProgress.total_pages : null),
       practiced_words: wordsList.length,
+      score,
       spoken_words: wordsList,
       transcripts: transcriptsListRef.current,
     };
@@ -845,6 +1192,11 @@ export function ReadingScreen({
   }
 
   const { book, child, completion, pagePreviews, permissions } = loadState.data;
+  const rangePagePreviews = pageProgress
+    ? pagePreviews.filter((candidate) =>
+        pageProgress.pages.some((entry) => entry.page_id === candidate.page_id),
+      )
+    : pagePreviews;
   const detailHref = `/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(child.id)}`;
   const booksHref = `/books?childId=${encodeURIComponent(child.id)}`;
   const safety = services.readingSocketAdapter.getSafetySnapshot(uiState);
@@ -891,27 +1243,112 @@ export function ReadingScreen({
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
+        {pageProgress ? (
+          <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-bold text-ink">
+                Phạm vi đọc: Trang {pageProgress.start_page_number}–
+                {pageProgress.end_page_number}
+              </p>
+              <p className="text-sm text-muted" aria-live="polite">
+                Trang {pageProgress.current_page_number} ·{" "}
+                {pageProgress.current_index + 1}/{pageProgress.total_pages}{" "}
+                trong phạm vi · {pageProgress.completed_pages}/
+                {pageProgress.total_pages} trang đã hoàn thành
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index <= 0
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index - 1)
+                }
+                variant="secondary"
+              >
+                <ChevronLeft aria-hidden="true" className="size-5" />
+                Trang trước
+              </Button>
+              <Button
+                disabled={
+                  isBusy ||
+                  uiState !== "reading" ||
+                  pageProgress.current_index >= pageProgress.total_pages - 1
+                }
+                onClick={() =>
+                  void navigateWithinRange(pageProgress.current_index + 1)
+                }
+                variant="secondary"
+              >
+                Trang tiếp theo
+                <ChevronRight aria-hidden="true" className="size-5" />
+              </Button>
+            </div>
+            {pageProgress.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                className="sm:self-start"
+                disabled={isBusy || uiState !== "reading"}
+                onClick={() => void confirmCurrentPageCompleted()}
+                variant="quiet"
+              >
+                Đánh dấu trang đã đọc xong
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {pageNavigationError ? (
+          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+        ) : null}
+        {pageProgress &&
+        pageProgress.current_index === pageProgress.total_pages - 1 ? (
+          <p className="text-sm font-semibold text-primary" role="status">
+            Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
+            sàng.
+          </p>
+        ) : null}
+      </div>
+
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
-        controlsDisabled={uiState !== "reading" || isBusy}
+        controlsDisabled={
+          uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
+        }
+        correctWordIds={correctWordIds}
+        countdown={countdown}
         currentWordId={currentWordId}
+        currentWordText={
+          page.words.find((w) => w.word_id === currentWordId)?.text ?? null
+        }
         exitHref={detailHref}
+        isCurrentWordMispronounced={Boolean(
+          currentWordId && mispronouncedWordIds.has(currentWordId),
+        )}
         isListening={uiState === "reading"}
         isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
-        isPlayingSample={speechPlayer.isPlaying}
+        isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
+        isReadingWord={isReadingWord}
         isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
+        mispronouncedWordIds={mispronouncedWordIds}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
         onPause={() => void pauseReading()}
         onReadSample={() => void handleReadSample()}
+        onReadWord={handleReadCurrentWord}
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
         comparisonResult={comparisonResult}
+        spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
@@ -1031,7 +1468,7 @@ export function ReadingScreen({
           onCancel={() => setUiState("reading")}
           onConfirm={() => void confirmManualPage()}
           onSelect={setSelectedManualPageId}
-          pages={pagePreviews}
+          pages={rangePagePreviews}
           selectedPageId={selectedManualPageId}
         />
       ) : uiState === "reconnecting" || uiState === "stt-error" ? (

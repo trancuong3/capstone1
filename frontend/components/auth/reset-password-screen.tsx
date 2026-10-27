@@ -50,12 +50,18 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
   if (isSuccessful) {
     return (
       <AuthShell>
-        <Card tone="success">
+        <Card
+          className="mx-auto max-w-[560px] border border-border shadow-sm"
+          tone="success"
+        >
           <div>
-            <h1 className="text-heading font-extrabold text-success-ink">
+            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-success-ink">
+              Tài khoản ViRead
+            </p>
+            <h1 className="mt-2 text-heading font-extrabold text-success-ink">
               Đã đổi mật khẩu
             </h1>
-            <p className="mt-4 text-body text-muted sm:mt-6">
+            <p className="mt-3 text-body leading-relaxed text-muted">
               Mật khẩu mới đã được lưu. Ba mẹ đăng nhập để tiếp tục cùng bé đọc
               sách.
             </p>
@@ -74,12 +80,15 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
     return (
       <AuthShell>
-        <Card>
+        <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
           <div>
-            <h1 className="text-heading font-extrabold text-ink">
+            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+              Bảo mật tài khoản ViRead
+            </p>
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
               {isExpired ? "Liên kết đã hết hạn" : "Liên kết không hợp lệ"}
             </h1>
-            <p className="mt-4 text-body text-muted sm:mt-6">
+            <p className="mt-3 text-body leading-relaxed text-muted">
               {isExpired
                 ? "Ba mẹ hãy yêu cầu một hướng dẫn đặt lại mật khẩu mới."
                 : "Ba mẹ vui lòng kiểm tra lại email hoặc yêu cầu một liên kết mới."}
@@ -102,12 +111,15 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card>
+      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
         <div>
-          <h1 className="text-heading font-extrabold text-ink">
+          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            Bảo mật tài khoản ViRead
+          </p>
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
             Đặt mật khẩu mới
           </h1>
-          <p className="mt-4 text-body text-muted sm:mt-6">
+          <p className="mt-3 text-body leading-relaxed text-muted">
             Dùng ít nhất 8 ký tự. Nhập lại mật khẩu mới để xác nhận.
           </p>
         </div>

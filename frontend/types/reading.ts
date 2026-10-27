@@ -21,6 +21,13 @@ export interface ReadingSessionSummaryDTO {
   readonly duration_ms: number | null;
 }
 
+export interface HistorySessionSummaryDTO extends Omit<
+  ReadingSessionSummaryDTO,
+  "state"
+> {
+  readonly state: ReadingSessionState | "IN_PROGRESS";
+}
+
 export type ReadingSession = ReadingSessionSummaryDTO;
 
 export interface ReadingSessionCreateDTO {
@@ -29,6 +36,35 @@ export interface ReadingSessionCreateDTO {
   readonly mode: "realtime";
   readonly selected_page_id?: UUID;
   readonly selected_page_revision_id?: UUID;
+  /** Last page selected for this session; omitted requests remain one-page sessions. */
+  readonly end_page_id?: UUID;
+}
+
+export type ReadingSessionPageStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED";
+
+export interface ReadingSessionPageProgressItemDTO {
+  readonly page_id: UUID;
+  readonly page_revision_id: UUID;
+  readonly page_number: number;
+  readonly page_order: number;
+  readonly status: ReadingSessionPageStatus;
+  readonly started_at: ISODateTime | null;
+  readonly completed_at: ISODateTime | null;
+}
+
+export interface ReadingSessionPageProgressDTO {
+  readonly session_id: UUID;
+  readonly persisted: boolean;
+  readonly start_page_id: UUID;
+  readonly end_page_id: UUID;
+  readonly current_page_id: UUID;
+  readonly start_page_number: number;
+  readonly end_page_number: number;
+  readonly current_page_number: number;
+  readonly current_index: number;
+  readonly total_pages: number;
+  readonly completed_pages: number;
+  readonly pages: readonly ReadingSessionPageProgressItemDTO[];
 }
 
 export interface ReadingSessionCreateResponseDTO {
@@ -51,6 +87,8 @@ export interface ReadingPageWordDTO {
   readonly word_index: number;
   readonly text: string;
   readonly bbox: WordBoundingBox;
+  /** Optional for compatibility with older cached/API fixtures. */
+  readonly line_index?: number;
 }
 
 export interface ReadingPageDTO {
@@ -63,6 +101,10 @@ export interface ReadingPageDTO {
   readonly image_url?: string | null;
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
+  /** Zero-based line indices that begin a new paragraph. */
+  readonly paragraph_start_line_indices?: readonly number[];
+  /** Zero-based line indices with image-derived first-line indentation. */
+  readonly indented_line_indices?: readonly number[];
 }
 
 export type ReadingPage = ReadingPageDTO;
@@ -163,9 +205,13 @@ export interface ReadingRealtimeSnapshotUI {
 export interface ReadingCompletionSummaryUI {
   readonly duration_minutes: number | null;
   readonly pages_explored: number | null;
+  readonly selected_range_pages?: number | null;
   readonly practiced_words: number | null;
   readonly spoken_words?: readonly string[] | null;
   readonly transcripts?: readonly string[] | null;
+  readonly correct_words?: readonly string[] | null;
+  readonly mispronounced_words?: readonly string[] | null;
+  readonly score?: number | null;
 }
 
 export type ReadingEventType =
@@ -217,17 +263,54 @@ export interface SessionComprehensionResultDTO {
   readonly answer: ComprehensionAnswerResultDTO | null;
 }
 
-export interface ReadingSessionDetailDTO extends ReadingSessionSummaryDTO {
+export interface HistoryEventDTO extends Omit<
+  ReadingEventDTO,
+  "type" | "status"
+> {
+  readonly type: ReadingEventType | "MISPRONUNCIATION";
+  readonly status:
+    ReadingEventStatus | "DETECTED" | "FEEDBACK_GIVEN" | "IGNORED_BY_GATE";
+}
+
+export interface HistoryComprehensionResultDTO {
+  readonly question: Omit<
+    ComprehensionQuestionDTO,
+    "difficulty" | "source_span"
+  > & {
+    readonly difficulty: number | string | null;
+    readonly source_span: SourceSpanDTO | null;
+  };
+  readonly answer: ComprehensionAnswerResultDTO | null;
+}
+
+export type HistorySectionStatus =
+  "absent" | "available" | "partial" | "unsupported";
+
+export interface HistoryFluencyAssessmentDTO extends Omit<
+  FluencyAssessmentDTO,
+  "metrics"
+> {
+  readonly metrics: FluencyComponentMetricsDTO | null;
+}
+
+export interface ReadingSessionDetailDTO extends HistorySessionSummaryDTO {
+  readonly selected_range_pages?: number | null;
+  readonly pages_completed?: number | null;
   readonly selected_page_revision_ids: readonly UUID[];
   readonly reference_page_revision_ids: readonly UUID[];
-  readonly events: readonly ReadingEventDTO[];
-  readonly fluency_assessment: FluencyAssessmentDTO | null;
-  readonly comprehension: readonly SessionComprehensionResultDTO[];
+  readonly events: readonly HistoryEventDTO[];
+  readonly fluency_assessment: HistoryFluencyAssessmentDTO | null;
+  readonly comprehension: readonly HistoryComprehensionResultDTO[];
+  readonly availability: {
+    readonly events: HistorySectionStatus;
+    readonly fluency: HistorySectionStatus;
+    readonly comprehension: HistorySectionStatus;
+  };
   readonly report_id: UUID | null;
 }
 
 export interface SessionHistoryResponseDTO {
-  readonly sessions: readonly ReadingSessionSummaryDTO[];
+  readonly sessions: readonly HistorySessionSummaryDTO[];
   readonly next_cursor: string | null;
 }
 

@@ -22,7 +22,7 @@ function isAllowedType(
 
 export function validateUploadFile(
   file: File,
-  pageNumber: number,
+  sequenceNumber: number,
 ): ValidatedUploadFileUI {
   if (!isAllowedType(file.type)) {
     return {
@@ -36,11 +36,10 @@ export function validateUploadFile(
 
   return {
     input: {
-      client_id: `${pageNumber}-${file.name}-${file.size}`,
+      client_id: `${sequenceNumber}-${file.name}-${file.size}`,
       file_name: file.name,
       mime_type: file.type,
       size_bytes: file.size,
-      page_number: pageNumber,
       file,
     },
     error: null,
@@ -82,10 +81,6 @@ export function validateUploadInput(
     input.size_bytes > MAX_PAGE_UPLOAD_BYTES
   ) {
     return `${input.file_name}: dung lượng phải lớn hơn 0 và không vượt quá 12 MB.`;
-  }
-
-  if (!Number.isSafeInteger(input.page_number) || input.page_number < 1) {
-    return `${input.file_name}: số trang không hợp lệ.`;
   }
 
   return validateUploadDimensions(input);

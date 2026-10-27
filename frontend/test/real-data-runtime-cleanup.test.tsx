@@ -34,6 +34,7 @@ vi.mock("@/lib/supabase/config", () => ({
 const bookId = "22222222-2222-4222-8222-222222222222";
 const book = {
   id: bookId,
+  name: "Tên sách thật từ API kiểm thử",
   title: "Dữ liệu thật từ API kiểm thử",
   author: null,
   min_grade: 1,
@@ -144,16 +145,19 @@ describe("Phase 5 real-data runtime cleanup", () => {
       screen.getByRole("heading", { name: "Tạo sách mới" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", { name: "Tên sách" }),
+      screen.getByRole("textbox", { name: "Tên sách *" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Tiêu đề sách *" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("textbox", { name: /Tác giả/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Khối lớp nhỏ nhất" }),
+      screen.getByRole("combobox", { name: "Khối lớp nhỏ nhất *" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Khối lớp lớn nhất" }),
+      screen.getByRole("combobox", { name: "Khối lớp lớn nhất *" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo sách" })).toBeEnabled();
     expect(
@@ -165,11 +169,7 @@ describe("Phase 5 real-data runtime cleanup", () => {
     const onUploaded = vi.fn();
     render(
       <AdminServicesProvider>
-        <AdminPageUploader
-          bookId={bookId}
-          nextPageNumber={1}
-          onUploaded={onUploaded}
-        />
+        <AdminPageUploader bookId={bookId} onUploaded={onUploaded} />
       </AdminServicesProvider>,
     );
     const input = screen.getByLabelText(/Chọn một hoặc nhiều ảnh trang sách/);

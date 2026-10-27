@@ -72,6 +72,11 @@ export const sessionDetailFixture: ReadingSessionDetailDTO = {
   fluency_assessment: null,
   comprehension: [],
   report_id: null,
+  availability: {
+    events: "available",
+    fluency: "absent",
+    comprehension: "absent",
+  },
 };
 export const difficultWordFixture: DifficultWordDTO = {
   normalized_word: "nghiêng",
@@ -92,6 +97,15 @@ export const reportWindowFixture: ReportDateWindow = {
   timezone: "Asia/Ho_Chi_Minh",
 };
 export const progressReportFixture: ProgressReportDTO = {
+  id: "18000000-0000-4000-8000-000000000001",
+  generated_at: "2026-10-01T00:10:00Z",
+  legacy: null,
+  data_status: "complete",
+  availability: {
+    metrics: "available",
+    difficult_words: "available",
+    comparison: "absent",
+  },
   child_id: TEST_CHILD_ID,
   period_start: reportWindowFixture.period_start,
   period_end: reportWindowFixture.period_end,

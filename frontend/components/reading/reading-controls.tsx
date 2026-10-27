@@ -67,7 +67,7 @@ export function ReadingControls({
           <Volume2 aria-hidden="true" className="size-6 shrink-0" />
         )}
         <span className="truncate">
-          {isPlayingSample ? "Dừng mẫu" : "Đọc mẫu"}
+          {isPlayingSample ? "Dừng mẫu" : "Đọc cả đoạn"}
         </span>
       </Button>
 

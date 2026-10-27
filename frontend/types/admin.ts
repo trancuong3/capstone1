@@ -48,6 +48,7 @@ export interface AdminParentDetailDTO {
 }
 
 export interface AdminBookCreateDTO {
+  readonly name: string;
   readonly title: string;
   readonly author: string | null;
   readonly min_grade: number;
@@ -63,7 +64,7 @@ export interface AdminBookQueryUI {
 }
 
 export interface AdminBookListItemUI {
-  readonly book: BookListItemDTO;
+  readonly book: AdminBookDTO;
   readonly page_count: number;
   readonly processing_count: number;
   readonly needs_review_count: number;
@@ -140,7 +141,6 @@ export interface AdminPageUploadInputUI {
   readonly file_name: string;
   readonly mime_type: "image/jpeg" | "image/png" | "image/webp";
   readonly size_bytes: number;
-  readonly page_number: number;
   readonly width?: number;
   readonly height?: number;
   /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
@@ -219,4 +219,8 @@ export type AdminMockScenario =
   | "degraded"
   | "unavailable";
 
-export type AdminBookDTO = BookListItemDTO;
+export type AdminBookDTO = BookListItemDTO & {
+  readonly name: string | null;
+  /** Next available page number, calculated from active pages only. */
+  readonly next_page_number?: number;
+};

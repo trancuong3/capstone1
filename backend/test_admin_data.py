@@ -86,6 +86,26 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).processing(page_row())
         self.assertEqual(caught.exception.status_code, 501)
 
+    async def test_admin_book_detail_uses_next_active_page_number(self):
+        repo = catalog_repo()
+        repo.max_page_number = AsyncMock(return_value=7)
+
+        result = await AdminCatalogService(repository=repo).book_detail(BOOK)
+
+        self.assertEqual(result.id, BOOK)
+        self.assertEqual(result.next_page_number, 8)
+        repo.max_page_number.assert_awaited_once_with(BOOK)
+
+    async def test_retired_page_is_hidden_from_direct_admin_detail_reads(self):
+        repo = catalog_repo()
+        repo.page.return_value = page_row(LifecycleStatus="RETIRED")
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminCatalogService(repository=repo).processing_by_page_id(PAGE)
+
+        self.assertEqual(caught.exception.status_code, 404)
+        repo.revisions.assert_not_awaited()
+
     async def test_admin_page_list_includes_persisted_text_preview(self):
         repo = catalog_repo()
         result = await AdminCatalogService(repository=repo).pages(BOOK)
@@ -129,9 +149,10 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
             await AdminCatalogService(repository=repo).image(PAGE)
         self.assertEqual(caught.exception.status_code, 501)
         repo.get.return_value.MinGrade = -1
-        with self.assertRaises(HTTPException) as caught:
-            await AdminCatalogService(repository=repo).book(BOOK)
-        self.assertEqual(caught.exception.status_code, 501)
+        # Admin must be able to load and repair legacy metadata that violates
+        # current input constraints; Parent-facing catalog contracts stay strict.
+        result = await AdminCatalogService(repository=repo).book(BOOK)
+        self.assertEqual(result.min_grade, -1)
 
     async def test_unknown_book_page_and_revision_are_404(self):
         for method, args, missing in (("book", (BOOK,), "get"), ("page", (PAGE,), "page"), ("revision", (PAGE, REVISION), "revision")):

@@ -12,7 +12,10 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
-import { mapSessionHistoryItem } from "@/lib/utils/report-mappers";
+import {
+  historyPageFromCursor,
+  mapSessionHistoryItem,
+} from "@/lib/utils/report-mappers";
 import type { ChildProfileDTO } from "@/types/child";
 import type { SessionHistoryItemViewModelUI } from "@/types/reports";
 
@@ -23,7 +26,7 @@ type ScreenState =
       readonly children: readonly ChildProfileDTO[];
       readonly child: ChildProfileDTO;
       readonly items: readonly SessionHistoryItemViewModelUI[];
-      readonly hasNext: boolean;
+      readonly nextCursor: string | null;
     }
   | { readonly status: "no-children" }
   | { readonly status: "not-found" }
@@ -76,7 +79,7 @@ export function SessionHistoryScreen({
             children,
             child,
             items,
-            hasNext: history.next_cursor !== null,
+            nextCursor: history.next_cursor,
           });
         }
       } catch (error) {
@@ -178,6 +181,8 @@ export function SessionHistoryScreen({
   }
 
   const childQuery = `childId=${encodeURIComponent(state.child.id)}`;
+  const nextPage =
+    state.nextCursor === null ? null : historyPageFromCursor(state.nextCursor);
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
       <ReportPageHeader
@@ -198,7 +203,7 @@ export function SessionHistoryScreen({
               Chọn sách để đọc
             </ButtonLink>
           }
-          description="Khi bé hoàn thành hoặc dừng một buổi đọc, thông tin sẽ xuất hiện ở đây."
+          description="Các buổi đọc được lưu của bé sẽ xuất hiện ở đây, kể cả buổi đang thực hiện."
           icon={<History aria-hidden="true" className="size-10 text-primary" />}
           title={
             currentPage > 1
@@ -209,7 +214,11 @@ export function SessionHistoryScreen({
       ) : (
         <div className="flex flex-col gap-4">
           {state.items.map((item) => (
-            <SessionHistoryItem item={item} key={item.session.id} />
+            <SessionHistoryItem
+              item={item}
+              key={item.session.id}
+              page={currentPage}
+            />
           ))}
         </div>
       )}
@@ -228,10 +237,10 @@ export function SessionHistoryScreen({
         ) : (
           <span />
         )}
-        {state.hasNext ? (
+        {nextPage !== null ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${currentPage + 1}`}
+            href={`/sessions?${childQuery}&page=${nextPage}`}
           >
             Trang sau
           </ButtonLink>

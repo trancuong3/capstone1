@@ -3,6 +3,7 @@ import type {
   AdminPageListItemUI,
   AdminPageLifecycleDTO,
   AdminPageProcessingDTO,
+  AdminPageRevisionDetailDTO,
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
   StatusPatchDTO,
@@ -15,6 +16,10 @@ import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 export interface AdminPageService {
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
   getImage(pageId: string): Promise<AdminPageImageUI>;
+  replaceImageAndReprocess(
+    pageId: string,
+    file: File,
+  ): Promise<AdminPageRevisionDetailDTO>;
   upload(
     bookId: string,
     pages: readonly AdminPageUploadInputUI[],
@@ -84,6 +89,16 @@ export function createAdminPageService(): AdminPageService {
         `/books/admin/pages/${encodeURIComponent(pageId)}/processing`,
         adminProcessingSchema.refine((item) => item.page_id === pageId),
       ),
+    replaceImageAndReprocess: async (pageId, file) => {
+      const form = new FormData();
+      form.append("image", file, file.name);
+      return requestApi(
+        `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr`,
+        adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
+        undefined,
+        { method: "POST", body: form },
+      );
+    },
     upload: async (bookId, pages, onProgress) => {
       for (const page of pages) {
         onProgress?.({
@@ -93,7 +108,6 @@ export function createAdminPageService(): AdminPageService {
         });
         const form = new FormData();
         form.append("image", page.file, page.file_name);
-        form.append("page_number", String(page.page_number));
         try {
           await requestApi(
             `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,

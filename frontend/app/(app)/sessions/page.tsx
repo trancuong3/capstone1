@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { SessionHistoryScreen } from "@/components/reports/session-history-screen";
-import { firstQueryValue, parseHistoryPage } from "@/lib/utils/report-state";
+import { firstQueryValue } from "@/lib/utils/report-state";
+import { historyPageFromCursor } from "@/lib/utils/report-mappers";
 
 export const metadata: Metadata = { title: "Lịch sử đọc" };
 
@@ -20,7 +21,10 @@ export default async function SessionsPage({
   return (
     <AppServicesProvider>
       <SessionHistoryScreen
-        page={parseHistoryPage(query.page)}
+        page={
+          historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ??
+          1
+        }
         requestedChildId={firstQueryValue(query.childId)}
       />
     </AppServicesProvider>

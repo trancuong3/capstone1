@@ -43,6 +43,9 @@ describe("Reading/AI unavailable boundaries (legacy mock behavior is not restore
         }),
       () => readingService.get(TEST_SESSION_ID),
       () => readingService.getCurrentPage(TEST_SESSION_ID),
+      () => readingService.getPageProgress(TEST_SESSION_ID),
+      () => readingService.navigateToPage(TEST_SESSION_ID, TEST_PAGE_ID),
+      () => readingService.completeCurrentPage(TEST_SESSION_ID, TEST_PAGE_ID),
       () => readingService.getCompletionSummary(TEST_SESSION_ID),
       () => readingService.finish(TEST_SESSION_ID),
     ];

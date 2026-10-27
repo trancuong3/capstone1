@@ -12,8 +12,13 @@ import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
+import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
+import type {
+  BookCollectionType,
+  ChildBookCollectionDTO,
+} from "@/types/reading-management";
 import { CHILD_GRADES, type ChildProfileDTO } from "@/types/child";
 
 type ChildContextState =
@@ -35,6 +40,7 @@ export function BookLibraryScreen({
 }: BookLibraryScreenProps) {
   const bookService = useBookService();
   const childService = useChildService();
+  const readingManagementService = useReadingManagementService();
   const [childState, setChildState] = useState<ChildContextState>({
     status: "loading",
   });
@@ -44,6 +50,19 @@ export function BookLibraryScreen({
   const [search, setSearch] = useState("");
   const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
   const [requestKey, setRequestKey] = useState(0);
+  const [savedCollections, setSavedCollections] = useState<
+    ChildBookCollectionDTO[]
+  >([]);
+  const [savedCollectionOwner, setSavedCollectionOwner] = useState("");
+  const [collectionBusyKey, setCollectionBusyKey] = useState("");
+  const [collectionNotice, setCollectionNotice] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
+  const selectedChildId =
+    childState.status === "ready" ? (childState.child?.id ?? "") : "";
+  const visibleSavedCollections =
+    savedCollectionOwner === selectedChildId ? savedCollections : [];
 
   useEffect(() => {
     let isActive = true;
@@ -73,6 +92,83 @@ export function BookLibraryScreen({
       isActive = false;
     };
   }, [childService, requestedChildId, requestKey]);
+
+  useEffect(() => {
+    if (!selectedChildId) {
+      return;
+    }
+    let isActive = true;
+    void readingManagementService
+      .listCollections(selectedChildId)
+      .then((items) => {
+        if (!isActive) return;
+        setSavedCollections(items);
+        setSavedCollectionOwner(selectedChildId);
+        setCollectionNotice(null);
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setSavedCollections([]);
+        setSavedCollectionOwner(selectedChildId);
+        setCollectionNotice({
+          tone: "error",
+          text: "Chưa tải được trạng thái sách đã lưu. Hãy kiểm tra backend và migration Reading Management.",
+        });
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [readingManagementService, selectedChildId, requestKey]);
+
+  async function toggleSavedCollection(
+    bookId: string,
+    type: BookCollectionType,
+  ) {
+    if (!selectedChildId || collectionBusyKey) return;
+    const existing = visibleSavedCollections.find(
+      (item) => item.book_id === bookId && item.collection_type === type,
+    );
+    setCollectionBusyKey(bookId + ":" + type);
+    setCollectionNotice(null);
+    try {
+      if (existing) {
+        await readingManagementService.removeCollection(
+          selectedChildId,
+          bookId,
+          type,
+        );
+        setSavedCollections((items) =>
+          items.filter((item) => item.id !== existing.id),
+        );
+        setCollectionNotice({
+          tone: "success",
+          text: "Đã gỡ sách khỏi danh sách.",
+        });
+      } else {
+        const saved = await readingManagementService.addCollection(
+          selectedChildId,
+          bookId,
+          type,
+        );
+        setSavedCollections((items) =>
+          items.some((item) => item.id === saved.id)
+            ? items
+            : [...items, saved],
+        );
+        setCollectionNotice({
+          tone: "success",
+          text: "Đã lưu sách cho hồ sơ bé.",
+        });
+      }
+    } catch {
+      setCollectionNotice({
+        tone: "error",
+        text: "Không lưu được thay đổi. Vui lòng thử lại; trạng thái chưa được cập nhật.",
+      });
+    } finally {
+      setCollectionBusyKey("");
+    }
+  }
 
   useEffect(() => {
     if (childState.status !== "ready") {
@@ -136,6 +232,19 @@ export function BookLibraryScreen({
             Thử lại
           </Button>
         </div>
+      ) : null}
+
+      {collectionNotice ? (
+        <StatusMessage
+          title={
+            collectionNotice.tone === "success"
+              ? "Đã cập nhật danh sách"
+              : "Không thể cập nhật danh sách"
+          }
+          tone={collectionNotice.tone}
+        >
+          {collectionNotice.text}
+        </StatusMessage>
       ) : null}
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:gap-6">
@@ -275,7 +384,18 @@ export function BookLibraryScreen({
         catalogState.books.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {catalogState.books.map((book) => (
-              <BookCard book={book} childId={child?.id} key={book.id} />
+              <BookCard
+                book={book}
+                childId={child?.id}
+                key={book.id}
+                savedTypes={visibleSavedCollections
+                  .filter((item) => item.book_id === book.id)
+                  .map((item) => item.collection_type)}
+                collectionBusy={collectionBusyKey.startsWith(book.id + ":")}
+                onToggleCollection={(type) =>
+                  void toggleSavedCollection(book.id, type)
+                }
+              />
             ))}
           </div>
         ) : null}

@@ -11,6 +11,7 @@ import type { PageMatchService } from "@/lib/api/page-match-service";
 import type { ProfileService } from "@/lib/api/profile-service";
 import type { ReportService } from "@/lib/api/report-service";
 import type { ReadingService } from "@/lib/api/reading-service";
+import type { ReadingManagementService } from "@/lib/api/reading-management-service";
 import type { ReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
 import type { SessionService } from "@/lib/api/session-service";
 import type { TutorService } from "@/lib/api/tutor-service";
@@ -22,6 +23,7 @@ import { createReportService } from "@/lib/api/report-service";
 import { createDifficultWordService } from "@/lib/api/difficult-word-service";
 import { createProfileService } from "@/lib/api/profile-service";
 import { createReadingService } from "@/lib/api/reading-service";
+import { createReadingManagementService } from "@/lib/api/reading-management-service";
 import { createPageMatchService } from "@/lib/api/page-match-service";
 import { createDevicePermissionService } from "@/lib/api/device-permission-service";
 import { createReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
@@ -40,6 +42,7 @@ export interface AppServices {
   profileService: ProfileService;
   reportService: ReportService;
   readingService: ReadingService;
+  readingManagementService: ReadingManagementService;
   readingSocketAdapter: ReadingSocketAdapter;
   sessionService: SessionService;
   tutorService: TutorService;
@@ -95,6 +98,8 @@ export function AppServicesProvider({
       readingService: isReadingEnabled
         ? createReadingService()
         : createUnavailableService<ReadingService>("ReadingService"),
+
+      readingManagementService: createReadingManagementService(),
 
       pageMatchService: isReadingEnabled
         ? createPageMatchService()

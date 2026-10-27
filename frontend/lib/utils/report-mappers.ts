@@ -5,7 +5,8 @@ import type {
   ProgressReportDTO,
   SessionHistoryItemViewModelUI,
 } from "@/types/reports";
-import type { ReadingSessionSummaryDTO } from "@/types/reading";
+import type { HistorySessionSummaryDTO } from "@/types/reading";
+import { formatProgressDuration } from "@/lib/utils/progress-report-state";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("vi-VN", {
   dateStyle: "short",
@@ -24,11 +25,35 @@ export function formatPercent(value: number | null): string {
 }
 
 export function mapSessionHistoryItem(
-  session: ReadingSessionSummaryDTO,
+  session: HistorySessionSummaryDTO,
   child: ChildProfileDTO,
   book: BookListItemDTO,
 ): SessionHistoryItemViewModelUI {
-  const labels: Record<ReadingSessionSummaryDTO["state"], string> = {
+  return {
+    session,
+    book,
+    child,
+    started_label: formatHistoryDateTime(session.started_at),
+    duration_label: formatHistoryDuration(session.duration_ms),
+    state_label: historyStateLabel(session.state),
+  };
+}
+
+export function formatHistoryDuration(durationMs: number | null): string {
+  if (durationMs === null) return "Chưa có dữ liệu thời lượng";
+  if (durationMs < 60_000) return `${Math.floor(durationMs / 1000)} giây`;
+  return `${Math.floor(durationMs / 60_000)} phút ${Math.floor((durationMs % 60_000) / 1000)} giây`;
+}
+
+export function formatHistoryDateTime(value: string): string {
+  return dateTimeFormatter.format(new Date(value));
+}
+
+export function historyStateLabel(
+  state: HistorySessionSummaryDTO["state"],
+): string {
+  const labels: Record<HistorySessionSummaryDTO["state"], string> = {
+    IN_PROGRESS: "Đang thực hiện",
     CREATED: "Đang chuẩn bị",
     PAGE_READY: "Đã nhận trang",
     LISTENING: "Đang đọc",
@@ -39,14 +64,13 @@ export function mapSessionHistoryItem(
     ABORTED: "Đã dừng",
   };
 
-  return {
-    session,
-    book,
-    child,
-    started_label: dateTimeFormatter.format(new Date(session.started_at)),
-    duration_label: formatDuration(session.duration_ms),
-    state_label: labels[session.state],
-  };
+  return labels[state];
+}
+
+export function historyPageFromCursor(cursor: string): number | null {
+  if (!/^page-[1-9][0-9]{0,5}$/.test(cursor)) return null;
+  const page = Number(cursor.slice(5));
+  return page <= 100000 ? page : null;
 }
 
 export function mapReportMetrics(
@@ -56,29 +80,35 @@ export function mapReportMetrics(
     {
       id: "sessions",
       label: "Buổi đọc hoàn thành",
-      value: `${report.completed_sessions} buổi`,
-      hint: "Chỉ tính session FINISHED",
-      unavailable: false,
+      value:
+        report.completed_sessions === null
+          ? "Chưa có dữ liệu"
+          : `${report.completed_sessions} buổi`,
+      hint: "Theo báo cáo đã lưu của kỳ được chọn",
+      unavailable: report.completed_sessions === null,
     },
     {
       id: "duration",
       label: "Thời gian đọc",
-      value: formatDuration(report.reading_duration_ms),
-      hint: "Trong 30 ngày",
-      unavailable: false,
+      value: formatProgressDuration(report.reading_duration_ms),
+      hint: "Theo báo cáo đã lưu của kỳ được chọn",
+      unavailable: report.reading_duration_ms === null,
     },
     {
       id: "comprehension",
       label: "Câu hỏi đọc hiểu",
       value: formatPercent(report.comprehension_accuracy),
-      hint: "Đáp án có kết quả xác định",
+      hint: "Kết quả đọc hiểu trong báo cáo đã lưu",
       unavailable: report.comprehension_accuracy === null,
     },
     {
       id: "omission",
       label: "Tỷ lệ bỏ sót",
       value: formatPercent(report.omission_rate),
-      hint: `${report.omission_count} bằng chứng đã xác nhận`,
+      hint:
+        report.omission_count === null
+          ? "Chưa có số lần bỏ sót"
+          : `${report.omission_count} lần bỏ sót theo báo cáo đã lưu`,
       unavailable: report.omission_rate === null,
     },
   ];

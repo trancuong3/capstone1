@@ -67,12 +67,12 @@ export function AdminLoginScreen({
     <div className="flex min-h-dvh w-full flex-col bg-sky">
       <SiteHeader variant="admin-login" />
       <main className="grid w-full min-w-0 flex-1 place-items-center px-4 py-10">
-        <Card className="max-w-[560px] bg-cream shadow-xl">
+        <Card className="max-w-[560px] border border-border bg-cream shadow-lg">
           <div className="mx-auto grid size-16 place-items-center rounded-full bg-primary text-white">
             <LockKeyhole aria-hidden className="size-8" />
           </div>
           <div className="text-center">
-            <p className="font-extrabold text-primary">ReadAlong Vision</p>
+            <p className="font-extrabold text-primary">ViRead</p>
             <h1 className="mt-2 text-heading font-black">Đăng nhập quản trị</h1>
             <p className="mt-2 text-muted">
               Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.

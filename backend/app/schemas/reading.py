@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AwareDatetime
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -20,6 +20,8 @@ class ReadingSessionCreate(ReadingSessionBase):
     selected_page_id: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
     selected_page_revision_id: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    end_page_id: Optional[UUID] = None
     EndedAt: Optional[datetime] = None
     ended_at: Optional[datetime] = None
 
@@ -28,6 +30,8 @@ class ReadingPageWordDTO(BaseModel):
     word_index: int
     text: str
     bbox: tuple[float, float, float, float]
+    # Default keeps responses compatible with legacy rows and test fixtures.
+    line_index: int = Field(default=0, ge=0)
 
 class ReadingPageDTO(BaseModel):
     page_id: UUID
@@ -40,11 +44,14 @@ class ReadingPageDTO(BaseModel):
     image_url: Optional[str] = None
     text: Optional[str] = None
     words: list[ReadingPageWordDTO]
+    paragraph_start_line_indices: list[int] = Field(default_factory=list)
+    indented_line_indices: list[int] = Field(default_factory=list)
 
 class ReadingCompletionSummaryDTO(BaseModel):
     # Null means the current database schema has no persisted evidence for this metric.
     duration_minutes: int | None = Field(default=None, ge=0)
     pages_explored: int | None = Field(default=None, ge=0)
+    selected_range_pages: int | None = Field(default=None, ge=0)
     practiced_words: int | None = Field(default=None, ge=0)
     spoken_words: list[str] | None = None
     transcripts: list[str] | None = None
@@ -55,6 +62,9 @@ class ReadingSessionResponse(ReadingSessionBase):
     BookId: UUID
     SelectedPageId: Optional[UUID] = None
     SelectedPageRevisionId: Optional[UUID] = None
+    StartPageId: Optional[UUID] = None
+    EndPageId: Optional[UUID] = None
+    CurrentPageId: Optional[UUID] = None
     StartedAt: datetime
     EndedAt: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
@@ -115,8 +125,44 @@ class SessionSummaryRead(BaseModel):
     duration_ms: int | None = Field(ge=0)
 
 
+class ReadingPageNavigationCreate(BaseModel):
+    target_page_id: UUID
+
+
+class ReadingSessionPageProgressItem(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(ge=1)
+    page_order: int = Field(ge=0)
+    status: Literal["PENDING", "IN_PROGRESS", "COMPLETED"]
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ReadingSessionPageProgressDTO(BaseModel):
+    session_id: UUID
+    persisted: bool = True
+    start_page_id: UUID
+    end_page_id: UUID
+    current_page_id: UUID
+    start_page_number: int = Field(ge=1)
+    end_page_number: int = Field(ge=1)
+    current_page_number: int = Field(ge=1)
+    current_index: int = Field(ge=0)
+    total_pages: int = Field(ge=1)
+    completed_pages: int = Field(ge=0)
+    pages: list[ReadingSessionPageProgressItem]
+
+
+class HistorySessionSummaryRead(SessionSummaryRead):
+    # History understands persisted session states without changing live reading.
+    state: SessionStateRead | Literal["IN_PROGRESS"]
+    started_at: AwareDatetime
+    ended_at: AwareDatetime | None
+
+
 class SessionHistoryRead(BaseModel):
-    sessions: list[SessionSummaryRead]
+    sessions: list[HistorySessionSummaryRead]
     next_cursor: str | None
 
 
@@ -132,6 +178,13 @@ class SessionEventRead(BaseModel):
     confidence: float | None
     status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED"]
     metadata: dict[str, object]
+
+
+class HistoryEventRead(SessionEventRead):
+    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE", "MISPRONUNCIATION"]
+    status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED", "DETECTED", "FEEDBACK_GIVEN", "IGNORED_BY_GATE"]
+    end_ms: int | None = Field(ge=0)
+    confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
 
 
 class SessionFluencyMetricsRead(BaseModel):
@@ -151,6 +204,15 @@ class SessionFluencyRead(BaseModel):
     score: float | None
     uncertainty: float | None
     model_version: str
+
+
+class HistoryFluencyMetricsRead(SessionFluencyMetricsRead):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryFluencyRead(SessionFluencyRead):
+    metrics: HistoryFluencyMetricsRead | None
+    model_config = ConfigDict(allow_inf_nan=False)
 
 
 class SessionSourceSpanRead(BaseModel):
@@ -183,13 +245,41 @@ class SessionComprehensionRead(BaseModel):
     answer: SessionAnswerRead | None
 
 
-class SessionDetailRead(SessionSummaryRead):
+class HistoryQuestionRead(SessionQuestionRead):
+    source_span: SessionSourceSpanRead | None
+    difficulty: float | str | None
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryAnswerRead(SessionAnswerRead):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class HistoryComprehensionRead(BaseModel):
+    question: HistoryQuestionRead
+    answer: HistoryAnswerRead | None
+
+
+HistorySectionStatus = Literal["absent", "available", "partial", "unsupported"]
+
+
+class HistoryAvailabilityRead(BaseModel):
+    events: HistorySectionStatus
+    fluency: HistorySectionStatus
+    comprehension: HistorySectionStatus
+
+
+class SessionDetailRead(HistorySessionSummaryRead):
+    selected_range_pages: int | None = Field(default=None, ge=0)
+    pages_completed: int | None = Field(default=None, ge=0)
     selected_page_revision_ids: list[UUID]
     reference_page_revision_ids: list[UUID]
-    events: list[SessionEventRead]
-    fluency_assessment: SessionFluencyRead | None
-    comprehension: list[SessionComprehensionRead]
+    events: list[HistoryEventRead]
+    fluency_assessment: HistoryFluencyRead | None
+    comprehension: list[HistoryComprehensionRead]
+    availability: HistoryAvailabilityRead
     report_id: UUID | None
+
 
 class WordTimestamp(BaseModel):
     text: str
@@ -200,3 +290,39 @@ class WordTimestamp(BaseModel):
 class CompareReadingRequest(BaseModel):
     transcript: str = Field(..., min_length=1)
     words: list[WordTimestamp] | None = None
+
+
+class ReadingPageWordRead(BaseModel):
+    word_id: UUID
+    word_index: int = Field(ge=0)
+    text: str
+    bbox: tuple[float, float, float, float]
+
+
+class ReadingPageRead(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(ge=1)
+    confidence: float = Field(ge=0, le=1)
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    words: list[ReadingPageWordRead]
+
+
+class CameraPageMatchRead(BaseModel):
+    framing_valid: bool
+    matched: bool
+    book_id: UUID | None = None  # Bổ sung ID cuốn sách được nhận diện
+    status_code: Literal[
+        "INVALID_IMAGE",
+        "TOO_DARK",
+        "TOO_BLURRY",
+        "OUT_OF_FRAME",
+        "FRAME_OK",
+        "MATCHED",
+        "LOW_CONFIDENCE",
+    ]
+    message: str
+    confidence: float = Field(ge=0, le=1)
+    matched_page: ReadingPageRead | None = None
+

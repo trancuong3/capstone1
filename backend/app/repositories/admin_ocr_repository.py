@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
@@ -17,12 +17,11 @@ class AdminOcrRepository:
     async def role(self, profile_id: UUID) -> str | None:
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
 
-    async def book(self, book_id: UUID) -> Book | None:
-        return await self.db.scalar(select(Book).where(Book.Id == book_id))
-
-    def stage_book(self, book: Book) -> None:
-        """Stage a validated Admin-created book for the service transaction."""
-        self.db.add(book)
+    async def book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
+        query = select(Book).where(Book.Id == book_id)
+        if lock:
+            query = query.with_for_update()
+        return await self.db.scalar(query)
 
     def stage_revision_bundle(
         self,
@@ -97,9 +96,62 @@ class AdminOcrRepository:
 
     async def page_number_exists(self, book_id: UUID, page_number: int) -> bool:
         value = await self.db.scalar(
-            select(BookPage.Id).where(BookPage.BookId == book_id, BookPage.PageNumber == page_number)
+            select(BookPage.Id).where(
+                BookPage.BookId == book_id,
+                BookPage.PageNumber == page_number,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
         )
         return value is not None
+
+    async def next_active_page_number(self, book_id: UUID) -> int:
+        """Return the next page number from ACTIVE rows only.
+
+        Callers serialize allocation by locking the owning Book row first.
+        """
+        value = await self.db.scalar(
+            select(func.max(BookPage.PageNumber)).where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+        )
+        return int(value or 0) + 1
+
+    async def active_pages_for_renumber(
+        self, book_id: UUID, *, lock: bool = False
+    ) -> list[BookPage]:
+        query = (
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        if lock:
+            query = query.with_for_update()
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def flush(self) -> None:
+        """Flush staged ORM changes while leaving transaction ownership to the Service."""
+        await self.db.flush()
+
+    @staticmethod
+    def set_page_number(page: BookPage, page_number: int) -> BookPage:
+        """Persist a page's display/order number selected by the Service."""
+        page.PageNumber = page_number
+        return page
+
+    @staticmethod
+    def set_page_image_source(
+        page: BookPage, *, image_path: str, width: int, height: int
+    ) -> BookPage:
+        """Update the active source image after the corresponding OCR revision is verified."""
+        page.ImagePath = image_path
+        page.Width = width
+        page.Height = height
+        return page
 
     def stage_page_revision_bundle(
         self,

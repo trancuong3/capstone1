@@ -38,8 +38,22 @@ const detail = {
   fluency_assessment: null,
   comprehension: [],
   report_id: null,
+  availability: {
+    events: "absent",
+    fluency: "absent",
+    comprehension: "absent",
+  },
 };
 const report = {
+  id: sessionId,
+  generated_at: "2026-10-08T01:00:00Z",
+  legacy: null,
+  data_status: "complete",
+  availability: {
+    metrics: "available",
+    difficult_words: "available",
+    comparison: "absent",
+  },
   child_id: childId,
   period_start: "2026-09-09",
   period_end: "2026-10-08",

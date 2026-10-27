@@ -34,6 +34,8 @@ function catalogResponse(input: RequestInfo | URL, empty = false) {
   const url = new URL(String(input));
   if (url.pathname === `/profiles/children/${TEST_CHILD_ID}`)
     return Response.json(childFixture);
+  if (url.pathname === "/reading-management/collections")
+    return Response.json([]);
   if (url.pathname === "/books/catalog")
     return Response.json(
       empty || url.searchParams.get("search") ? [] : [bookFixture],
@@ -152,11 +154,17 @@ describe("BookLibraryScreen with real API adapters", () => {
   });
 
   it("keeps catalog failures generic after child loading succeeds", async () => {
-    apiFetchFixture.mockImplementation(async (input) =>
-      new URL(String(input)).pathname === `/profiles/children/${TEST_CHILD_ID}`
-        ? Response.json(childFixture)
-        : Response.json({ detail: "Private catalog details" }, { status: 500 }),
-    );
+    apiFetchFixture.mockImplementation(async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      if (pathname === "/reading-management/collections")
+        return Response.json([]);
+      return Response.json(
+        { detail: "Private catalog details" },
+        { status: 500 },
+      );
+    });
     renderLibrary();
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(

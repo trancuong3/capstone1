@@ -27,6 +27,7 @@ const revisionId = "44444444-4444-4444-8444-444444444444";
 const timestamp = "2026-10-08T00:00:00Z";
 const book = {
   id: bookId,
+  name: "Real book name",
   title: "Real retired book",
   author: null,
   min_grade: 1,
@@ -143,9 +144,10 @@ describe("real Admin adapters", () => {
     expect(url.searchParams.get("lifecycle_status")).toBe("RETIRED");
     expect(url.searchParams.get("verification_status")).toBe("VERIFIED");
   });
-  it("reads book metadata from the admin route", async () => {
-    fetchMock.mockResolvedValue(Response.json(book));
-    expect(await createAdminBookService().get(bookId)).toEqual(book);
+  it("reads book metadata and next page number from the admin route", async () => {
+    const adminBookDetail = { ...book, next_page_number: 8 };
+    fetchMock.mockResolvedValue(Response.json(adminBookDetail));
+    expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
   });
   it("rejects a book belonging to a different requested ID", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...book, id: pageId }));
@@ -175,6 +177,34 @@ describe("real Admin adapters", () => {
     expect(await createAdminPageService().getImage(pageId)).toEqual(image);
     expect(await createAdminPageService().reload(pageId)).toEqual(processing);
   });
+
+  it("uploads a replacement image without a page number", async () => {
+    fetchMock.mockResolvedValue(Response.json(detail));
+    const file = new File(["new page image"], "page-1.png", {
+      type: "image/png",
+    });
+    const result = await createAdminPageService().replaceImageAndReprocess(
+      pageId,
+      file,
+    );
+    expect(result).toMatchObject({
+      page_id: detail.page_id,
+      page_revision_id: detail.page_revision_id,
+      draft_text: detail.draft_text,
+      verification_status: detail.verification_status,
+    });
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      `/books/admin/pages/${pageId}/reupload-ocr`,
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("image")).toMatchObject({
+      name: "page-1.png",
+    });
+    expect((init.body as FormData).get("page_number")).toBeNull();
+  });
+
   it.each([
     "bucket/image.png",
     "https://user:password@example.test/image",
@@ -371,6 +401,7 @@ describe("real Admin adapters", () => {
   it("creates a book through the protected Admin endpoint", async () => {
     fetchMock.mockResolvedValueOnce(Response.json(book));
     const created = await createAdminBookService().create({
+      name: "  Tên mèo nhỏ  ",
       title: "  Chú mèo nhỏ  ",
       author: "  ",
       min_grade: 1,
@@ -385,6 +416,7 @@ describe("real Admin adapters", () => {
       "Bearer test-token",
     );
     expect(JSON.parse(String(init.body))).toEqual({
+      name: "Tên mèo nhỏ",
       title: "Chú mèo nhỏ",
       author: null,
       min_grade: 1,
@@ -409,7 +441,6 @@ describe("real Admin adapters", () => {
       file_name: file.name,
       mime_type: "image/png" as const,
       size_bytes: file.size,
-      page_number: 2,
       width: 800,
       height: 1000,
       file,
@@ -434,7 +465,7 @@ describe("real Admin adapters", () => {
     expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get("page_number")).toBe("2");
+    expect((init.body as FormData).get("page_number")).toBeNull();
     expect((init.body as FormData).get("image")).toMatchObject({
       name: "page-2.png",
     });
@@ -456,7 +487,6 @@ describe("real Admin adapters", () => {
       file_name: file.name,
       mime_type: "image/png" as const,
       size_bytes: file.size,
-      page_number: 3,
       width: 800,
       height: 1000,
       file,
@@ -581,24 +611,59 @@ describe("real Admin adapters", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 
-  it("keeps unsupported edit and lifecycle operations explicitly unavailable", async () => {
+  it("updates metadata and lifecycle through the real book API adapters", async () => {
     const books = createAdminBookService();
-    const pages = createAdminPageService();
-    const operations = [
-      books.update(bookId, {
-        title: "X",
-        author: null,
-        min_grade: 1,
-        max_grade: 3,
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        ...book,
+        title: "Updated title",
+        min_grade: 2,
+        max_grade: 4,
       }),
-      books.updateStatus(bookId, { status: "RETIRED" }),
-      pages.updateStatus(pageId, { status: "RETIRED" }),
-    ];
-    await Promise.all(
-      operations.map((operation) =>
-        expect(operation).rejects.toMatchObject({ status: 501 }),
-      ),
     );
+
+    const updated = await books.update(bookId, {
+      name: "Real book name",
+      title: "  Updated title  ",
+      author: "  Author  ",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    expect(updated.name).toBe("Real book name");
+    expect(updated.title).toBe("Updated title");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      name: "Real book name",
+      title: "Updated title",
+      author: "Author",
+      min_grade: 2,
+      max_grade: 4,
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...book, lifecycle_status: "RETIRED" }),
+    );
+    const retired = await books.updateStatus(bookId, { status: "RETIRED" });
+
+    expect(retired.lifecycle_status).toBe("RETIRED");
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/catalog/${bookId}/status`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      status: "RETIRED",
+    });
+  });
+
+  it("keeps unsupported page lifecycle updates unavailable", async () => {
+    await expect(
+      createAdminPageService().updateStatus(pageId, { status: "RETIRED" }),
+    ).rejects.toMatchObject({ status: 501 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

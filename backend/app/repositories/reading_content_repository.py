@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
-    PageRevisionWord, Profile, ReadingEvent, ReadingSession,
+    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
 
 
@@ -84,6 +84,90 @@ class ReadingContentRepository:
             .order_by(PageRevisionWord.WordIndex)
         )
         return list(result.scalars().all())
+
+    async def all_pages_between_numbers(
+        self, book_id: UUID, start_page_number: int, end_page_number: int
+    ) -> list[BookPage]:
+        result = await self.db.execute(
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+                BookPage.PageNumber >= start_page_number,
+                BookPage.PageNumber <= end_page_number,
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return list(result.scalars().all())
+
+    async def verified_pages_between_numbers(
+        self, book_id: UUID, start_page_number: int, end_page_number: int
+    ) -> list[BookPage]:
+        result = await self.db.execute(
+            select(BookPage)
+            .join(Book, Book.Id == BookPage.BookId)
+            .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.PageNumber >= start_page_number,
+                BookPage.PageNumber <= end_page_number,
+                BookPage.LifecycleStatus == "ACTIVE",
+                Book.LifecycleStatus == "ACTIVE",
+                PageRevision.PageId == BookPage.Id,
+                PageRevision.VerificationStatus == "VERIFIED",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return list(result.scalars().all())
+
+    async def session_page_rows(self, session_id: UUID) -> list[ReadingSessionPage]:
+        result = await self.db.execute(
+            select(ReadingSessionPage)
+            .where(ReadingSessionPage.SessionId == session_id)
+            .order_by(ReadingSessionPage.PageOrder, ReadingSessionPage.Id)
+        )
+        return list(result.scalars().all())
+
+    async def session_page(
+        self, session_id: UUID, page_id: UUID
+    ) -> ReadingSessionPage | None:
+        return await self.db.scalar(
+            select(ReadingSessionPage).where(
+                ReadingSessionPage.SessionId == session_id,
+                ReadingSessionPage.PageId == page_id,
+            )
+        )
+
+    async def page_by_id(self, page_id: UUID) -> BookPage | None:
+        return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
+
+    async def revision_snapshot(self, page_id: UUID, revision_id: UUID) -> PageRevision | None:
+        return await self.db.scalar(
+            select(PageRevision).where(
+                PageRevision.Id == revision_id,
+                PageRevision.PageId == page_id,
+            )
+        )
+
+    async def save_session_progress(
+        self, session: ReadingSession, page_rows: list[ReadingSessionPage]
+    ) -> ReadingSession:
+        self.db.add(session)
+        self.db.add_all(page_rows)
+        try:
+            await self.db.commit()
+            await self.db.refresh(session)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return session
+
+    async def session_for_update(self, session_id: UUID) -> ReadingSession | None:
+        return await self.db.scalar(
+            select(ReadingSession)
+            .where(ReadingSession.Id == session_id)
+            .with_for_update()
+        )
 
     async def session(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
@@ -162,5 +246,21 @@ class ReadingContentRepository:
             raise
         return session
 
-    async def create_session(self, session: ReadingSession) -> ReadingSession:
-        return await self.save_session(session)
+    async def create_session(
+        self,
+        session: ReadingSession,
+        page_rows: list[ReadingSessionPage] | None = None,
+    ) -> ReadingSession:
+        self.db.add(session)
+        try:
+            await self.db.flush()
+            if page_rows:
+                for row in page_rows:
+                    row.SessionId = session.Id
+                self.db.add_all(page_rows)
+            await self.db.commit()
+            await self.db.refresh(session)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return session

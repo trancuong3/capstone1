@@ -1,3 +1,4 @@
+import { BookOpen } from "lucide-react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils/cn";
@@ -21,14 +22,15 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
       <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
         <Link
           aria-label={
-            isAdminLogin
-              ? "ReadAlong Vision - đăng nhập quản trị"
-              : "ReadAlong Vision - đăng nhập"
+            isAdminLogin ? "ViRead - đăng nhập quản trị" : "ViRead - đăng nhập"
           }
           className="inline-flex min-h-11 w-fit max-w-full flex-wrap items-center gap-2 rounded-control text-label font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:text-body"
           href={isAdminLogin ? "/admin/login" : "/login"}
         >
-          <span>READALONG VISION</span>
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky text-primary">
+            <BookOpen aria-hidden="true" className="size-5" />
+          </span>
+          <span className="tracking-tight">ViRead</span>
           {isAdminLogin ? (
             <span className="rounded-full bg-sky px-3 py-1 text-sm font-bold text-primary-hover">
               ADMIN

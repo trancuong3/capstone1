@@ -11,7 +11,12 @@ import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionEventList } from "@/components/reports/session-event-list";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
-import { formatDuration, formatPercent } from "@/lib/utils/report-mappers";
+import {
+  formatHistoryDateTime,
+  formatHistoryDuration,
+  formatPercent,
+  historyStateLabel,
+} from "@/lib/utils/report-mappers";
 import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingSessionDetailDTO } from "@/types/reading";
@@ -30,8 +35,12 @@ type DetailState =
 
 export function SessionDetailScreen({
   sessionId,
+  requestedChildId,
+  page = 1,
 }: {
   readonly sessionId: string;
+  readonly requestedChildId?: string;
+  readonly page?: number;
 }) {
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
@@ -47,7 +56,7 @@ export function SessionDetailScreen({
           childService.get(detail.child_id),
           sessionService.getBook(sessionId),
         ]);
-        if (book.id !== detail.book_id)
+        if (book.id !== detail.book_id || child.id !== detail.child_id)
           throw new Error("Invalid historical book response");
         if (active) setState({ status: "ready", detail, child, book });
       } catch (error) {
@@ -144,13 +153,26 @@ export function SessionDetailScreen({
 
   const { detail } = state;
   const metrics = detail.fluency_assessment?.metrics;
+  const rangeIsPartial =
+    detail.selected_range_pages != null &&
+    (detail.pages_completed == null ||
+      detail.pages_completed < detail.selected_range_pages);
+  const returnPage =
+    requestedChildId === detail.child_id &&
+    Number.isSafeInteger(page) &&
+    page >= 1 &&
+    page <= 100000
+      ? page
+      : null;
+  const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
+  const availability = detail.availability;
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
       <ReportPageHeader
         action={
           <ButtonLink
             className="sm:w-auto"
-            href={`/sessions?childId=${encodeURIComponent(state.child.id)}`}
+            href={returnHref}
             variant="secondary"
           >
             <ArrowLeft aria-hidden="true" className="size-5" />
@@ -161,19 +183,68 @@ export function SessionDetailScreen({
         eyebrow="Chi tiết buổi đọc"
         title={
           detail.state === "FINISHED"
-            ? "Buổi đọc đã hoàn thành"
-            : "Buổi đọc chưa hoàn tất"
+            ? rangeIsPartial
+              ? "Buổi đọc đã lưu"
+              : "Buổi đọc đã hoàn thành"
+            : detail.state === "ABORTED"
+              ? "Buổi đọc đã dừng"
+              : `Buổi đọc: ${historyStateLabel(detail.state)}`
         }
       />
-      {detail.state !== "FINISHED" ? (
+      {rangeIsPartial ? (
+        <StatusMessage title="Một phần phạm vi chưa hoàn thành" tone="info">
+          Phạm vi đã chọn có {detail.selected_range_pages} trang, nhưng mới có{" "}
+          {detail.pages_completed ?? 0} trang được xác nhận hoàn thành. Lịch sử
+          vẫn được giữ nguyên và không tính các trang chưa đọc là hoàn thành.
+        </StatusMessage>
+      ) : null}
+      {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
         <StatusMessage title="Dữ liệu đang dở dang" tone="warning">
           Buổi đọc chưa kết thúc nên thời lượng, chỉ số trôi chảy và báo cáo có
           thể chưa có.
         </StatusMessage>
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {detail.state === "FINISHED" && detail.ended_at === null ? (
+        <StatusMessage tone="info">
+          Buổi đọc đã hoàn thành nhưng chưa lưu giờ kết thúc; chưa có dữ liệu
+          thời lượng.
+        </StatusMessage>
+      ) : null}
+      <dl className="grid gap-3 text-label text-muted sm:grid-cols-2">
+        <div>
+          <dt className="font-bold">Bắt đầu (giờ Việt Nam)</dt>
+          <dd>{formatHistoryDateTime(detail.started_at)}</dd>
+        </div>
+        <div>
+          <dt className="font-bold">Kết thúc (giờ Việt Nam)</dt>
+          <dd>
+            {detail.ended_at === null
+              ? "Chưa lưu giờ kết thúc"
+              : formatHistoryDateTime(detail.ended_at)}
+          </dd>
+        </div>
+      </dl>
+      {availability.fluency === "unsupported" ||
+      availability.fluency === "partial" ? (
+        <StatusMessage tone="info">
+          Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy đủ.
+          Chỉ hiển thị điểm/chỉ số đọc được, không tự quy đổi dữ liệu thiếu.
+        </StatusMessage>
+      ) : null}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          ["Thời lượng", formatDuration(detail.duration_ms)],
+          ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
+          ...(detail.selected_range_pages == null
+            ? []
+            : [
+                ["Trang trong phạm vi", `${detail.selected_range_pages} trang`],
+                [
+                  "Trang đã xác nhận hoàn thành",
+                  detail.pages_completed == null
+                    ? "Chưa ghi nhận"
+                    : `${detail.pages_completed} trang`,
+                ],
+              ]),
           ["Độ chính xác", formatPercent(metrics?.accuracy_percent ?? null)],
           [
             "Tốc độ đọc",
@@ -184,7 +255,9 @@ export function SessionDetailScreen({
           [
             "Điểm trôi chảy",
             detail.fluency_assessment?.score == null
-              ? "Chưa đánh giá"
+              ? availability.fluency === "absent"
+                ? "Chưa đánh giá"
+                : "Chưa có điểm hiển thị"
               : String(detail.fluency_assessment.score),
           ],
         ].map(([label, value]) => (
@@ -239,11 +312,32 @@ export function SessionDetailScreen({
         <h2 className="text-2xl font-extrabold text-ink">
           Sự kiện trong buổi đọc
         </h2>
-        <SessionEventList events={detail.events} />
+        {availability.events === "unsupported" ||
+        availability.events === "partial" ? (
+          <StatusMessage tone="info">
+            Có sự kiện đã lưu nhưng{" "}
+            {availability.events === "partial" ? "một phần" : "định dạng"} chưa
+            được hỗ trợ. Không tự coi đây là lỗi đọc đã xác nhận.
+          </StatusMessage>
+        ) : null}
+        {detail.events.length > 0 || availability.events === "absent" ? (
+          <SessionEventList events={detail.events} />
+        ) : null}
       </Card>
       <Card className="bg-white">
         <h2 className="text-2xl font-extrabold text-ink">Câu hỏi đọc hiểu</h2>
-        {detail.comprehension.length === 0 ? (
+        {availability.comprehension === "unsupported" ||
+        availability.comprehension === "partial" ? (
+          <StatusMessage tone="info">
+            Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ
+            trợ.{" "}
+            {availability.comprehension === "partial"
+              ? "Nội dung đọc được vẫn hiển thị bên dưới."
+              : "Chưa thể hiển thị nội dung của nhóm này."}
+          </StatusMessage>
+        ) : null}
+        {detail.comprehension.length === 0 &&
+        availability.comprehension === "absent" ? (
           <p className="rounded-control bg-sky p-5 text-body text-muted">
             Buổi đọc này không có câu hỏi đọc hiểu.
           </p>
@@ -256,9 +350,14 @@ export function SessionDetailScreen({
               >
                 <p className="font-extrabold text-ink">{question.prompt}</p>
                 <p className="mt-2 text-label text-muted">
+                  Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
+                </p>
+                <p className="mt-2 text-label text-muted">
                   {answer
                     ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
-                    : "Chưa có câu trả lời"}
+                    : question.answered
+                      ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
+                      : "Chưa có câu trả lời"}
                 </p>
               </li>
             ))}
