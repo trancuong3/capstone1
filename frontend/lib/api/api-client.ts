@@ -214,7 +214,19 @@ export async function requestApi<T>(
     throw failure(response.status, requestId);
   }
   const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw failure(response.status, requestId);
+
+  if (!parsed.success) {
+    console.error(
+      `[API schema validation failed] ${requestOptions.method ?? "GET"} ${path}`,
+      {
+        issues: parsed.error.issues,
+        response: payload,
+      }
+    );
+
+    throw failure(response.status, requestId);
+  }
+
   return parsed.data;
 }
 

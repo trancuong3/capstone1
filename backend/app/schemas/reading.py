@@ -191,5 +191,12 @@ class SessionDetailRead(SessionSummaryRead):
     comprehension: list[SessionComprehensionRead]
     report_id: UUID | None
 
+class WordTimestamp(BaseModel):
+    text: str
+    start: float = Field(..., ge=0)
+    end: float = Field(..., ge=0)
+
+
 class CompareReadingRequest(BaseModel):
     transcript: str = Field(..., min_length=1)
+    words: list[WordTimestamp] | None = None

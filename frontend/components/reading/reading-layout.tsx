@@ -7,6 +7,7 @@ import { CameraPreview } from "@/components/reading/camera-preview";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
+import type { ComparisonResult } from "@/lib/api/comparison-service";
 
 interface ReadingLayoutProps {
   audioLevel?: number;
@@ -29,6 +30,7 @@ interface ReadingLayoutProps {
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
+  comparisonResult?: ComparisonResult | null;
 }
 
 export function ReadingLayout({
@@ -51,6 +53,7 @@ export function ReadingLayout({
   onToggleListening,
   onWordClick,
   page,
+  comparisonResult,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
@@ -77,6 +80,7 @@ export function ReadingLayout({
           isTransitioning={isPageTransitioning}
           onWordClick={onWordClick}
           page={page}
+          comparisonResult={comparisonResult}
         />
       </CameraPreview>
 

@@ -48,6 +48,7 @@ class Transcription:
     text: str
     language_code: str | None
     language_probability: float | None
+    words: list[dict[str, Any]] | None = None
 
 
 class ElevenLabsVoiceProvider:
@@ -79,7 +80,7 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderError()
 
         language_code = payload.get("language_code")
-        if language_code is not None and not isinstance(language_code, str):
+        if not isinstance(language_code, str):
             language_code = None
 
         language_probability = payload.get("language_probability")
@@ -88,11 +89,33 @@ class ElevenLabsVoiceProvider:
         ):
             language_probability = None
 
+        raw_words = payload.get("words")
+        words = None
+
+        if isinstance(raw_words, list):
+            words = [
+                {
+                    "text": item["text"],
+                    "start": item["start"],
+                    "end": item["end"],
+                }
+                for item in raw_words
+                if isinstance(item, dict)
+                and item.get("type", "word") == "word"
+                and isinstance(item.get("text"), str)
+                and isinstance(item.get("start"), (int, float))
+                and not isinstance(item.get("start"), bool)
+                and isinstance(item.get("end"), (int, float))
+                and not isinstance(item.get("end"), bool)
+            ]
+
         return Transcription(
             text=payload["text"],
             language_code=language_code,
             language_probability=language_probability,
+            words=words,
         )
+
 
     async def synthesize(
         self,
@@ -148,7 +171,10 @@ class ElevenLabsVoiceProvider:
         content_type: str,
         language_code: str | None = None,
     ) -> Transcription:
-        form: dict[str, str] = {"model_id": "scribe_v2"}
+        form: dict[str, str] = {
+            "model_id": "scribe_v2",
+            "timestamps_granularity": "word",
+        }
         if language_code:
             lang = "vie" if language_code.lower() in ("vi", "vie", "vi-vn") else language_code
             form["language_code"] = lang

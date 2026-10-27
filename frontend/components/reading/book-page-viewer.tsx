@@ -1,12 +1,14 @@
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
+import type { ComparisonResult } from "@/lib/api/comparison-service";
 
 interface BookPageViewerProps {
   currentWordId: string | null;
   isTransitioning?: boolean;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
+  comparisonResult?: ComparisonResult | null;
 }
 
 export function BookPageViewer({
@@ -14,6 +16,7 @@ export function BookPageViewer({
   isTransitioning = false,
   onWordClick,
   page,
+  comparisonResult,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
 
@@ -44,12 +47,49 @@ export function BookPageViewer({
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-5 shadow-inner sm:mt-6 sm:p-8">
           {hasWords ? (
             <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
-              {page.words.map((word) => (
+              {page.words.map((word, index) => {
+                const wordIndex = word.word_index ?? index;
+
+                const alignment = comparisonResult?.alignment.find(
+                  (item) => item.book_index === wordIndex,
+                );
+
+                const isHesitation = comparisonResult?.summary.hesitations.some(
+                  (item) =>
+                    typeof item === "object" &&
+                      item !== null &&
+                        "after_word" in item &&
+                          String(item.after_word).toLocaleLowerCase("vi") ===
+                            word.text.toLocaleLowerCase("vi"),
+                ); 
+
+                const isRepeated =
+                  comparisonResult?.summary.repeated_words.some(
+                    (item) =>
+                      item.toLocaleLowerCase("vi") ===
+                      word.text.toLocaleLowerCase("vi"),
+                ) ?? false;
+
+                const colorClass =
+                  alignment?.status === "DELETE"
+                    ? "bg-red-200 text-red-900 ring-1 ring-red-500"
+                    : alignment?.status === "SUBSTITUTE"
+                      ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
+                      : isRepeated
+                        ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
+                        : isHesitation
+                          ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
+                          : alignment?.status === "MATCH"
+                            ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                            : "";
+
+              return (
                 <span
                   className={cn(
                     "mr-2 inline-block rounded-[10px] px-1.5 py-0.5 transition-all duration-150 cursor-pointer select-none hover:bg-highlight/40 active:scale-95",
+                    colorClass,
                     word.word_id === currentWordId &&
-                      "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
+                      "bg-yellow-300 scale-105 font-black text-primary shadow-sm ring-2 ring-yellow-500",
                   )}
                   data-bbox={word.bbox.join(",")}
                   data-page-revision-id={page.page_revision_id}
@@ -67,7 +107,8 @@ export function BookPageViewer({
                 >
                   {word.text}
                 </span>
-              ))}
+              );
+            })}
             </p>
           ) : page.text ? (
             <p className="text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">

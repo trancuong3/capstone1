@@ -106,4 +106,5 @@ async def speech_to_text(
         text=transcription.text,
         language_code=transcription.language_code,
         language_probability=transcription.language_probability,
+        words=transcription.words,
     )

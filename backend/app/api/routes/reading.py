@@ -12,8 +12,12 @@ from app.schemas import (
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
 from app.schemas.reading import CompareReadingRequest
-from app.services.text_alignment import align_text, summarize_alignment
-
+from app.services.text_alignment import (
+    align_text,
+    detect_hesitations,
+    summarize_alignment,
+    detect_hesitations,
+)
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
@@ -311,6 +315,7 @@ async def get_owned_session_book(
     return await HistoryService(HistoryRepository(db)).book(session_id, actor_id)
 
 
+
 @router.post("/sessions/{session_id}/compare")
 async def compare_reading(
     session_id: UUID,
@@ -318,15 +323,14 @@ async def compare_reading(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Lấy trang sách hiện tại của session
+    # 1. Get the current reading page
     page = await ReadingContentService(
         ReadingContentRepository(db)
     ).get_session_page(session_id, actor_id)
 
-    # 2. Lấy văn bản sách đã xác minh
+    # 2. Get verified book text
     reference_text = (
-        page.text
-        or " ".join(word.text for word in page.words)
+        page.text or " ".join(word.text for word in page.words)
     )
 
     if not reference_text.strip():
@@ -335,16 +339,26 @@ async def compare_reading(
             detail="Book text is empty",
         )
 
-    # 3. So sánh văn bản sách với transcript
-    result = align_text(
-        reference_text,
-        request.transcript,
+    # 3. Align book text with transcript
+    result = align_text(reference_text, request.transcript)
+
+    # 4. Convert timestamps to dictionaries
+    words = (
+        [word.model_dump() for word in request.words]
+        if request.words is not None
+        else None
+    )
+    print("Request words:", request.words)
+    print("Words count:", len(words) if words else 0)
+    print("Detected hesitations:", detect_hesitations(words or []))
+
+    # 5. Summarize reading results
+    summary = summarize_alignment(
+        result["alignment"],
+        words=words,
+        threshold=1.0,
     )
 
-    # 4. Tổng hợp từ thiếu, từ thừa, từ thay thế
-    summary = summarize_alignment(result["alignment"])
-
-    # 5. Trả kết quả cho frontend
     return {
         "session_id": str(session_id),
         "page_id": str(page.page_id),

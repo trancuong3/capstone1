@@ -29,9 +29,16 @@ class TextToSpeechRequest(BaseModel):
         return normalized
 
 
+class SpeechWord(BaseModel):
+    text: str
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+
+
 class SpeechToTextResponse(BaseModel):
     """The safe, provider-neutral part of a transcription result."""
 
     text: str
     language_code: str | None = None
     language_probability: float | None = None
+    words: list[SpeechWord] | None = None

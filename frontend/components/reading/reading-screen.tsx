@@ -130,6 +130,7 @@ export function ReadingScreen({
   const [isComparing, setIsComparing] = useState(false);
   const [comparisonResult, setComparisonResult] =
     useState<ComparisonResult | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
@@ -322,6 +323,9 @@ export function ReadingScreen({
 
   async function startListening(): Promise<boolean> {
     setLatestTranscript(null);
+    setComparisonResult(null);
+    setComparisonError(null);
+    setIsComparing(false);
     isListeningActiveRef.current = true;
 
     // 1. Record the full session. ElevenLabs STT runs once after recording stops.
@@ -427,6 +431,8 @@ export function ReadingScreen({
         languageCode: "vi",
         signal: controller.signal,
       });
+      console.log("Full STT result:", transcript);
+      console.log("STT words:", transcript.words);
 
       if (!mountedRef.current || controller.signal.aborted) {
         return "";
@@ -441,6 +447,7 @@ export function ReadingScreen({
 
       // Hiển thị văn bản đã nhận diện
       setLatestTranscript(text);
+      setComparisonError(null);
 
       // Giữ chức năng cũ
       matchSpokenWord(text);
@@ -450,13 +457,18 @@ export function ReadingScreen({
       try {
         setIsComparing(true);
 
-        const result = await compareTranscript(sessionId, text);
+        const result = await compareTranscript(
+          sessionId,
+          text,
+          transcript.words ?? undefined
+        );
 
         if (!mountedRef.current || controller.signal.aborted) {
           return text;
         }
 
         setComparisonResult(result);
+        setComparisonError(null);
 
         console.log("Transcript:", text);
         console.log(
@@ -467,6 +479,9 @@ export function ReadingScreen({
       } catch (err) {
         if (!controller.signal.aborted) {
           console.error("Lỗi so sánh transcript:", err);
+          setComparisonError(
+            "Chưa thể so sánh bài đọc. Vui lòng thử lại sau."
+          );
         }
       } finally {
         if (mountedRef.current) {
@@ -896,6 +911,7 @@ export function ReadingScreen({
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
+        comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
@@ -911,8 +927,17 @@ export function ReadingScreen({
           </p>
         )}
 
+        {comparisonError && (
+          <StatusMessage tone="error">
+            {comparisonError}
+          </StatusMessage>
+        )}
+
         {comparisonResult && (
-          <ReadingReport result={comparisonResult} />
+          <ReadingReport
+            result={comparisonResult}
+            bookWords={page.words}
+          />
         )}
       </div>
       {confirmFinish ? (
