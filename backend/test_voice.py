@@ -105,6 +105,7 @@ class VoiceRouteTests(unittest.TestCase):
                 "text": "Con mèo đang ngủ.",
                 "language_code": "vi",
                 "language_probability": 0.99,
+                "words": None,
             },
         )
         provider.transcribe.assert_awaited_once_with(
