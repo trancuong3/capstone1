@@ -489,21 +489,21 @@ export function ReadingScreen({
     // Keep the recorder callback empty to avoid per-utterance API requests.
     try {
       await speechRecorder.start(async (utteranceBlob) => {
-        if (!mountedRef.current || !isListeningActiveRef.current) return;
-        try {
-          const transcript = await speechService.transcribe(utteranceBlob, {
-            languageCode: "vi",
-          });
-          if (!mountedRef.current || !transcript.text) return;
-          const cleanText = transcript.text.trim();
-          if (cleanText) {
-            setLatestTranscript(cleanText);
-            verifySpokenWord(cleanText);
-            recordSpokenText(cleanText);
-          }
-        } catch (e) {
-          console.warn("Live ElevenLabs STT utterance notice:", e);
-        }
+        // if (!mountedRef.current || !isListeningActiveRef.current) return;
+        // try {
+        //   const transcript = await speechService.transcribe(utteranceBlob, {
+        //     languageCode: "vi",
+        //   });
+        //   if (!mountedRef.current || !transcript.text) return;
+        //   const cleanText = transcript.text.trim();
+        //   if (cleanText) {
+        //     setLatestTranscript(cleanText);
+        //     verifySpokenWord(cleanText);
+        //     recordSpokenText(cleanText);
+        //   }
+        // } catch (e) {
+        //   console.warn("Live ElevenLabs STT utterance notice:", e);
+        // }
       });
       isUsingRecorderRef.current = true;
     } catch (error) {
