@@ -220,7 +220,7 @@ test("Admin book creation requires separate name and title and sends normalized 
   expect(api.unexpected).toEqual([]);
 });
 
-for (const width of [1440, 1024, 768, 390]) {
+for (const width of [320, 375, 430, 768, 1366, 1920]) {
   test(`read-route matrix, headings, console and overflow at ${width}px`, async ({
     page,
   }, testInfo) => {
@@ -228,7 +228,7 @@ for (const width of [1440, 1024, 768, 390]) {
       testInfo.project.name !== "desktop",
       "Matrix itself covers all four widths.",
     );
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const api = await installApiFixture(page);
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     const pageErrors: string[] = [];
@@ -286,7 +286,7 @@ for (const width of [1440, 1024, 768, 390]) {
           page.getByRole("heading", { name: "Database" }),
         ).toBeVisible();
       await assertLayout(page);
-      if (width === 1440 || width === 390)
+      if (width === 1366 || width === 375)
         await page.screenshot({
           path: testInfo.outputPath(`route-${index}-${width}.png`),
           fullPage: true,
