@@ -54,7 +54,8 @@ export function ProgressChart({ report }: ProgressChartProps) {
           </div>
         ))}
       </div>
-      <table className="sr-only">
+      <div className="sr-only">
+        <table>
         <caption>Tóm tắt dạng bảng của biểu đồ bằng chứng đọc</caption>
         <thead>
           <tr>
@@ -70,7 +71,8 @@ export function ProgressChart({ report }: ProgressChartProps) {
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </section>
   );
 }

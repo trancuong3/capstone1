@@ -61,6 +61,7 @@ describe("Report components with typed data and real API adapters", () => {
     const table = screen.getByRole("table", {
       name: "Tóm tắt dạng bảng của biểu đồ bằng chứng đọc",
     });
+    expect(table.parentElement).toHaveClass("sr-only");
     expect(
       within(table).getByRole("row", { name: "Bỏ sót 2" }),
     ).toBeInTheDocument();
