@@ -71,12 +71,8 @@ describe("BookPageViewer", () => {
       <BookPageViewer currentWordId={null} page={formattedPage} />,
     );
 
-    expect(
-      screen.getByRole("button", { name: "Ngày" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "một" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ngày" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "một" })).toBeInTheDocument();
     expect(container.querySelectorAll("br")).toHaveLength(4);
     expect(
       container.querySelector(
