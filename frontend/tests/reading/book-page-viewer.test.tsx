@@ -16,7 +16,9 @@ const page: ReadingPageDTO = {
 };
 
 describe("BookPageViewer", () => {
-  it("preserves OCR line breaks and paragraph indentation while rendering words", () => {
+  it(
+    "preserves OCR line breaks and paragraph indentation while rendering words",
+    () => {
     const formattedPage: ReadingPageDTO = {
       ...page,
       text: "Ngày xưa\ncó\n\n    một cậu\nbé",
@@ -84,7 +86,9 @@ describe("BookPageViewer", () => {
     ).toHaveLength(1);
   });
 
-  it("shows stored page text and does not render scanned or fallback imagery", () => {
+  it(
+    "shows stored page text and does not render scanned or fallback imagery",
+    () => {
     render(<BookPageViewer currentWordId={null} page={page} />);
 
     expect(screen.getByText("Mẹ đưa bé đến trường.")).toBeInTheDocument();
