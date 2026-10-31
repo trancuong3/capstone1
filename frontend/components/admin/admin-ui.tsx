@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PageHeader } from "@/components/common/page-header";
 import { cn } from "@/lib/utils/cn";
 import type { OperationalHealthStatusUI } from "@/types/admin";
 import type { BookLifecycleStatus } from "@/types/book";
@@ -16,22 +17,12 @@ export function AdminPageHeader({
   description?: string;
 }) {
   return (
-    <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
-      <div>
-        {eyebrow ? (
-          <p className="mb-1 text-label font-extrabold uppercase tracking-wider text-primary">
-            {eyebrow}
-          </p>
-        ) : null}
-        <h1 className="text-heading font-black text-ink">{title}</h1>
-        {description ? (
-          <p className="mt-2 max-w-3xl text-body text-muted">{description}</p>
-        ) : null}
-      </div>
-      {actions ? (
-        <div className="flex shrink-0 flex-wrap gap-3">{actions}</div>
-      ) : null}
-    </div>
+    <PageHeader
+      action={actions}
+      description={description}
+      eyebrow={eyebrow}
+      title={title}
+    />
   );
 }
 
@@ -76,7 +67,7 @@ export function AdminLoading({
   return (
     <div
       aria-live="polite"
-      className="grid min-h-64 place-items-center rounded-card bg-cream p-8 text-center"
+      className="grid min-h-64 place-items-center rounded-card border border-border bg-white p-8 text-center shadow-sm"
     >
       <div>
         <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-sky border-t-primary" />

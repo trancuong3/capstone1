@@ -1,8 +1,8 @@
 import { ArrowLeft, Heart } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 
 import { ButtonLink } from "@/components/common/button";
+import { ViReadLogo } from "@/components/common/viread-logo";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface BookChildHeaderProps {
@@ -23,20 +23,11 @@ export function BookChildHeader({
   return (
     <header className="w-full">
       <div className="hidden h-16 w-full items-center justify-between sm:flex">
-        <Link
-          aria-label="Về tổng quan ViRead"
-          className="flex h-16 shrink-0 items-center gap-3 rounded-control font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+        <ViReadLogo
+          ariaLabel="ViRead - về tổng quan"
           href="/dashboard"
-        >
-          <Image
-            alt=""
-            height={48}
-            priority
-            src="/images/figma/owl-mascot.svg"
-            width={48}
-          />
-          <span className="text-body">ViRead</span>
-        </Link>
+          size="md"
+        />
         <ButtonLink
           className="max-w-[220px] shrink-0"
           href="/dashboard"
@@ -47,14 +38,24 @@ export function BookChildHeader({
         </ButtonLink>
       </div>
 
-      <Link
-        aria-label={"Quay lại. " + (mobileLabel ?? childLabel)}
-        className="flex h-12 w-full items-center gap-2 rounded-control text-left font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:hidden"
-        href={backHref}
-      >
-        <ArrowLeft aria-hidden="true" className="size-[26px] text-ink" />
-        <span className="text-label">{mobileLabel ?? childLabel}</span>
-      </Link>
+      <div className="flex h-12 w-full min-w-0 items-center gap-2 sm:hidden">
+        <ViReadLogo
+          ariaLabel="ViRead - về tổng quan"
+          compact
+          href="/dashboard"
+          size="sm"
+        />
+        <Link
+          aria-label={"Quay lại. " + (mobileLabel ?? childLabel)}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-control text-left font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+          href={backHref}
+        >
+          <ArrowLeft aria-hidden="true" className="size-6 shrink-0 text-ink" />
+          <span className="truncate text-label">
+            {mobileLabel ?? childLabel}
+          </span>
+        </Link>
+      </div>
     </header>
   );
 }

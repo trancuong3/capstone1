@@ -8,11 +8,67 @@ import {
 } from "./real-data-fixture";
 
 async function assertLayout(page: Page) {
-  const dimensions = await page.evaluate(() => ({
-    width: document.documentElement.clientWidth,
-    scroll: document.documentElement.scrollWidth,
-  }));
-  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width);
+  const dimensions = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const describe = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const htmlElement = element as HTMLElement;
+      return {
+        tag: element.tagName.toLowerCase(),
+        className:
+          typeof htmlElement.className === "string"
+            ? htmlElement.className
+            : "",
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
+        overflowX: window.getComputedStyle(element).overflowX,
+      };
+    };
+    const overflowingElements = Array.from(document.body.querySelectorAll("*"))
+      .map((element) => {
+        const ancestors: ReturnType<typeof describe>[] = [];
+        let ancestor = element.parentElement;
+        while (ancestor) {
+          ancestors.push(describe(ancestor));
+          ancestor = ancestor.parentElement;
+        }
+        const isContained = ancestors.some((item) =>
+          ["auto", "scroll", "hidden", "clip"].includes(item.overflowX),
+        );
+        return {
+          ...describe(element),
+          text: element.textContent?.trim().slice(0, 50),
+          isContained,
+          ancestors: ancestors.slice(0, 6),
+        };
+      })
+      .filter(
+        (element) =>
+          element.width > 0 &&
+          element.right > width + 1 &&
+          !element.isContained,
+      )
+      .sort((left, right) => right.right - left.right)
+      .slice(0, 15);
+
+    return {
+      width,
+      scroll: document.documentElement.scrollWidth,
+      body: describe(document.body),
+      header: document.querySelector("header")
+        ? describe(document.querySelector("header")!)
+        : null,
+      main: document.querySelector("main")
+        ? describe(document.querySelector("main")!)
+        : null,
+      overflowingElements,
+    };
+  });
+  expect(
+    dimensions.scroll,
+    `Horizontal overflow: ${JSON.stringify(dimensions)}`,
+  ).toBeLessThanOrEqual(dimensions.width);
 }
 
 test("Parent dashboard → catalog → real book metadata with unavailable preview", async ({
@@ -220,15 +276,15 @@ test("Admin book creation requires separate name and title and sends normalized 
   expect(api.unexpected).toEqual([]);
 });
 
-for (const width of [1440, 1024, 768, 390]) {
+for (const width of [320, 375, 430, 768, 1366, 1920]) {
   test(`read-route matrix, headings, console and overflow at ${width}px`, async ({
     page,
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop",
-      "Matrix itself covers all four widths.",
+      "Matrix itself covers all six widths.",
     );
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const api = await installApiFixture(page);
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     const pageErrors: string[] = [];
@@ -286,7 +342,7 @@ for (const width of [1440, 1024, 768, 390]) {
           page.getByRole("heading", { name: "Database" }),
         ).toBeVisible();
       await assertLayout(page);
-      if (width === 1440 || width === 390)
+      if (width === 1366 || width === 375)
         await page.screenshot({
           path: testInfo.outputPath(`route-${index}-${width}.png`),
           fullPage: true,

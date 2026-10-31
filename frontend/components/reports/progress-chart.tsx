@@ -54,23 +54,25 @@ export function ProgressChart({ report }: ProgressChartProps) {
           </div>
         ))}
       </div>
-      <table className="sr-only">
-        <caption>Tóm tắt dạng bảng của biểu đồ bằng chứng đọc</caption>
-        <thead>
-          <tr>
-            <th scope="col">Loại</th>
-            <th scope="col">Số lần đã lưu</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <th scope="row">{row.label}</th>
-              <td>{row.value ?? "Chưa có dữ liệu"}</td>
+      <div className="sr-only">
+        <table>
+          <caption>Tóm tắt dạng bảng của biểu đồ bằng chứng đọc</caption>
+          <thead>
+            <tr>
+              <th scope="col">Loại</th>
+              <th scope="col">Số lần đã lưu</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <th scope="row">{row.label}</th>
+                <td>{row.value ?? "Chưa có dữ liệu"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
