@@ -100,7 +100,7 @@ export function AppShell({ children }: AppShellProps) {
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(
-            "mx-auto flex w-full max-w-[1376px]",
+            "mx-auto flex w-full min-w-0 max-w-[1376px]",
             isChildOnboarding
               ? "min-h-11 items-center"
               : "flex-col gap-3 sm:min-h-16 sm:flex-row sm:items-center sm:gap-4",
@@ -114,7 +114,7 @@ export function AppShell({ children }: AppShellProps) {
           />
 
           {!isChildOnboarding ? (
-            <div className="flex w-full min-w-0 items-center gap-2 overflow-x-auto pb-1 sm:w-auto sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
+            <div className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 sm:w-auto sm:max-w-none sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
               {navigationItems.map(({ href, icon: Icon, label }) => {
                 const isActive =
                   pathname === href ||
