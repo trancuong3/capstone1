@@ -50,10 +50,7 @@ export function BookChildHeader({
           className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-control text-left font-bold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
           href={backHref}
         >
-          <ArrowLeft
-            aria-hidden="true"
-            className="size-6 shrink-0 text-ink"
-          />
+          <ArrowLeft aria-hidden="true" className="size-6 shrink-0 text-ink" />
           <span className="truncate text-label">
             {mobileLabel ?? childLabel}
           </span>
