@@ -19,6 +19,7 @@ import {
 } from "@/components/profile/parent-profile-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useProfileService } from "@/hooks/use-profile-service";
@@ -190,16 +191,12 @@ export function ParentProfileScreen() {
 
   return (
     <section className="mx-auto flex w-full max-w-[800px] flex-col gap-6">
-      <header>
-        <p className="text-label font-bold text-primary">HỒ SƠ BA MẸ</p>
-        <h1 className="mt-2 text-heading font-extrabold text-ink">
-          Thông tin tài khoản
-        </h1>
-        <p className="mt-2 text-body text-muted">
-          Xem và cập nhật thông tin liên hệ cùng các hồ sơ trẻ đã liên kết với
-          ViRead.
-        </p>
-      </header>
+      <PageHeader
+        className="mb-0 gap-4"
+        description="Xem và cập nhật thông tin liên hệ cùng các hồ sơ trẻ đã liên kết với ViRead."
+        eyebrow="Hồ sơ ba mẹ"
+        title="Thông tin tài khoản"
+      />
 
       <Card className="sm:p-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
