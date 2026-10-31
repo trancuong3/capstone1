@@ -10,36 +10,64 @@ import {
 async function assertLayout(page: Page) {
   const dimensions = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
-    const overflowingElements = Array.from(document.body.querySelectorAll("*"))
+    const describe = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      const htmlElement = element as HTMLElement;
+      return {
+        tag: element.tagName.toLowerCase(),
+        className:
+          typeof htmlElement.className === "string"
+            ? htmlElement.className
+            : "",
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        width: Math.round(rect.width),
+        overflowX: window.getComputedStyle(element).overflowX,
+      };
+    };
+    const overflowingElements = Array.from(
+      document.body.querySelectorAll("*"),
+    )
       .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const htmlElement = element as HTMLElement;
+        const ancestors: ReturnType<typeof describe>[] = [];
+        let ancestor = element.parentElement;
+        while (ancestor) {
+          ancestors.push(describe(ancestor));
+          ancestor = ancestor.parentElement;
+        }
+        const isContained = ancestors.some((item) =>
+          ["auto", "scroll", "hidden", "clip"].includes(item.overflowX),
+        );
         return {
-          tag: element.tagName.toLowerCase(),
-          className:
-            typeof htmlElement.className === "string"
-              ? htmlElement.className
-              : "",
-          left: Math.round(rect.left),
-          right: Math.round(rect.right),
-          width: Math.round(rect.width),
-          overflowX: window.getComputedStyle(element).overflowX,
-          text: element.textContent?.trim().slice(0, 70),
+          ...describe(element),
+          text: element.textContent?.trim().slice(0, 50),
+          isContained,
+          ancestors: ancestors.slice(0, 6),
         };
       })
-      .filter((element) => element.width > 0 && element.right > width + 1)
+      .filter(
+        (element) =>
+          element.width > 0 && element.right > width + 1 && !element.isContained,
+      )
       .sort((left, right) => right.right - left.right)
-      .slice(0, 20);
+      .slice(0, 15);
 
     return {
       width,
       scroll: document.documentElement.scrollWidth,
+      body: describe(document.body),
+      header: document.querySelector("header")
+        ? describe(document.querySelector("header")!)
+        : null,
+      main: document.querySelector("main")
+        ? describe(document.querySelector("main")!)
+        : null,
       overflowingElements,
     };
   });
   expect(
     dimensions.scroll,
-    `Horizontal overflow: ${JSON.stringify(dimensions.overflowingElements)}`,
+    `Horizontal overflow: ${JSON.stringify(dimensions)}`,
   ).toBeLessThanOrEqual(dimensions.width);
 }
 
