@@ -23,7 +23,9 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
         <div className="flex min-w-0 items-center gap-3">
           <ViReadLogo
             ariaLabel={
-              isAdminLogin ? "ViRead - đăng nhập quản trị" : "ViRead - đăng nhập"
+              isAdminLogin
+                ? "ViRead - đăng nhập quản trị"
+                : "ViRead - đăng nhập"
             }
             href={isAdminLogin ? "/admin/login" : "/login"}
             size="md"

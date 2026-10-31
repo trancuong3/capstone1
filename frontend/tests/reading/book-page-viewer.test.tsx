@@ -71,15 +71,17 @@ describe("BookPageViewer", () => {
       <BookPageViewer currentWordId={null} page={formattedPage} />,
     );
 
-    expect(screen.getByText("Ngày")).toBeInTheDocument();
-    expect(screen.getByText("một")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ngày" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "một" })).toBeInTheDocument();
     expect(container.querySelectorAll("br")).toHaveLength(4);
     expect(
       container.querySelector(
         '[data-word-id="44444444-4444-4444-8444-444444444444"]',
       ),
     ).toHaveAttribute("data-line-index", "2");
-    expect(container.querySelectorAll('span[aria-hidden="true"]')).toHaveLength(1);
+    expect(
+      container.querySelectorAll('span[aria-hidden="true"]'),
+    ).toHaveLength(1);
   });
 
   it("shows stored page text and does not render scanned or fallback imagery", () => {
