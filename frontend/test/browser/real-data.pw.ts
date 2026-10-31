@@ -47,7 +47,9 @@ async function assertLayout(page: Page) {
       })
       .filter(
         (element) =>
-          element.width > 0 && element.right > width + 1 && !element.isContained,
+          element.width > 0 &&
+          element.right > width + 1 &&
+          !element.isContained,
       )
       .sort((left, right) => right.right - left.right)
       .slice(0, 15);
