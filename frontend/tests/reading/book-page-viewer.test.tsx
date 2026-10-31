@@ -79,7 +79,9 @@ describe("BookPageViewer", () => {
         '[data-word-id="44444444-4444-4444-8444-444444444444"]',
       ),
     ).toHaveAttribute("data-line-index", "2");
-    expect(container.querySelectorAll('span[aria-hidden="true"]')).toHaveLength(1);
+    expect(
+      container.querySelectorAll('span[aria-hidden="true"]'),
+    ).toHaveLength(1);
   });
 
   it("shows stored page text and does not render scanned or fallback imagery", () => {
