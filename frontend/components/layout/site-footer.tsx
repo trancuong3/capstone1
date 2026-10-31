@@ -1,6 +1,7 @@
 import { Mail, MapPin, Phone } from "lucide-react";
 import Link from "next/link";
 
+import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
 
 interface SiteFooterProps {
@@ -33,12 +34,14 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
         <>
           <div className="mx-auto grid w-full max-w-[1376px] gap-8 px-4 py-8 sm:px-8 md:grid-cols-2 md:gap-10 lg:grid-cols-[1.2fr_1fr_0.8fr] lg:py-10">
             <section aria-labelledby="footer-viread-brand" className="min-w-0">
-              <h2
-                className="text-xl font-black tracking-tight text-primary"
-                id="footer-viread-brand"
-              >
-                ViRead
+              <h2 className="sr-only" id="footer-viread-brand">
+                Thương hiệu ViRead
               </h2>
+              <ViReadLogo
+                ariaLabel="ViRead - về tổng quan"
+                href="/dashboard"
+                size="md"
+              />
               <p className="mt-3 max-w-md text-sm leading-6 text-muted">
                 Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng đọc
                 sách và theo dõi quá trình học tập.
@@ -128,8 +131,12 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
         </>
       ) : (
         <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
-          <div className="min-w-0 space-y-1">
-            <p className="text-label font-extrabold text-primary">ViRead</p>
+          <div className="min-w-0 space-y-2">
+            <ViReadLogo
+              ariaLabel="ViRead - về trang chủ"
+              href={isAdmin ? "/admin/parents" : "/login"}
+              size="md"
+            />
             <p className="text-sm leading-relaxed text-muted">
               {isAdmin
                 ? "Khu vực quản trị ViRead."
