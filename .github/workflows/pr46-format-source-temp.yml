@@ -1,0 +1,28 @@
+name: PR46 Temporary Prettier Formatting
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  format-source:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Apply the repository-pinned Prettier formatter
+        run: npx prettier --write components/reports/progress-chart.tsx tests/reading/book-page-viewer.test.tsx
+      - name: Print formatted source for exact patch application
+        run: |
+          echo "===== progress-chart.tsx ====="
+          cat components/reports/progress-chart.tsx
+          echo "===== book-page-viewer.test.tsx ====="
+          cat tests/reading/book-page-viewer.test.tsx
