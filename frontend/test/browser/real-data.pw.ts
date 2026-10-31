@@ -10,9 +10,7 @@ import {
 async function assertLayout(page: Page) {
   const dimensions = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
-    const overflowingElements = Array.from(
-      document.body.querySelectorAll("*"),
-    )
+    const overflowingElements = Array.from(document.body.querySelectorAll("*"))
       .map((element) => {
         const rect = element.getBoundingClientRect();
         const htmlElement = element as HTMLElement;
@@ -256,7 +254,7 @@ for (const width of [320, 375, 430, 768, 1366, 1920]) {
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop",
-      "Matrix itself covers all four widths.",
+      "Matrix itself covers all six widths.",
     );
     test.setTimeout(360_000);
     const api = await installApiFixture(page);
