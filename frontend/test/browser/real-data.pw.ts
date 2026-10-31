@@ -26,7 +26,7 @@ async function assertLayout(page: Page) {
           right: Math.round(rect.right),
           width: Math.round(rect.width),
           overflowX: window.getComputedStyle(element).overflowX,
-          text: element.textContent?.trim().replace(/\\s+/g, " ").slice(0, 70),
+          text: element.textContent?.trim().slice(0, 70),
         };
       })
       .filter((element) => element.width > 0 && element.right > width + 1)
