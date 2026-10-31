@@ -8,11 +8,41 @@ import {
 } from "./real-data-fixture";
 
 async function assertLayout(page: Page) {
-  const dimensions = await page.evaluate(() => ({
-    width: document.documentElement.clientWidth,
-    scroll: document.documentElement.scrollWidth,
-  }));
-  expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width);
+  const dimensions = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const overflowingElements = Array.from(
+      document.body.querySelectorAll("*"),
+    )
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const htmlElement = element as HTMLElement;
+        return {
+          tag: element.tagName.toLowerCase(),
+          className:
+            typeof htmlElement.className === "string"
+              ? htmlElement.className
+              : "",
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+          overflowX: window.getComputedStyle(element).overflowX,
+          text: element.textContent?.trim().replace(/\\s+/g, " ").slice(0, 70),
+        };
+      })
+      .filter((element) => element.width > 0 && element.right > width + 1)
+      .sort((left, right) => right.right - left.right)
+      .slice(0, 20);
+
+    return {
+      width,
+      scroll: document.documentElement.scrollWidth,
+      overflowingElements,
+    };
+  });
+  expect(
+    dimensions.scroll,
+    `Horizontal overflow: ${JSON.stringify(dimensions.overflowingElements)}`,
+  ).toBeLessThanOrEqual(dimensions.width);
 }
 
 test("Parent dashboard → catalog → real book metadata with unavailable preview", async ({
