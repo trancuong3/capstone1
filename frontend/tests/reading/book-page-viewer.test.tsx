@@ -85,7 +85,7 @@ describe("BookPageViewer", () => {
         container.querySelectorAll('span[aria-hidden="true"]'),
       ).toHaveLength(1);
     },
-  );;
+  );
 
   it(
     "shows stored page text and does not render scanned or fallback imagery",
@@ -96,5 +96,5 @@ describe("BookPageViewer", () => {
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
       expect(screen.getByText("Nội dung OCR đã xác minh")).toBeInTheDocument();
     },
-  );;
+  );
 });
