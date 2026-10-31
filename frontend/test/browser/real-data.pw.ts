@@ -25,9 +25,7 @@ async function assertLayout(page: Page) {
         overflowX: window.getComputedStyle(element).overflowX,
       };
     };
-    const overflowingElements = Array.from(
-      document.body.querySelectorAll("*"),
-    )
+    const overflowingElements = Array.from(document.body.querySelectorAll("*"))
       .map((element) => {
         const ancestors: ReturnType<typeof describe>[] = [];
         let ancestor = element.parentElement;
