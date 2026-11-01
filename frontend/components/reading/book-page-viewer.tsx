@@ -124,12 +124,10 @@ export function BookPageViewer({
                 const lineIndex = word.line_index ?? 0;
                 const previousLineIndex = previousWord?.line_index ?? 0;
                 const startsLine =
-                  previousWord !== undefined &&
-                  lineIndex !== previousLineIndex;
+                  previousWord !== undefined && lineIndex !== previousLineIndex;
 
                 const verticalGap = previousWord
-                  ? word.bbox[1] -
-                    (previousWord.bbox[1] + previousWord.bbox[3])
+                  ? word.bbox[1] - (previousWord.bbox[1] + previousWord.bbox[3])
                   : 0;
 
                 const inferredParagraphBreak =
@@ -222,7 +220,6 @@ export function BookPageViewer({
                   </Fragment>
                 );
               })}
-
             </p>
           ) : page.text ? (
             <p className="whitespace-pre-wrap text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">

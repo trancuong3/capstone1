@@ -1,7 +1,5 @@
 "use client";
 
-
-
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ServiceError } from "@/lib/api/service-error";
@@ -41,7 +39,6 @@ import {
   compareTranscript,
   type ComparisonResult,
 } from "@/lib/api/comparison-service";
-
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -166,7 +163,6 @@ export function ReadingScreen({
     Promise.resolve(false),
   );
   const isUsingRecorderRef = useRef(false);
-
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -470,7 +466,6 @@ export function ReadingScreen({
       failedWordsSetRef.current.add(targetWord.text);
       // Keep currentWordId on targetWord (DO NOT jump forward)
       setCurrentWordId(targetWord.word_id);
-
     }
 
     setCorrectWordIds(new Set(correctWordIdsRef.current));
@@ -592,7 +587,6 @@ export function ReadingScreen({
     return true;
   }
 
-
   useEffect(() => {
     startListeningRef.current = startListening;
   });
@@ -613,7 +607,6 @@ export function ReadingScreen({
         setLatestTranscript(transcript.text);
         verifySpokenWord(transcript.text);
         recordSpokenText(transcript.text);
-
       }
 
       const text = transcript.text?.trim() ?? "";
@@ -621,14 +614,13 @@ export function ReadingScreen({
       if (!text) {
         return "";
       }
-  
 
       // Hiển thị văn bản đã nhận diện
       setLatestTranscript(text);
       setComparisonError(null);
 
       // Giữ chức năng cũ
-      
+
       recordSpokenText(text);
 
       // So sánh với nội dung sách
@@ -638,7 +630,7 @@ export function ReadingScreen({
         const result = await compareTranscript(
           sessionId,
           text,
-          transcript.words ?? undefined
+          transcript.words ?? undefined,
         );
 
         if (!mountedRef.current || controller.signal.aborted) {
@@ -649,17 +641,12 @@ export function ReadingScreen({
         setComparisonError(null);
 
         console.log("Transcript:", text);
-        console.log(
-          "Book text:",
-          page?.words.map((w) => w.text).join(" "),
-        );
+        console.log("Book text:", page?.words.map((w) => w.text).join(" "));
         console.log("Kết quả so sánh:", result);
       } catch (err) {
         if (!controller.signal.aborted) {
           console.error("Lỗi so sánh transcript:", err);
-          setComparisonError(
-            "Chưa thể so sánh bài đọc. Vui lòng thử lại sau."
-          );
+          setComparisonError("Chưa thể so sánh bài đọc. Vui lòng thử lại sau.");
         }
       } finally {
         if (mountedRef.current) {
@@ -669,9 +656,9 @@ export function ReadingScreen({
 
       return text;
     } catch (err) {
-        if (!controller.signal.aborted) {
-          console.error("Lỗi chuyển ghi âm thành văn bản:", err);
-        }
+      if (!controller.signal.aborted) {
+        console.error("Lỗi chuyển ghi âm thành văn bản:", err);
+      }
 
       return "";
     }
@@ -695,7 +682,6 @@ export function ReadingScreen({
           console.log("Đoạn văn đã nhận diện:", text);
         }
       }
-      
     } catch {
       speechRecorder.cancel();
     }
@@ -1371,25 +1357,16 @@ export function ReadingScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
-       {/* Hiển thị kết quả so sánh bài đọc */}
+      {/* Hiển thị kết quả so sánh bài đọc */}
       <div className="mx-auto w-full max-w-[720px] space-y-3 p-4">
-        {isComparing && (
-          <p role="status">
-            Đang so sánh bài đọc...
-          </p>
-        )}
+        {isComparing && <p role="status">Đang so sánh bài đọc...</p>}
 
         {comparisonError && (
-          <StatusMessage tone="error">
-            {comparisonError}
-          </StatusMessage>
+          <StatusMessage tone="error">{comparisonError}</StatusMessage>
         )}
 
         {comparisonResult && (
-          <ReadingReport
-            result={comparisonResult}
-            bookWords={page.words}
-          />
+          <ReadingReport result={comparisonResult} bookWords={page.words} />
         )}
       </div>
       {confirmFinish ? (
@@ -1563,4 +1540,3 @@ function connectionLabel(state: ReadingConnectionState): string {
 
   return labels[state];
 }
-
