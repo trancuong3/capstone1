@@ -409,8 +409,10 @@ export function ReadingScreen({
 
     const targetClean = normalizeVietnamese(targetWord.text);
 
-    // Look for target word match in the spoken tokens
+    // Look for target word match in the spoken tokens, with small lookahead for natural child speech
+    let activeMatchIdx = -1;
     let matchedTokenIdx = -1;
+
     for (let t = 0; t < tokens.length; t++) {
       const tok = tokens[t];
       if (
@@ -418,18 +420,37 @@ export function ReadingScreen({
         (targetClean.length >= 2 && tok.includes(targetClean)) ||
         (tok.length >= 2 && targetClean.includes(tok))
       ) {
+        activeMatchIdx = searchIdx;
         matchedTokenIdx = t;
         break;
       }
     }
 
-    if (matchedTokenIdx >= 0) {
-      // Correct pronunciation!
-      correctWordIdsRef.current.add(targetWord.word_id);
-      mispronouncedWordIdsRef.current.delete(targetWord.word_id);
-      spokenWordsSetRef.current.add(targetWord.text);
+    if (activeMatchIdx === -1 && searchIdx + 1 < words.length) {
+      const nextWord = words[searchIdx + 1];
+      const nextClean = normalizeVietnamese(nextWord.text);
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (
+          tok === nextClean ||
+          (nextClean.length >= 2 && tok.includes(nextClean)) ||
+          (tok.length >= 2 && nextClean.includes(tok))
+        ) {
+          activeMatchIdx = searchIdx + 1;
+          matchedTokenIdx = t;
+          break;
+        }
+      }
+    }
 
-      let nextIdx = searchIdx + 1;
+    if (activeMatchIdx >= 0) {
+      // Correct pronunciation!
+      const matchedWord = words[activeMatchIdx];
+      correctWordIdsRef.current.add(matchedWord.word_id);
+      mispronouncedWordIdsRef.current.delete(matchedWord.word_id);
+      spokenWordsSetRef.current.add(matchedWord.text);
+
+      let nextIdx = activeMatchIdx + 1;
       let nextTokIdx = matchedTokenIdx + 1;
 
       // Match subsequent words if user spoke a fluent phrase in one go
@@ -480,25 +501,24 @@ export function ReadingScreen({
     setIsComparing(false);
     isListeningActiveRef.current = true;
 
-    // 1. Record the full session. ElevenLabs STT runs once after recording stops.
-    // Keep the recorder callback empty to avoid per-utterance API requests.
+    // 1. Start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
     try {
       await speechRecorder.start(async (utteranceBlob) => {
-        // if (!mountedRef.current || !isListeningActiveRef.current) return;
-        // try {
-        //   const transcript = await speechService.transcribe(utteranceBlob, {
-        //     languageCode: "vi",
-        //   });
-        //   if (!mountedRef.current || !transcript.text) return;
-        //   const cleanText = transcript.text.trim();
-        //   if (cleanText) {
-        //     setLatestTranscript(cleanText);
-        //     verifySpokenWord(cleanText);
-        //     recordSpokenText(cleanText);
-        //   }
-        // } catch (e) {
-        //   console.warn("Live ElevenLabs STT utterance notice:", e);
-        // }
+        if (!mountedRef.current || !isListeningActiveRef.current) return;
+        try {
+          const transcript = await speechService.transcribe(utteranceBlob, {
+            languageCode: "vi",
+          });
+          if (!mountedRef.current || !transcript.text) return;
+          const cleanText = transcript.text.trim();
+          if (cleanText) {
+            setLatestTranscript(cleanText);
+            verifySpokenWord(cleanText);
+            recordSpokenText(cleanText);
+          }
+        } catch (e) {
+          console.warn("Live ElevenLabs STT utterance notice:", e);
+        }
       });
       isUsingRecorderRef.current = true;
     } catch (error) {
