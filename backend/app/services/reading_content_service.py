@@ -472,39 +472,64 @@ class ReadingContentService:
         page_id: UUID,
         session_id: UUID,
         actor_id: UUID,
+        revision_id: UUID | None = None,
     ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
+
         session = await self.repository.session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
+
         await self.require_owned_child(session.ChildId, actor_id)
 
         session_rows = await self.repository.session_page_rows(session.Id)
+
         if session_rows:
             snapshot = await self.repository.session_page(session.Id, page_id)
+
             if snapshot is None:
                 raise HTTPException(
                     status_code=404,
                     detail="Page is outside this reading session's selected range",
                 )
+
+            if revision_id is not None and snapshot.PageRevisionId != revision_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Requested revision does not match the reading session snapshot",
+                )
+
             page = await self.repository.page_by_id(snapshot.PageId)
             revision = await self.repository.revision_snapshot(
-                snapshot.PageId, snapshot.PageRevisionId
+                snapshot.PageId,
+                snapshot.PageRevisionId,
             )
+
             if page is None or revision is None or page.BookId != session.BookId:
                 raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+
             return await self._build_page_dto(page, revision)
 
-        # Legacy one-page sessions retain the existing same-book eligibility rule.
+        # Legacy session
         page = await self.repository.verified_page(page_id, session.BookId)
+
         if page is None:
             raise HTTPException(
                 status_code=404,
                 detail="Active verified page not found in this reading session's book",
             )
-        revision = await self.repository.verified_revision(page.Id, page.CurrentVerifiedRevisionId)
+
+        if revision_id is not None:
+            revision = await self.repository.revision_snapshot(page.Id, revision_id)
+        else:
+            revision = await self.repository.verified_revision(
+                page.Id,
+                page.CurrentVerifiedRevisionId,
+            )
+
         if revision is None:
-            raise HTTPException(status_code=409, detail="Verified page revision is unavailable")
+            raise HTTPException(status_code=409, detail="Page revision is unavailable")
+
         return await self._build_page_dto(page, revision)
 
     async def get_session_progress(

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  FileText,
   Home,
   Mic,
   Star,
@@ -328,6 +329,14 @@ export function SessionComplete({
         >
           <Users aria-hidden="true" className="size-5" />
           Xem cùng ba mẹ
+        </ButtonLink>
+        <ButtonLink
+          className="mx-auto max-w-[360px]"
+          href={`/sessions/${sessionId}/report`}
+          variant="secondary"
+        >
+          <FileText aria-hidden="true" className="size-5" />
+          Xem báo cáo
         </ButtonLink>
       </div>
     </section>

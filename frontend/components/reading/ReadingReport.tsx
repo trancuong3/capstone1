@@ -1,16 +1,23 @@
+
 "use client";
 
-import type { ComparisonResult } from "@/lib/api/comparison-service";
+import { useEffect, useState } from "react";
 
-type BookWord = {
-  text: string;
-  word_index?: number;
-  word_id?: string;
-};
+import {
+  getReadingPage,
+  deleteReadingReport,
+  type ReadingPage,
+  type ComparisonResult,
+} from "@/lib/api/comparison-service";
+
+import { BookPageContent } from "@/components/reading/book-page-content";
 
 type Props = {
-  result: ComparisonResult;
-  bookWords?: readonly BookWord[];
+  result: Pick<
+    ComparisonResult,
+    "alignment" | "summary" | "page_id" | "page_revision_id"
+  >;
+  sessionId: string;
 };
 
 type Hesitation = {
@@ -27,20 +34,6 @@ const COLORS = {
   repeated: "border-purple-500 bg-purple-100",
 };
 
-function getWordColor(
-  status: string,
-  isRepeated: boolean,
-  isHesitation: boolean,
-) {
-  if (status === "DELETE") return COLORS.missing;
-  if (status === "SUBSTITUTE") return COLORS.wrong;
-  if (isRepeated) return COLORS.repeated;
-  if (isHesitation) return COLORS.hesitation;
-  if (status === "MATCH") return COLORS.correct;
-
-  return "";
-}
-
 function isHesitation(value: unknown): value is Hesitation {
   if (typeof value !== "object" || value === null) return false;
 
@@ -53,7 +46,45 @@ function isHesitation(value: unknown): value is Hesitation {
   );
 }
 
-export function ReadingReport({ result, bookWords = [] }: Props) {
+export function ReadingReport({ result, sessionId }: Props) {
+  const [page, setPage] = useState<ReadingPage | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPage() {
+      try {
+        setPageError(null);
+
+        const data = await getReadingPage(
+          result.page_id,
+          sessionId,
+          result.page_revision_id,
+        );
+
+        if (!cancelled) {
+          setPage(data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPageError(
+            error instanceof Error
+              ? error.message
+              : "Không thể tải nội dung trang sách.",
+          );
+        }
+      }
+    }
+
+    loadPage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [result.page_id, result.page_revision_id, sessionId]);
+
+  // Thống kê kết quả đọc
   const correctCount = result.alignment.filter(
     (item) => item.status === "MATCH",
   ).length;
@@ -75,46 +106,51 @@ export function ReadingReport({ result, bookWords = [] }: Props) {
   const hesitations = result.summary.hesitations.filter(isHesitation);
   const hesitationSeconds = result.summary.hesitation_seconds;
 
-  // Xác định các vị trí từ bị lặp trong đoạn căn chỉnh.
-  const repeatedBookIndexes = new Set<number>();
-
-  for (const item of result.alignment) {
-    if (
-      item.status !== "INSERT" ||
-      item.spoken_word === null ||
-      !result.summary.repeated_words.includes(item.spoken_word)
-    ) {
-      continue;
-    }
-
-    const neighbor = result.alignment.find(
-      (candidate) =>
-        candidate.status === "MATCH" &&
-        candidate.book_word === item.spoken_word &&
-        candidate.spoken_index !== null &&
-        Math.abs(candidate.spoken_index - (item.spoken_index ?? -100)) === 1,
-    );
-
-    if (neighbor?.book_index !== null && neighbor?.book_index !== undefined) {
-      repeatedBookIndexes.add(neighbor.book_index);
-    }
-  }
-
-  // Tô xanh dương từ đứng trước khoảng ngập ngừng.
-  const hesitationWords = new Set(
-    hesitations.map((item) => item.after_word.toLocaleLowerCase("vi")),
-  );
-
-  // Lấy trạng thái căn chỉnh theo vị trí từ trong sách.
-  const alignmentByIndex = new Map(
-    result.alignment
-      .filter((item) => item.book_index !== null)
-      .map((item) => [item.book_index as number, item]),
-  );
-
   return (
     <div className="space-y-5 rounded-xl border p-4">
       <h2 className="text-xl font-bold">Báo cáo đọc</h2>
+
+      {/* Nội dung bài đọc */}
+      <div className="space-y-3 border-t pt-3">
+        <h3 className="font-semibold">Nội dung bài đọc</h3>
+
+        {pageError ? (
+          <p className="text-sm text-red-600">{pageError}</p>
+        ) : !page ? (
+          <p className="text-sm text-muted">
+            Đang tải nội dung bài đọc...
+          </p>
+        ) : (
+          <article
+            className="relative min-h-[552px] w-full overflow-hidden rounded-[8px] bg-cream p-4 shadow-[0_8px_24px_rgba(33,61,66,0.06)] sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-8"
+            data-page-id={page.page_id}
+            data-page-revision-id={page.page_revision_id}
+          >
+            <div className="relative z-10 flex h-full flex-col">
+              <header className="mb-2 flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  Nội dung OCR đã xác minh
+                </span>
+
+                <span className="text-label text-muted">
+                  Trang {page.page_number}
+                </span>
+              </header>
+
+              <BookPageContent
+                page={page}
+                comparisonResult={result}
+                readOnly
+              />
+
+              <p className="mt-2 text-right text-label text-muted">
+                {page.page_number}
+              </p>
+            </div>
+          </article>
+        )}
+      </div>
 
       {/* Thống kê */}
       <div className="grid grid-cols-2 gap-4">

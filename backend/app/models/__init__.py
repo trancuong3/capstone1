@@ -4,3 +4,4 @@ from .reading import ReadingSession, ReadingSessionPage, ReadingEvent, FluencyAs
 from .comprehension import ComprehensionQuestion, ComprehensionAnswer
 from .system import ProgressReport, ConsentRecord, AuditLog
 from .reading_management import ReadingGoal, ChildBookCollection, ReadingReminder, ReadingReminderOccurrence
+from app.models.reading_comparison_report import ReadingComparisonReport
