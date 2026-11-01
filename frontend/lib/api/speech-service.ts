@@ -7,16 +7,30 @@ import { getApiBaseUrl } from "@/lib/supabase/config";
 const safeMessage =
   "Chức năng giọng nói đang chưa sẵn sàng. Vui lòng thử lại sau.";
 
+const wordTimestampSchema = z.object({
+  text: z.string(),
+  start: z.number().nonnegative(),
+  end: z.number().nonnegative(),
+});
+
 const transcriptionSchema = z.object({
   text: z.string(),
   language_code: z.string().nullable().optional(),
   language_probability: z.number().nullable().optional(),
+  words: z.array(wordTimestampSchema).nullable().optional(),
 });
+
+export interface WordTimestamp {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
 
 export interface SpeechTranscript {
   readonly text: string;
   readonly language_code: string | null;
   readonly language_probability: number | null;
+  readonly words: readonly WordTimestamp[] | null;
 }
 
 export interface TextToSpeechOptions {
@@ -168,6 +182,7 @@ export function createSpeechService(): SpeechService {
         text: parsed.data.text,
         language_code: parsed.data.language_code ?? null,
         language_probability: parsed.data.language_probability ?? null,
+        words: parsed.data.words ?? null,
       };
     },
   };

@@ -2,11 +2,13 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { ViReadLogo } from "@/components/common/viread-logo";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
 import { CameraPreview } from "@/components/reading/camera-preview";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
+import type { ComparisonResult } from "@/lib/api/comparison-service";
 
 interface ReadingLayoutProps {
   audioLevel?: number;
@@ -36,6 +38,7 @@ interface ReadingLayoutProps {
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
+  comparisonResult?: ComparisonResult | null;
   spokenWords?: Set<string>;
 }
 
@@ -66,19 +69,28 @@ export function ReadingLayout({
   onToggleListening,
   onWordClick,
   page,
+  comparisonResult,
   spokenWords,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
       <header className="flex min-h-12 items-center gap-3">
-        <Link
-          aria-label="Thoát khỏi buổi đọc"
-          className="inline-flex h-12 shrink-0 items-center gap-2 rounded-control px-1 text-label font-bold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-16 sm:w-[180px] sm:bg-white sm:px-4"
-          href={exitHref}
-        >
-          <ArrowLeft aria-hidden="true" className="size-5" />
-          <span className="hidden sm:inline">Thoát</span>
-        </Link>
+        <div className="flex shrink-0 items-center gap-2 sm:w-[180px]">
+          <ViReadLogo
+            ariaLabel="ViRead - về tổng quan"
+            compact
+            href="/dashboard"
+            size="sm"
+          />
+          <Link
+            aria-label="Thoát khỏi buổi đọc"
+            className="inline-flex h-12 shrink-0 items-center gap-2 rounded-control px-1 text-label font-bold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-16 sm:bg-white sm:px-4"
+            href={exitHref}
+          >
+            <ArrowLeft aria-hidden="true" className="size-5" />
+            <span className="hidden sm:inline">Thoát</span>
+          </Link>
+        </div>
         <p className="min-w-0 flex-1 truncate text-center text-label font-bold text-primary sm:text-ink">
           {bookTitle} · Trang {page.page_number}
         </p>
@@ -95,6 +107,7 @@ export function ReadingLayout({
           mispronouncedWordIds={mispronouncedWordIds}
           onWordClick={onWordClick}
           page={page}
+          comparisonResult={comparisonResult}
           spokenWords={spokenWords}
         />
       </CameraPreview>

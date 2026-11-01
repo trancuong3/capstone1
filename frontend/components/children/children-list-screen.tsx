@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
@@ -47,21 +48,18 @@ export function ChildrenListScreen() {
 
   return (
     <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-label font-bold text-primary">HỒ SƠ BÉ</p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
-            Các bạn nhỏ của gia đình
-          </h1>
-          <p className="mt-2 text-body text-muted">
-            Ba mẹ có thể tạo và chỉnh sửa những hồ sơ thuộc tài khoản này.
-          </p>
-        </div>
-        <ButtonLink className="sm:w-auto sm:min-w-60" href="/children/new">
-          <Plus aria-hidden="true" className="size-5" />
-          Tạo hồ sơ bé
-        </ButtonLink>
-      </header>
+      <PageHeader
+        action={
+          <ButtonLink className="sm:min-w-60" href="/children/new">
+            <Plus aria-hidden="true" className="size-5" />
+            Tạo hồ sơ bé
+          </ButtonLink>
+        }
+        className="mb-0"
+        description="Ba mẹ có thể tạo và chỉnh sửa những hồ sơ thuộc tài khoản này."
+        eyebrow="Hồ sơ bé"
+        title="Các bạn nhỏ của gia đình"
+      />
 
       {state.status === "loading" ? (
         <div

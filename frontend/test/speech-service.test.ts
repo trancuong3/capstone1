@@ -79,6 +79,7 @@ describe("speech service", () => {
       text: "Con mèo đang ngủ.",
       language_code: "vi",
       language_probability: 0.99,
+      words: null,
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -90,6 +91,25 @@ describe("speech service", () => {
     expect(body.get("language_code")).toBe("vi");
     expect(body.get("file")).toBeTruthy();
     expect(headersFromCall().has("content-type")).toBe(false);
+  });
+
+  it("preserves provider word timestamps for reading alignment", async () => {
+    const words = [
+      { text: "Con", start: 0.1, end: 0.2 },
+      { text: "mèo", start: 0.21, end: 0.4 },
+    ];
+    fetchMock.mockResolvedValue(
+      Response.json({
+        text: "Con mèo",
+        language_code: "vi",
+        language_probability: 0.99,
+        words,
+      }),
+    );
+
+    await expect(
+      createSpeechService().transcribe(new Blob(["recorded-audio"])),
+    ).resolves.toMatchObject({ words });
   });
 
   it("does not call the API without a browser session", async () => {

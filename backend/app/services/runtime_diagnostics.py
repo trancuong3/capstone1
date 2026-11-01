@@ -1,10 +1,7 @@
-"""Internal, read-only diagnostics for Supabase Storage and local OCR configuration."""
+"""Internal, read-only diagnostics for Supabase Storage and Dual-Engine OCR configuration."""
 from __future__ import annotations
 
-import os
-import shutil
-
-import pytesseract
+import importlib.util
 
 from app.database.config import (
     SUPABASE_ADMIN_KEY,
@@ -15,31 +12,21 @@ from app.database.config import (
 
 def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, bool | None]:
     """Return booleans only; never return URLs, bucket names, commands, or keys."""
-    configured_command = (os.getenv("TESSERACT_CMD") or "").strip()
-    executable_available: bool | None = None
-    language_available: bool | None = None
-    if include_ocr:
-        binary = configured_command or pytesseract.pytesseract.tesseract_cmd
-        executable_available = bool(os.path.isfile(binary) or shutil.which(binary))
+    ocr_available: bool | None = None
 
-    # Use the configured binary while probing its language data, then restore
-    # pytesseract's process-global value so diagnostics do not alter OCR behavior.
-    if executable_available and include_ocr:
-        original_command = pytesseract.pytesseract.tesseract_cmd
-        try:
-            if configured_command:
-                pytesseract.pytesseract.tesseract_cmd = configured_command
-            language_available = "vie" in set(pytesseract.get_languages(config=""))
-        except Exception:
-            language_available = False
-        finally:
-            pytesseract.pytesseract.tesseract_cmd = original_command
+    if include_ocr:
+        # Kiểm tra tính sẵn sàng của Dual-Engine (PaddleOCR + VietOCR) trong môi trường runtime
+        paddle_ready = importlib.util.find_spec("paddleocr") is not None
+        vietocr_ready = importlib.util.find_spec("vietocr") is not None
+        ocr_available = bool(paddle_ready and vietocr_ready)
 
     return {
         "supabase_url_configured": bool(SUPABASE_URL),
         "supabase_storage_bucket_configured": bool(SUPABASE_STORAGE_BUCKET),
         "server_side_key_configured": bool(SUPABASE_ADMIN_KEY),
-        "tesseract_command_configured": bool(configured_command),
-        "tesseract_executable_available": executable_available,
-        "vietnamese_language_available": language_available,
+        "ocr_engine_available": ocr_available,
+        "vietnamese_language_available": ocr_available,
+        # Giữ lại các key cũ làm shim tương thích ngược để không làm vỡ các schema API hiện hữu
+        "tesseract_command_configured": ocr_available,
+        "tesseract_executable_available": ocr_available,
     }

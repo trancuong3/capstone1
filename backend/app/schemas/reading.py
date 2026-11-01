@@ -281,6 +281,17 @@ class SessionDetailRead(HistorySessionSummaryRead):
     report_id: UUID | None
 
 
+class WordTimestamp(BaseModel):
+    text: str
+    start: float = Field(..., ge=0)
+    end: float = Field(..., ge=0)
+
+
+class CompareReadingRequest(BaseModel):
+    transcript: str = Field(..., min_length=1)
+    words: list[WordTimestamp] | None = None
+
+
 class ReadingPageWordRead(BaseModel):
     word_id: UUID
     word_index: int = Field(ge=0)
@@ -314,3 +325,4 @@ class CameraPageMatchRead(BaseModel):
     message: str
     confidence: float = Field(ge=0, le=1)
     matched_page: ReadingPageRead | None = None
+

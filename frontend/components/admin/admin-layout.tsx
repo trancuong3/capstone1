@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { ViReadLogo } from "@/components/common/viread-logo";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { cn } from "@/lib/utils/cn";
@@ -55,12 +56,16 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh w-full flex-col bg-canvas">
       <header className="shrink-0 border-b border-border bg-white">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-4 py-4 sm:px-8">
-          <Link
-            className="mr-auto flex min-h-11 items-center rounded-control text-xl font-black text-primary focus-visible:outline-3 focus-visible:outline-primary"
-            href="/admin/parents"
-          >
-            ViRead <span className="ml-2 text-ink">Admin</span>
-          </Link>
+          <div className="mr-auto flex min-w-0 items-center gap-3">
+            <ViReadLogo
+              ariaLabel="ViRead - khu vực quản trị"
+              href="/admin/parents"
+              size="md"
+            />
+            <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold tracking-wide text-primary-hover">
+              ADMIN
+            </span>
+          </div>
           <nav
             aria-label="Điều hướng quản trị"
             className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto"

@@ -1,8 +1,10 @@
 "use client";
 
+
+
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import { ServiceError } from "@/lib/api/service-error";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -14,6 +16,7 @@ import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog"
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
+import { ReadingReport } from "@/components/reading/ReadingReport";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -34,6 +37,11 @@ import type {
   ReadingUiState,
   TutorAction,
 } from "@/types/reading";
+import {
+  compareTranscript,
+  type ComparisonResult,
+} from "@/lib/api/comparison-service";
+
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -125,6 +133,11 @@ export function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
+  const [finalTranscript, setFinalTranscript] = useState("");
+  const [isComparing, setIsComparing] = useState(false);
+  const [comparisonResult, setComparisonResult] =
+    useState<ComparisonResult | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
@@ -148,10 +161,12 @@ export function ReadingScreen({
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+
   const startListeningRef = useRef<() => Promise<boolean>>(() =>
     Promise.resolve(false),
   );
   const isUsingRecorderRef = useRef(false);
+
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -455,6 +470,7 @@ export function ReadingScreen({
       failedWordsSetRef.current.add(targetWord.text);
       // Keep currentWordId on targetWord (DO NOT jump forward)
       setCurrentWordId(targetWord.word_id);
+
     }
 
     setCorrectWordIds(new Set(correctWordIdsRef.current));
@@ -464,30 +480,33 @@ export function ReadingScreen({
 
   async function startListening(): Promise<boolean> {
     setLatestTranscript(null);
+    setComparisonResult(null);
+    setComparisonError(null);
+    setIsComparing(false);
     isListeningActiveRef.current = true;
 
-    // 1. Always start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
+    // 1. Record the full session. ElevenLabs STT runs once after recording stops.
+    // Keep the recorder callback empty to avoid per-utterance API requests.
     try {
       await speechRecorder.start(async (utteranceBlob) => {
-        if (!mountedRef.current || !isListeningActiveRef.current) return;
-        try {
-          const transcript = await speechService.transcribe(utteranceBlob, {
-            languageCode: "vi",
-          });
-          if (!mountedRef.current || !transcript.text) return;
-          const cleanText = transcript.text.trim();
-          if (cleanText) {
-            setLatestTranscript(cleanText);
-            verifySpokenWord(cleanText);
-            recordSpokenText(cleanText);
-          }
-        } catch (e) {
-          console.warn("Live ElevenLabs STT utterance notice:", e);
-        }
+        // if (!mountedRef.current || !isListeningActiveRef.current) return;
+        // try {
+        //   const transcript = await speechService.transcribe(utteranceBlob, {
+        //     languageCode: "vi",
+        //   });
+        //   if (!mountedRef.current || !transcript.text) return;
+        //   const cleanText = transcript.text.trim();
+        //   if (cleanText) {
+        //     setLatestTranscript(cleanText);
+        //     verifySpokenWord(cleanText);
+        //     recordSpokenText(cleanText);
+        //   }
+        // } catch (e) {
+        //   console.warn("Live ElevenLabs STT utterance notice:", e);
+        // }
       });
       isUsingRecorderRef.current = true;
     } catch (error) {
-      isUsingRecorderRef.current = false;
       const message = error instanceof Error ? error.message : "";
       if (message.includes("not supported")) {
         if (mountedRef.current) setLatestTranscript(null);
@@ -573,14 +592,17 @@ export function ReadingScreen({
     return true;
   }
 
+
   useEffect(() => {
     startListeningRef.current = startListening;
   });
 
   async function transcribeRecording(recording: Blob) {
     transcriptionAbortRef.current?.abort();
+
     const controller = new AbortController();
     transcriptionAbortRef.current = controller;
+
     try {
       const transcript = await speechService.transcribe(recording, {
         languageCode: "vi",
@@ -591,23 +613,67 @@ export function ReadingScreen({
         setLatestTranscript(transcript.text);
         verifySpokenWord(transcript.text);
         recordSpokenText(transcript.text);
+
       }
+
+      const text = transcript.text?.trim() ?? "";
+
+      if (!text) {
+        return "";
+      }
+  
+
+      // Hiển thị văn bản đã nhận diện
+      setLatestTranscript(text);
+      setComparisonError(null);
+
+      // Giữ chức năng cũ
+      
+      recordSpokenText(text);
+
+      // So sánh với nội dung sách
+      try {
+        setIsComparing(true);
+
+        const result = await compareTranscript(
+          sessionId,
+          text,
+          transcript.words ?? undefined
+        );
+
+        if (!mountedRef.current || controller.signal.aborted) {
+          return text;
+        }
+
+        setComparisonResult(result);
+        setComparisonError(null);
+
+        console.log("Transcript:", text);
+        console.log(
+          "Book text:",
+          page?.words.map((w) => w.text).join(" "),
+        );
+        console.log("Kết quả so sánh:", result);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error("Lỗi so sánh transcript:", err);
+          setComparisonError(
+            "Chưa thể so sánh bài đọc. Vui lòng thử lại sau."
+          );
+        }
+      } finally {
+        if (mountedRef.current) {
+          setIsComparing(false);
+        }
+      }
+
+      return text;
     } catch (err) {
-      console.warn("ElevenLabs STT transcription notice:", err);
-      if (
-        !mountedRef.current ||
-        controller.signal.aborted ||
-        finishStartedRef.current
-      )
-        return;
-      if (spokenWordsSetRef.current.size === 0) {
-        setConnectionState("reconnecting");
-        setUiState("stt-error");
-      }
-    } finally {
-      if (transcriptionAbortRef.current === controller) {
-        transcriptionAbortRef.current = null;
-      }
+        if (!controller.signal.aborted) {
+          console.error("Lỗi chuyển ghi âm thành văn bản:", err);
+        }
+
+      return "";
     }
   }
 
@@ -621,12 +687,15 @@ export function ReadingScreen({
       }
       recognitionRef.current = null;
     }
-    isUsingRecorderRef.current = false;
     try {
       const recording = await speechRecorder.stop();
       if (recording && recording.size > 200) {
-        await transcribeRecording(recording);
+        const text = await transcribeRecording(recording);
+        if (text) {
+          console.log("Đoạn văn đã nhận diện:", text);
+        }
       }
+      
     } catch {
       speechRecorder.cancel();
     }
@@ -1293,6 +1362,7 @@ export function ReadingScreen({
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
+        comparisonResult={comparisonResult}
         spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
@@ -1301,7 +1371,27 @@ export function ReadingScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
+       {/* Hiển thị kết quả so sánh bài đọc */}
+      <div className="mx-auto w-full max-w-[720px] space-y-3 p-4">
+        {isComparing && (
+          <p role="status">
+            Đang so sánh bài đọc...
+          </p>
+        )}
 
+        {comparisonError && (
+          <StatusMessage tone="error">
+            {comparisonError}
+          </StatusMessage>
+        )}
+
+        {comparisonResult && (
+          <ReadingReport
+            result={comparisonResult}
+            bookWords={page.words}
+          />
+        )}
+      </div>
       {confirmFinish ? (
         <ReadingStatusDialog
           body="Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."
@@ -1473,3 +1563,4 @@ function connectionLabel(state: ReadingConnectionState): string {
 
   return labels[state];
 }
+

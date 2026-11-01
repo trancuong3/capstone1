@@ -1,6 +1,6 @@
-import { BookOpen } from "lucide-react";
 import Link from "next/link";
 
+import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
 
 interface SiteHeaderProps {
@@ -20,23 +20,22 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
       )}
     >
       <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
-        <Link
-          aria-label={
-            isAdminLogin ? "ViRead - đăng nhập quản trị" : "ViRead - đăng nhập"
-          }
-          className="inline-flex min-h-11 w-fit max-w-full flex-wrap items-center gap-2 rounded-control text-label font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:text-body"
-          href={isAdminLogin ? "/admin/login" : "/login"}
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky text-primary">
-            <BookOpen aria-hidden="true" className="size-5" />
-          </span>
-          <span className="tracking-tight">ViRead</span>
+        <div className="flex min-w-0 items-center gap-3">
+          <ViReadLogo
+            ariaLabel={
+              isAdminLogin
+                ? "ViRead - đăng nhập quản trị"
+                : "ViRead - đăng nhập"
+            }
+            href={isAdminLogin ? "/admin/login" : "/login"}
+            size="md"
+          />
           {isAdminLogin ? (
-            <span className="rounded-full bg-sky px-3 py-1 text-sm font-bold text-primary-hover">
+            <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold tracking-wide text-primary-hover">
               ADMIN
             </span>
           ) : null}
-        </Link>
+        </div>
 
         {isAdminLogin ? (
           <p className="text-label font-bold text-muted">Khu vực quản trị</p>

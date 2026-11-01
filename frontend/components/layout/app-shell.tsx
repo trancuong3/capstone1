@@ -14,6 +14,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
+import { ViReadLogo } from "@/components/common/viread-logo";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { cn } from "@/lib/utils/cn";
@@ -99,26 +100,21 @@ export function AppShell({ children }: AppShellProps) {
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(
-            "mx-auto flex w-full max-w-[1376px]",
+            "mx-auto flex w-full min-w-0 max-w-[1376px]",
             isChildOnboarding
               ? "min-h-11 items-center"
               : "flex-col gap-3 sm:min-h-16 sm:flex-row sm:items-center sm:gap-4",
           )}
         >
-          <Link
-            className={cn(
-              "flex items-center rounded-control font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
-              isChildOnboarding
-                ? "min-h-11 text-label"
-                : "min-h-11 text-label sm:mr-auto sm:text-body",
-            )}
+          <ViReadLogo
+            ariaLabel="ViRead - về tổng quan"
+            className={cn(isChildOnboarding ? "text-label" : "sm:mr-auto")}
             href="/dashboard"
-          >
-            ViRead
-          </Link>
+            size="md"
+          />
 
           {!isChildOnboarding ? (
-            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end sm:gap-3">
+            <div className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 sm:w-auto sm:max-w-none sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
               {navigationItems.map(({ href, icon: Icon, label }) => {
                 const isActive =
                   pathname === href ||
@@ -130,7 +126,7 @@ export function AppShell({ children }: AppShellProps) {
                   <Link
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "flex min-h-14 min-w-0 items-center justify-center gap-1 rounded-control px-1 text-center text-[13px] font-bold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-14 sm:min-w-28 sm:gap-2 sm:px-3 sm:text-label lg:min-w-32",
+                      "flex min-h-12 shrink-0 items-center justify-center gap-1 rounded-control px-3 text-center text-[13px] font-bold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-14 sm:min-w-28 sm:gap-2 sm:px-3 sm:text-label lg:min-w-32",
                       isActive
                         ? "bg-sky text-primary-hover"
                         : "bg-white hover:bg-sky",
@@ -147,7 +143,7 @@ export function AppShell({ children }: AppShellProps) {
                 );
               })}
               <button
-                className="flex min-h-14 min-w-0 items-center justify-center gap-1 rounded-control bg-white px-1 text-center text-[13px] font-bold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55 sm:h-14 sm:min-w-28 sm:gap-2 sm:px-3 sm:text-label lg:min-w-32"
+                className="flex min-h-12 shrink-0 items-center justify-center gap-1 rounded-control bg-white px-3 text-center text-[13px] font-bold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55 sm:h-14 sm:min-w-28 sm:gap-2 sm:px-3 sm:text-label lg:min-w-32"
                 disabled={isSigningOut}
                 onClick={handleSignOut}
                 type="button"
