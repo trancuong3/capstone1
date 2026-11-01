@@ -95,6 +95,7 @@ torch==2.14.1
 torchvision==0.29.1
 jiwer==4.0.0
 pillow==12.0.0
+pytesseract==0.3.13
 
 # OCR geometry & text formatting dependencies
 pyclipper==1.4.0

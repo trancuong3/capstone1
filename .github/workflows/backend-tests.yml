@@ -34,7 +34,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo apt-get update && sudo apt-get install -y libgl1 libgomp1
+          sudo apt-get update && sudo apt-get install -y libgl1 libgomp1 tesseract-ocr tesseract-ocr-vie
 
       - name: Set up Python
         uses: actions/setup-python@v5
