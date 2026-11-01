@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -27,6 +27,24 @@ export function BookPageViewer({
   spokenWords,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
+  const currentWordRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (
+      currentWordRef.current &&
+      typeof currentWordRef.current.scrollIntoView === "function"
+    ) {
+      currentWordRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
+  }, [currentWordId]);
+
+  const currentIdx = currentWordId
+    ? page.words.findIndex((w) => w.word_id === currentWordId)
+    : -1;
 
   return (
     <article
@@ -51,7 +69,6 @@ export function BookPageViewer({
             Trang {page.page_number}
           </span>
         </header>
-
         <BookPageContent
           page={page}
           comparisonResult={comparisonResult}
@@ -61,7 +78,6 @@ export function BookPageViewer({
           spokenWords={spokenWords}
           onWordClick={onWordClick}
         />
-
         <p className="mt-2 text-right text-label text-muted">
           {page.page_number}
         </p>
