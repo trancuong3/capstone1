@@ -98,6 +98,36 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
 
+    def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
+        """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
+        mock_tesseract_result = {
+            "text": "Con mèo trèo cây cau",
+            "words": [
+                {
+                    "word_index": 0,
+                    "line_index": 0,
+                    "text": "Con",
+                    "normalized_text": "con",
+                    "bbox": [0.1, 0.1, 0.1, 0.1],
+                    "ocr_confidence": 0.9,
+                }
+            ],
+            "metadata": {"engine": "tesseract"},
+        }
+        with patch.object(
+            ocr_engine,
+            "_get_ocr_engines",
+            side_effect=ocr_engine.OcrEngineUnavailable("Libraries not installed"),
+        ):
+            with patch.object(
+                ocr_engine,
+                "_extract_text_and_boxes_tesseract",
+                return_value=mock_tesseract_result,
+            ):
+                result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+                self.assertEqual(result["metadata"]["engine"], "tesseract")
+                self.assertEqual(result["text"], "Con mèo trèo cây cau")
+
 
 if __name__ == "__main__":
     unittest.main()
