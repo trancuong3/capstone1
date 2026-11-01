@@ -14,7 +14,6 @@ import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog"
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
-import { ReadingReport } from "@/components/reading/ReadingReport";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -169,12 +168,7 @@ export function ReadingScreen({
     if (!trimmed) return;
 
     const transcripts = transcriptsListRef.current;
-    if (
-      transcripts.length === 0 ||
-      transcripts[transcripts.length - 1] !== trimmed
-    ) {
-      transcripts.push(trimmed);
-    }
+    transcripts.push(trimmed);
 
     const words = trimmed
       .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
@@ -568,7 +562,6 @@ export function ReadingScreen({
             if (currentWord && mountedRef.current) {
               setLatestTranscript(currentWord);
               verifySpokenWord(currentWord);
-              recordSpokenText(currentWord);
             }
           };
 
@@ -611,7 +604,7 @@ export function ReadingScreen({
     startListeningRef.current = startListening;
   });
 
-  async function transcribeRecording(recording: Blob) {
+  async function transcribeRecording(recording: Blob): Promise<string> {
     transcriptionAbortRef.current?.abort();
 
     const controller = new AbortController();
@@ -622,12 +615,14 @@ export function ReadingScreen({
         languageCode: "vi",
         signal: controller.signal,
       });
-      if (!mountedRef.current || controller.signal.aborted) return;
-      if (transcript.text) {
-        setLatestTranscript(transcript.text);
-        verifySpokenWord(transcript.text);
-        recordSpokenText(transcript.text);
-      }
+    if (!mountedRef.current || controller.signal.aborted) {
+      return "";
+    }
+
+    if (transcript.text) {
+      setLatestTranscript(transcript.text);
+      verifySpokenWord(transcript.text);
+    } 
 
       const text = transcript.text?.trim() ?? "";
 
@@ -635,45 +630,11 @@ export function ReadingScreen({
         return "";
       }
 
-      // Hiển thị văn bản đã nhận diện
       setLatestTranscript(text);
       setComparisonError(null);
 
-      // Giữ chức năng cũ
-
+      // Lưu transcript của đoạn ghi âm này.
       recordSpokenText(text);
-
-      // So sánh với nội dung sách
-      try {
-        setIsComparing(true);
-
-        const result = await compareTranscript(
-          sessionId,
-          text,
-          transcript.words ?? undefined,
-        );
-
-        if (!mountedRef.current || controller.signal.aborted) {
-          return text;
-        }
-
-        setComparisonResult(result);
-        setComparisonError(null);
-
-        console.log("Transcript:", text);
-        console.log("Book text:", page?.words.map((w) => w.text).join(" "));
-        console.log("Kết quả so sánh:", result);
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          console.error("Lỗi so sánh transcript:", err);
-          setComparisonError("Chưa thể so sánh bài đọc. Vui lòng thử lại sau.");
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsComparing(false);
-        }
-      }
-
       return text;
     } catch (err) {
       if (!controller.signal.aborted) {
@@ -683,7 +644,6 @@ export function ReadingScreen({
       return "";
     }
   }
-
   async function stopListeningAndTranscribe() {
     isListeningActiveRef.current = false;
     if (recognitionRef.current) {
@@ -858,6 +818,14 @@ export function ReadingScreen({
     setConnectionState("connected");
     setUiState("reading");
     setIsMicRecording(false);
+    //Set lại ghi âm mới
+    transcriptsListRef.current = [];
+
+    setLatestTranscript("");
+    setFinalTranscript("");
+    setComparisonResult(null);
+    setComparisonError(null);
+    setIsComparing(false);
     setIsBusy(false);
     setCountdown(3);
     if (page && page.words.length > 0) {
@@ -1103,64 +1071,151 @@ export function ReadingScreen({
     }
   }
 
-  async function finishReading() {
-    if (finishStartedRef.current) return;
-    finishStartedRef.current = true;
-    setIsBusy(true);
-    speechPlayer.stop();
+async function finishReading() {
+  if (finishStartedRef.current) return;
+
+  finishStartedRef.current = true;
+  setIsBusy(true);
+  speechPlayer.stop();
+
+  try {
+    // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
     if (isMicRecording) {
       try {
         await stopListeningAndTranscribe();
-      } catch {
+      } catch (error) {
+        console.error("Lỗi khi dừng ghi âm:", error);
         speechRecorder.cancel();
       }
-      if (mountedRef.current) setIsMicRecording(false);
+
+      if (mountedRef.current) {
+        setIsMicRecording(false);
+      }
     }
+
+    if (!mountedRef.current) return;
+
+    // 2. Ghép transcript của tất cả các lần ghi âm
+    const combinedTranscript = transcriptsListRef.current
+      .join(" ")
+      .trim();
+
+    setFinalTranscript(combinedTranscript);
+
+    // 3. So sánh transcript đúng một lần khi bé đọc xong
+    if (combinedTranscript) {
+      setIsComparing(true);
+      setComparisonError(null);
+      setComparisonResult(null);
+
+      try {
+        const result = await compareTranscript(
+          sessionId,
+          combinedTranscript,
+        );
+
+        if (!mountedRef.current) return;
+
+        setComparisonResult(result);
+      } catch (error) {
+        console.error("Lỗi so sánh bài đọc:", error);
+
+        if (mountedRef.current) {
+          setComparisonError(
+            error instanceof Error
+              ? error.message
+              : "Không thể so sánh bài đọc.",
+          );
+        }
+      } finally {
+        if (mountedRef.current) {
+          setIsComparing(false);
+        }
+      }
+    }
+
+    if (!mountedRef.current) return;
+
+    // 4. Kết thúc session
     const [finishedSession] = await Promise.all([
       services.readingService.finish(sessionId),
-      services.readingSocketAdapter.sendControl(sessionId, "finish"),
+      services.readingSocketAdapter.sendControl(
+        sessionId,
+        "finish",
+      ),
     ]);
+
     if (!mountedRef.current) return;
+
+    // 5. Lấy thống kê buổi đọc
     const wordsList = Array.from(spokenWordsSetRef.current);
-    const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
+
+    const durationMinutes = getDurationMinutes(
+      finishedSession.duration_ms,
+    );
+
     const persistedCompletion = await services.readingService
       .getCompletionSummary(sessionId)
       .catch(() => null);
 
-    const correctWordsList = Array.from(correctWordIdsRef.current)
+    const correctWordsList = Array.from(
+      correctWordIdsRef.current,
+    )
       .map((wordId) => wordTextByIdRef.current.get(wordId))
       .filter((word): word is string => Boolean(word));
-    const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
+
+    const mispronouncedWordsList = Array.from(
+      failedWordsSetRef.current,
+    );
 
     const totalTracked =
       correctWordsList.length + mispronouncedWordsList.length;
+
     const score =
       totalTracked > 0
-        ? Math.round((correctWordsList.length / totalTracked) * 100)
+        ? Math.round(
+            (correctWordsList.length / totalTracked) * 100,
+          )
         : null;
 
+    // 6. Tạo thống kê hoàn thành
     const updatedSummary: ReadingCompletionSummaryUI = {
       correct_words: correctWordsList,
       duration_minutes: durationMinutes,
       mispronounced_words: mispronouncedWordsList,
       pages_explored:
         persistedCompletion?.pages_explored ??
-        (pageProgress?.persisted ? pageProgress.completed_pages : null),
+        (pageProgress?.persisted
+          ? pageProgress.completed_pages
+          : null),
       selected_range_pages:
         persistedCompletion?.selected_range_pages ??
-        (pageProgress?.persisted ? pageProgress.total_pages : null),
+        (pageProgress?.persisted
+          ? pageProgress.total_pages
+          : null),
       practiced_words: wordsList.length,
       score,
       spoken_words: wordsList,
-      transcripts: transcriptsListRef.current,
+      transcripts: [...transcriptsListRef.current],
     };
+
+    // 7. Hiển thị màn hình hoàn thành
     setSessionSummary(updatedSummary);
     setCanonicalState("FINISHED");
     setConfirmFinish(false);
     setUiState("complete");
-    setIsBusy(false);
-  }
+  } catch (error) {
+    console.error("Lỗi khi kết thúc buổi đọc:", error);
 
+    // Cho phép thử kết thúc lại nếu có lỗi
+    finishStartedRef.current = false;
+  } finally {
+    if (mountedRef.current) {
+      setIsComparing(false);
+      setIsBusy(false);
+    }
+  }
+}
   if (loadState.status === "error" || loadState.status === "not-found") {
     const notFound = loadState.status === "not-found";
     const title = notFound
@@ -1368,7 +1423,6 @@ export function ReadingScreen({
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
-        comparisonResult={comparisonResult}
         spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
@@ -1377,18 +1431,6 @@ export function ReadingScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
-      {/* Hiển thị kết quả so sánh bài đọc */}
-      <div className="mx-auto w-full max-w-[720px] space-y-3 p-4">
-        {isComparing && <p role="status">Đang so sánh bài đọc...</p>}
-
-        {comparisonError && (
-          <StatusMessage tone="error">{comparisonError}</StatusMessage>
-        )}
-
-        {comparisonResult && (
-          <ReadingReport result={comparisonResult} bookWords={page.words} />
-        )}
-      </div>
       {confirmFinish ? (
         <ReadingStatusDialog
           body="Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."

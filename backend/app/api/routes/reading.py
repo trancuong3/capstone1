@@ -3,9 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
-
 from app.api.deps import get_db, get_current_parent_id
-from app.models import ReadingSession, ReadingEvent, FluencyAssessment, ReadingSessionPage
+from app.models import (
+    ReadingSession,
+    ReadingEvent,
+    FluencyAssessment,
+    ReadingSessionPage,
+    ReadingComparisonReport,
+)
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
     ReadingEventResponse, ReadingEventCreate,
@@ -118,11 +123,12 @@ async def navigate_session_page(
 async def get_reading_page(
     page_id: UUID,
     session_id: UUID = Query(...),
+    revision_id: UUID | None = Query(None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
-        page_id, session_id, actor_id
+        page_id, session_id, actor_id, revision_id=revision_id
     )
 
 
@@ -437,12 +443,12 @@ async def compare_reading(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Get the current reading page
+    # 1. Lấy trang hiện tại và kiểm tra quyền truy cập session
     page = await ReadingContentService(
         ReadingContentRepository(db)
     ).get_session_page(session_id, actor_id)
 
-    # 2. Get verified book text
+    # 2. Lấy nội dung sách
     reference_text = (
         page.text or " ".join(word.text for word in page.words)
     )
@@ -453,33 +459,130 @@ async def compare_reading(
             detail="Book text is empty",
         )
 
-    # 3. Align book text with transcript
+    # 3. So sánh nội dung bé đọc với nội dung sách
     result = align_text(reference_text, request.transcript)
 
-    # 4. Convert timestamps to dictionaries
+    # 4. Xử lý timestamp
     words = (
         [word.model_dump() for word in request.words]
         if request.words is not None
         else None
     )
-    print("Request words:", request.words)
-    print("Words count:", len(words) if words else 0)
-    print("Detected hesitations:", detect_hesitations(words or []))
 
-    # 5. Summarize reading results
+    # 5. Tổng hợp kết quả
     summary = summarize_alignment(
         result["alignment"],
         words=words,
         threshold=1.0,
     )
 
+    # 6. Tạo bản ghi báo cáo
+    report = ReadingComparisonReport(
+        SessionId=session_id,
+        PageId=page.page_id,
+        PageRevisionId=page.page_revision_id,
+        Transcript=request.transcript,
+        Distance=result["distance"],
+        Alignment=result["alignment"],
+        Summary=summary,
+    )
+
+    # 7. Lưu database
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+
+    # 8. Trả kết quả
     return {
+        "report_id": str(report.Id),
         "session_id": str(session_id),
         "page_id": str(page.page_id),
         "page_revision_id": str(page.page_revision_id),
+        "transcript": request.transcript,
         "distance": result["distance"],
         "alignment": result["alignment"],
         "summary": summary,
+        "created_at": report.CreatedAt,
+    }
+
+@router.get("/sessions/{session_id}/reports")
+async def get_session_reports(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Kiểm tra session có thuộc phụ huynh hiện tại không
+    await ReadingContentService(
+        ReadingContentRepository(db)
+    ).get_session_summary(session_id, actor_id)
+
+    # 2. Lấy tất cả báo cáo của session
+    result = await db.execute(
+        select(ReadingComparisonReport)
+        .where(
+            ReadingComparisonReport.SessionId == session_id
+        )
+        .order_by(
+            ReadingComparisonReport.CreatedAt.desc(),
+            ReadingComparisonReport.Id.desc(),
+        )
+    )
+
+    reports = result.scalars().all()
+
+    # 3. Trả dữ liệu
+    return {
+        "session_id": str(session_id),
+        "total": len(reports),
+        "reports": [
+            {
+                "report_id": str(report.Id),
+                "page_id": str(report.PageId),
+                "page_revision_id": str(report.PageRevisionId),
+                "transcript": report.Transcript,
+                "distance": report.Distance,
+                "alignment": report.Alignment,
+                "summary": report.Summary,
+                "created_at": report.CreatedAt,
+            }
+            for report in reports
+        ],
+    }
+
+
+@router.delete("/reports/{report_id}")
+async def delete_reading_report(
+    report_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # 1. Tìm báo cáo
+    result = await db.execute(
+        select(ReadingComparisonReport).where(
+            ReadingComparisonReport.Id == report_id
+        )
+    )
+
+    report = result.scalar_one_or_none()
+
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy báo cáo.",
+        )
+
+    # 2. Kiểm tra session thuộc phụ huynh hiện tại
+    await ReadingContentService(
+        ReadingContentRepository(db)
+    ).get_session_summary(report.SessionId, actor_id)
+
+    # 3. Xóa báo cáo
+    await db.delete(report)
+    await db.commit()
+
+    return {
+        "message": "Report deleted successfully",
+        "report_id": str(report_id),
     }
 
 #Kadepham
