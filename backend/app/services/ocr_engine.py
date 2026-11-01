@@ -18,10 +18,19 @@ import cv2
 import jiwer
 import numpy as np
 import torch
-from paddleocr import PaddleOCR
 from PIL import Image
-from vietocr.tool.config import Cfg
-from vietocr.tool.predictor import Predictor
+
+try:
+    from paddleocr import PaddleOCR
+except ImportError:
+    PaddleOCR = None  # type: ignore
+
+try:
+    from vietocr.tool.config import Cfg
+    from vietocr.tool.predictor import Predictor
+except ImportError:
+    Cfg = None  # type: ignore
+    Predictor = None  # type: ignore
 
 
 class OcrEngineUnavailable(RuntimeError):
@@ -76,6 +85,11 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
             return _paddle_engine, _vietocr_engine
 
         try:
+            if PaddleOCR is None or Cfg is None or Predictor is None:
+                raise OcrEngineUnavailable(
+                    "Thư viện PaddleOCR hoặc VietOCR chưa được cài đặt trong môi trường."
+                )
+
             paddle_inst = PaddleOCR(
                 use_angle_cls=False,
                 lang="vi",
