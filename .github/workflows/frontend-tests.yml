@@ -47,6 +47,7 @@ jobs:
           npm test --
           tests/reading/reading-screen.test.tsx
           tests/reading/browser-transcript-collector.test.ts
+          tests/reading/reading-report-page.test.tsx
           test/speech-service.test.ts
 
       - name: TypeScript check for Parent CRUD source
