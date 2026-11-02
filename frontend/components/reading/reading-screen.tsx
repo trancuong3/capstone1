@@ -162,6 +162,7 @@ export function ReadingScreen({
   const mountedRef = useRef(false);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+  const isStoppingRecognitionRef = useRef(false);
   const trackerRef = useRef<SequentialReadingTracker | null>(null);
   const utteranceSequenceRef = useRef(0);
   const utteranceEventIdsRef = useRef(new WeakMap<Blob, string>());
@@ -471,6 +472,7 @@ export function ReadingScreen({
     setComparisonError(null);
     setIsComparing(false);
     isListeningActiveRef.current = true;
+    isStoppingRecognitionRef.current = false;
     isUsingRecorderRef.current = false;
 
     // MediaRecorder utterances are the authoritative final STT stream.
@@ -556,9 +558,17 @@ export function ReadingScreen({
           };
 
           rec.onend = () => {
-            if (mountedRef.current && isListeningActiveRef.current) {
+            if (
+              mountedRef.current &&
+              isListeningActiveRef.current &&
+              !isStoppingRecognitionRef.current
+            ) {
               setTimeout(() => {
-                if (mountedRef.current && isListeningActiveRef.current) {
+                if (
+                  mountedRef.current &&
+                  isListeningActiveRef.current &&
+                  !isStoppingRecognitionRef.current
+                ) {
                   try {
                     recognitionEpoch = ++browserRecognitionEpochRef.current;
                     rec.start();
@@ -600,6 +610,7 @@ export function ReadingScreen({
   });
 
   async function stopListeningAndTranscribe() {
+    isStoppingRecognitionRef.current = true;
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
