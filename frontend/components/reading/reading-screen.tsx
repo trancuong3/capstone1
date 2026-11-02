@@ -742,7 +742,7 @@ export function ReadingScreen({
       setIsReadingWord(false);
       setIsBusy(false);
     }
-    if (isMicRecording) {
+    if (isMicRecording || isListeningActiveRef.current) {
       setIsBusy(true);
       try {
         await stopListeningAndTranscribe();
@@ -837,7 +837,7 @@ export function ReadingScreen({
     if (speechPlayer.isPlaying) speechPlayer.stop();
     resumeMicrophoneAfterSpeechRef.current = false;
     setIsBusy(true);
-    if (isMicRecording) {
+    if (isMicRecording || isListeningActiveRef.current) {
       try {
         await stopListeningAndTranscribe();
       } catch {
@@ -899,7 +899,7 @@ export function ReadingScreen({
     speechPlayer.stop();
     setIsReadingWord(false);
     try {
-      if (isMicRecording) {
+      if (isMicRecording || isListeningActiveRef.current) {
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
       }
@@ -960,7 +960,7 @@ export function ReadingScreen({
     if (isBusy) return;
     setIsBusy(true);
     try {
-      if (isMicRecording) {
+      if (isMicRecording || isListeningActiveRef.current) {
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
       }
@@ -993,7 +993,7 @@ export function ReadingScreen({
     if (!selectedManualPageId || isBusy) return;
     setIsBusy(true);
     try {
-      if (isMicRecording) {
+      if (isMicRecording || isListeningActiveRef.current) {
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
       }
@@ -1113,7 +1113,7 @@ async function finishReading() {
 
   try {
     // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
-    if (isMicRecording) {
+    if (isMicRecording || isListeningActiveRef.current) {
       try {
         await stopListeningAndTranscribe();
       } catch (error) {
