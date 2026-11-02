@@ -379,10 +379,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await screen.findByRole("button", { name: "Bắt đầu đọc" }),
     );
 
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
     const microphoneButton = await screen.findByRole("button", {
       name: "Dừng nhận diện giọng nói",
     });
-    await user.click(microphoneButton);
     await waitFor(() => {
       expect(speechRecorderMock.start).toHaveBeenCalledOnce();
       expect(FakeSpeechRecognition.instances).toHaveLength(1);
@@ -460,9 +464,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     );
     await user.click(
       await screen.findByRole("button", {
-        name: "Dừng nhận diện giọng nói",
+        name: "Bé đọc với nhận diện giọng nói",
       }),
     );
+    await screen.findByRole("button", {
+      name: "Dừng nhận diện giọng nói",
+    });
     await waitFor(() => {
       expect(EmptySpeechRecognition.instances).toHaveLength(1);
     });
