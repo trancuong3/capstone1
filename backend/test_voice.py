@@ -88,6 +88,10 @@ class VoiceRouteTests(unittest.TestCase):
                 text="Con mèo đang ngủ.",
                 language_code="vi",
                 language_probability=0.99,
+                words=[
+                    {"text": "Con", "start": 0.1, "end": 0.2, "logprob": -0.08},
+                    {"text": "mèo", "start": 0.21, "end": 0.4, "logprob": -0.12},
+                ],
             )
         )
         with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
@@ -105,7 +109,10 @@ class VoiceRouteTests(unittest.TestCase):
                 "text": "Con mèo đang ngủ.",
                 "language_code": "vi",
                 "language_probability": 0.99,
-                "words": None,
+                "words": [
+                    {"text": "Con", "start": 0.1, "end": 0.2, "logprob": -0.08},
+                    {"text": "mèo", "start": 0.21, "end": 0.4, "logprob": -0.12},
+                ],
             },
         )
         provider.transcribe.assert_awaited_once_with(
