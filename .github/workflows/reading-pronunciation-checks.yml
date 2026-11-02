@@ -66,7 +66,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [[ -n "$(git status --porcelain)" ]]; then
-            git add -u -- frontend
+            git add -u -- .
             git commit -m "style(reading): format pronunciation workflow"
             git push origin HEAD:refs/heads/fix/reading-pronunciation-flow-20261102
           fi
