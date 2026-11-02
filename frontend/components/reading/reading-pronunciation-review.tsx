@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CheckCircle2, Mic, Volume2 } from "lucide-react";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -9,6 +9,7 @@ import { createSpeechService } from "@/lib/api/speech-service";
 import {
   alignReadingSegment,
   DEFAULT_WORD_CONFIDENCE_THRESHOLD,
+  type PronunciationReviewCandidate,
   type PronunciationReviewGroup,
   type ReadingSourceWord,
 } from "@/lib/utils/reading-pronunciation-alignment";
@@ -16,6 +17,12 @@ import {
 interface ReadingPronunciationReviewProps {
   readonly groups: readonly PronunciationReviewGroup[];
   readonly onComplete: () => void;
+  readonly onPracticeOutcome: (
+    candidate: PronunciationReviewCandidate,
+    stage: "WORD" | "SENTENCE",
+    outcome: "CORRECT" | "ASSISTED",
+    confidence: number | null,
+  ) => Promise<void>;
 }
 
 const MAX_ATTEMPTS = 2;
@@ -23,6 +30,7 @@ const MAX_ATTEMPTS = 2;
 export function ReadingPronunciationReview({
   groups,
   onComplete,
+  onPracticeOutcome,
 }: ReadingPronunciationReviewProps) {
   const recorder = useSpeechRecorder();
   const player = useSpeechPlayer();
@@ -37,6 +45,7 @@ export function ReadingPronunciationReview({
   const [feedback, setFeedback] = useState(
     "Con đọc từ này một lần nữa nhé.",
   );
+  const reportedOutcomesRef = useRef<Set<string>>(new Set());
 
   const group = groups[groupIndex] ?? null;
   const currentWord = group?.words[wordIndex] ?? null;
@@ -71,6 +80,25 @@ export function ReadingPronunciationReview({
         </button>
       </main>
     );
+  }
+
+  async function reportOutcomes(
+    candidates: readonly PronunciationReviewCandidate[],
+    stage: "WORD" | "SENTENCE",
+    outcome: "CORRECT" | "ASSISTED",
+    confidence: number | null,
+  ) {
+    for (const candidate of candidates) {
+      const key = `${candidate.page_id}:${candidate.page_revision_id}:${candidate.word_id}:${stage}`;
+      if (reportedOutcomesRef.current.has(key)) continue;
+      reportedOutcomesRef.current.add(key);
+      try {
+        await onPracticeOutcome(candidate, stage, outcome, confidence);
+      } catch (error) {
+        // Practice feedback must not trap the child in the review screen.
+        console.warn("Could not persist pronunciation practice outcome:", error);
+      }
+    }
   }
 
   function advance() {
@@ -155,11 +183,38 @@ export function ReadingPronunciationReview({
         result.next_word_index === targetWords.length;
 
       if (isConfirmedCorrect) {
+        if (phase === "word" && currentWord) {
+          await reportOutcomes(
+            [currentWord],
+            "WORD",
+            "CORRECT",
+            result.assessments[0]?.confidence ?? null,
+          );
+        } else if (phase === "sentence") {
+          const sentenceStart = group.sentence_start_word_index ?? 0;
+          for (const candidate of group.words) {
+            const sentenceOffset = candidate.word_index - sentenceStart;
+            await reportOutcomes(
+              [candidate],
+              "SENTENCE",
+              "CORRECT",
+              result.assessments[sentenceOffset]?.confidence ?? null,
+            );
+          }
+        }
+
         setFeedback(
           phase === "word"
             ? "Con đọc đúng rồi! Bây giờ mình luyện tiếp nhé."
             : "Con đã đọc lại cả câu rất tốt!",
         );
+        if (phase === "word" && wordIndex + 1 === group.words.length && !group.sentence_text) {
+          setCanContinue(true);
+          setFeedback(
+            "Con đọc từ này rồi. Nội dung OCR chưa có dấu câu để xác định nguyên câu, nên mình không tự tạo câu mới nhé.",
+          );
+          return;
+        }
         advance();
       } else {
         const nextAttempt = attempts + 1;
@@ -195,6 +250,11 @@ export function ReadingPronunciationReview({
     if (!targetText) return;
     try {
       await player.play(targetText);
+      if (phase === "word" && currentWord) {
+        await reportOutcomes([currentWord], "WORD", "ASSISTED", null);
+      } else if (phase === "sentence") {
+        await reportOutcomes(group.words, "SENTENCE", "ASSISTED", null);
+      }
       setFeedback("Con vừa nghe mẫu. Mình chuyển sang phần tiếp theo nhé.");
       setCanContinue(true);
     } catch {
@@ -268,6 +328,11 @@ export function ReadingPronunciationReview({
         <p className="min-h-6 text-sm font-semibold text-muted" aria-live="polite">
           {feedback}
         </p>
+        {phase === "word" && !group.sentence_text && wordIndex === group.words.length - 1 ? (
+          <p className="max-w-xl text-xs text-amber-800">
+            Nội dung trang chưa có dấu câu đủ rõ để xác định nguyên câu. ViRead sẽ không tự bịa câu thay thế.
+          </p>
+        ) : null}
         <p className="text-xs text-muted">
           Lượt thử: {Math.min(attempts, MAX_ATTEMPTS)} / {MAX_ATTEMPTS}
         </p>
