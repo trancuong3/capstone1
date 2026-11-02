@@ -33,7 +33,6 @@ export function useSpeechRecorder(): SpeechRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const allChunksRef = useRef<Blob[]>([]);
   const onUtteranceRef = useRef<
     | ((
         blob: Blob,
@@ -46,6 +45,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   const recorderSegmentStartedAtMsRef = useRef<number | null>(null);
   const recorderSegmentIdRef = useRef<string | null>(null);
   const segmentSequenceRef = useRef(0);
+  const pendingRotationsRef = useRef<Set<Promise<void>>>(new Set());
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const hasSpeechInCurrentRecorderRef = useRef(false);
@@ -96,7 +96,6 @@ export function useSpeechRecorder(): SpeechRecorder {
       const recorder = recorderRef.current;
       recorderRef.current = null;
       chunksRef.current = [];
-      allChunksRef.current = [];
       if (recorder) stopTracks(recorder.stream);
       cleanupAudioNodes();
       setIsRecording(false);
@@ -149,7 +148,6 @@ export function useSpeechRecorder(): SpeechRecorder {
 
       onUtteranceRef.current = onUtterance ?? null;
       chunksRef.current = [];
-      allChunksRef.current = [];
       isRecordingRef.current = true;
       hasSpeechInCurrentRecorderRef.current = false;
       const captureGeneration = captureGenerationRef.current;
@@ -191,13 +189,13 @@ export function useSpeechRecorder(): SpeechRecorder {
         rec.ondataavailable = (event) => {
           if (event.data.size) {
             recorderChunks.push(event.data);
-            allChunksRef.current.push(event.data);
           }
         };
         rec.onerror = () => {};
         recorderSegmentStartedAtMsRef.current = Date.now();
         recorderSegmentIdRef.current = `${captureGeneration}:${++segmentSequenceRef.current}`;
-        rec.start(150);
+        // One finalized container per utterance; no timeslice fragments are uploaded.
+        rec.start();
         return rec;
       };
 
@@ -300,20 +298,35 @@ export function useSpeechRecorder(): SpeechRecorder {
                   const currentUtteranceChunks = chunksRef.current;
                   chunksRef.current = [];
 
+                  let resolveRotation!: () => void;
+                  const rotationCompletion = new Promise<void>((resolve) => {
+                    resolveRotation = resolve;
+                  });
+                  pendingRotationsRef.current.add(rotationCompletion);
+
                   activeRecorder.onstop = () => {
                     isRotatingRef.current = false;
-                    const contentType = activeRecorder.mimeType || "audio/webm";
-                    if (currentUtteranceChunks.length) {
-                      const blob = new Blob(currentUtteranceChunks, {
-                        type: contentType,
-                      });
-                      if (blob.size > 800) {
-                        onUtteranceRef.current?.(
-                          blob,
-                          segmentStartedAtMs,
-                          audioSegmentId ?? undefined,
+                    try {
+                      const contentType = activeRecorder.mimeType.trim();
+                      if (contentType && currentUtteranceChunks.length) {
+                        const blob = new Blob(currentUtteranceChunks, {
+                          type: contentType,
+                        });
+                        if (blob.size > 800) {
+                          onUtteranceRef.current?.(
+                            blob,
+                            segmentStartedAtMs,
+                            audioSegmentId ?? undefined,
+                          );
+                        }
+                      } else {
+                        console.warn(
+                          "Discarding finalized utterance with missing MIME metadata.",
                         );
                       }
+                    } finally {
+                      pendingRotationsRef.current.delete(rotationCompletion);
+                      resolveRotation();
                     }
                   };
 
@@ -341,23 +354,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         recorderRef.current = initialRecorder;
         setIsRecording(true);
 
-        // Wait for the first MediaRecorder timeslice before reporting that
-        // capture is ready. Audio gathered during this warm-up is retained as
-        // pre-roll, protecting the first phoneme after the UI starts listening.
-        await new Promise<void>((resolve) => {
-          let settled = false;
-          const settle = () => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(warmupTimeout);
-            resolve();
-          };
-          const warmupTimeout = setTimeout(settle, 400);
-          initialRecorder.addEventListener("dataavailable", settle, {
-            once: true,
-          });
-        });
-
+        // Recording starts synchronously; complete audio is delivered on stop.
         if (
           captureGeneration !== captureGenerationRef.current ||
           !isRecordingRef.current
@@ -378,10 +375,7 @@ export function useSpeechRecorder(): SpeechRecorder {
     if (!recorder || recorder.state === "inactive") {
       cleanupAudioNodes();
       setIsRecording(false);
-      const finalBlob = allChunksRef.current.length
-        ? new Blob(allChunksRef.current, { type: "audio/webm" })
-        : null;
-      return Promise.resolve(finalBlob);
+      return Promise.resolve(null);
     }
 
     return new Promise<Blob | null>((resolve, reject) => {
@@ -395,24 +389,30 @@ export function useSpeechRecorder(): SpeechRecorder {
       const finalAudioSegmentId = recorderSegmentIdRef.current;
       const finalHasSpeech = hasSpeechInCurrentRecorderRef.current;
       recorder.onstop = () => {
-        const contentType = recorder.mimeType || "audio/webm";
-        const finalSegment = finalSegmentChunks.length
-          ? new Blob(finalSegmentChunks, { type: contentType })
-          : null;
-        // Emit the unsegmented tail exactly once. Previously this tail was
-        // returned as a whole-session Blob and the caller could either lose it
-        // or re-transcribe all already-processed audio.
-        if (finalHasSpeech && finalSegment && finalSegment.size > 800) {
-          onUtteranceRef.current?.(
-            finalSegment,
-            finalSegmentStartedAtMs,
-            finalAudioSegmentId ?? undefined,
-          );
-        }
-        const fullRecording = allChunksRef.current.length
-          ? new Blob(allChunksRef.current, { type: contentType })
-          : null;
-        finish(fullRecording);
+        const contentType = recorder.mimeType.trim();
+        const finalSegment =
+          contentType && finalSegmentChunks.length
+            ? new Blob(finalSegmentChunks, { type: contentType })
+            : null;
+
+        // Earlier recorder instances may still be finalizing. Dispatch the tail
+        // only after they finish so recognition preserves spoken utterance order.
+        void Promise.all(Array.from(pendingRotationsRef.current)).then(() => {
+          if (finalHasSpeech && finalSegment && finalSegment.size > 800) {
+            onUtteranceRef.current?.(
+              finalSegment,
+              finalSegmentStartedAtMs,
+              finalAudioSegmentId ?? undefined,
+            );
+          } else if (finalHasSpeech && !contentType) {
+            console.warn(
+              "Discarding finalized utterance with missing MIME metadata.",
+            );
+          }
+          // Independent recorder sessions cannot be concatenated into one valid
+          // WebM container. Return only the final independently playable segment.
+          finish(finalSegment);
+        });
       };
       try {
         recorder.stop();
