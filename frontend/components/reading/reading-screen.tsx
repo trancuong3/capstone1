@@ -773,7 +773,7 @@ export function ReadingScreen({
       setComparisonError(null);
     }
 
-    return resolvedText;
+    return resolvedText ?? "";
   }
 
   async function handleReadSample() {
