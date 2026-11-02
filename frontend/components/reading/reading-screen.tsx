@@ -1028,7 +1028,7 @@ export function ReadingScreen({
     }
   }
 
-  async function reconnect(mode: ReadingReconnectDemoMode) {  async function reconnect(mode: ReadingReconnectDemoMode) {
+  async function reconnect(mode: ReadingReconnectDemoMode) {
     if (isBusy) return;
     const resumeMicrophone = uiState === "stt-error";
     setIsBusy(true);
