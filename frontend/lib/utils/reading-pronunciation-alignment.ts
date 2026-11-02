@@ -336,6 +336,7 @@ export function alignReadingSegment(
 
 export interface PronunciationReviewCandidate {
   readonly page_id: string;
+  readonly page_number: number;
   readonly page_revision_id: string;
   readonly word_id: string;
   readonly word_index: number;
@@ -350,6 +351,7 @@ export interface PronunciationReviewCandidate {
 export interface PronunciationReviewGroup {
   readonly key: string;
   readonly page_id: string;
+  readonly page_number: number;
   readonly page_revision_id: string;
   readonly sentence_text: string | null;
   readonly sentence_start_word_index: number | null;
@@ -396,7 +398,7 @@ export function groupPronunciationReviewCandidates(
 
   for (const candidate of [...candidates].sort(
     (left, right) =>
-      left.page_id.localeCompare(right.page_id) ||
+      left.page_number - right.page_number ||
       left.word_index - right.word_index,
   )) {
     const sentenceKey =
@@ -419,6 +421,7 @@ export function groupPronunciationReviewCandidates(
       groups.set(key, {
         key,
         page_id: candidate.page_id,
+        page_number: candidate.page_number,
         page_revision_id: candidate.page_revision_id,
         sentence_text: candidate.sentence_text,
         sentence_start_word_index: candidate.sentence_start_word_index,
@@ -431,7 +434,7 @@ export function groupPronunciationReviewCandidates(
 
   return [...groups.values()].sort(
     (left, right) =>
-      left.page_id.localeCompare(right.page_id) ||
+      left.page_number - right.page_number ||
       (left.words[0]?.word_index ?? 0) - (right.words[0]?.word_index ?? 0),
   );
 }
