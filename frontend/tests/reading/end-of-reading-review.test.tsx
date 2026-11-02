@@ -29,6 +29,8 @@ describe("EndOfReadingReview", () => {
         currentPosition={1}
         feedback="Con cùng đọc lại nhé!"
         item={item}
+        onExit={vi.fn()}
+        onPause={vi.fn()}
         onStartAttempt={vi.fn()}
         secondsRemaining={null}
         totalItems={3}
@@ -52,6 +54,8 @@ describe("EndOfReadingReview", () => {
         currentPosition={2}
         feedback="Con cứ đọc nhé!"
         item={{ ...item, attempts: 1 }}
+        onExit={vi.fn()}
+        onPause={vi.fn()}
         onStartAttempt={vi.fn()}
         secondsRemaining={2}
         totalItems={3}
@@ -61,6 +65,6 @@ describe("EndOfReadingReview", () => {
     expect(screen.getByText("Còn 2 giây")).toBeInTheDocument();
     expect(screen.getByText("Mình đang nghe con đọc…")).toBeInTheDocument();
     expect(screen.getByText("Con cứ đọc nhé!")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 });
