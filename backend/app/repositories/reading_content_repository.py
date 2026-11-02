@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
-    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
+    PageRevisionWord, Profile, ReadingComparisonReport, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
 
 
@@ -213,6 +213,19 @@ class ReadingContentRepository:
             )
             .limit(1)
         )
+
+    async def create_reading_comparison_report(
+        self,
+        report: ReadingComparisonReport,
+    ) -> ReadingComparisonReport:
+        self.db.add(report)
+        try:
+            await self.db.commit()
+            await self.db.refresh(report)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return report
 
     async def create_reading_event(self, event: ReadingEvent) -> ReadingEvent:
         self.db.add(event)
