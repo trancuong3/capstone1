@@ -17,9 +17,6 @@ from app.repositories.reading_comparison_repository import ReadingComparisonRepo
 SESSION_ID = UUID("10000000-0000-4000-8000-000000000001")
 PAGE_ID = UUID("30000000-0000-4000-8000-000000000001")
 REVISION_ID = UUID("40000000-0000-4000-8000-000000000001")
-REPORT_ID = UUID("50000000-0000-4000-8000-000000000001")
-
-
 class ReadingComparisonRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_find_exact_scopes_to_session_page_revision_and_transcript(self):
         db = MagicMock()
