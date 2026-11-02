@@ -356,6 +356,39 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         repo.create_reading_event.assert_not_awaited()
 
+    async def test_reading_event_idempotency_key_cannot_be_reused_for_another_occurrence(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        repo.reading_event_by_idempotency_key.return_value = SimpleNamespace(
+            Id=UUID("88888888-8888-4888-8888-888888888888"),
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            WordId=UUID("99999999-9999-4999-8999-999999999999"),
+            Type="SUBSTITUTION",
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            WordId=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            Type="SUBSTITUTION",
+            StartMs=100,
+            Confidence=0.9,
+            Status="CONFIRMED",
+            Metadata={"idempotency_key": "same-key"},
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
+
     async def test_reading_event_cannot_reference_unverified_or_foreign_page(self):
         service, repo = self.make_service()
         session_id = UUID("77777777-7777-4777-8777-777777777777")
