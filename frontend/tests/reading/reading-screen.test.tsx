@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceError } from "@/lib/api/service-error";
@@ -17,11 +17,39 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook } = vi.hoisted(() => ({
+const {
+  servicesHook,
+  speechRecorderMock,
+  speechServiceMock,
+  compareTranscriptMock,
+} = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
+  speechRecorderMock: {
+    isRecording: false,
+    isSpeaking: false,
+    audioLevel: 0,
+    start: vi.fn(),
+    stop: vi.fn(),
+    cancel: vi.fn(),
+    getStream: vi.fn(),
+  },
+  speechServiceMock: {
+    synthesize: vi.fn(),
+    transcribe: vi.fn(),
+  },
+  compareTranscriptMock: vi.fn(),
 }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
+}));
+vi.mock("@/hooks/use-speech-recorder", () => ({
+  useSpeechRecorder: () => speechRecorderMock,
+}));
+vi.mock("@/lib/api/speech-service", () => ({
+  createSpeechService: () => speechServiceMock,
+}));
+vi.mock("@/lib/api/comparison-service", () => ({
+  compareTranscript: compareTranscriptMock,
 }));
 
 // Typed, test-local responses only. The application provider still uses
@@ -249,6 +277,40 @@ let services: ReturnType<typeof createReadingFixtures>;
 beforeEach(() => {
   services = createReadingFixtures();
   servicesHook.mockReset().mockReturnValue(services);
+  speechRecorderMock.start.mockReset().mockResolvedValue(undefined);
+  speechRecorderMock.stop
+    .mockReset()
+    .mockResolvedValue(
+      new Blob(["x".repeat(256)], { type: "audio/webm" }),
+    );
+  speechRecorderMock.cancel.mockReset();
+  speechRecorderMock.getStream.mockReset().mockReturnValue(null);
+  speechServiceMock.synthesize.mockReset();
+  speechServiceMock.transcribe.mockReset().mockRejectedValue(
+    new ServiceError({
+      code: "STT_QUOTA_EXCEEDED",
+      status: 503,
+      message: "Dịch vụ nhận diện giọng nói đã hết lượt sử dụng.",
+      request_id: "quota-test",
+      retryable: false,
+    }),
+  );
+  compareTranscriptMock.mockReset().mockResolvedValue({
+    session_id: TEST_SESSION_ID,
+    page_id: pageFour.page_id,
+    page_revision_id: pageFour.page_revision_id,
+    distance: 0,
+    alignment: [],
+    summary: {
+      missing_words: [],
+      extra_words: [],
+      substitutions: [],
+      repeated_count: 0,
+      repeated_words: [],
+      hesitations: [],
+      hesitation_seconds: null,
+    },
+  });
 });
 function renderReading(
   state: ReadingUiState,
@@ -264,6 +326,89 @@ function renderReading(
 }
 
 describe("ReadingScreen presentation with typed test-local service responses", () => {
+  it("generates a page-scoped report from final browser speech when ElevenLabs quota is exhausted", async () => {
+    class FakeSpeechRecognition {
+      static instances: FakeSpeechRecognition[] = [];
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: Array<{
+              isFinal: boolean;
+              0: { transcript: string };
+            }>;
+          }) => void)
+        | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+
+      constructor() {
+        FakeSpeechRecognition.instances.push(this);
+      }
+
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: FakeSpeechRecognition,
+    });
+
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    const microphoneButton = await screen.findByRole("button", {
+      name: "Dừng nhận diện giọng nói",
+    });
+    await user.click(microphoneButton);
+    await waitFor(() => {
+      expect(speechRecorderMock.start).toHaveBeenCalledOnce();
+      expect(FakeSpeechRecognition.instances).toHaveLength(1);
+    });
+
+    const recognition = FakeSpeechRecognition.instances[0];
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: false, 0: { transcript: "Con mèo" } }],
+      });
+    });
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: true, 0: { transcript: "Con mèo" } }],
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await user.click(await screen.findByRole("button", { name: "Lưu và dừng" }));
+
+    await waitFor(() => {
+      expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
+      expect(compareTranscriptMock).toHaveBeenCalledOnce();
+      expect(services.readingService.finish).toHaveBeenCalledOnce();
+    });
+
+    expect(compareTranscriptMock).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      "Con mèo",
+      [],
+      {
+        page_id: pageFour.page_id,
+        page_revision_id: pageFour.page_revision_id,
+      },
+    );
+    expect(
+      screen.queryByText("Báo cáo đọc chưa sẵn sàng"),
+    ).not.toBeInTheDocument();
+  });
+
   it("starts the listening UI only after the control service resolves", async () => {
     const user = userEvent.setup();
     renderReading("ready");
