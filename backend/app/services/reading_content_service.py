@@ -177,6 +177,17 @@ class ReadingContentService:
                 event_key,
             )
             if existing_event is not None:
+                same_occurrence = (
+                    existing_event.PageId == payload.PageId
+                    and existing_event.PageRevisionId == payload.PageRevisionId
+                    and existing_event.WordId == payload.WordId
+                    and existing_event.Type == payload.Type
+                )
+                if not same_occurrence:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency key is already assigned to another word occurrence",
+                    )
                 return existing_event
 
         event = ReadingEvent(**payload.model_dump())
