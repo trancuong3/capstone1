@@ -47,9 +47,11 @@ export function ReadingPronunciationReview({
   const reportedOutcomesRef = useRef<Set<string>>(new Set());
   const currentPracticeTranscriptRef = useRef<string | null>(null);
 
+  const cancelRecorder = recorder.cancel;
+
   useEffect(() => {
-    return () => recorder.cancel();
-  }, [recorder.cancel]);
+    return () => cancelRecorder();
+  }, [cancelRecorder]);
 
   const group = groups[groupIndex] ?? null;
   const currentWord = group?.words[wordIndex] ?? null;
