@@ -131,7 +131,14 @@ export function ReadingPronunciationReview({
         languageCode: "vi",
       });
       if (!transcript.text.trim() || !transcript.words?.length) {
-        setFeedback("Mình chưa có đủ dữ liệu để kiểm tra. Con thử lại nhé.");
+        const nextAttempt = attempts + 1;
+        setAttempts(nextAttempt);
+        setCanContinue(nextAttempt >= MAX_ATTEMPTS);
+        setFeedback(
+          nextAttempt >= MAX_ATTEMPTS
+            ? "Mình chưa nghe đủ rõ để xác nhận. Con có thể nghe mẫu rồi chuyển tiếp nhé."
+            : "Mình chưa có đủ dữ liệu để kiểm tra. Con thử đọc chậm và rõ hơn nhé.",
+        );
         return;
       }
 
