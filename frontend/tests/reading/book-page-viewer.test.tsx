@@ -192,4 +192,38 @@ describe("BookPageViewer", () => {
       screen.getByRole("button", { name: "khỏe, cần đọc lại" }),
     ).toBeInTheDocument();
   });
+  it("renders uncertain speech evidence neutrally without green or confirmed-error styling", () => {
+    const uncertainPage: ReadingPageDTO = {
+      ...page,
+      words: [
+        {
+          word_id: "uncertain-word-1",
+          word_index: 0,
+          line_index: 0,
+          text: "khỏe",
+          bbox: [0.1, 0.1, 0.05, 0.02],
+        },
+      ],
+    };
+
+    const { container } = render(
+      <BookPageViewer
+        currentWordId={null}
+        page={uncertainPage}
+        uncertainWordIds={new Set(["uncertain-word-1"])}
+      />,
+    );
+
+    const word = container.querySelector('[data-word-id="uncertain-word-1"]');
+    expect(word).toHaveAttribute("data-word-status", "UNCERTAIN");
+    expect(word).toHaveAttribute(
+      "aria-label",
+      "khỏe, chưa đủ dữ liệu để đánh giá",
+    );
+    expect(word).toHaveTextContent("?");
+    expect(word).not.toHaveClass("bg-emerald-50");
+    expect(word).not.toHaveClass("bg-rose-50");
+    expect(word).toHaveClass("bg-amber-50");
+  });
+
 });

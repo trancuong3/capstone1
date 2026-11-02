@@ -10,6 +10,7 @@ interface BookPageViewerProps {
   currentWordId: string | null;
   isTransitioning?: boolean;
   mispronouncedWordIds?: Set<string>;
+  uncertainWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
@@ -21,6 +22,7 @@ export function BookPageViewer({
   currentWordId,
   isTransitioning = false,
   mispronouncedWordIds,
+  uncertainWordIds,
   onWordClick,
   page,
   comparisonResult,
@@ -70,6 +72,7 @@ export function BookPageViewer({
           currentWordId={currentWordId}
           correctWordIds={correctWordIds}
           mispronouncedWordIds={mispronouncedWordIds}
+          uncertainWordIds={uncertainWordIds}
           reviewedWordIds={reviewedWordIds}
           onWordClick={onWordClick}
         />

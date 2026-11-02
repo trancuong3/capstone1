@@ -10,6 +10,7 @@ interface BookPageContentProps {
   currentWordId?: string | null;
   correctWordIds?: Set<string>;
   mispronouncedWordIds?: Set<string>;
+  uncertainWordIds?: Set<string>;
   reviewedWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   readOnly?: boolean;
@@ -21,6 +22,7 @@ export function BookPageContent({
   currentWordId = null,
   correctWordIds,
   mispronouncedWordIds,
+  uncertainWordIds,
   reviewedWordIds,
   onWordClick,
   readOnly = false,
@@ -46,6 +48,7 @@ export function BookPageContent({
 
             const isCorrect = Boolean(correctWordIds?.has(word.word_id));
             const isReviewed = Boolean(reviewedWordIds?.has(word.word_id));
+            const isUncertain = Boolean(uncertainWordIds?.has(word.word_id));
             const tokenStatus =
               isCurrent && isMispronounced
                 ? "NEEDS_REVIEW"
@@ -55,14 +58,17 @@ export function BookPageContent({
                     ? "REVIEWED"
                     : isMispronounced
                       ? "NEEDS_REVIEW"
-                      : isCorrect
-                        ? "CORRECT"
-                        : "NOT_REACHED";
+                      : isUncertain
+                        ? "UNCERTAIN"
+                        : isCorrect
+                          ? "CORRECT"
+                          : "NOT_REACHED";
             const accessibleStatus = {
               NOT_REACHED: "chưa đọc đến",
               ACTIVE: "đang đọc",
               CORRECT: "đã đọc đúng",
               NEEDS_REVIEW: "cần đọc lại",
+              UNCERTAIN: "chưa đủ dữ liệu để đánh giá",
               REVIEWED: "đã đọc lại đúng",
             }[tokenStatus];
 
@@ -137,12 +143,25 @@ export function BookPageContent({
 
                     !isCurrent &&
                       !isMispronounced &&
+                      !isUncertain &&
+                      isReviewed &&
+                      "bg-sky-50 text-sky-900 font-bold border-b-2 border-sky-500",
+
+                    !isCurrent &&
+                      !isMispronounced &&
+                      !isUncertain &&
                       !isReviewed &&
                       isCorrect &&
                       "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
 
                     !isCurrent &&
                       !isMispronounced &&
+                      isUncertain &&
+                      "bg-amber-50 text-amber-900 font-semibold border-b-2 border-amber-300",
+
+                    !isCurrent &&
+                      !isMispronounced &&
+                      !isUncertain &&
                       !isCorrect &&
                       !colorClass &&
                       !readOnly &&
@@ -161,8 +180,10 @@ export function BookPageContent({
                     readOnly
                       ? undefined
                       : isCurrent && isMispronounced
-                        ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
-                        : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
+                        ? `Mình cùng luyện lại từ "${word.text}" nhé!`
+                        : isUncertain
+                          ? `Mình chưa nghe rõ từ "${word.text}". Chưa kết luận bé đọc sai.`
+                          : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }
                   onKeyDown={
                     readOnly
@@ -189,6 +210,13 @@ export function BookPageContent({
                       className="ml-1 text-[0.7em] font-black"
                     >
                       !
+                    </span>
+                  ) : tokenStatus === "UNCERTAIN" ? (
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 text-[0.7em] font-bold text-amber-700"
+                    >
+                      ?
                     </span>
                   ) : null}
                 </span>

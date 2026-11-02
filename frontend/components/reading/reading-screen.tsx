@@ -691,19 +691,13 @@ export function ReadingScreen({
                   recognitionEpoch,
                   i,
                 ].join(":");
-                const confidence = result[0]?.confidence;
-                const evidenceWords = finalText.split(/\\s+/u).map((text) => ({
-                  text,
-                  logprob:
-                    typeof confidence === "number" && confidence > 0
-                      ? Math.log(confidence)
-                      : null,
-                }));
+                // Browser SpeechRecognition confidence is phrase-level, not word-aligned.
+                // Keep the event UNCERTAIN instead of copying one score to every token.
                 commitRecognizedTranscript(
                   finalEventId,
                   finalText,
                   activeTracker,
-                  evidenceWords,
+                  null,
                 );
               }
             }
@@ -1215,8 +1209,10 @@ export function ReadingScreen({
         setReviewFeedback("Mình đã nghe mẫu cùng nhau. Sang từ tiếp theo nhé!");
       } catch {
         sessionReviewQueueRef.current.markUnresolved(item.reviewId);
-        uncertainWordIdsRef.current.add(item.wordId);
-        setUncertainWordIds(new Set(uncertainWordIdsRef.current));
+        if (item.reason !== "CONFIDENTLY_INCORRECT") {
+          uncertainWordIdsRef.current.add(item.wordId);
+          setUncertainWordIds(new Set(uncertainWordIdsRef.current));
+        }
         setReviewFeedback("Mình chưa phát được âm mẫu. Mình chuyển sang từ tiếp theo nhé.");
       }
     } else if (result === "NO_SPEECH") {
@@ -1479,7 +1475,10 @@ export function ReadingScreen({
                 : "READ_EXAMPLE",
             StartMs: toReadingEventStartMs(Date.now()),
             EndMs: null,
-            Confidence: item.lastReviewConfidence ?? null,
+            Confidence:
+              item.resolution === "REVIEWED_CORRECT"
+                ? item.lastReviewConfidence ?? null
+                : null,
             Status: "FEEDBACK_GIVEN",
             Metadata: {
               source: "END_OF_SESSION_WORD_REVIEW",
@@ -1868,6 +1867,7 @@ export function ReadingScreen({
         isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
         mispronouncedWordIds={mispronouncedWordIds}
+        uncertainWordIds={uncertainWordIds}
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}

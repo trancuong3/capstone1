@@ -29,6 +29,7 @@ interface ReadingLayoutProps {
   isSpeaking?: boolean;
   latestTranscript?: string | null;
   mispronouncedWordIds?: Set<string>;
+  uncertainWordIds?: Set<string>;
   onFinish: () => void;
   onHelp: () => void;
   onManualPage: () => void;
@@ -60,6 +61,7 @@ export function ReadingLayout({
   isSpeaking = false,
   latestTranscript,
   mispronouncedWordIds,
+  uncertainWordIds,
   onFinish,
   onHelp,
   onManualPage,
@@ -105,6 +107,7 @@ export function ReadingLayout({
           currentWordId={currentWordId}
           isTransitioning={isPageTransitioning}
           mispronouncedWordIds={mispronouncedWordIds}
+          uncertainWordIds={uncertainWordIds}
           onWordClick={onWordClick}
           page={page}
           comparisonResult={comparisonResult}
