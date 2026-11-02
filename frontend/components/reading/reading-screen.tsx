@@ -206,8 +206,17 @@ export function ReadingScreen({
         };
         pageTranscriptsRef.current.set(bucketKey, bucket);
       }
+      const isFirstSegmentForPage = bucket.segments.length === 0;
       bucket.segments.push(trimmed);
-      if (words?.length) bucket.words.push(...words);
+
+      // ElevenLabs word timestamps are relative to the uploaded audio segment.
+      // Once a page uses more than one capture segment, their clocks cannot be
+      // safely merged without real inter-segment timing evidence.
+      if (isFirstSegmentForPage && words?.length) {
+        bucket.words.push(...words);
+      } else if (!isFirstSegmentForPage) {
+        bucket.words.length = 0;
+      }
 
       const spokenTokens = trimmed
         .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
