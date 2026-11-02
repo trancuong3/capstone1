@@ -374,16 +374,8 @@ export function findOriginalSentence(
   while (start > 0 && !SENTENCE_ENDING.test(words[start - 1].text.trim())) {
     start -= 1;
   }
-  if (
-    start > 0 ||
-    (start === 0 && targetWordIndex === 0)
-  ) {
-    // A page boundary is accepted as a sentence boundary only when the target
-    // belongs to the first sentence beginning at the start of the verified page.
-  } else {
-    return null;
-  }
-
+  // Reaching index zero is a valid page boundary. Any later sentence must be
+  // preceded by a real ending mark, which is why the backward scan stops there.
   let end = targetWordIndex;
   while (end < words.length && !SENTENCE_ENDING.test(words[end].text.trim())) {
     end += 1;
