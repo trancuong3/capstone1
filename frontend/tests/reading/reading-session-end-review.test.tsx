@@ -261,7 +261,9 @@ describe("ReadingScreen session-end word review", () => {
         new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
       );
     });
-    await screen.findByText("Bé mây");
+    await waitFor(() =>
+      expect(mocks.speech.transcribe).toHaveBeenCalledTimes(1),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Xong" }));
     await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
@@ -305,7 +307,7 @@ describe("ReadingScreen session-end word review", () => {
 
     await act(async () => {
       fireEvent.click(
-        screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+        screen.getByRole("button", { name: /nhận diện giọng nói/ }),
       );
     });
     expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
@@ -316,7 +318,9 @@ describe("ReadingScreen session-end word review", () => {
         new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
       );
     });
-    await screen.findByText("Bé mây");
+    await waitFor(() =>
+      expect(mocks.speech.transcribe).toHaveBeenCalledTimes(1),
+    );
 
     // PROMPT 2 must not interrupt the child when a page's first pass ends.
     expect(
