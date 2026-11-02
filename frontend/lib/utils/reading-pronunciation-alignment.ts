@@ -382,8 +382,19 @@ export function findOriginalSentence(
   while (start > 0 && !SENTENCE_ENDING.test(words[start - 1].text.trim())) {
     start -= 1;
   }
-  // Reaching index zero is a valid page boundary. Any later sentence must be
-  // preceded by a real ending mark, which is why the backward scan stops there.
+  if (start === 0) {
+    const firstWord = words[0]?.text.trim() ?? "";
+    const firstLetter = firstWord.match(/^\\p{L}/u)?.[0] ?? "";
+    // A page can begin mid-sentence. Without a preceding page, accept its
+    // boundary only when the verified text starts with a capitalized word.
+    if (
+      !firstLetter ||
+      firstLetter === firstLetter.toLocaleLowerCase("vi")
+    ) {
+      return null;
+    }
+  }
+
   let end = targetWordIndex;
   while (end < words.length && !SENTENCE_ENDING.test(words[end].text.trim())) {
     end += 1;
