@@ -207,6 +207,10 @@ export function ReadingScreen({
           options?.onEnded?.();
           void resumeMicrophoneAfterReferenceAudio();
         },
+        onError: () => {
+          options?.onError?.();
+          void resumeMicrophoneAfterReferenceAudio();
+        },
       });
     } catch (error) {
       await resumeMicrophoneAfterReferenceAudio();
@@ -221,6 +225,9 @@ export function ReadingScreen({
     try {
       await playReferenceAudio(word.text, {
         onEnded: () => {
+          if (mountedRef.current) setIsReadingWord(false);
+        },
+        onError: () => {
           if (mountedRef.current) setIsReadingWord(false);
         },
       });

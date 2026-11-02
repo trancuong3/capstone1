@@ -282,9 +282,19 @@ export function ReadingPronunciationReview({
   }
 
   async function playSample() {
-    if (!targetText) return;
+    if (!targetText || isProcessing || isRecording) return;
+    setIsProcessing(true);
+    setCanContinue(false);
     try {
-      await player.play(targetText);
+      await new Promise<void>((resolve, reject) => {
+        void player
+          .play(targetText, {
+            onEnded: resolve,
+            onError: () =>
+              reject(new Error("Reference audio playback failed.")),
+          })
+          .catch(reject);
+      });
       currentPracticeTranscriptRef.current = null;
       if (phase === "word" && currentWord) {
         await reportOutcomes([currentWord], "WORD", "ASSISTED", null);
@@ -296,6 +306,8 @@ export function ReadingPronunciationReview({
     } catch {
       setFeedback("Chưa phát được giọng mẫu. Con vẫn có thể chuyển tiếp.");
       setCanContinue(true);
+    } finally {
+      setIsProcessing(false);
     }
   }
 

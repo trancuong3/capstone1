@@ -35,7 +35,8 @@ export interface WordOccurrenceAssessment {
     | "CONFIDENT_SUBSTITUTION"
     | "BOUNDED_OMISSION"
     | "LOW_CONFIDENCE"
-    | "INCOMPLETE_TOKEN";
+    | "INCOMPLETE_TOKEN"
+    | "UNRELATED_SPEECH_CONTEXT";
 }
 
 export interface ReadingSegmentAlignment {
@@ -307,6 +308,14 @@ export function alignReadingSegment(
     });
   }
 
+  const hasUnrelatedSpeech =
+    steps.some((step) => step.kind === "extra-spoken") ||
+    [...rawMapped.values()].some(
+      (item) =>
+        !item.exact &&
+        !item.incomplete &&
+        item.similarity < MIN_TOKEN_SIMILARITY,
+    );
   const assessments: WordOccurrenceAssessment[] = [];
   const mappedByOffset = new Map<
     number,
@@ -344,6 +353,9 @@ export function alignReadingSegment(
     } else if (evidence.incomplete) {
       status = "UNCERTAIN";
       reason = "INCOMPLETE_TOKEN";
+    } else if (evidence.exact && hasUnrelatedSpeech) {
+      status = "UNCERTAIN";
+      reason = "UNRELATED_SPEECH_CONTEXT";
     } else if (evidence.exact) {
       status = "CORRECT";
       reason = "EXACT_WORD_MATCH";

@@ -8,6 +8,7 @@ export interface SpeechPlayOptions {
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
+  onError?: () => void;
 }
 
 export interface SpeechPlayer {
@@ -57,17 +58,25 @@ export function useSpeechPlayer(): SpeechPlayer {
       objectUrlRef.current = objectUrl;
       audioRef.current = audio;
 
-      const handleEnded = () => {
+      const clearProgressFrame = () => {
         if (animFrameRef.current !== null) {
           cancelAnimationFrame(animFrameRef.current);
           animFrameRef.current = null;
         }
+      };
+      const handleEnded = () => {
+        clearProgressFrame();
         options?.onEnded?.();
+        stop();
+      };
+      const handleError = () => {
+        clearProgressFrame();
+        options?.onError?.();
         stop();
       };
 
       audio.onended = handleEnded;
-      audio.onerror = handleEnded;
+      audio.onerror = handleError;
 
       const startProgressLoop = () => {
         const update = () => {

@@ -1,9 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ServiceError } from "@/lib/api/service-error";
-import type { ReadingUiState } from "@/types/reading";
+
 import { ReadingScreen } from "@/components/reading/reading-screen";
+import { ServiceError } from "@/lib/api/service-error";
 import type { ReadingServices } from "@/hooks/use-reading-services";
 import {
   bookFixture,
@@ -11,6 +11,7 @@ import {
   sessionSummaryFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
+import type { ReadingUiState } from "@/types/reading";
 import type {
   ReadingPageDTO,
   ReadingSessionPageProgressDTO,
@@ -19,7 +20,7 @@ import type {
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
 
 interface TestMicrophoneTrack {
-  stop: ReturnType<typeof vi.fn>;
+  stop: () => void;
   readonly readyState: MediaStreamTrackState;
 }
 
@@ -432,11 +433,23 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       TEST_SESSION_ID,
       "start",
     );
-    expect(screen.getByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."),
+    ).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(getUserMediaMock).toHaveBeenCalledWith({ audio: true });
+        expect(testRecorderInstances[0]?.state).toBe("recording");
+      },
+      { timeout: 5000 },
+    );
+    expect(
+      await screen.findByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/Trạng thái kết nối: đã kết nối\./),
     ).toBeInTheDocument();
-  });
+  }, 8000);
 
   it("shows the selected range and navigates only to a saved next page", async () => {
     const user = userEvent.setup();
@@ -557,8 +570,16 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     const user = userEvent.setup();
     const { container } = renderReading("microphone-denied");
 
+    await screen.findByRole("dialog", {
+      name: "Mình chưa nghe thấy giọng bé",
+    });
     await user.click(screen.getByRole("button", { name: "Thử lại" }));
-    const recoveryDialog = await screen.findByRole("dialog", {
+    await waitFor(() => {
+      expect(services.devicePermissionService.retry).toHaveBeenCalledWith(
+        "microphone",
+      );
+    });
+    const recoveryDialog = screen.getByRole("dialog", {
       name: "Mình chưa nghe thấy giọng bé",
     });
 

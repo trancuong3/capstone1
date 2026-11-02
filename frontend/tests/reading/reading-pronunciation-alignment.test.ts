@@ -114,21 +114,30 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
     ).toBe(true);
   });
 
-  it("does not mark unrelated background speech as an incorrect word", () => {
-    const result = alignReadingSegment(
-      source(["Con", "mèo"]),
-      0,
-      "hello mèo",
-      evidence(["hello", "mèo"]),
-    );
+  it(
+    "does not mark a matching word green when unrelated background speech is present",
+    () => {
+      const result = alignReadingSegment(
+        source(["Con", "mèo"]),
+        0,
+        "hello mèo",
+        evidence(["hello", "mèo"]),
+      );
 
-    expect(result.assessments[0]).toMatchObject({
-      expected_text: "Con",
-      recognized_text: "hello",
-      status: "UNCERTAIN",
-    });
-    expect(result.assessments[1].status).toBe("CORRECT");
-  });
+      expect(result.assessments[0]).toMatchObject({
+        expected_text: "Con",
+        recognized_text: "hello",
+        status: "UNCERTAIN",
+      });
+      expect(result.assessments[1]).toMatchObject({
+        expected_text: "mèo",
+        recognized_text: "mèo",
+        status: "UNCERTAIN",
+        reason: "UNRELATED_SPEECH_CONTEXT",
+      });
+      expect(result.next_word_index).toBe(0);
+    },
+  );
 
   it("does not turn a short partial token into a correct or incorrect result", () => {
     const result = alignReadingSegment(

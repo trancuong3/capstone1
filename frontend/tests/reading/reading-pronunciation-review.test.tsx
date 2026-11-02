@@ -1,15 +1,18 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReadingPronunciationReview } from "@/components/reading/reading-pronunciation-review";
+import type { SpeechPlayOptions } from "@/hooks/use-speech-player";
 import type { PronunciationReviewGroup } from "@/lib/utils/reading-pronunciation-alignment";
 
 const mocks = vi.hoisted(() => ({
   recorderStart: vi.fn<() => Promise<void>>(),
   recorderStop: vi.fn<() => Promise<Blob | null>>(),
   recorderCancel: vi.fn(),
-  playerPlay: vi.fn<(text: string) => Promise<void>>(),
+  playerPlay: vi.fn<
+    (text: string, options?: SpeechPlayOptions) => Promise<void>
+  >(),
   transcribe: vi.fn<
     (
       blob: Blob,
@@ -220,6 +223,75 @@ describe("end-of-session pronunciation review", () => {
     expect(
       await screen.findByText(/Mình chưa nghe thấy giọng đọc rõ ràng/),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeEnabled();
+  });
+
+  it("records assisted practice only after the sample audio has fully ended", async () => {
+    const user = userEvent.setup();
+    const onPracticeOutcome = vi.fn().mockResolvedValue(undefined);
+    let finishPlayback: (() => void) | undefined;
+
+    mocks.playerPlay.mockImplementation(async (_text, options) => {
+      finishPlayback = options?.onEnded;
+    });
+
+    render(
+      <ReadingPronunciationReview
+        groups={[reviewGroup]}
+        onComplete={vi.fn()}
+        onPracticeOutcome={onPracticeOutcome}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Nghe đọc mẫu" }));
+    await waitFor(() => expect(mocks.playerPlay).toHaveBeenCalledOnce());
+
+    expect(finishPlayback).toBeTypeOf("function");
+    expect(onPracticeOutcome).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Tiếp tục" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishPlayback?.();
+    });
+
+    await waitFor(() => {
+      expect(onPracticeOutcome).toHaveBeenCalledWith(
+        reviewGroup.words[0],
+        "WORD",
+        "ASSISTED",
+        null,
+        null,
+      );
+    });
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeEnabled();
+  });
+
+  it("does not persist assisted practice when the sample audio fails", async () => {
+    const user = userEvent.setup();
+    const onPracticeOutcome = vi.fn().mockResolvedValue(undefined);
+
+    mocks.playerPlay.mockImplementation(async (_text, options) => {
+      options?.onError?.();
+    });
+
+    render(
+      <ReadingPronunciationReview
+        groups={[reviewGroup]}
+        onComplete={vi.fn()}
+        onPracticeOutcome={onPracticeOutcome}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Nghe đọc mẫu" }));
+
+    expect(
+      await screen.findByText(
+        "Chưa phát được giọng mẫu. Con vẫn có thể chuyển tiếp.",
+      ),
+    ).toBeInTheDocument();
+    expect(onPracticeOutcome).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeEnabled();
   });
 });

@@ -420,6 +420,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         repo.reading_event_by_idempotency_key.return_value = SimpleNamespace(
             Id=UUID("88888888-8888-4888-8888-888888888888"),
+            SessionId=session_id,
             PageId=PAGE_ID,
             PageRevisionId=REVISION_ID,
             WordId=UUID("99999999-9999-4999-8999-999999999999"),
