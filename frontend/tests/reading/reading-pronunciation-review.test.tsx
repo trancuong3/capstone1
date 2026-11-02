@@ -10,9 +10,8 @@ const mocks = vi.hoisted(() => ({
   recorderStart: vi.fn<() => Promise<void>>(),
   recorderStop: vi.fn<() => Promise<Blob | null>>(),
   recorderCancel: vi.fn(),
-  playerPlay: vi.fn<
-    (text: string, options?: SpeechPlayOptions) => Promise<void>
-  >(),
+  playerPlay:
+    vi.fn<(text: string, options?: SpeechPlayOptions) => Promise<void>>(),
   transcribe: vi.fn<
     (
       blob: Blob,
