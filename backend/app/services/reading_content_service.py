@@ -456,6 +456,7 @@ class ReadingContentService:
         report_id: UUID,
         actor_id: UUID,
     ) -> DeleteReadingReportResponse:
+        await self.require_parent(actor_id)
         report = await self.repository.reading_comparison_report(report_id)
         if report is None:
             raise HTTPException(
@@ -475,6 +476,8 @@ class ReadingContentService:
         actor_id: UUID,
         payload: CompareReadingRequest,
     ) -> CompareReadingResponse:
+        # This report is page-scoped text alignment for diagnostics only. It is
+        # not an acoustic pronunciation decision and must never drive word colors.
         # get_session_page enforces parent ownership and resolves the immutable
         # page/revision snapshot saved in this session, including multi-page sessions.
         page = await self.get_session_page(session_id, actor_id)
