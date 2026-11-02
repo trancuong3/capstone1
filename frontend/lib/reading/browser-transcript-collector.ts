@@ -61,3 +61,16 @@ export class BrowserTranscriptCollector {
     this.completedCycles.length = 0;
   }
 }
+
+/** Prefer the provider result for one capture, using actual browser final text
+ * only when provider STT returned no usable transcript.
+ */
+export function resolveTranscriptForSegment(
+  providerText: string | null | undefined,
+  browserFinalText: string | null | undefined,
+): string | null {
+  const preferred = providerText?.trim();
+  if (preferred) return preferred;
+  const fallback = browserFinalText?.trim();
+  return fallback || null;
+}
