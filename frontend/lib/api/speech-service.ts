@@ -153,16 +153,34 @@ export function createSpeechService(): SpeechService {
     async transcribe(audio, options = {}) {
       if (!audio.size) throw failure("STT_UNAVAILABLE", 422);
 
-      const mimeType = audio.type || "audio/webm";
-      const fileBlob = audio.type
-        ? audio
-        : new Blob([audio], { type: mimeType });
-      const filename =
-        options.filename ??
-        (mimeType.includes("ogg") ? "recording.ogg" : "recording.webm");
+      // A MIME label is metadata, not a conversion. Never invent WebM when
+      // the captured Blob has no authoritative encoding information.
+      const mimeType = audio.type.trim();
+      const baseMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+      const extensionByMimeType: Readonly<Record<string, string>> = {
+        "audio/webm": "webm",
+        "audio/ogg": "ogg",
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/mp4": "m4a",
+        "audio/aac": "aac",
+        "audio/flac": "flac",
+      };
+      const extension = extensionByMimeType[baseMimeType];
+      if (!extension) throw failure("STT_UNAVAILABLE", 422);
 
+      const filename = options.filename ?? `recording.${extension}`;
+      const suppliedExtension = filename.split(".").pop()?.toLowerCase();
+      if (suppliedExtension !== extension) {
+        throw failure("STT_UNAVAILABLE", 422);
+      }
+
+      // Send the original bytes unchanged. The browser's MediaRecorder MIME
+      // type and the filename extension must describe the same audio format.
       const form = new FormData();
-      form.append("file", fileBlob, filename);
+      form.append("file", audio, filename);
       if (options.languageCode)
         form.append("language_code", options.languageCode);
 
