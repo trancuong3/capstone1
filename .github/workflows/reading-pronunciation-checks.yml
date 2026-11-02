@@ -58,6 +58,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Format changed reading files
+        run: |
+          npx prettier --write \
+            hooks/use-speech-recorder.ts \
+            lib/api/speech-service.ts \
+            test/speech-service.test.ts \
+            test/use-speech-recorder.test.tsx
+
       - name: Check formatting for changed reading files
         run: |
           npx prettier --check \
@@ -103,6 +111,18 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
         run: npm run build
+
+      - name: Export Prettier-formatted speech files for exact review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-speech-files
+          path: |
+            frontend/hooks/use-speech-recorder.ts
+            frontend/lib/api/speech-service.ts
+            frontend/test/speech-service.test.ts
+            frontend/test/use-speech-recorder.test.tsx
+          if-no-files-found: error
 
   backend:
     name: Backend unit and API regression tests
