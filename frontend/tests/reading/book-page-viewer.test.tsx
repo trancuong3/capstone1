@@ -71,8 +71,12 @@ describe("BookPageViewer", () => {
       <BookPageViewer currentWordId={null} page={formattedPage} />,
     );
 
-    expect(screen.getByRole("button", { name: "Ngày" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "một" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Ngày, chưa đọc đến" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "một, chưa đọc đến" }),
+    ).toBeInTheDocument();
     expect(container.querySelectorAll("br")).toHaveLength(4);
     expect(
       container.querySelector(
@@ -96,15 +100,69 @@ describe("BookPageViewer", () => {
     const repeatedPage: ReadingPageDTO = {
       ...page,
       words: [
-        { word_id: "line-a-0", word_index: 0, line_index: 0, text: "Hôm", bbox: [0.1, 0.1, 0.05, 0.02] },
-        { word_id: "line-a-1", word_index: 1, line_index: 0, text: "nay", bbox: [0.16, 0.1, 0.05, 0.02] },
-        { word_id: "line-a-2", word_index: 2, line_index: 0, text: "khỏe", bbox: [0.22, 0.1, 0.05, 0.02] },
-        { word_id: "line-a-3", word_index: 3, line_index: 0, text: "không?", bbox: [0.28, 0.1, 0.06, 0.02] },
-        { word_id: "line-b-0", word_index: 4, line_index: 1, text: "Tôi", bbox: [0.1, 0.2, 0.04, 0.02] },
-        { word_id: "line-b-1", word_index: 5, line_index: 1, text: "khỏe", bbox: [0.15, 0.2, 0.05, 0.02] },
-        { word_id: "line-c-0", word_index: 6, line_index: 2, text: "đi", bbox: [0.1, 0.3, 0.03, 0.02] },
-        { word_id: "line-c-1", word_index: 7, line_index: 2, text: "chơi", bbox: [0.14, 0.3, 0.04, 0.02] },
-        { word_id: "line-c-2", word_index: 8, line_index: 2, text: "không?", bbox: [0.19, 0.3, 0.06, 0.02] },
+        {
+          word_id: "line-a-0",
+          word_index: 0,
+          line_index: 0,
+          text: "Hôm",
+          bbox: [0.1, 0.1, 0.05, 0.02],
+        },
+        {
+          word_id: "line-a-1",
+          word_index: 1,
+          line_index: 0,
+          text: "nay",
+          bbox: [0.16, 0.1, 0.05, 0.02],
+        },
+        {
+          word_id: "line-a-2",
+          word_index: 2,
+          line_index: 0,
+          text: "khỏe",
+          bbox: [0.22, 0.1, 0.05, 0.02],
+        },
+        {
+          word_id: "line-a-3",
+          word_index: 3,
+          line_index: 0,
+          text: "không?",
+          bbox: [0.28, 0.1, 0.06, 0.02],
+        },
+        {
+          word_id: "line-b-0",
+          word_index: 4,
+          line_index: 1,
+          text: "Tôi",
+          bbox: [0.1, 0.2, 0.04, 0.02],
+        },
+        {
+          word_id: "line-b-1",
+          word_index: 5,
+          line_index: 1,
+          text: "khỏe",
+          bbox: [0.15, 0.2, 0.05, 0.02],
+        },
+        {
+          word_id: "line-c-0",
+          word_index: 6,
+          line_index: 2,
+          text: "đi",
+          bbox: [0.1, 0.3, 0.03, 0.02],
+        },
+        {
+          word_id: "line-c-1",
+          word_index: 7,
+          line_index: 2,
+          text: "chơi",
+          bbox: [0.14, 0.3, 0.04, 0.02],
+        },
+        {
+          word_id: "line-c-2",
+          word_index: 8,
+          line_index: 2,
+          text: "không?",
+          bbox: [0.19, 0.3, 0.06, 0.02],
+        },
       ],
     };
 

@@ -266,7 +266,7 @@ describe("Reading action cleanup with a typed service boundary", () => {
     fireEvent.click(retry);
     expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
       TEST_SESSION_ID,
-      pageFour.words[3].word_id,
+      pageFour.words[0].word_id,
     );
     view.unmount();
     await act(async () => {

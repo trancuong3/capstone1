@@ -46,17 +46,18 @@ export function BookPageContent({
 
             const isCorrect = Boolean(correctWordIds?.has(word.word_id));
             const isReviewed = Boolean(reviewedWordIds?.has(word.word_id));
-            const tokenStatus = isCurrent && isMispronounced
-              ? "NEEDS_REVIEW"
-              : isCurrent
-                ? "ACTIVE"
-                : isReviewed
-                  ? "REVIEWED"
-                  : isMispronounced
-                    ? "NEEDS_REVIEW"
-                    : isCorrect
-                      ? "CORRECT"
-                      : "NOT_REACHED";
+            const tokenStatus =
+              isCurrent && isMispronounced
+                ? "NEEDS_REVIEW"
+                : isCurrent
+                  ? "ACTIVE"
+                  : isReviewed
+                    ? "REVIEWED"
+                    : isMispronounced
+                      ? "NEEDS_REVIEW"
+                      : isCorrect
+                        ? "CORRECT"
+                        : "NOT_REACHED";
             const accessibleStatus = {
               NOT_REACHED: "chưa đọc đến",
               ACTIVE: "đang đọc",

@@ -266,7 +266,9 @@ export function useSpeechRecorder(): SpeechRecorder {
       cleanupAudioNodes();
       setIsRecording(false);
       const finalBlob = chunksRef.current.length
-        ? new Blob(chunksRef.current, { type: recorder?.mimeType || "audio/webm" })
+        ? new Blob(chunksRef.current, {
+            type: recorder?.mimeType || "audio/webm",
+          })
         : null;
       return Promise.resolve(finalBlob);
     }

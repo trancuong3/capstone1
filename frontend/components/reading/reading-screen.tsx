@@ -2,7 +2,6 @@
 
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ServiceError } from "@/lib/api/service-error";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -136,9 +135,9 @@ export function ReadingScreen({
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
   const [, setFinalTranscript] = useState("");
-  const [isComparing, setIsComparing] = useState(false);
+  const [, setIsComparing] = useState(false);
   const [, setComparisonResult] = useState<ComparisonResult | null>(null);
-  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
@@ -174,7 +173,7 @@ export function ReadingScreen({
   );
   const isUsingRecorderRef = useRef(false);
 
-  function resetPageTracking(nextPage: ReadingPageDTO) {
+  const resetPageTracking = useCallback((nextPage: ReadingPageDTO) => {
     trackerRef.current = new SequentialReadingTracker(
       nextPage.page_id,
       nextPage.page_revision_id,
@@ -188,12 +187,15 @@ export function ReadingScreen({
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
     setReviewedWordIds(new Set());
-  }
+  }, []);
 
-  function activatePage(nextPage: ReadingPageDTO) {
-    setPage(nextPage);
-    resetPageTracking(nextPage);
-  }
+  const activatePage = useCallback(
+    (nextPage: ReadingPageDTO) => {
+      setPage(nextPage);
+      resetPageTracking(nextPage);
+    },
+    [resetPageTracking],
+  );
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -211,7 +213,7 @@ export function ReadingScreen({
     for (const w of words) {
       spokenWordsSetRef.current.add(w);
     }
-   }, []);
+  }, []);
 
   const handleWordClick = useCallback(
     async (word: ReadingPageWordDTO) => {
@@ -346,7 +348,7 @@ export function ReadingScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId]);
+  }, [activatePage, initialPageId, loadKey, services, sessionId]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -404,6 +406,7 @@ export function ReadingScreen({
     services.readingService,
     sessionId,
     uiState,
+    activatePage,
   ]);
 
   function commitRecognizedTranscript(

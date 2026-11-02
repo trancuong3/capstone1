@@ -32,6 +32,7 @@ export interface InterimReadingPreview {
 export function normalizeReadingToken(value: string): string {
   return value
     .normalize("NFC")
+    .trim()
     .toLocaleLowerCase("vi")
     .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "");
 }
@@ -97,7 +98,10 @@ export class SequentialReadingTracker {
    * marks that exact occurrence for review and stops the utterance; later
    * occurrences are never searched or updated.
    */
-  commitFinal(eventId: string, transcript: string): SequentialAlignmentSnapshot {
+  commitFinal(
+    eventId: string,
+    transcript: string,
+  ): SequentialAlignmentSnapshot {
     const stableEventId = eventId.trim();
     if (!stableEventId || this.processedEventIds.has(stableEventId)) {
       return this.snapshot({ duplicate: true, matchedCount: 0 });

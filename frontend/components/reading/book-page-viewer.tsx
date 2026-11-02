@@ -26,7 +26,6 @@ export function BookPageViewer({
   comparisonResult,
   reviewedWordIds,
 }: BookPageViewerProps) {
-  const hasWords = page.words && page.words.length > 0;
   const currentWordRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
@@ -41,10 +40,6 @@ export function BookPageViewer({
       });
     }
   }, [currentWordId]);
-
-  const currentIdx = currentWordId
-    ? page.words.findIndex((w) => w.word_id === currentWordId)
-    : -1;
 
   return (
     <article
