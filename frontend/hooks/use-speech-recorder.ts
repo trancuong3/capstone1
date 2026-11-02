@@ -27,7 +27,6 @@ export function useSpeechRecorder(): SpeechRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const allChunksRef = useRef<Blob[]>([]);
   const onUtteranceRef = useRef<((blob: Blob) => void) | null>(null);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
@@ -76,7 +75,6 @@ export function useSpeechRecorder(): SpeechRecorder {
       const recorder = recorderRef.current;
       recorderRef.current = null;
       chunksRef.current = [];
-      allChunksRef.current = [];
       if (recorder) stopTracks(recorder.stream);
       cleanupAudioNodes();
       setIsRecording(false);
@@ -122,7 +120,6 @@ export function useSpeechRecorder(): SpeechRecorder {
 
       onUtteranceRef.current = onUtterance ?? null;
       chunksRef.current = [];
-      allChunksRef.current = [];
       isRecordingRef.current = true;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -137,11 +134,10 @@ export function useSpeechRecorder(): SpeechRecorder {
         const rec = mimeType
           ? new MediaRecorder(streamRef.current, { mimeType })
           : new MediaRecorder(streamRef.current);
+        const recorderChunks: Blob[] = [];
+        chunksRef.current = recorderChunks;
         rec.ondataavailable = (event) => {
-          if (event.data.size) {
-            chunksRef.current.push(event.data);
-            allChunksRef.current.push(event.data);
-          }
+          if (event.data.size) recorderChunks.push(event.data);
         };
         rec.onerror = () => {};
         rec.start(150);
@@ -224,9 +220,7 @@ export function useSpeechRecorder(): SpeechRecorder {
                 const activeRecorder = recorderRef.current;
                 if (activeRecorder && activeRecorder.state === "recording") {
                   isRotatingRef.current = true;
-                  const currentUtteranceChunks = [...chunksRef.current];
-                  chunksRef.current = [];
-
+                  const currentUtteranceChunks = chunksRef.current;
                   activeRecorder.onstop = () => {
                     isRotatingRef.current = false;
                     const contentType = activeRecorder.mimeType || "audio/webm";
@@ -234,9 +228,7 @@ export function useSpeechRecorder(): SpeechRecorder {
                       const blob = new Blob(currentUtteranceChunks, {
                         type: contentType,
                       });
-                      if (blob.size > 800) {
-                        onUtteranceRef.current?.(blob);
-                      }
+                      if (blob.size > 800) onUtteranceRef.current?.(blob);
                     }
                   };
 
@@ -273,8 +265,8 @@ export function useSpeechRecorder(): SpeechRecorder {
     if (!recorder || recorder.state === "inactive") {
       cleanupAudioNodes();
       setIsRecording(false);
-      const finalBlob = allChunksRef.current.length
-        ? new Blob(allChunksRef.current, { type: "audio/webm" })
+      const finalBlob = chunksRef.current.length
+        ? new Blob(chunksRef.current, { type: recorder?.mimeType || "audio/webm" })
         : null;
       return Promise.resolve(finalBlob);
     }
@@ -282,11 +274,16 @@ export function useSpeechRecorder(): SpeechRecorder {
     return new Promise<Blob | null>((resolve, reject) => {
       resolveStopRef.current = resolve;
       rejectStopRef.current = reject;
+      const finalChunks = chunksRef.current;
       recorder.onstop = () => {
         const contentType = recorder.mimeType || "audio/webm";
-        const finalBlob = allChunksRef.current.length
-          ? new Blob(allChunksRef.current, { type: contentType })
+        const finalBlob = finalChunks.length
+          ? new Blob(finalChunks, { type: contentType })
           : null;
+        // Finalize only the un-emitted tail; completed segments are not repeated.
+        if (finalBlob && finalBlob.size > 800) {
+          onUtteranceRef.current?.(finalBlob);
+        }
         finish(finalBlob);
       };
       try {
