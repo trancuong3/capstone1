@@ -43,6 +43,7 @@ import {
   type PronunciationReviewCandidate,
   type PronunciationReviewGroup,
 } from "@/lib/utils/reading-pronunciation-alignment";
+import type { ReadingEventCreateDTO } from "@/types/reading";
 
 interface ReadingScreenProps {
   initialPageId?: string;
@@ -128,6 +129,9 @@ export function ReadingScreen({
   const speechSegmentSequenceRef = useRef(0);
   const recognitionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pronunciationReviewCandidatesRef = useRef<Map<string, PronunciationReviewCandidate>>(new Map());
+  const pendingReadingEventsRef = useRef<Map<string, ReadingEventCreateDTO>>(new Map());
+  const persistedReadingEventKeysRef = useRef<Set<string>>(new Set());
+  const sessionStartedAtMsRef = useRef(Date.now());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const isListeningActiveRef = useRef(false);
@@ -230,6 +234,10 @@ export function ReadingScreen({
     async function load() {
       try {
         const session = await services.readingService.get(sessionId);
+        const sessionStartedAtMs = Date.parse(session.started_at);
+        if (Number.isFinite(sessionStartedAtMs)) {
+          sessionStartedAtMsRef.current = sessionStartedAtMs;
+        }
         const [
           book,
           child,
@@ -347,7 +355,10 @@ export function ReadingScreen({
     uiState,
   ]);
 
-  function enqueueRecordedUtterance(utteranceBlob: Blob) {
+  function enqueueRecordedUtterance(
+    utteranceBlob: Blob,
+    segmentStartedAtMs = Date.now(),
+  ) {
     if (utteranceBlob.size <= 800) return;
     const pageAtCapture = activePageRef.current;
     if (!pageAtCapture) return;
@@ -406,6 +417,37 @@ export function ReadingScreen({
               sentence_start_word_index: sentence?.startWordIndex ?? null,
               sentence_end_word_index_exclusive: sentence?.endWordIndexExclusive ?? null,
             });
+            if (assessment.confidence !== null) {
+              const eventKey = candidateKey;
+              const eventStartMs = Math.max(
+                0,
+                Math.round(
+                  segmentStartedAtMs +
+                    (assessment.recognized_start_seconds ?? 0) * 1000 -
+                    sessionStartedAtMsRef.current,
+                ),
+              );
+              pendingReadingEventsRef.current.set(eventKey, {
+                session_id: sessionId,
+                page_id: pageAtCapture.page_id,
+                page_revision_id: pageAtCapture.page_revision_id,
+                word_id: assessment.word_id,
+                type: "SUBSTITUTION",
+                start_ms: eventStartMs,
+                end_ms: null,
+                confidence: assessment.confidence,
+                status: "CONFIRMED",
+                metadata: {
+                  phase: "FIRST_PASS",
+                  occurrence_key: candidateKey,
+                  word_index: assessment.word_index,
+                  expected_word: assessment.expected_text,
+                  recognized_word: assessment.recognized_text,
+                  recognition_reason: assessment.reason,
+                  segment_id: segmentId,
+                },
+              });
+            }
           } else {
             uncertainWordIdsRef.current.add(assessment.word_id);
           }
@@ -458,6 +500,28 @@ export function ReadingScreen({
   useEffect(() => {
     startListeningRef.current = startListening;
   });
+
+  async function persistPendingReadingEvents() {
+    const createEvent = services.readingService.createEvent;
+    if (!createEvent) {
+      if (pendingReadingEventsRef.current.size > 0) {
+        console.warn("ReadingService.createEvent is unavailable; pronunciation events were not persisted.");
+      }
+      return;
+    }
+
+    for (const [eventKey, event] of pendingReadingEventsRef.current) {
+      if (persistedReadingEventKeysRef.current.has(eventKey)) continue;
+      try {
+        await createEvent(event);
+        persistedReadingEventKeysRef.current.add(eventKey);
+        pendingReadingEventsRef.current.delete(eventKey);
+      } catch (error) {
+        // Keep the event queued in memory for one final retry at session finish.
+        console.warn("Could not persist a confirmed pronunciation event:", error);
+      }
+    }
+  }
 
   async function stopListeningAndTranscribe() {
     isListeningActiveRef.current = false;
@@ -616,6 +680,9 @@ export function ReadingScreen({
     speechSegmentSequenceRef.current = 0;
     recognitionQueueRef.current = Promise.resolve();
     pronunciationReviewCandidatesRef.current.clear();
+    pendingReadingEventsRef.current.clear();
+    persistedReadingEventKeysRef.current.clear();
+    sessionStartedAtMsRef.current = Date.now();
     correctWordIdsRef.current.clear();
     mispronouncedWordIdsRef.current.clear();
     uncertainWordIdsRef.current.clear();
@@ -878,6 +945,10 @@ async function finishReading() {
       }
     }
 
+    if (!mountedRef.current) return;
+
+    // Save confirmed source-occurrence errors before finishing the session.
+    await persistPendingReadingEvents();
     if (!mountedRef.current) return;
 
     // 2. Ghép transcript của tất cả các lần ghi âm
