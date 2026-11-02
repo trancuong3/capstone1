@@ -384,7 +384,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         name: "Bé đọc với nhận diện giọng nói",
       }),
     );
-    const microphoneButton = await screen.findByRole("button", {
+    await screen.findByRole("button", {
       name: "Dừng nhận diện giọng nói",
     });
     await waitFor(() => {
