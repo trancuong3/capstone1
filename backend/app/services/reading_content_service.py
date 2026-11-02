@@ -157,6 +157,15 @@ class ReadingContentService:
         ):
             raise HTTPException(status_code=422, detail="Word does not belong to the referenced page revision")
 
+        event_key = payload.Metadata.get("idempotency_key")
+        if isinstance(event_key, str) and event_key.strip():
+            existing_event = await self.repository.reading_event_by_idempotency_key(
+                session.Id,
+                event_key,
+            )
+            if existing_event is not None:
+                return existing_event
+
         event = ReadingEvent(**payload.model_dump())
         return await self.repository.create_reading_event(event)
 
