@@ -81,24 +81,27 @@ async def speech_to_text(
         declared_mime_type, declared_mime_type
     )
 
+    if inferred_mime_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"code": "UNSUPPORTED_AUDIO"},
+        )
+
     if declared_mime_type in ("", "application/octet-stream"):
         # Infer only from a recognized filename extension. Never guess WebM.
         resolved_mime_type = inferred_mime_type
     else:
         resolved_mime_type = declared_mime_type
         if resolved_mime_type not in AUDIO_MIME_BY_EXTENSION.values():
-            resolved_mime_type = None
-        elif inferred_mime_type and inferred_mime_type != resolved_mime_type:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail={"code": "UNSUPPORTED_AUDIO"},
+            )
+        if inferred_mime_type != resolved_mime_type:
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                 detail={"code": "AUDIO_FORMAT_MISMATCH"},
             )
-
-    if resolved_mime_type is None:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={"code": "UNSUPPORTED_AUDIO"},
-        )
 
     try:
         audio = await file.read(MAX_AUDIO_BYTES + 1)
