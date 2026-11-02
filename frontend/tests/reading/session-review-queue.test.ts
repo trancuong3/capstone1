@@ -30,10 +30,13 @@ function candidate(
 describe("SessionReviewQueue", () => {
   it("keeps duplicate displayed words as separate token occurrences", () => {
     const queue = new SessionReviewQueue();
-    queue.addPageCandidates([
-      candidate("page-1", "line-a-khoe", 1),
-      candidate("page-1", "line-b-khoe", 3),
-    ], 0);
+    queue.addPageCandidates(
+      [
+        candidate("page-1", "line-a-khoe", 1),
+        candidate("page-1", "line-b-khoe", 3),
+      ],
+      0,
+    );
 
     expect(queue.snapshot().total).toBe(2);
     expect(queue.getCurrent()?.wordId).toBe("line-a-khoe");
@@ -45,13 +48,14 @@ describe("SessionReviewQueue", () => {
 
   it("preserves page range order and word position rather than insertion order", () => {
     const queue = new SessionReviewQueue();
-    queue.addPageCandidates([
-      candidate("page-2", "p2-word-0", 0, "mèo"),
-    ], 1);
-    queue.addPageCandidates([
-      candidate("page-1", "p1-word-3", 3, "nhỏ"),
-      candidate("page-1", "p1-word-1", 1, "Bé"),
-    ], 0);
+    queue.addPageCandidates([candidate("page-2", "p2-word-0", 0, "mèo")], 1);
+    queue.addPageCandidates(
+      [
+        candidate("page-1", "p1-word-3", 3, "nhỏ"),
+        candidate("page-1", "p1-word-1", 1, "Bé"),
+      ],
+      0,
+    );
 
     expect(queue.snapshot().items.map((item) => item.wordId)).toEqual([
       "p1-word-1",
@@ -71,10 +75,13 @@ describe("SessionReviewQueue", () => {
 
   it("moves to the next exact occurrence after a correct review attempt", () => {
     const queue = new SessionReviewQueue();
-    queue.addPageCandidates([
-      candidate("page-1", "wrong-1", 0, "Hôm"),
-      candidate("page-1", "wrong-2", 1, "nay"),
-    ], 0);
+    queue.addPageCandidates(
+      [
+        candidate("page-1", "wrong-1", 0, "Hôm"),
+        candidate("page-1", "wrong-2", 1, "nay"),
+      ],
+      0,
+    );
     const first = queue.getCurrent();
     expect(first).not.toBeNull();
 
@@ -117,10 +124,10 @@ describe("SessionReviewQueue", () => {
 
   it("rejects a delayed callback when the queue has already moved to another token", () => {
     const queue = new SessionReviewQueue();
-    queue.addPageCandidates([
-      candidate("page-1", "old-item", 0),
-      candidate("page-1", "new-item", 1),
-    ], 0);
+    queue.addPageCandidates(
+      [candidate("page-1", "old-item", 0), candidate("page-1", "new-item", 1)],
+      0,
+    );
     const oldItem = queue.getCurrent()!;
     queue.recordAttempt(oldItem.reviewId, "CORRECT");
 
@@ -131,16 +138,21 @@ describe("SessionReviewQueue", () => {
 
   it("keeps no-speech and uncertain separate from confirmed mispronunciation", () => {
     const queue = new SessionReviewQueue();
-    queue.addPageCandidates([
-      candidate("page-1", "silent", 0, "Con", "NO_SPEECH"),
-      candidate("page-1", "uncertain", 1, "mèo", "UNCERTAIN"),
-    ], 0);
+    queue.addPageCandidates(
+      [
+        candidate("page-1", "silent", 0, "Con", "NO_SPEECH"),
+        candidate("page-1", "uncertain", 1, "mèo", "UNCERTAIN"),
+      ],
+      0,
+    );
 
     expect(queue.snapshot().items.map((item) => item.reason)).toEqual([
       "NO_SPEECH",
       "UNCERTAIN",
     ]);
-    expect(queue.snapshot().items.every((item) => item.resolution === "PENDING")).toBe(true);
+    expect(
+      queue.snapshot().items.every((item) => item.resolution === "PENDING"),
+    ).toBe(true);
   });
 
   it("retains uncertain and no-speech outcomes for history without adding them to child review", () => {
@@ -196,15 +208,9 @@ describe("SessionReviewQueue", () => {
     expect(queue.snapshot().total).toBe(1);
 
     // A later pass on the same verified revision has no incorrect tokens.
-    queue.replacePageCandidates(
-      [],
-      0,
-      "page-1",
-      "revision-page-1",
-    );
+    queue.replacePageCandidates([], 0, "page-1", "revision-page-1");
 
     expect(queue.snapshot().total).toBe(0);
     expect(queue.getCurrent()).toBeNull();
   });
-
 });

@@ -158,15 +158,11 @@ describe("SequentialReadingTracker", () => {
       { minWordConfidence: 0.8, requireWordConfidence: true },
     );
 
-    const result = tracker.commitFinal(
-      "confidence-event",
-      "khỏe tốt chó",
-      [
-        { text: "khỏe", logprob: Math.log(0.95) },
-        { text: "tốt", logprob: Math.log(0.91) },
-        { text: "chó", logprob: Math.log(0.42) },
-      ],
-    );
+    const result = tracker.commitFinal("confidence-event", "khỏe tốt chó", [
+      { text: "khỏe", logprob: Math.log(0.95) },
+      { text: "tốt", logprob: Math.log(0.91) },
+      { text: "chó", logprob: Math.log(0.42) },
+    ]);
 
     expect(result.correctWordIds).toEqual(new Set(["confident-correct"]));
     expect(result.needsReviewWordIds).toEqual(new Set(["confident-wrong"]));

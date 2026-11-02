@@ -40,7 +40,9 @@ export function SessionComplete({
   summary,
 }: SessionCompleteProps) {
   const [showWordList, setShowWordList] = useState(false);
-  const [playingUncertainWordIndex, setPlayingUncertainWordIndex] = useState<number | null>(null);
+  const [playingUncertainWordIndex, setPlayingUncertainWordIndex] = useState<
+    number | null
+  >(null);
   const speechPlayer = useSpeechPlayer();
 
   function playUncertainWordSample(word: string, index: number) {
@@ -317,7 +319,10 @@ export function SessionComplete({
                   <div className="rounded-card border border-emerald-200 bg-emerald-50/50 p-4">
                     <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-800">
                       <CheckCircle2 aria-hidden="true" className="size-4" />
-                      Tự luyện lại và đọc đúng ({reviewedCorrectWords.length} từ)
+                      Tự luyện lại và đọc đúng ({
+                        reviewedCorrectWords.length
+                      }{" "}
+                      từ)
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {reviewedCorrectWords.map((word, idx) => (
@@ -372,7 +377,9 @@ export function SessionComplete({
                             className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
                           >
                             <Volume2 aria-hidden="true" className="size-3.5" />
-                            {playingUncertainWordIndex === idx ? "Đang phát…" : "Nghe mẫu"}
+                            {playingUncertainWordIndex === idx
+                              ? "Đang phát…"
+                              : "Nghe mẫu"}
                           </button>
                         </span>
                       ))}

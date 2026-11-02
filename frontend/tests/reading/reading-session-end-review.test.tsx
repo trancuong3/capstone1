@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReadingScreen } from "@/components/reading/reading-screen";
@@ -9,7 +15,10 @@ import {
   sessionSummaryFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
-import type { ReadingPageDTO, ReadingSessionPageProgressDTO } from "@/types/reading";
+import type {
+  ReadingPageDTO,
+  ReadingSessionPageProgressDTO,
+} from "@/types/reading";
 
 const mocks = vi.hoisted(() => ({
   services: null as unknown,
@@ -143,9 +152,7 @@ beforeEach(() => {
       text: "mèo",
       language_code: "vi",
       language_probability: 0.99,
-      words: [
-        { text: "mèo", start: 0, end: 0.3, logprob: Math.log(0.98) },
-      ],
+      words: [{ text: "mèo", start: 0, end: 0.3, logprob: Math.log(0.98) }],
     });
 
   mocks.player.play.mockReset().mockResolvedValue(undefined);
@@ -156,7 +163,9 @@ beforeEach(() => {
   });
 
   const readingService = {
-    createEvent: vi.fn<ReadingServices["readingService"]["createEvent"]>().mockResolvedValue(undefined),
+    createEvent: vi
+      .fn<ReadingServices["readingService"]["createEvent"]>()
+      .mockResolvedValue(undefined),
     create: vi.fn(),
     get: vi.fn().mockResolvedValue({
       ...sessionSummaryFixture,
@@ -196,7 +205,9 @@ beforeEach(() => {
       submitAnswer: vi.fn(),
     },
     devicePermissionService: {
-      getSnapshot: vi.fn().mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getSnapshot: vi
+        .fn()
+        .mockResolvedValue({ camera: "ready", microphone: "ready" }),
       retry: vi.fn(),
     },
     pageMatchService: {
@@ -228,141 +239,132 @@ afterEach(() => {
 });
 
 describe("ReadingScreen session-end word review", () => {
-  it(
-    "keeps uncalibrated recognition uncertain, persists it as ignored-by-gate, and does not force a whole-range reread",
-    async () => {
-      vi.stubEnv("NEXT_PUBLIC_READING_WORD_CONFIDENCE_THRESHOLD", "");
-      const readingService = services.readingService;
-      render(
-        <ReadingScreen
-          initialUiState="reading"
-          reconnectMode="recover"
-          sessionId={TEST_SESSION_ID}
-        />,
-      );
+  it("keeps uncalibrated recognition uncertain, persists it as ignored-by-gate, and does not force a whole-range reread", async () => {
+    vi.stubEnv("NEXT_PUBLIC_READING_WORD_CONFIDENCE_THRESHOLD", "");
+    const readingService = services.readingService;
+    render(
+      <ReadingScreen
+        initialUiState="reading"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
 
-      await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: /nhận diện giọng nói/ }),
-        );
+    await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /nhận diện giọng nói/ }),
+      );
+    });
+    await act(async () => {
+      mocks.recorder.callback?.(
+        new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
+      );
+    });
+    await screen.findByText("Bé mây");
+
+    fireEvent.click(screen.getByRole("button", { name: "Xong" }));
+    await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
+    ).not.toBeInTheDocument();
+    expect(readingService.finish).toHaveBeenCalledOnce();
+    const createEventMock = vi.mocked(readingService.createEvent);
+    expect(createEventMock).toHaveBeenCalledTimes(2);
+    for (const [event] of createEventMock.mock.calls) {
+      expect(event).toMatchObject({
+        Type: "MISPRONUNCIATION",
+        Status: "IGNORED_BY_GATE",
       });
-      await act(async () => {
-        mocks.recorder.callback?.(
-          new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
-        );
-      });
-      await screen.findByText("Bé mây");
+    }
 
-      fireEvent.click(screen.getByRole("button", { name: "Xong" }));
-      await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
-      fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
+    fireEvent.click(screen.getByRole("button", { name: /2 từ/i }));
+    expect(
+      screen.getByRole("button", { name: "Nghe mẫu từ Bé" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Nghe mẫu từ mèo" }),
+    ).toBeInTheDocument();
+  }, 12_000);
 
-      expect(
-        await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
-      ).not.toBeInTheDocument();
-      expect(readingService.finish).toHaveBeenCalledOnce();
-      const createEventMock = vi.mocked(readingService.createEvent);
-      expect(createEventMock).toHaveBeenCalledTimes(2);
-      for (const [event] of createEventMock.mock.calls) {
-        expect(event).toMatchObject({
-          Type: "MISPRONUNCIATION",
-          Status: "IGNORED_BY_GATE",
-        });
-      }
+  it("defers word review until finish, then persists the exact self-corrected occurrence before finishing", async () => {
+    render(
+      <ReadingScreen
+        initialUiState="reading"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
 
-      fireEvent.click(screen.getByRole("button", { name: /2 từ/i }));
-      expect(
-        screen.getByRole("button", { name: "Nghe mẫu từ Bé" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Nghe mẫu từ mèo" }),
-      ).toBeInTheDocument();
-    },
-    12_000,
-  );
+    await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
 
-  it(
-    "defers word review until finish, then persists the exact self-corrected occurrence before finishing",
-    async () => {
-      render(
-        <ReadingScreen
-          initialUiState="reading"
-          reconnectMode="recover"
-          sessionId={TEST_SESSION_ID}
-        />,
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
       );
+    });
+    expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
+    expect(mocks.recorder.callback).not.toBeNull();
 
-      await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
-
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
-        );
-      });
-      expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
-      expect(mocks.recorder.callback).not.toBeNull();
-
-      await act(async () => {
-        mocks.recorder.callback?.(
-          new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
-        );
-      });
-      await screen.findByText("Bé mây");
-
-      // PROMPT 2 must not interrupt the child when a page's first pass ends.
-      expect(
-        screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
-      ).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole("button", { name: "Xong" }));
-      await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
-      fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
-
-      expect(
-        await screen.findByRole("main", { name: "Luyện lại từ sau khi đọc" }),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId("review-target-word")).toHaveTextContent("mèo");
-      expect(services.readingService.finish).not.toHaveBeenCalled();
-
-      fireEvent.click(screen.getByRole("button", { name: "Bắt đầu đọc" }));
-      await waitFor(() => expect(mocks.recorder.start).toHaveBeenCalledTimes(2));
-      mocks.recorder.emitTailOnStop = true;
-
-      await waitFor(
-        () =>
-          expect(services.readingService.finish).toHaveBeenCalledTimes(1),
-        { timeout: 6_000 },
+    await act(async () => {
+      mocks.recorder.callback?.(
+        new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
       );
+    });
+    await screen.findByText("Bé mây");
 
-      expect(mocks.speech.transcribe).toHaveBeenCalledTimes(2);
-      expect(services.readingService.createEvent).toHaveBeenCalledTimes(2);
-      expect(services.readingService.createEvent).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          Type: "MISPRONUNCIATION",
-          Status: "DETECTED",
-          WordId: pageFour.words[1].word_id,
-          PageRevisionId: pageFour.page_revision_id,
-        }),
-      );
-      expect(services.readingService.createEvent).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          Type: "SELF_CORRECTION",
-          Status: "FEEDBACK_GIVEN",
-          WordId: pageFour.words[1].word_id,
-          PageRevisionId: pageFour.page_revision_id,
-          Confidence: 0.98,
-        }),
-      );
-      expect(
-        await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
-      ).toBeInTheDocument();
-    },
-    12_000,
-  );
+    // PROMPT 2 must not interrupt the child when a page's first pass ends.
+    expect(
+      screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Xong" }));
+    await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
+
+    expect(
+      await screen.findByRole("main", { name: "Luyện lại từ sau khi đọc" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("review-target-word")).toHaveTextContent("mèo");
+    expect(services.readingService.finish).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu đọc" }));
+    await waitFor(() => expect(mocks.recorder.start).toHaveBeenCalledTimes(2));
+    mocks.recorder.emitTailOnStop = true;
+
+    await waitFor(
+      () => expect(services.readingService.finish).toHaveBeenCalledTimes(1),
+      { timeout: 6_000 },
+    );
+
+    expect(mocks.speech.transcribe).toHaveBeenCalledTimes(2);
+    expect(services.readingService.createEvent).toHaveBeenCalledTimes(2);
+    expect(services.readingService.createEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        Type: "MISPRONUNCIATION",
+        Status: "DETECTED",
+        WordId: pageFour.words[1].word_id,
+        PageRevisionId: pageFour.page_revision_id,
+      }),
+    );
+    expect(services.readingService.createEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        Type: "SELF_CORRECTION",
+        Status: "FEEDBACK_GIVEN",
+        WordId: pageFour.words[1].word_id,
+        PageRevisionId: pageFour.page_revision_id,
+        Confidence: 0.98,
+      }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
+    ).toBeInTheDocument();
+  }, 12_000);
 });

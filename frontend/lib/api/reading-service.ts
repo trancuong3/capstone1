@@ -11,14 +11,10 @@ import type {
 } from "@/types/reading";
 
 export type ReadingEventCreateType =
-  | "MISPRONUNCIATION"
-  | "SELF_CORRECTION"
-  | "READ_EXAMPLE";
+  "MISPRONUNCIATION" | "SELF_CORRECTION" | "READ_EXAMPLE";
 
 export type ReadingEventCreateStatus =
-  | "DETECTED"
-  | "IGNORED_BY_GATE"
-  | "FEEDBACK_GIVEN";
+  "DETECTED" | "IGNORED_BY_GATE" | "FEEDBACK_GIVEN";
 
 export interface ReadingEventCreateInput {
   SessionId: string;

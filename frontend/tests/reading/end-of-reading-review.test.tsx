@@ -37,11 +37,12 @@ describe("EndOfReadingReview", () => {
 
     expect(screen.getByTestId("review-target-word")).toHaveTextContent("khỏe");
     expect(screen.getByText(/Có 3 từ cần nghe lại/)).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Tiến trình luyện từ" })).toHaveAttribute(
-      "aria-valuemax",
-      "3",
-    );
-    expect(screen.getByRole("button", { name: "Bắt đầu đọc" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "Tiến trình luyện từ" }),
+    ).toHaveAttribute("aria-valuemax", "3");
+    expect(
+      screen.getByRole("button", { name: "Bắt đầu đọc" }),
+    ).toBeInTheDocument();
   });
 
   it("shows a listening countdown and keeps the child-facing language encouraging", () => {

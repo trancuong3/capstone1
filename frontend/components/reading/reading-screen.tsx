@@ -6,7 +6,10 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
-import { EndOfReadingReview, type EndReviewActivity } from "@/components/reading/end-of-reading-review";
+import {
+  EndOfReadingReview,
+  type EndReviewActivity,
+} from "@/components/reading/end-of-reading-review";
 import { ManualPageSelector } from "@/components/reading/manual-page-selector";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
@@ -187,14 +190,21 @@ export function ReadingScreen({
   const [isSessionReviewing, setIsSessionReviewing] = useState(false);
   const [reviewQueueSnapshot, setReviewQueueSnapshot] =
     useState<SessionReviewQueueSnapshot>({
-      items: [], pendingCount: 0, completedCount: 0, current: null, total: 0,
+      items: [],
+      pendingCount: 0,
+      completedCount: 0,
+      current: null,
+      total: 0,
     });
-  const [reviewActivity, setReviewActivity] = useState<EndReviewActivity>("ready");
-  const [reviewSecondsRemaining, setReviewSecondsRemaining] = useState<number | null>(null);
+  const [reviewActivity, setReviewActivity] =
+    useState<EndReviewActivity>("ready");
+  const [reviewSecondsRemaining, setReviewSecondsRemaining] = useState<
+    number | null
+  >(null);
   const [reviewFeedback, setReviewFeedback] = useState("");
-  const [reviewedCorrectWordIds, setReviewedCorrectWordIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [reviewedCorrectWordIds, setReviewedCorrectWordIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [assistedWordIds, setAssistedWordIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -229,35 +239,38 @@ export function ReadingScreen({
   );
   const isUsingRecorderRef = useRef(false);
 
-  const resetPageTracking = useCallback((nextPage: ReadingPageDTO) => {
-    trackerRef.current = new SequentialReadingTracker(
-      nextPage.page_id,
-      nextPage.page_revision_id,
-      nextPage.words,
-      {
-        deferReviewUntilSessionEnd: true,
-        minWordConfidence: wordConfidenceThreshold,
-        requireWordConfidence: true,
-      },
-    );
-    utteranceSequenceRef.current = 0;
-    for (const word of nextPage.words) {
-      wordTextByIdRef.current.set(word.word_id, word.text);
-      // Revisiting a page starts a fresh first pass for these exact token IDs.
-      // Do not let an earlier attempt inflate this session's final score.
-      correctWordIdsRef.current.delete(word.word_id);
-      failedWordIdsRef.current.delete(word.word_id);
-      uncertainWordIdsRef.current.delete(word.word_id);
-      reviewedCorrectWordIdsRef.current.delete(word.word_id);
-      assistedWordIdsRef.current.delete(word.word_id);
-    }
-    setCurrentWordId(nextPage.words[0]?.word_id ?? null);
-    setCorrectWordIds(new Set());
-    setMispronouncedWordIds(new Set());
-    setReviewedWordIds(new Set());
-    setUncertainWordIds(new Set());
-    setIsReviewingWords(false);
-  }, [wordConfidenceThreshold]);
+  const resetPageTracking = useCallback(
+    (nextPage: ReadingPageDTO) => {
+      trackerRef.current = new SequentialReadingTracker(
+        nextPage.page_id,
+        nextPage.page_revision_id,
+        nextPage.words,
+        {
+          deferReviewUntilSessionEnd: true,
+          minWordConfidence: wordConfidenceThreshold,
+          requireWordConfidence: true,
+        },
+      );
+      utteranceSequenceRef.current = 0;
+      for (const word of nextPage.words) {
+        wordTextByIdRef.current.set(word.word_id, word.text);
+        // Revisiting a page starts a fresh first pass for these exact token IDs.
+        // Do not let an earlier attempt inflate this session's final score.
+        correctWordIdsRef.current.delete(word.word_id);
+        failedWordIdsRef.current.delete(word.word_id);
+        uncertainWordIdsRef.current.delete(word.word_id);
+        reviewedCorrectWordIdsRef.current.delete(word.word_id);
+        assistedWordIdsRef.current.delete(word.word_id);
+      }
+      setCurrentWordId(nextPage.words[0]?.word_id ?? null);
+      setCorrectWordIds(new Set());
+      setMispronouncedWordIds(new Set());
+      setReviewedWordIds(new Set());
+      setUncertainWordIds(new Set());
+      setIsReviewingWords(false);
+    },
+    [wordConfidenceThreshold],
+  );
 
   const activatePage = useCallback(
     (nextPage: ReadingPageDTO) => {
@@ -271,7 +284,8 @@ export function ReadingScreen({
     const tracker = trackerRef.current;
     if (!tracker) return;
     const pageOrder =
-      pageProgress?.pages.find((item) => item.page_id === tracker.pageId)?.page_order ??
+      pageProgress?.pages.find((item) => item.page_id === tracker.pageId)
+        ?.page_order ??
       pageProgress?.current_index ??
       0;
     sessionReviewQueueRef.current.replacePageCandidates(
@@ -597,7 +611,12 @@ export function ReadingScreen({
         const finalText = transcript.text.trim();
         if (finalText) {
           setLatestTranscript(finalText);
-          commitRecognizedTranscript(eventId, finalText, tracker, transcript.words);
+          commitRecognizedTranscript(
+            eventId,
+            finalText,
+            tracker,
+            transcript.words,
+          );
         } else {
           commitUncertainRecognition(eventId, tracker, "NO_SPEECH");
         }
@@ -1124,10 +1143,7 @@ export function ReadingScreen({
     }
   }
 
-  function enqueueReviewUtterance(
-    attempt: ReviewAttempt,
-    audio: Blob,
-  ) {
+  function enqueueReviewUtterance(attempt: ReviewAttempt, audio: Blob) {
     if (audio.size <= 800 || reviewAttemptRef.current !== attempt) return;
 
     const pending = attempt.queue.then(async () => {
@@ -1194,7 +1210,8 @@ export function ReadingScreen({
           speechPlayer
             .play(item.expectedWord, {
               onEnded: resolve,
-              onError: () => reject(new Error("Reference pronunciation playback failed.")),
+              onError: () =>
+                reject(new Error("Reference pronunciation playback failed.")),
             })
             .catch(reject);
         });
@@ -1213,7 +1230,9 @@ export function ReadingScreen({
           uncertainWordIdsRef.current.add(item.wordId);
           setUncertainWordIds(new Set(uncertainWordIdsRef.current));
         }
-        setReviewFeedback("Mình chưa phát được âm mẫu. Mình chuyển sang từ tiếp theo nhé.");
+        setReviewFeedback(
+          "Mình chưa phát được âm mẫu. Mình chuyển sang từ tiếp theo nhé.",
+        );
       }
     } else if (result === "NO_SPEECH") {
       setReviewFeedback("Mình chưa nghe thấy. Con thử lại nhé!");
@@ -1302,10 +1321,7 @@ export function ReadingScreen({
   }
 
   async function stopReviewAttempt(attempt: ReviewAttempt) {
-    if (
-      reviewAttemptRef.current !== attempt ||
-      attempt.stopping
-    ) {
+    if (reviewAttemptRef.current !== attempt || attempt.stopping) {
       return;
     }
 
@@ -1328,10 +1344,7 @@ export function ReadingScreen({
     }
     await attempt.queue;
 
-    if (
-      !mountedRef.current ||
-      reviewAttemptRef.current !== attempt
-    ) {
+    if (!mountedRef.current || reviewAttemptRef.current !== attempt) {
       return;
     }
 
@@ -1422,7 +1435,10 @@ export function ReadingScreen({
   function toReadingEventStartMs(timestamp: number): number {
     // The current PostgreSQL ReadingEvents.StartMs contract is SMALLINT.
     // Preserve the full elapsed value in metadata while clamping this legacy field.
-    const elapsed = Math.max(0, Math.round(timestamp - sessionStartedAtMsRef.current));
+    const elapsed = Math.max(
+      0,
+      Math.round(timestamp - sessionStartedAtMsRef.current),
+    );
     return Math.min(32_767, elapsed);
   }
 
@@ -1484,7 +1500,7 @@ export function ReadingScreen({
             EndMs: null,
             Confidence:
               item.resolution === "REVIEWED_CORRECT"
-                ? item.lastReviewConfidence ?? null
+                ? (item.lastReviewConfidence ?? null)
                 : null,
             Status: "FEEDBACK_GIVEN",
             Metadata: {
@@ -1566,7 +1582,8 @@ export function ReadingScreen({
       // One token occurrence contributes at most once to each first-pass set.
       // Review success and model assistance are reported separately and do not
       // inflate independent first-pass accuracy.
-      const totalEvaluated = correctWordIdsRef.current.size + failedWordIdsRef.current.size;
+      const totalEvaluated =
+        correctWordIdsRef.current.size + failedWordIdsRef.current.size;
       const score =
         totalEvaluated > 0
           ? Math.round((correctWordIdsRef.current.size / totalEvaluated) * 100)

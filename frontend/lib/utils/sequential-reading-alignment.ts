@@ -17,9 +17,7 @@ export interface RecognitionWordEvidence {
 }
 
 export type SequentialReviewReason =
-  | "CONFIDENTLY_INCORRECT"
-  | "UNCERTAIN"
-  | "NO_SPEECH";
+  "CONFIDENTLY_INCORRECT" | "UNCERTAIN" | "NO_SPEECH";
 
 export interface SequentialReviewCandidate {
   readonly pageId: string;
@@ -102,7 +100,10 @@ export class SequentialReadingTracker {
   private readonly needsReviewWordIds = new Set<string>();
   private readonly uncertainWordIds = new Set<string>();
   private readonly reviewedWordIds = new Set<string>();
-  private readonly reviewCandidates = new Map<string, SequentialReviewCandidate>();
+  private readonly reviewCandidates = new Map<
+    string,
+    SequentialReviewCandidate
+  >();
 
   constructor(
     pageId: string,
@@ -330,13 +331,7 @@ export class SequentialReadingTracker {
       this.uncertainWordIds.add(expected.word_id);
       this.reviewCandidates.set(
         expected.word_id,
-        this.createCandidate(
-          expected,
-          this.cursorIndex,
-          null,
-          null,
-          reason,
-        ),
+        this.createCandidate(expected, this.cursorIndex, null, null, reason),
       );
       this.cursorIndex += 1;
     }
@@ -347,10 +342,15 @@ export class SequentialReadingTracker {
     spokenTokens: readonly string[],
     evidenceWords?: readonly RecognitionWordEvidence[] | null,
   ): readonly (RecognitionWordEvidence | undefined)[] {
-    if (!evidenceWords?.length || evidenceWords.length !== spokenTokens.length) {
+    if (
+      !evidenceWords?.length ||
+      evidenceWords.length !== spokenTokens.length
+    ) {
       return spokenTokens.map(() => undefined);
     }
-    const aligned = evidenceWords.map((word) => normalizeReadingToken(word.text));
+    const aligned = evidenceWords.map((word) =>
+      normalizeReadingToken(word.text),
+    );
     if (aligned.some((token, index) => token !== spokenTokens[index])) {
       return spokenTokens.map(() => undefined);
     }

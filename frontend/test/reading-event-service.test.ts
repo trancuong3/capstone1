@@ -60,10 +60,14 @@ describe("Reading event persistence", () => {
       Metadata: eventResponse.Metadata,
     };
 
-    await expect(createReadingService().createEvent(input)).resolves.toBeUndefined();
+    await expect(
+      createReadingService().createEvent(input),
+    ).resolves.toBeUndefined();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8000/reading/events");
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:8000/reading/events",
+    );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: { Authorization: "Bearer isolated-test-token" },

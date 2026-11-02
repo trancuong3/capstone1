@@ -225,5 +225,4 @@ describe("BookPageViewer", () => {
     expect(word).not.toHaveClass("bg-rose-50");
     expect(word).toHaveClass("bg-amber-50");
   });
-
 });

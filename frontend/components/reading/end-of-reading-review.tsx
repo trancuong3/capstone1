@@ -4,10 +4,7 @@ import { Mic, Volume2 } from "lucide-react";
 import type { SessionReviewItem } from "@/lib/utils/session-review-queue";
 
 export type EndReviewActivity =
-  | "ready"
-  | "listening"
-  | "processing"
-  | "assisting";
+  "ready" | "listening" | "processing" | "assisting";
 
 interface EndOfReadingReviewProps {
   readonly item: SessionReviewItem;
@@ -38,14 +35,13 @@ export function EndOfReadingReview({
       data-review-activity={activity}
     >
       <header className="space-y-3 text-center">
-        <p className="text-sm font-bold text-primary">
-          Con đã đọc xong rồi!
-        </p>
+        <p className="text-sm font-bold text-primary">Con đã đọc xong rồi!</p>
         <h1 className="text-heading font-extrabold text-ink">
           Mình cùng luyện lại một vài từ nhé.
         </h1>
         <p className="text-sm text-muted" aria-live="polite">
-          Có {totalItems} từ cần nghe lại · Từ thứ {currentPosition} / {totalItems}
+          Có {totalItems} từ cần nghe lại · Từ thứ {currentPosition} /{" "}
+          {totalItems}
         </p>
         <div
           className="h-2 overflow-hidden rounded-full bg-cream-dark"
@@ -87,7 +83,9 @@ export function EndOfReadingReview({
             <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Mic aria-hidden="true" className="size-6 animate-pulse" />
             </span>
-            <p className="font-semibold text-primary">Mình đang nghe con đọc…</p>
+            <p className="font-semibold text-primary">
+              Mình đang nghe con đọc…
+            </p>
             <p className="text-sm text-muted">
               Còn {secondsRemaining ?? 3} giây
             </p>
@@ -97,7 +95,9 @@ export function EndOfReadingReview({
             <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Mic aria-hidden="true" className="size-6" />
             </span>
-            <p className="font-semibold text-primary">Mình đang kiểm tra lời đọc…</p>
+            <p className="font-semibold text-primary">
+              Mình đang kiểm tra lời đọc…
+            </p>
             <p className="text-sm text-muted">
               Mình đợi kết quả nhận diện hoàn tất nhé.
             </p>
@@ -107,7 +107,9 @@ export function EndOfReadingReview({
             <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Volume2 aria-hidden="true" className="size-6 animate-pulse" />
             </span>
-            <p className="font-semibold text-primary">Mình nghe mẫu trước nhé.</p>
+            <p className="font-semibold text-primary">
+              Mình nghe mẫu trước nhé.
+            </p>
           </div>
         ) : (
           <button
@@ -120,11 +122,20 @@ export function EndOfReadingReview({
           </button>
         )}
 
-        <p className="min-h-6 text-sm font-semibold text-muted" aria-live="polite">
+        <p
+          className="min-h-6 text-sm font-semibold text-muted"
+          aria-live="polite"
+        >
           {feedback}
         </p>
         <p className="text-xs text-muted">
-          Lượt thử: {Math.min(item.attempts + (activity === "listening" || activity === "processing" ? 1 : 0), 2)} / 2
+          Lượt thử:{" "}
+          {Math.min(
+            item.attempts +
+              (activity === "listening" || activity === "processing" ? 1 : 0),
+            2,
+          )}{" "}
+          / 2
         </p>
       </section>
     </main>

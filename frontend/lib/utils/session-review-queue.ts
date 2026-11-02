@@ -2,12 +2,8 @@ import type { SequentialReviewCandidate } from "@/lib/utils/sequential-reading-a
 
 export const MAX_REVIEW_ATTEMPTS = 2;
 
-
 export type SessionReviewResolution =
-  | "PENDING"
-  | "REVIEWED_CORRECT"
-  | "ASSISTED"
-  | "UNRESOLVED";
+  "PENDING" | "REVIEWED_CORRECT" | "ASSISTED" | "UNRESOLVED";
 
 export interface SessionReviewItem extends SequentialReviewCandidate {
   readonly reviewId: string;
@@ -80,9 +76,17 @@ export class SessionReviewQueue {
     reviewId: string,
     result: "CORRECT" | "INCORRECT" | "UNCERTAIN" | "NO_SPEECH",
     confidence: number | null = null,
-  ): { accepted: boolean; needsAssistance: boolean; item: SessionReviewItem | null } {
+  ): {
+    accepted: boolean;
+    needsAssistance: boolean;
+    item: SessionReviewItem | null;
+  } {
     const current = this.getCurrent();
-    if (!current || current.reviewId !== reviewId || current.attempts >= MAX_REVIEW_ATTEMPTS) {
+    if (
+      !current ||
+      current.reviewId !== reviewId ||
+      current.attempts >= MAX_REVIEW_ATTEMPTS
+    ) {
       return { accepted: false, needsAssistance: false, item: current };
     }
 
@@ -97,8 +101,7 @@ export class SessionReviewQueue {
     this.itemsByOccurrence.set(reviewId, updated);
     return {
       accepted: true,
-      needsAssistance:
-        result !== "CORRECT" && attempts >= MAX_REVIEW_ATTEMPTS,
+      needsAssistance: result !== "CORRECT" && attempts >= MAX_REVIEW_ATTEMPTS,
       item: updated,
     };
   }
@@ -118,9 +121,7 @@ export class SessionReviewQueue {
     const reviewItems = items.filter(
       (item) => item.reason === "CONFIDENTLY_INCORRECT",
     );
-    const pending = reviewItems.filter(
-      (item) => item.resolution === "PENDING",
-    );
+    const pending = reviewItems.filter((item) => item.resolution === "PENDING");
     return {
       items,
       pendingCount: pending.length,
