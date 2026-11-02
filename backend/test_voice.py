@@ -1,6 +1,8 @@
 """Focused contract tests for the isolated ElevenLabs voice routes."""
 
+import asyncio
 import os
+import struct
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -15,13 +17,38 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_current_parent_id
 from app.api.routes import voice as voice_routes
 from app.providers.elevenlabs_voice_provider import (
+    ElevenLabsVoiceProvider,
     SynthesizedAudio,
     Transcription,
     VoiceProviderError,
+    VoiceProviderUnavailable,
 )
 
 
 ACTOR_ID = UUID("11111111-1111-4111-8111-111111111111")
+
+
+def make_wav_bytes() -> bytes:
+    """Return a small valid mono PCM WAV fixture."""
+    sample_rate = 16_000
+    pcm_data = b"\x00\x00" * 1_600
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + len(pcm_data),
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        sample_rate,
+        sample_rate * 2,
+        2,
+        16,
+        b"data",
+        len(pcm_data),
+    )
+    return header + pcm_data
 
 
 def make_client(authenticated: bool = True) -> TestClient:
@@ -99,7 +126,7 @@ class VoiceRouteTests(unittest.TestCase):
                 response = client.post(
                     "/voice/speech-to-text",
                     data={"language_code": "vi"},
-                    files={"file": ("reading.webm", b"audio-bytes", "audio/webm")},
+                    files={"file": ("reading.wav", make_wav_bytes(), "audio/wav")},
                 )
 
         self.assertEqual(response.status_code, 200)
@@ -116,9 +143,9 @@ class VoiceRouteTests(unittest.TestCase):
             },
         )
         provider.transcribe.assert_awaited_once_with(
-            audio=b"audio-bytes",
-            filename="reading.webm",
-            content_type="audio/webm",
+            audio=make_wav_bytes(),
+            filename="reading.wav",
+            content_type="audio/wav",
             language_code="vi",
         )
 
@@ -134,6 +161,31 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": {"code": "UNSUPPORTED_AUDIO"}})
         provider.transcribe.assert_not_called()
 
+    def test_speech_to_text_maps_invalid_provider_audio_to_safe_422(self):
+        provider = MagicMock()
+        provider.transcribe = AsyncMock(side_effect=VoiceProviderError(status_code=422))
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.wav", make_wav_bytes(), "audio/wav")},
+                )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {"detail": {"code": "INVALID_AUDIO"}})
+        self.assertNotIn("ElevenLabs", response.text)
+
+    def test_speech_to_text_rejects_mime_and_extension_mismatch(self):
+        provider = MagicMock()
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.webm", make_wav_bytes(), "audio/wav")},
+                )
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.json(), {"detail": {"code": "AUDIO_FORMAT_MISMATCH"}})
+        provider.transcribe.assert_not_called()
+
     def test_speech_to_text_hides_provider_failure_details(self):
         provider = MagicMock()
         provider.transcribe = AsyncMock(side_effect=VoiceProviderError(status_code=503))
@@ -145,6 +197,81 @@ class VoiceRouteTests(unittest.TestCase):
                 )
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"detail": {"code": "SPEECH_UNAVAILABLE"}})
+
+
+class ElevenLabsProviderErrorTests(unittest.TestCase):
+    def test_invalid_audio_is_a_non_retryable_client_error(self):
+        response = MagicMock()
+        response.is_error = True
+        response.status_code = 400
+        response.headers = {
+            "request-id": "safe-request-id",
+            "content-type": "application/json",
+        }
+        response.json.return_value = {
+            "detail": {"type": "validation_error", "code": "invalid_audio"}
+        }
+
+        class FakeAsyncClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return response
+
+        provider = ElevenLabsVoiceProvider(api_key="isolated-test-key")
+        with patch(
+            "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
+            return_value=FakeAsyncClient(),
+        ):
+            with self.assertRaises(VoiceProviderError) as raised:
+                asyncio.run(
+                    provider.transcribe(
+                        audio=make_wav_bytes(),
+                        filename="recording.wav",
+                        content_type="audio/wav",
+                        language_code="vi",
+                    )
+                )
+
+        self.assertEqual(raised.exception.status_code, 422)
+
+    def test_provider_rate_limit_remains_unavailable(self):
+        response = MagicMock()
+        response.is_error = True
+        response.status_code = 429
+        response.headers = {
+            "request-id": "safe-rate-limit-id",
+            "content-type": "application/json",
+        }
+        response.text = '{"detail":"rate limited"}'
+
+        class FakeAsyncClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return response
+
+        provider = ElevenLabsVoiceProvider(api_key="isolated-test-key")
+        with patch(
+            "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
+            return_value=FakeAsyncClient(),
+        ):
+            with self.assertRaises(VoiceProviderUnavailable):
+                asyncio.run(
+                    provider.transcribe(
+                        audio=make_wav_bytes(),
+                        filename="recording.wav",
+                        content_type="audio/wav",
+                    )
+                )
 
 
 if __name__ == "__main__":
