@@ -25,8 +25,14 @@ class FakeAnalyser {
 }
 
 class FakeAudioContext {
+  static latestAnalyser: FakeAnalyser | null = null;
+
   state = "running";
   analyser = new FakeAnalyser();
+
+  constructor() {
+    FakeAudioContext.latestAnalyser = this.analyser;
+  }
   createMediaStreamSource = () =>
     ({
       connect: vi.fn(),
@@ -73,7 +79,6 @@ class FakeMediaRecorder {
 
 let frameId = 0;
 let frames = new Map<number, FrameRequestCallback>();
-let audioContext: FakeAudioContext | null = null;
 const getUserMedia = vi.fn(async () => stream);
 
 function flushFrame() {
@@ -93,19 +98,14 @@ beforeEach(() => {
   getUserMedia.mockReset().mockResolvedValue(stream);
   frameId = 0;
   frames = new Map();
-  audioContext = null;
+  FakeAudioContext.latestAnalyser = null;
 
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: { getUserMedia },
   });
   vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
-  vi.stubGlobal("AudioContext", class extends FakeAudioContext {
-    constructor() {
-      super();
-      audioContext = this;
-    }
-  });
+  vi.stubGlobal("AudioContext", FakeAudioContext);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     const id = ++frameId;
     frames.set(id, callback);
@@ -135,15 +135,15 @@ describe("useSpeechRecorder", () => {
 
     // Capture speech, then 30 animation frames of silence to rotate the recorder.
     flushFrame();
-    expect(audioContext).not.toBeNull();
-    audioContext!.analyser.speaking = false;
+    expect(FakeAudioContext.latestAnalyser).not.toBeNull();
+    FakeAudioContext.latestAnalyser!.speaking = false;
     for (let index = 0; index < 30; index += 1) flushFrame();
 
     expect(FakeMediaRecorder.instances).toHaveLength(2);
     expect(onUtterance).toHaveBeenCalledTimes(1);
 
     // Capture speech in the second recorder and stop the microphone.
-    audioContext!.analyser.speaking = true;
+    FakeAudioContext.latestAnalyser!.speaking = true;
     flushFrame();
 
     let finalRecording: Blob | null = null;
