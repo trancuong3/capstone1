@@ -171,3 +171,4 @@ describe("per-session reading report page", () => {
     confirm.mockRestore();
   });
 });
+
