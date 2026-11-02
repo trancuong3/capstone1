@@ -335,6 +335,8 @@ export function useSpeechRecorder(): SpeechRecorder {
                     recorderRef.current = createRecorder();
                   } catch {
                     isRotatingRef.current = false;
+                    pendingRotationsRef.current.delete(rotationCompletion);
+                    resolveRotation();
                   }
                 }
               }
@@ -373,9 +375,12 @@ export function useSpeechRecorder(): SpeechRecorder {
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
-      cleanupAudioNodes();
-      setIsRecording(false);
-      return Promise.resolve(null);
+      const pendingRotations = Array.from(pendingRotationsRef.current);
+      return Promise.all(pendingRotations).then(() => {
+        cleanupAudioNodes();
+        setIsRecording(false);
+        return null;
+      });
     }
 
     return new Promise<Blob | null>((resolve, reject) => {
