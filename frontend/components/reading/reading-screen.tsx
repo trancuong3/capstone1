@@ -799,7 +799,6 @@ export function ReadingScreen({
     pendingReadingEventsRef.current.clear();
     pendingPracticeEventsRef.current.clear();
     persistedReadingEventKeysRef.current.clear();
-    sessionStartedAtMsRef.current = Date.now();
     correctWordIdsRef.current.clear();
     mispronouncedWordIdsRef.current.clear();
     uncertainWordIdsRef.current.clear();
