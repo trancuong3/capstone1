@@ -400,6 +400,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   );
 
   const stop = useCallback(() => {
+    const captureGeneration = captureGenerationRef.current;
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       const pendingRotations = Array.from(pendingRotationsRef.current);
