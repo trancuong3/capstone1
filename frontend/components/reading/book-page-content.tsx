@@ -188,9 +188,19 @@ export function BookPageContent({
                 >
                   {word.text}
                   {tokenStatus === "REVIEWED" || tokenStatus === "CORRECT" ? (
-                    <span aria-hidden="true" className="ml-1 text-[0.7em] font-black">✓</span>
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 text-[0.7em] font-black"
+                    >
+                      ✓
+                    </span>
                   ) : tokenStatus === "NEEDS_REVIEW" ? (
-                    <span aria-hidden="true" className="ml-1 text-[0.7em] font-black">!</span>
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 text-[0.7em] font-black"
+                    >
+                      !
+                    </span>
                   ) : null}
                 </span>
               </Fragment>

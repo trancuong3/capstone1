@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";

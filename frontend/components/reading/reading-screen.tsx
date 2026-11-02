@@ -980,151 +980,151 @@ export function ReadingScreen({
     }
   }
 
-async function finishReading() {
-  if (finishStartedRef.current) return;
+  async function finishReading() {
+    if (finishStartedRef.current) return;
 
-  finishStartedRef.current = true;
-  setIsBusy(true);
-  speechPlayer.stop();
+    finishStartedRef.current = true;
+    setIsBusy(true);
+    speechPlayer.stop();
 
-  try {
-    // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
-    if (isMicRecording) {
-      try {
-        await stopListeningAndTranscribe();
-      } catch (error) {
-        console.error("Lỗi khi dừng ghi âm:", error);
-        speechRecorder.cancel();
-      }
-
-      if (mountedRef.current) {
-        setIsMicRecording(false);
-      }
-    }
-
-    if (!mountedRef.current) return;
-
-    // 2. Ghép transcript của tất cả các lần ghi âm
-    const combinedTranscript = transcriptsListRef.current
-      .join(" ")
-      .trim();
-
-    setFinalTranscript(combinedTranscript);
-
-    // 3. So sánh transcript đúng một lần khi bé đọc xong
-    if (combinedTranscript) {
-      setIsComparing(true);
-      setComparisonError(null);
-      setComparisonResult(null);
-
-      try {
-        const result = await compareTranscript(
-          sessionId,
-          combinedTranscript,
-        );
-
-        if (!mountedRef.current) return;
-
-        setComparisonResult(result);
-      } catch (error) {
-        console.error("Lỗi so sánh bài đọc:", error);
+    try {
+      // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
+      if (isMicRecording) {
+        try {
+          await stopListeningAndTranscribe();
+        } catch (error) {
+          console.error("Lỗi khi dừng ghi âm:", error);
+          speechRecorder.cancel();
+        }
 
         if (mountedRef.current) {
-          setComparisonError(
-            error instanceof Error
-              ? error.message
-              : "Không thể so sánh bài đọc.",
+          setIsMicRecording(false);
+        }
+      }
+
+      if (!mountedRef.current) return;
+
+      // 2. Ghép transcript của tất cả các lần ghi âm
+      const combinedTranscript = transcriptsListRef.current
+        .join(" ")
+        .trim();
+
+      setFinalTranscript(combinedTranscript);
+
+      // 3. So sánh transcript đúng một lần khi bé đọc xong
+      if (combinedTranscript) {
+        setIsComparing(true);
+        setComparisonError(null);
+        setComparisonResult(null);
+
+        try {
+          const result = await compareTranscript(
+            sessionId,
+            combinedTranscript,
           );
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsComparing(false);
+
+          if (!mountedRef.current) return;
+
+          setComparisonResult(result);
+        } catch (error) {
+          console.error("Lỗi so sánh bài đọc:", error);
+
+          if (mountedRef.current) {
+            setComparisonError(
+              error instanceof Error
+                ? error.message
+                : "Không thể so sánh bài đọc.",
+            );
+          }
+        } finally {
+          if (mountedRef.current) {
+            setIsComparing(false);
+          }
         }
       }
-    }
 
-    if (!mountedRef.current) return;
+      if (!mountedRef.current) return;
 
-    // 4. Kết thúc session
-    const [finishedSession] = await Promise.all([
-      services.readingService.finish(sessionId),
-      services.readingSocketAdapter.sendControl(
-        sessionId,
-        "finish",
-      ),
-    ]);
+      // 4. Kết thúc session
+      const [finishedSession] = await Promise.all([
+        services.readingService.finish(sessionId),
+        services.readingSocketAdapter.sendControl(
+          sessionId,
+          "finish",
+        ),
+      ]);
 
-    if (!mountedRef.current) return;
+      if (!mountedRef.current) return;
 
-    // 5. Lấy thống kê buổi đọc
-    const wordsList = Array.from(spokenWordsSetRef.current);
+      // 5. Lấy thống kê buổi đọc
+      const wordsList = Array.from(spokenWordsSetRef.current);
 
-    const durationMinutes = getDurationMinutes(
-      finishedSession.duration_ms,
-    );
+      const durationMinutes = getDurationMinutes(
+        finishedSession.duration_ms,
+      );
 
-    const persistedCompletion = await services.readingService
-      .getCompletionSummary(sessionId)
-      .catch(() => null);
+      const persistedCompletion = await services.readingService
+        .getCompletionSummary(sessionId)
+        .catch(() => null);
 
-    const correctWordsList = Array.from(
-      correctWordIdsRef.current,
-    )
-      .map((wordId) => wordTextByIdRef.current.get(wordId))
-      .filter((word): word is string => Boolean(word));
+      const correctWordsList = Array.from(
+        correctWordIdsRef.current,
+      )
+        .map((wordId) => wordTextByIdRef.current.get(wordId))
+        .filter((word): word is string => Boolean(word));
 
-    const mispronouncedWordsList = Array.from(failedWordIdsRef.current)
-      .map((wordId) => wordTextByIdRef.current.get(wordId))
-      .filter((word): word is string => Boolean(word));
+      const mispronouncedWordsList = Array.from(failedWordIdsRef.current)
+        .map((wordId) => wordTextByIdRef.current.get(wordId))
+        .filter((word): word is string => Boolean(word));
 
-    const totalTracked =
-      correctWordsList.length + mispronouncedWordsList.length;
+      const totalTracked =
+        correctWordsList.length + mispronouncedWordsList.length;
 
-    const score =
-      totalTracked > 0
-        ? Math.round(
-            (correctWordsList.length / totalTracked) * 100,
-          )
-        : null;
+      const score =
+        totalTracked > 0
+          ? Math.round(
+              (correctWordsList.length / totalTracked) * 100,
+            )
+          : null;
 
-    // 6. Tạo thống kê hoàn thành
-    const updatedSummary: ReadingCompletionSummaryUI = {
-      correct_words: correctWordsList,
-      duration_minutes: durationMinutes,
-      mispronounced_words: mispronouncedWordsList,
-      pages_explored:
-        persistedCompletion?.pages_explored ??
-        (pageProgress?.persisted
-          ? pageProgress.completed_pages
-          : null),
-      selected_range_pages:
-        persistedCompletion?.selected_range_pages ??
-        (pageProgress?.persisted
-          ? pageProgress.total_pages
-          : null),
-      practiced_words: wordsList.length,
-      score,
-      spoken_words: wordsList,
-      transcripts: [...transcriptsListRef.current],
-    };
+      // 6. Tạo thống kê hoàn thành
+      const updatedSummary: ReadingCompletionSummaryUI = {
+        correct_words: correctWordsList,
+        duration_minutes: durationMinutes,
+        mispronounced_words: mispronouncedWordsList,
+        pages_explored:
+          persistedCompletion?.pages_explored ??
+          (pageProgress?.persisted
+            ? pageProgress.completed_pages
+            : null),
+        selected_range_pages:
+          persistedCompletion?.selected_range_pages ??
+          (pageProgress?.persisted
+            ? pageProgress.total_pages
+            : null),
+        practiced_words: wordsList.length,
+        score,
+        spoken_words: wordsList,
+        transcripts: [...transcriptsListRef.current],
+      };
 
-    // 7. Hiển thị màn hình hoàn thành
-    setSessionSummary(updatedSummary);
-    setCanonicalState("FINISHED");
-    setConfirmFinish(false);
-    setUiState("complete");
-  } catch (error) {
-    console.error("Lỗi khi kết thúc buổi đọc:", error);
+      // 7. Hiển thị màn hình hoàn thành
+      setSessionSummary(updatedSummary);
+      setCanonicalState("FINISHED");
+      setConfirmFinish(false);
+      setUiState("complete");
+    } catch (error) {
+      console.error("Lỗi khi kết thúc buổi đọc:", error);
 
-    // Cho phép thử kết thúc lại nếu có lỗi
-    finishStartedRef.current = false;
-  } finally {
-    if (mountedRef.current) {
-      setIsComparing(false);
-      setIsBusy(false);
+      // Cho phép thử kết thúc lại nếu có lỗi
+      finishStartedRef.current = false;
+    } finally {
+      if (mountedRef.current) {
+        setIsComparing(false);
+        setIsBusy(false);
+      }
     }
   }
-}
   if (loadState.status === "error" || loadState.status === "not-found") {
     const notFound = loadState.status === "not-found";
     const title = notFound
