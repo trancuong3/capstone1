@@ -39,7 +39,7 @@ interface ReadingLayoutProps {
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
-  spokenWords?: Set<string>;
+  reviewedWordIds?: Set<string>;
 }
 
 export function ReadingLayout({
@@ -70,7 +70,7 @@ export function ReadingLayout({
   onWordClick,
   page,
   comparisonResult,
-  spokenWords,
+  reviewedWordIds,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
@@ -108,7 +108,7 @@ export function ReadingLayout({
           onWordClick={onWordClick}
           page={page}
           comparisonResult={comparisonResult}
-          spokenWords={spokenWords}
+          reviewedWordIds={reviewedWordIds}
         />
       </CameraPreview>
 
