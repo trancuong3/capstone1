@@ -267,7 +267,7 @@ describe("ReadingScreen session-end word review", () => {
       expect(mocks.speech.transcribe).toHaveBeenCalledTimes(1),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Xong" }));
+    fireEvent.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
     fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
 
@@ -329,7 +329,7 @@ describe("ReadingScreen session-end word review", () => {
       screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Xong" }));
+    fireEvent.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
     fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
 
