@@ -102,6 +102,35 @@ type AlignmentStep =
 
 const SUBSTITUTION_COST = 1.25;
 const GAP_COST = 1;
+const MIN_PRONUNCIATION_SIMILARITY = 0.45;
+
+function tokenSimilarity(left: string, right: string): number {
+  const leftChars = Array.from(left);
+  const rightChars = Array.from(right);
+  if (!leftChars.length || !rightChars.length) return 0;
+
+  const previous = Array.from(
+    { length: rightChars.length + 1 },
+    (_, index) => index,
+  );
+  let current = Array<number>(rightChars.length + 1).fill(0);
+
+  for (let i = 1; i <= leftChars.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= rightChars.length; j += 1) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (leftChars[i - 1] === rightChars[j - 1] ? 0 : 1),
+      );
+    }
+    for (let j = 0; j <= rightChars.length; j += 1) {
+      previous[j] = current[j];
+    }
+  }
+
+  return 1 - previous[rightChars.length] / Math.max(leftChars.length, rightChars.length);
+}
 
 function nearlyEqual(left: number, right: number): boolean {
   return Math.abs(left - right) < 1e-9;
@@ -236,43 +265,95 @@ export function alignReadingSegment(
     (step): step is Extract<AlignmentStep, { kind: "mapped" }> =>
       step.kind === "mapped",
   );
-  const mappedByOffset = new Map<
+  const rawMapped = new Map<
     number,
-    { readonly spokenIndex: number; readonly confidence: number | null; readonly status: "CORRECT" | "INCORRECT" | "UNCERTAIN"; readonly reason: WordOccurrenceAssessment["reason"] }
+    {
+      readonly spokenIndex: number;
+      readonly recognizedText: string;
+      readonly confidence: number | null;
+      readonly exact: boolean;
+      readonly incomplete: boolean;
+      readonly similarity: number;
+      readonly recognizedStartSeconds: number | null;
+    }
   >();
-  const assessments: WordOccurrenceAssessment[] = [];
 
   for (const step of mapped) {
-    const sourceWord = source[step.sourceOffset];
-    const spokenWord = spoken[step.spokenIndex];
     const expected = expectedTokens[step.sourceOffset];
+    const spokenWord = spoken[step.spokenIndex];
     const recognized = spokenTokens[step.spokenIndex];
-    const confidence = confidenceFromLogprob(spokenWord.logprob);
-    const hasConfidence =
-      confidence !== null && confidence >= confidenceThreshold;
-    const incomplete = isLikelyIncompleteToken(recognized, expected);
-    const exact = expected === recognized;
+    rawMapped.set(step.sourceOffset, {
+      spokenIndex: step.spokenIndex,
+      recognizedText: spokenWord.text,
+      confidence: confidenceFromLogprob(spokenWord.logprob),
+      exact: expected === recognized,
+      incomplete: isLikelyIncompleteToken(recognized, expected),
+      similarity: tokenSimilarity(expected, recognized),
+      recognizedStartSeconds:
+        typeof spokenWord.start === "number" && Number.isFinite(spokenWord.start)
+          ? spokenWord.start
+          : null,
+    });
+  }
+
+  const assessments: WordOccurrenceAssessment[] = [];
+  const mappedByOffset = new Map<
+    number,
+    {
+      readonly spokenIndex: number;
+      readonly confidence: number | null;
+      readonly status: "CORRECT" | "INCORRECT" | "UNCERTAIN";
+      readonly reason: WordOccurrenceAssessment["reason"];
+    }
+  >();
+
+  for (const [sourceOffset, evidence] of rawMapped) {
+    const sourceWord = source[sourceOffset];
+    const previous = rawMapped.get(sourceOffset - 1);
+    const next = rawMapped.get(sourceOffset + 1);
+    const hasReliableAdjacentContext =
+      (previous?.exact === true &&
+        previous.confidence !== null &&
+        previous.confidence >= confidenceThreshold &&
+        previous.spokenIndex === evidence.spokenIndex - 1) ||
+      (next?.exact === true &&
+        next.confidence !== null &&
+        next.confidence >= confidenceThreshold &&
+        next.spokenIndex === evidence.spokenIndex + 1);
 
     let status: WordOccurrenceAssessment["status"];
     let reason: WordOccurrenceAssessment["reason"];
 
-    if (!hasConfidence) {
+    if (
+      evidence.confidence === null ||
+      evidence.confidence < confidenceThreshold
+    ) {
       status = "UNCERTAIN";
       reason = "LOW_CONFIDENCE";
-    } else if (incomplete) {
+    } else if (evidence.incomplete) {
       status = "UNCERTAIN";
       reason = "INCOMPLETE_TOKEN";
-    } else if (exact) {
+    } else if (evidence.exact) {
       status = "CORRECT";
       reason = "EXACT_WORD_MATCH";
-    } else {
+    } else if (
+      evidence.similarity >= MIN_PRONUNCIATION_SIMILARITY &&
+      hasReliableAdjacentContext
+    ) {
+      // A non-matching word is only a confirmed pronunciation candidate when
+      // it resembles the expected Vietnamese word and is bounded by a
+      // neighboring exact token in the same utterance. Unrelated background
+      // speech therefore stays UNCERTAIN rather than turning a book word red.
       status = "INCORRECT";
       reason = "CONFIDENT_SUBSTITUTION";
+    } else {
+      status = "UNCERTAIN";
+      reason = "LOW_CONFIDENCE";
     }
 
-    mappedByOffset.set(step.sourceOffset, {
-      spokenIndex: step.spokenIndex,
-      confidence,
+    mappedByOffset.set(sourceOffset, {
+      spokenIndex: evidence.spokenIndex,
+      confidence: evidence.confidence,
       status,
       reason,
     });
@@ -280,12 +361,9 @@ export function alignReadingSegment(
       word_id: sourceWord.word_id,
       word_index: sourceWord.word_index,
       expected_text: sourceWord.text,
-      recognized_text: spokenWord.text,
-      recognized_start_seconds:
-        typeof spokenWord.start === "number" && Number.isFinite(spokenWord.start)
-          ? spokenWord.start
-          : null,
-      confidence,
+      recognized_text: evidence.recognizedText,
+      recognized_start_seconds: evidence.recognizedStartSeconds,
+      confidence: evidence.confidence,
       status,
       reason,
     });
