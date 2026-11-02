@@ -198,7 +198,7 @@ export function ReadingScreen({
   const [assistedWordIds, setAssistedWordIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [sessionSummary, setSessionSummary =
+  const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
   const correctWordIdsRef = useRef<Set<string>>(new Set());
