@@ -1087,6 +1087,8 @@ export function ReadingScreen({
         // Audio assistance remains available while the separate tutor-event API
         // is being connected by the reading-session owner.
       }
+      // A delayed tutor response must not start audio after this screen unmounts.
+      if (!mountedRef.current) return;
       await playReferenceAudio(action?.tts_text ?? word);
       if (mountedRef.current) setTutorAction(action);
     } catch {
@@ -1115,6 +1117,8 @@ export function ReadingScreen({
       } catch {
         // A retry must still replay the word even if tutor-event persistence is unavailable.
       }
+      // Do not replay tutor audio when the request settles after unmount.
+      if (!mountedRef.current) return;
       await playReferenceAudio(nextAction?.tts_text ?? word);
       if (mountedRef.current) {
         setTutorAction(nextAction);

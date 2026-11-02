@@ -328,6 +328,10 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         existing_event = SimpleNamespace(
             Id=UUID("88888888-8888-4888-8888-888888888888"),
             SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            WordId=UUID("99999999-9999-4999-8999-999999999999"),
+            Type="SUBSTITUTION",
         )
         repo.session.return_value = SimpleNamespace(
             Id=session_id,
@@ -355,6 +359,56 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             "session:page:revision:word",
         )
         repo.create_reading_event.assert_not_awaited()
+
+
+    async def test_reading_event_idempotency_rejects_page_revision_word_type_and_session_mismatch(
+        self,
+    ):
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        word_id = UUID("99999999-9999-4999-8999-999999999999")
+        mismatches = (
+            ("PageId", UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
+            ("PageRevisionId", UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")),
+            ("WordId", UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")),
+            ("Type", "MISPRONUNCIATION"),
+            ("SessionId", UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")),
+        )
+
+        for field, conflicting_value in mismatches:
+            with self.subTest(field=field):
+                service, repo = self.make_service()
+                existing_event = SimpleNamespace(
+                    Id=UUID("88888888-8888-4888-8888-888888888888"),
+                    SessionId=session_id,
+                    PageId=PAGE_ID,
+                    PageRevisionId=REVISION_ID,
+                    WordId=word_id,
+                    Type="SUBSTITUTION",
+                )
+                setattr(existing_event, field, conflicting_value)
+                repo.session.return_value = SimpleNamespace(
+                    Id=session_id,
+                    ChildId=CHILD_ID,
+                    BookId=BOOK_ID,
+                )
+                repo.reading_event_by_idempotency_key.return_value = existing_event
+                payload = ReadingEventCreate(
+                    SessionId=session_id,
+                    PageId=PAGE_ID,
+                    PageRevisionId=REVISION_ID,
+                    WordId=word_id,
+                    Type="SUBSTITUTION",
+                    StartMs=100,
+                    Confidence=0.9,
+                    Status="CONFIRMED",
+                    Metadata={"idempotency_key": "same-key"},
+                )
+
+                with self.assertRaises(HTTPException) as raised:
+                    await service.create_reading_event(PARENT_ID, payload)
+
+                self.assertEqual(raised.exception.status_code, 409)
+                repo.create_reading_event.assert_not_awaited()
 
     async def test_reading_event_idempotency_key_cannot_be_reused_for_another_occurrence(self):
         service, repo = self.make_service()

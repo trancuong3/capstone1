@@ -53,8 +53,12 @@ class DualEngineOcrTests(unittest.TestCase):
         mock_viet = MagicMock()
 
         with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
-            with self.assertRaises(ocr_engine.OcrNoTextDetected):
-                ocr_engine.extract_text_and_boxes(sample_png_bytes())
+            with patch.object(
+                ocr_engine, "_extract_text_and_boxes_tesseract"
+            ) as tesseract_fallback:
+                with self.assertRaises(ocr_engine.OcrNoTextDetected):
+                    ocr_engine.extract_text_and_boxes(sample_png_bytes())
+                tesseract_fallback.assert_not_called()
 
     def test_extract_text_and_boxes_dual_engine_contract(self):
         """Kiểm tra hợp đồng dữ liệu chuẩn hóa của Dual-Engine."""
@@ -70,7 +74,11 @@ class DualEngineOcrTests(unittest.TestCase):
         mock_viet.predict.return_value = "Chú mèo"
 
         with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
-            result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+            with patch.object(
+                ocr_engine, "_extract_text_and_boxes_tesseract"
+            ) as tesseract_fallback:
+                result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+                tesseract_fallback.assert_not_called()
 
         # Kiểm tra nội dung trích xuất
         self.assertEqual(result["text"], "Chú mèo")
@@ -97,6 +105,30 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["coordinate_space"], "normalized_original_dimensions")
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
+
+
+    def test_unexpected_dual_engine_processing_error_is_not_hidden_by_fallback(self):
+        mock_paddle = MagicMock()
+        mock_viet = MagicMock()
+
+        with patch.object(
+            ocr_engine,
+            "_get_ocr_engines",
+            return_value=(mock_paddle, mock_viet),
+        ):
+            with patch.object(
+                ocr_engine,
+                "_extract_text_and_boxes_dual_engine",
+                side_effect=ValueError("unexpected OCR processing failure"),
+            ):
+                with patch.object(
+                    ocr_engine, "_extract_text_and_boxes_tesseract"
+                ) as tesseract_fallback:
+                    with self.assertRaisesRegex(
+                        ValueError, "unexpected OCR processing failure"
+                    ):
+                        ocr_engine.extract_text_and_boxes(sample_png_bytes())
+                    tesseract_fallback.assert_not_called()
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""

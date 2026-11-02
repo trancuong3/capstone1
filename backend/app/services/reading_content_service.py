@@ -178,7 +178,8 @@ class ReadingContentService:
             )
             if existing_event is not None:
                 same_occurrence = (
-                    existing_event.PageId == payload.PageId
+                    existing_event.SessionId == session.Id
+                    and existing_event.PageId == payload.PageId
                     and existing_event.PageRevisionId == payload.PageRevisionId
                     and existing_event.WordId == payload.WordId
                     and existing_event.Type == payload.Type

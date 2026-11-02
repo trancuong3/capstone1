@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import type { ReadingServices } from "@/hooks/use-reading-services";
+import type { SpeechPlayOptions } from "@/hooks/use-speech-player";
 import {
   bookFixture,
   childFixture,
@@ -14,12 +15,25 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook } = vi.hoisted(() => ({
+const { servicesHook, speechPlayerPlay } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
+  speechPlayerPlay: vi.fn<
+    (text: string, options?: SpeechPlayOptions) => Promise<void>
+  >(),
 }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
 }));
+vi.mock("@/hooks/use-speech-player", () => ({
+  useSpeechPlayer: () => ({
+    isPlaying: false,
+    play: speechPlayerPlay,
+    stop: vi.fn(),
+  }),
+}));
+beforeEach(() => {
+  speechPlayerPlay.mockReset().mockResolvedValue(undefined);
+});
 
 // Typed, test-local responses only. The application provider still uses
 // unavailable Reading/AI services; these fixtures exercise existing UI handlers.
@@ -90,8 +104,8 @@ const pageProgressFixture: ReadingSessionPageProgressDTO = {
 const tutorAction: TutorAction = {
   action: "READ_EXAMPLE",
   action_id: "70000000-0000-4000-8000-000000000001",
-  page_revision_word_id: pageFour.words[3].word_id,
-  tts_text: "đang",
+  page_revision_word_id: pageFour.words[0].word_id,
+  tts_text: "Bé",
 };
 function createReadingFixtures() {
   return {
@@ -266,14 +280,54 @@ describe("Reading action cleanup with a typed service boundary", () => {
     fireEvent.click(retry);
     expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
       TEST_SESSION_ID,
-      pageFour.words[3].word_id,
+      pageFour.words[0].word_id,
     );
     view.unmount();
     await act(async () => {
       settle(tutorAction);
     });
     expect(services.tutorService.retryReadExample).not.toHaveBeenCalled();
+    expect(speechPlayerPlay).not.toHaveBeenCalled();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(view.container).toBeEmptyDOMElement();
+  });
+
+  it("targets the explicitly selected source occurrence for a tutor retry", async () => {
+    const services = createReadingFixtures();
+    servicesHook.mockReset().mockReturnValue(services);
+    const selectedWord = pageFour.words[2];
+    services.tutorService.requestReadExample.mockResolvedValue({
+      ...tutorAction,
+      page_revision_word_id: selectedWord.word_id,
+      tts_text: selectedWord.text,
+    });
+
+    const view = render(
+      <ReadingScreen
+        initialUiState="tts-error"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: selectedWord.text }),
+    );
+    await waitFor(() => {
+      expect(speechPlayerPlay).toHaveBeenCalledWith(
+        selectedWord.text,
+        expect.any(Object),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Thử nghe lại" }));
+    await waitFor(() => {
+      expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        selectedWord.word_id,
+      );
+    });
+    expect(speechPlayerPlay).toHaveBeenCalledTimes(2);
+    view.unmount();
   });
 });

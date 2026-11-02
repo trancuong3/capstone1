@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceError } from "@/lib/api/service-error";
 import type { ReadingUiState } from "@/types/reading";
 import { ReadingScreen } from "@/components/reading/reading-screen";
@@ -17,6 +17,141 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
+
+interface TestMicrophoneTrack {
+  stop: ReturnType<typeof vi.fn>;
+  readonly readyState: MediaStreamTrackState;
+}
+
+class TestMediaRecorder extends EventTarget {
+  static isTypeSupported = vi.fn(() => true);
+
+  readonly stream: MediaStream;
+  readonly mimeType: string;
+  state: RecordingState = "inactive";
+  ondataavailable: ((event: BlobEvent) => void) | null = null;
+  onstop: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+    super();
+    this.stream = stream;
+    this.mimeType = options?.mimeType ?? "audio/webm";
+    testRecorderInstances.push(this);
+  }
+
+  start(): void {
+    if (this.state !== "inactive") {
+      throw new Error("The test recorder is already active.");
+    }
+    this.state = "recording";
+    queueMicrotask(() => {
+      if (this.state === "recording") this.emitDataAvailable();
+    });
+  }
+
+  stop(): void {
+    if (this.state === "inactive") return;
+    this.state = "inactive";
+    this.emitDataAvailable();
+    const event = new Event("stop");
+    this.onstop?.(event);
+    this.dispatchEvent(event);
+  }
+
+  dispose(): void {
+    this.state = "inactive";
+    this.ondataavailable = null;
+    this.onstop = null;
+    this.onerror = null;
+  }
+
+  private emitDataAvailable(): void {
+    const event = new Event("dataavailable") as BlobEvent;
+    Object.defineProperty(event, "data", {
+      value: new Blob([], { type: this.mimeType }),
+    });
+    this.ondataavailable?.(event);
+    this.dispatchEvent(event);
+  }
+}
+
+const testRecorderInstances: TestMediaRecorder[] = [];
+const testMicrophoneTracks: TestMicrophoneTrack[] = [];
+let getUserMediaMock: ReturnType<typeof vi.fn>;
+let originalMediaRecorderDescriptor: PropertyDescriptor | undefined;
+let originalMediaDevicesDescriptor: PropertyDescriptor | undefined;
+
+function createTestMicrophoneStream(): MediaStream {
+  let stopped = false;
+  const track: TestMicrophoneTrack = {
+    stop: vi.fn(() => {
+      stopped = true;
+    }),
+    get readyState(): MediaStreamTrackState {
+      return stopped ? "ended" : "live";
+    },
+  };
+  testMicrophoneTracks.push(track);
+  return {
+    getTracks: () => [track],
+    get active() {
+      return !stopped;
+    },
+  } as unknown as MediaStream;
+}
+
+function installRecordingTestEnvironment(): void {
+  testRecorderInstances.length = 0;
+  testMicrophoneTracks.length = 0;
+  originalMediaRecorderDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "MediaRecorder",
+  );
+  originalMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+    navigator,
+    "mediaDevices",
+  );
+  getUserMediaMock = vi.fn(async () => createTestMicrophoneStream());
+
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    writable: true,
+    value: TestMediaRecorder,
+  });
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia: getUserMediaMock } as unknown as MediaDevices,
+  });
+}
+
+function cleanupRecordingTestEnvironment(): void {
+  for (const recorder of testRecorderInstances) recorder.dispose();
+  for (const track of testMicrophoneTracks) {
+    if (track.readyState !== "ended") track.stop();
+  }
+
+  if (originalMediaRecorderDescriptor) {
+    Object.defineProperty(
+      globalThis,
+      "MediaRecorder",
+      originalMediaRecorderDescriptor,
+    );
+  } else {
+    Reflect.deleteProperty(globalThis, "MediaRecorder");
+  }
+  if (originalMediaDevicesDescriptor) {
+    Object.defineProperty(
+      navigator,
+      "mediaDevices",
+      originalMediaDevicesDescriptor,
+    );
+  } else {
+    Reflect.deleteProperty(navigator, "mediaDevices");
+  }
+}
+
+
 const { servicesHook } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
 }));
@@ -93,8 +228,8 @@ const pageProgressFixture: ReadingSessionPageProgressDTO = {
 const tutorAction: TutorAction = {
   action: "READ_EXAMPLE",
   action_id: "70000000-0000-4000-8000-000000000001",
-  page_revision_word_id: pageFour.words[3].word_id,
-  tts_text: "đang",
+  page_revision_word_id: pageFour.words[0].word_id,
+  tts_text: "Bé",
 };
 function createReadingFixtures() {
   return {
@@ -214,6 +349,23 @@ function createReadingFixtures() {
       finish: vi
         .fn<ReadingServices["readingService"]["finish"]>()
         .mockResolvedValue(sessionSummaryFixture),
+      createEvent: vi
+        .fn<
+          NonNullable<ReadingServices["readingService"]["createEvent"]>
+        >()
+        .mockResolvedValue({
+          id: "91000000-0000-4000-8000-000000000001",
+          session_id: TEST_SESSION_ID,
+          page_id: pageFour.page_id,
+          page_revision_id: pageFour.page_revision_id,
+          page_revision_word_id: pageFour.words[0].word_id,
+          type: "SUBSTITUTION",
+          start_ms: 100,
+          end_ms: null,
+          confidence: 0.9,
+          status: "CONFIRMED",
+          metadata: {},
+        }),
     },
     readingSocketAdapter: {
       subscribe: vi
@@ -247,9 +399,11 @@ function createReadingFixtures() {
 
 let services: ReturnType<typeof createReadingFixtures>;
 beforeEach(() => {
+  installRecordingTestEnvironment();
   services = createReadingFixtures();
   servicesHook.mockReset().mockReturnValue(services);
 });
+afterEach(cleanupRecordingTestEnvironment);
 function renderReading(
   state: ReadingUiState,
   requestedSessionId = TEST_SESSION_ID,
@@ -278,7 +432,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       TEST_SESSION_ID,
       "start",
     );
-    expect(screen.getByText("Mình đang nghe bé đọc")).toBeInTheDocument();
+    expect(screen.getByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé.")).toBeInTheDocument();
     expect(
       screen.getByText(/Trạng thái kết nối: đã kết nối\./),
     ).toBeInTheDocument();
@@ -358,13 +512,19 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     );
     await user.click(screen.getByRole("button", { name: "Đọc tiếp" }));
     expect(
-      await screen.findByText("Mình đang nghe bé đọc"),
+      await screen.findByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."),
     ).toBeInTheDocument();
     expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
       TEST_SESSION_ID,
       "resume",
     );
+    expect(getUserMediaMock).toHaveBeenCalledWith({ audio: true });
+    expect(testRecorderInstances[0]?.state).toBe("recording");
     unmount();
+    expect(testRecorderInstances[0]?.state).toBe("inactive");
+    expect(
+      testMicrophoneTracks.every((track) => track.readyState === "ended"),
+    ).toBe(true);
     renderReading("reconnecting");
     expect(
       await screen.findByRole("dialog", { name: "Đợi mình một chút nhé…" }),
@@ -379,10 +539,53 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toHaveTextContent("camera chưa được mở");
     await user.click(screen.getByRole("button", { name: "Thử lại" }));
     expect(
-      await screen.findByText("Mình đang nghe bé đọc"),
+      await screen.findByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."),
     ).toBeInTheDocument();
     expect(services.devicePermissionService.retry).toHaveBeenCalledWith(
       "camera",
+    );
+    expect(getUserMediaMock).toHaveBeenCalledWith({ audio: true });
+    expect(testRecorderInstances[0]?.state).toBe("recording");
+  });
+
+  it("does not claim active recording or persist pronunciation evidence when MediaRecorder is unsupported", async () => {
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    const user = userEvent.setup();
+    const { container } = renderReading("microphone-denied");
+
+    await user.click(screen.getByRole("button", { name: "Thử lại" }));
+    const recoveryDialog = await screen.findByRole("dialog", {
+      name: "Mình chưa nghe thấy giọng bé",
+    });
+
+    expect(recoveryDialog).toHaveTextContent(
+      "Hệ thống đang ngừng nghe và không kết luận bé đọc sai.",
+    );
+    expect(services.devicePermissionService.retry).toHaveBeenCalledWith(
+      "microphone",
+    );
+    expect(getUserMediaMock).not.toHaveBeenCalled();
+    expect(testRecorderInstances).toHaveLength(0);
+    expect(services.readingService.createEvent).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText("Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Bé đang đọc")).not.toBeInTheDocument();
+    expect(container.firstElementChild).toHaveAttribute(
+      "data-evidence-valid",
+      "false",
+    );
+    expect(container.firstElementChild).toHaveAttribute(
+      "data-child-error-count",
+      "0",
+    );
+    expect(container.firstElementChild).toHaveAttribute(
+      "data-scoring-active",
+      "false",
     );
   });
 
