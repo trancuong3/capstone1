@@ -15,10 +15,12 @@ from sqlalchemy.dialects import postgresql
 from app.repositories.reading_content_repository import ReadingContentRepository
 
 from app.schemas.reading import (
+    CompareReadingRequest,
     FluencyAssessmentCreate,
     ReadingEventCreate,
-    ReadingSessionCreate,
+    ReadingPageDTO,
     ReadingPageNavigationCreate,
+    ReadingSessionCreate,
 )
 from app.services.reading_content_service import ReadingContentService
 
@@ -80,6 +82,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             revision_word_exists=AsyncMock(return_value=True),
             reading_event_by_idempotency_key=AsyncMock(return_value=None),
             create_reading_event=AsyncMock(side_effect=lambda row: row),
+            create_reading_comparison_report=AsyncMock(side_effect=lambda row: row),
             create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
             events_for_session=AsyncMock(return_value=[]),
         )
@@ -131,6 +134,85 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.practiced_words)
         self.assertIsNone(result.spoken_words)
         self.assertIsNone(result.transcripts)
+
+    async def test_compare_reading_persists_the_exact_session_page_revision(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        selected_page_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        selected_revision_id = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        created_at = datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc)
+        page = ReadingPageDTO(
+            page_id=selected_page_id,
+            page_revision_id=selected_revision_id,
+            page_number=3,
+            confidence=0.95,
+            width=600,
+            height=800,
+            text="Bạn An khỏe không?",
+            words=[
+                {
+                    "word_id": UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+                    "word_index": 0,
+                    "text": "Bạn",
+                    "bbox": (0.1, 0.1, 0.1, 0.05),
+                }
+            ],
+        )
+        service.get_session_page = AsyncMock(return_value=page)
+
+        async def persist_report(report):
+            report.Id = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+            report.CreatedAt = created_at
+            return report
+
+        repo.create_reading_comparison_report.side_effect = persist_report
+        payload = CompareReadingRequest(
+            transcript="Bạn An khỏe không?",
+            words=[
+                {"text": "Bạn", "start": 0.0, "end": 0.2},
+                {"text": "An", "start": 0.25, "end": 0.4},
+                {"text": "khỏe", "start": 0.5, "end": 0.8},
+                {"text": "không?", "start": 0.85, "end": 1.1},
+            ],
+        )
+
+        result = await service.compare_reading(session_id, PARENT_ID, payload)
+
+        service.get_session_page.assert_awaited_once_with(session_id, PARENT_ID)
+        repo.create_reading_comparison_report.assert_awaited_once()
+        saved_report = repo.create_reading_comparison_report.await_args.args[0]
+        self.assertEqual(saved_report.PageId, selected_page_id)
+        self.assertEqual(saved_report.PageRevisionId, selected_revision_id)
+        self.assertEqual(result.page_id, selected_page_id)
+        self.assertEqual(result.page_revision_id, selected_revision_id)
+        self.assertEqual(result.session_id, session_id)
+        self.assertEqual(result.distance, 0)
+        self.assertEqual(result.created_at, created_at)
+
+    async def test_compare_reading_rejects_empty_verified_reference_without_saving(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        page = ReadingPageDTO(
+            page_id=PAGE_ID,
+            page_revision_id=REVISION_ID,
+            page_number=1,
+            confidence=None,
+            width=600,
+            height=800,
+            text="",
+            words=[],
+        )
+        service.get_session_page = AsyncMock(return_value=page)
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.compare_reading(
+                session_id,
+                PARENT_ID,
+                CompareReadingRequest(transcript="Bạn An khỏe không?"),
+            )
+
+        self.assertEqual(raised.exception.status_code, 422)
+        repo.create_reading_comparison_report.assert_not_awaited()
 
     async def test_reading_event_requires_owned_session_and_verified_page_revision(self):
         service, repo = self.make_service()
