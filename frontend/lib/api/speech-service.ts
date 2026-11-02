@@ -179,7 +179,8 @@ export function createSpeechService(): SpeechService {
       // A MIME label is metadata, not a conversion. Never invent WebM when
       // the captured Blob has no authoritative encoding information.
       const mimeType = audio.type.trim();
-      const baseMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+      const baseMimeType =
+        mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
       const extensionByMimeType: Readonly<Record<string, string>> = {
         "audio/webm": "webm",
         "audio/ogg": "ogg",
