@@ -581,7 +581,7 @@ export function ReadingScreen({
       start_ms: startMs,
       end_ms: null,
       confidence,
-      status: outcome === "CORRECT" ? "CONFIRMED" : "DISMISSED",
+      status: outcome === "CORRECT" ? "CONFIRMED" : "UNCERTAIN",
       metadata: {
         phase: "POST_SESSION_PRACTICE",
         practice_stage: stage,
