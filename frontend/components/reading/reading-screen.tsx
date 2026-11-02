@@ -519,13 +519,7 @@ export function ReadingScreen({
       cumulativeWeights.push(running);
     }
 
-    // Clear previous word tracking so sample read starts fresh
-    correctWordIdsRef.current.clear();
-    mispronouncedWordIdsRef.current.clear();
-    spokenWordsSetRef.current.clear();
-    setCorrectWordIds(new Set());
-    setMispronouncedWordIds(new Set());
-
+    // TTS playback is guidance only; it must never mutate first-pass recognition.
     // Set first word active immediately so user sees what is being queued
     setCurrentWordId(words[0].word_id);
 
@@ -894,21 +888,14 @@ async function finishReading() {
       .trim();
 
 
-    // 3. So sánh transcript đúng một lần khi bé đọc xong
+    // Text-only comparison is diagnostic, not a source of word-level
+    // pronunciation decisions. Multi-page transcripts must not be compared
+    // against the current page alone.
     if (combinedTranscript && (pageProgress?.total_pages ?? 1) === 1) {
       try {
-        const result = await compareTranscript(
-          sessionId,
-          combinedTranscript,
-        );
-
-        if (!mountedRef.current) return;
-
+        await compareTranscript(sessionId, combinedTranscript);
       } catch (error) {
         console.error("Lỗi so sánh bài đọc:", error);
-
-        if (mountedRef.current) {
-          }
       }
     }
 
