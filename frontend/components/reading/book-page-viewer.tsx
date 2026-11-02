@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { WordHighlightOverlay } from "@/components/reading/word-highlight-overlay";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -26,7 +26,6 @@ export function BookPageViewer({
   page,
   comparisonResult,
 }: BookPageViewerProps) {
-  const hasWords = page.words && page.words.length > 0;
   const currentWordRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
@@ -41,10 +40,6 @@ export function BookPageViewer({
       });
     }
   }, [currentWordId]);
-
-  const currentIdx = currentWordId
-    ? page.words.findIndex((w) => w.word_id === currentWordId)
-    : -1;
 
   return (
     <article
