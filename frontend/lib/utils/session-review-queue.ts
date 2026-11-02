@@ -2,6 +2,20 @@ import type { SequentialReviewCandidate } from "@/lib/utils/sequential-reading-a
 
 export const MAX_REVIEW_ATTEMPTS = 2;
 
+/**
+ * Only confirmed pronunciation mismatches should automatically enter the
+ * end-of-session retry queue. UNCERTAIN and NO_SPEECH remain separate outcomes:
+ * reviewing every such token would force children to reread the whole range
+ * when no calibrated confidence threshold is configured.
+ */
+export function confirmedIncorrectReviewCandidates(
+  candidates: readonly SequentialReviewCandidate[],
+): SequentialReviewCandidate[] {
+  return candidates.filter(
+    (candidate) => candidate.reason === "CONFIDENTLY_INCORRECT",
+  );
+}
+
 export type SessionReviewResolution =
   | "PENDING"
   | "REVIEWED_CORRECT"
