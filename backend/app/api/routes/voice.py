@@ -17,8 +17,16 @@ from app.schemas.voice import SpeechToTextResponse, TextToSpeechRequest
 router = APIRouter()
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
-ALLOWED_AUDIO_PREFIXES = ("audio/", "video/", "application/octet-stream")
-ALLOWED_AUDIO_EXTENSIONS = (".webm", ".ogg", ".mp3", ".wav", ".m4a", ".aac", ".flac")
+AUDIO_MIME_BY_EXTENSION = {
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
+AUDIO_MIME_ALIASES = {"audio/x-wav": "audio/wav"}
 
 
 def provider_http_exception(error: VoiceProviderError) -> HTTPException:
@@ -61,12 +69,27 @@ async def speech_to_text(
     """Transcribe an uploaded recording without persisting the child's audio."""
 
     filename = (file.filename or "").lower()
-    is_valid_prefix = bool(
-        file.content_type and file.content_type.startswith(ALLOWED_AUDIO_PREFIXES)
+    extension = "." + filename.rsplit(".", 1)[-1] if "." in filename else ""
+    inferred_mime_type = AUDIO_MIME_BY_EXTENSION.get(extension)
+    declared_mime_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    declared_mime_type = AUDIO_MIME_ALIASES.get(
+        declared_mime_type, declared_mime_type
     )
-    is_valid_ext = any(filename.endswith(ext) for ext in ALLOWED_AUDIO_EXTENSIONS)
 
-    if file.content_type and not (is_valid_prefix or is_valid_ext):
+    if declared_mime_type in ("", "application/octet-stream"):
+        # Infer only from a recognized filename extension. Never guess WebM.
+        resolved_mime_type = inferred_mime_type
+    else:
+        resolved_mime_type = declared_mime_type
+        if resolved_mime_type not in AUDIO_MIME_BY_EXTENSION.values():
+            resolved_mime_type = None
+        elif inferred_mime_type and inferred_mime_type != resolved_mime_type:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail={"code": "AUDIO_FORMAT_MISMATCH"},
+            )
+
+    if resolved_mime_type is None:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={"code": "UNSUPPORTED_AUDIO"},
@@ -88,9 +111,14 @@ async def speech_to_text(
             detail={"code": "AUDIO_TOO_LARGE"},
         )
 
+    # Preserve a recognized provider-compatible MIME type. Only use the
+    # extension-derived value when the browser supplied no useful type.
     content_type = file.content_type
-    if not content_type or content_type == "application/octet-stream":
-        content_type = "audio/webm"
+    if not content_type or content_type.split(";", 1)[0].strip().lower() in (
+        "application/octet-stream",
+        "",
+    ):
+        content_type = resolved_mime_type
 
     try:
         transcription = await ElevenLabsVoiceProvider().transcribe(
