@@ -251,10 +251,12 @@ describe("ReadingScreen session-end word review", () => {
     );
 
     await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: /nhận diện giọng nói/ }),
-      );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Bé đọc với nhận diện giọng nói/ }),
+    );
+    await waitFor(() => {
+      expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
+      expect(mocks.recorder.callback).not.toBeNull();
     });
     await act(async () => {
       mocks.recorder.callback?.(
@@ -305,13 +307,13 @@ describe("ReadingScreen session-end word review", () => {
 
     await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
 
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: /nhận diện giọng nói/ }),
-      );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Bé đọc với nhận diện giọng nói/ }),
+    );
+    await waitFor(() => {
+      expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
+      expect(mocks.recorder.callback).not.toBeNull();
     });
-    expect(mocks.recorder.start).toHaveBeenCalledTimes(1);
-    expect(mocks.recorder.callback).not.toBeNull();
 
     await act(async () => {
       mocks.recorder.callback?.(
