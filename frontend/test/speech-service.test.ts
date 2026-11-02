@@ -126,26 +126,20 @@ describe("speech service", () => {
       ),
     );
 
-    await expect(
-      createSpeechService().transcribe(
-        new Blob(["recorded-audio"], { type: "audio/webm" }),
-      ),
-    ).rejects.toMatchObject({
+    const request = createSpeechService().transcribe(
+      new Blob(["recorded-audio"], { type: "audio/webm" }),
+    );
+    await expect(request).rejects.toMatchObject({
       code: "STT_QUOTA_EXCEEDED",
       status: 503,
       request_id: "quota-request",
       retryable: false,
     });
-
-    try {
-      await createSpeechService().transcribe(
-        new Blob(["recorded-audio"], { type: "audio/webm" }),
-      );
-    } catch (error) {
+    await request.catch((error: unknown) => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).not.toContain("0 credits");
       expect((error as Error).message).not.toContain("22 credits");
-    }
+    });
   });
 
   it("does not call the API without a browser session", async () => {
