@@ -374,7 +374,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     const user = userEvent.setup();
-    renderReading("reading");
+    renderReading("ready");
+    await user.click(
+      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+    );
 
     const microphoneButton = await screen.findByRole("button", {
       name: "Dừng nhận diện giọng nói",
@@ -451,7 +454,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     const user = userEvent.setup();
-    renderReading("reading");
+    renderReading("ready");
+    await user.click(
+      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+    );
     await user.click(
       await screen.findByRole("button", {
         name: "Dừng nhận diện giọng nói",
