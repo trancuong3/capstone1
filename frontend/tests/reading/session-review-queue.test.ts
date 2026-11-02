@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  confirmedIncorrectReviewCandidates,
   MAX_REVIEW_ATTEMPTS,
   SessionReviewQueue,
 } from "@/lib/utils/session-review-queue";
@@ -27,31 +26,6 @@ function candidate(
     reason,
   };
 }
-
-describe("confirmedIncorrectReviewCandidates", () => {
-  it("queues only exact occurrences that were confidently classified as incorrect", () => {
-    const candidates = [
-      candidate("page-1", "wrong", 0, "khỏe", "CONFIDENTLY_INCORRECT"),
-      candidate("page-1", "uncertain", 1, "mèo", "UNCERTAIN"),
-      candidate("page-1", "silent", 2, "con", "NO_SPEECH"),
-    ];
-
-    expect(
-      confirmedIncorrectReviewCandidates(candidates).map((item) => item.wordId),
-    ).toEqual(["wrong"]);
-  });
-
-  it("keeps duplicate displayed words independent by occurrence ID", () => {
-    const candidates = [
-      candidate("page-1", "line-a-khoe", 1, "khỏe"),
-      candidate("page-1", "line-b-khoe", 4, "khỏe"),
-    ];
-
-    expect(
-      confirmedIncorrectReviewCandidates(candidates).map((item) => item.wordId),
-    ).toEqual(["line-a-khoe", "line-b-khoe"]);
-  });
-});
 
 describe("SessionReviewQueue", () => {
   it("keeps duplicate displayed words as separate token occurrences", () => {
@@ -167,6 +141,26 @@ describe("SessionReviewQueue", () => {
       "UNCERTAIN",
     ]);
     expect(queue.snapshot().items.every((item) => item.resolution === "PENDING")).toBe(true);
+  });
+
+  it("retains uncertain and no-speech outcomes for history without adding them to child review", () => {
+    const queue = new SessionReviewQueue();
+    queue.addPageCandidates(
+      [
+        candidate("page-1", "uncertain", 0, "khỏe", "UNCERTAIN"),
+        candidate("page-1", "silent", 1, "mèo", "NO_SPEECH"),
+      ],
+      0,
+    );
+
+    const snapshot = queue.snapshot();
+    expect(snapshot.items.map((item) => item.reason)).toEqual([
+      "UNCERTAIN",
+      "NO_SPEECH",
+    ]);
+    expect(snapshot.current).toBeNull();
+    expect(snapshot.pendingCount).toBe(0);
+    expect(snapshot.total).toBe(0);
   });
 
   it("records model pronunciation as assisted, not independently correct", () => {
