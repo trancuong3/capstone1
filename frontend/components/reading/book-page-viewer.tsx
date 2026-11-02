@@ -13,7 +13,7 @@ interface BookPageViewerProps {
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
-  spokenWords?: Set<string>;
+  reviewedWordIds?: Set<string>;
 }
 
 export function BookPageViewer({
@@ -24,7 +24,7 @@ export function BookPageViewer({
   onWordClick,
   page,
   comparisonResult,
-  spokenWords,
+  reviewedWordIds,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
   const currentWordRef = useRef<HTMLSpanElement | null>(null);
@@ -75,7 +75,7 @@ export function BookPageViewer({
           currentWordId={currentWordId}
           correctWordIds={correctWordIds}
           mispronouncedWordIds={mispronouncedWordIds}
-          spokenWords={spokenWords}
+          reviewedWordIds={reviewedWordIds}
           onWordClick={onWordClick}
         />
         <p className="mt-2 text-right text-label text-muted">
