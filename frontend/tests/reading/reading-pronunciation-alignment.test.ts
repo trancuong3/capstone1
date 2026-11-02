@@ -95,6 +95,52 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
     expect(result.assessments[1].status).toBe("CORRECT");
   });
 
+
+  it("marks a confidently mispronounced first word only when the next source word confirms context", () => {
+    const result = alignReadingSegment(
+      source(["Con", "mèo", "đang", "ngủ."]),
+      0,
+      "Còn mèo đang ngủ.",
+      evidence(["Còn", "mèo", "đang", "ngủ."]),
+    );
+
+    expect(result.assessments[0]).toMatchObject({
+      expected_text: "Con",
+      recognized_text: "Còn",
+      status: "INCORRECT",
+      reason: "CONFIDENT_SUBSTITUTION",
+    });
+    expect(result.assessments.slice(1).every((item) => item.status === "CORRECT")).toBe(true);
+  });
+
+  it("does not mark unrelated background speech as an incorrect word", () => {
+    const result = alignReadingSegment(
+      source(["Con", "mèo"]),
+      0,
+      "hello mèo",
+      evidence(["hello", "mèo"]),
+    );
+
+    expect(result.assessments[0]).toMatchObject({
+      expected_text: "Con",
+      recognized_text: "hello",
+      status: "UNCERTAIN",
+    });
+    expect(result.assessments[1].status).toBe("CORRECT");
+  });
+
+  it("does not turn a short partial token into a correct or incorrect result", () => {
+    const result = alignReadingSegment(
+      source(["Con", "mèo"]),
+      0,
+      "c mèo",
+      evidence(["c", "mèo"]),
+    );
+
+    expect(result.assessments[0].status).toBe("UNCERTAIN");
+    expect(result.assessments[0].reason).toBe("INCOMPLETE_TOKEN");
+  });
+
   it("does not use transcript-only text as word-level confidence", () => {
     const result = alignReadingSegment(
       source(["Con", "mèo"]),
