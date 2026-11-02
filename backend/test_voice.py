@@ -213,24 +213,34 @@ class ElevenLabsProviderErrorTests(unittest.TestCase):
         }
 
         class FakeAsyncClient:
+            request: dict[str, object] | None = None
+
             async def __aenter__(self):
                 return self
 
             async def __aexit__(self, *_args):
                 return None
 
-            async def post(self, *_args, **_kwargs):
+            async def post(self, url, *, headers, data, files):
+                self.request = {
+                    "url": url,
+                    "headers": headers,
+                    "data": data,
+                    "files": files,
+                }
                 return response
 
+        audio = make_wav_bytes()
+        client = FakeAsyncClient()
         provider = ElevenLabsVoiceProvider(api_key="isolated-test-key")
         with patch(
             "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
-            return_value=FakeAsyncClient(),
+            return_value=client,
         ):
             with self.assertRaises(VoiceProviderError) as raised:
                 asyncio.run(
                     provider.transcribe(
-                        audio=make_wav_bytes(),
+                        audio=audio,
                         filename="recording.wav",
                         content_type="audio/wav",
                         language_code="vi",
@@ -238,6 +248,13 @@ class ElevenLabsProviderErrorTests(unittest.TestCase):
                 )
 
         self.assertEqual(raised.exception.status_code, 422)
+        self.assertIsNotNone(client.request)
+        self.assertEqual(
+            client.request["files"]["file"],
+            ("recording.wav", audio, "audio/wav"),
+        )
+        self.assertEqual(client.request["data"]["model_id"], "scribe_v2")
+        self.assertEqual(client.request["data"]["language_code"], "vie")
 
     def test_provider_rate_limit_remains_unavailable(self):
         response = MagicMock()
