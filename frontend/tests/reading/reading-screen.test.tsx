@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServiceError } from "@/lib/api/service-error";
 import type { ReadingUiState } from "@/types/reading";
 import { ReadingScreen } from "@/components/reading/reading-screen";
@@ -17,6 +17,7 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
+let previousSpeechRecognition: PropertyDescriptor | undefined;
 const {
   servicesHook,
   speechRecorderMock,
@@ -275,6 +276,10 @@ function createReadingFixtures() {
 
 let services: ReturnType<typeof createReadingFixtures>;
 beforeEach(() => {
+  previousSpeechRecognition = Object.getOwnPropertyDescriptor(
+    window,
+    "SpeechRecognition",
+  );
   services = createReadingFixtures();
   servicesHook.mockReset().mockReturnValue(services);
   speechRecorderMock.start.mockReset().mockResolvedValue(undefined);
@@ -311,6 +316,14 @@ beforeEach(() => {
       hesitation_seconds: null,
     },
   });
+});
+
+afterEach(() => {
+  if (previousSpeechRecognition) {
+    Object.defineProperty(window, "SpeechRecognition", previousSpeechRecognition);
+  } else {
+    Reflect.deleteProperty(window, "SpeechRecognition");
+  }
 });
 function renderReading(
   state: ReadingUiState,
@@ -407,6 +420,55 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(
       screen.queryByText("Báo cáo đọc chưa sẵn sàng"),
     ).not.toBeInTheDocument();
+  });
+
+  it("finishes the session without inventing a report when neither STT source has final text", async () => {
+    class EmptySpeechRecognition {
+      static instances: EmptySpeechRecognition[] = [];
+      onresult: ((event: {
+        resultIndex: number;
+        results: Array<{ isFinal: boolean; 0: { transcript: string } }>;
+      }) => void) | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+
+      constructor() {
+        EmptySpeechRecognition.instances.push(this);
+      }
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: EmptySpeechRecognition,
+    });
+
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Dừng nhận diện giọng nói",
+      }),
+    );
+    await waitFor(() => {
+      expect(EmptySpeechRecognition.instances).toHaveLength(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await user.click(await screen.findByRole("button", { name: "Lưu và dừng" }));
+
+    await waitFor(() => {
+      expect(services.readingService.finish).toHaveBeenCalledOnce();
+      expect(screen.getByText("Báo cáo đọc chưa sẵn sàng")).toBeInTheDocument();
+    });
+    expect(compareTranscriptMock).not.toHaveBeenCalled();
   });
 
   it("starts the listening UI only after the control service resolves", async () => {
