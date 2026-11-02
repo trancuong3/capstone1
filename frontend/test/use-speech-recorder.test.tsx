@@ -61,8 +61,10 @@ class FakeMediaRecorder {
   });
   stop = vi.fn(() => {
     this.state = "inactive";
+    const audioBuffer = new ArrayBuffer(this.segmentBytes.byteLength);
+    new Uint8Array(audioBuffer).set(this.segmentBytes);
     this.ondataavailable?.({
-      data: new Blob([this.segmentBytes], { type: this.mimeType }),
+      data: new Blob([audioBuffer], { type: this.mimeType }),
     } as BlobEvent);
     this.onstop?.(new Event("stop"));
   });
@@ -146,9 +148,9 @@ describe("useSpeechRecorder", () => {
     FakeAudioContext.latestAnalyser!.speaking = true;
     flushFrame();
 
-    let finalRecording: Blob | null = null;
+    const finalRecording: { current: Blob | null } = { current: null };
     await act(async () => {
-      finalRecording = await result.current.stop();
+      finalRecording.current = await result.current.stop();
     });
 
     expect(onUtterance).toHaveBeenCalledTimes(2);
@@ -173,8 +175,8 @@ describe("useSpeechRecorder", () => {
 
     // stop() returns only the last complete recorder segment. It must not
     // concatenate independent WebM containers into one invalid recording.
-    expect(finalRecording).toBeInstanceOf(Blob);
-    expect(finalRecording?.size).toBe(1_024);
+    expect(finalRecording.current).toBeInstanceOf(Blob);
+    expect(finalRecording.current?.size).toBe(1_024);
     expect(result.current.isRecording).toBe(false);
     expect(tracks[0]?.stop).toHaveBeenCalledTimes(1);
   });
