@@ -9,14 +9,18 @@ from app.models import (
     ReadingEvent,
     FluencyAssessment,
     ReadingSessionPage,
-    ReadingComparisonReport,
 )
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
     ReadingEventResponse, ReadingEventCreate,
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
-from app.schemas.reading import CompareReadingRequest, CompareReadingResponse
+from app.schemas.reading import (
+    CompareReadingRequest,
+    CompareReadingResponse,
+    DeleteReadingReportResponse,
+    ReadingComparisonReportListResponse,
+)
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
@@ -444,85 +448,32 @@ async def compare_reading(
         ReadingContentRepository(db)
     ).compare_reading(session_id, actor_id, request)
 
-@router.get("/sessions/{session_id}/reports")
+@router.get(
+    "/sessions/{session_id}/reports",
+    response_model=ReadingComparisonReportListResponse,
+)
 async def get_session_reports(
     session_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Kiểm tra session có thuộc phụ huynh hiện tại không
-    await ReadingContentService(
+    return await ReadingContentService(
         ReadingContentRepository(db)
-    ).get_session_summary(session_id, actor_id)
-
-    # 2. Lấy tất cả báo cáo của session
-    result = await db.execute(
-        select(ReadingComparisonReport)
-        .where(
-            ReadingComparisonReport.SessionId == session_id
-        )
-        .order_by(
-            ReadingComparisonReport.CreatedAt.desc(),
-            ReadingComparisonReport.Id.desc(),
-        )
-    )
-
-    reports = result.scalars().all()
-
-    # 3. Trả dữ liệu
-    return {
-        "session_id": str(session_id),
-        "total": len(reports),
-        "reports": [
-            {
-                "report_id": str(report.Id),
-                "page_id": str(report.PageId),
-                "page_revision_id": str(report.PageRevisionId),
-                "transcript": report.Transcript,
-                "distance": report.Distance,
-                "alignment": report.Alignment,
-                "summary": report.Summary,
-                "created_at": report.CreatedAt,
-            }
-            for report in reports
-        ],
-    }
+    ).get_session_reports(session_id, actor_id)
 
 
-@router.delete("/reports/{report_id}")
+@router.delete(
+    "/reports/{report_id}",
+    response_model=DeleteReadingReportResponse,
+)
 async def delete_reading_report(
     report_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Tìm báo cáo
-    result = await db.execute(
-        select(ReadingComparisonReport).where(
-            ReadingComparisonReport.Id == report_id
-        )
-    )
-
-    report = result.scalar_one_or_none()
-
-    if report is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Không tìm thấy báo cáo.",
-        )
-
-    # 2. Kiểm tra session thuộc phụ huynh hiện tại
-    await ReadingContentService(
+    return await ReadingContentService(
         ReadingContentRepository(db)
-    ).get_session_summary(report.SessionId, actor_id)
-
-    # 3. Xóa báo cáo
-    await db.delete(report)
-    await db.commit()
-
-    return {
-        "message": "Report deleted successfully",
-        "report_id": str(report_id),
-    }
+    ).delete_reading_report(report_id, actor_id)
 
 #Kadepham
 import os
