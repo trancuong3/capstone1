@@ -304,6 +304,28 @@ class CompareReadingResponse(BaseModel):
     created_at: datetime
 
 
+class ReadingComparisonReportItem(BaseModel):
+    report_id: UUID
+    page_id: UUID
+    page_revision_id: UUID
+    transcript: str
+    distance: int = Field(ge=0)
+    alignment: list[Dict[str, Any]]
+    summary: Dict[str, Any]
+    created_at: datetime
+
+
+class ReadingComparisonReportListResponse(BaseModel):
+    session_id: UUID
+    total: int = Field(ge=0)
+    reports: list[ReadingComparisonReportItem]
+
+
+class DeleteReadingReportResponse(BaseModel):
+    message: str
+    report_id: UUID
+
+
 class ReadingPageWordRead(BaseModel):
     word_id: UUID
     word_index: int = Field(ge=0)
