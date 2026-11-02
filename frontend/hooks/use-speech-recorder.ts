@@ -193,7 +193,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         };
         rec.onerror = () => {};
         recorderSegmentStartedAtMsRef.current = Date.now();
-        recorderSegmentIdRef.current = `${captureGeneration}:${++segmentSequenceRef.current}`;
+        recorderSegmentIdRef.current = `$captureGeneration}:${++segmentSequenceRef.current}`;
         // One finalized container per utterance; no timeslice fragments are uploaded.
         rec.start();
         return rec;
@@ -351,10 +351,15 @@ export function useSpeechRecorder(): SpeechRecorder {
                   try {
                     recorderRef.current = createRecorder();
                     if (!recorderRef.current) {
-                      throw new Error("A replacement MediaRecorder was unavailable.");
+                      throw new Error(
+                        "A replacement MediaRecorder was unavailable.",
+                      );
                     }
                   } catch (error) {
-                    console.warn("Could not start the next speech recorder:", error);
+                    console.warn(
+                      "Could not start the next speech recorder:",
+                      error,
+                    );
                     recorderRef.current = null;
                     isRecordingRef.current = false;
                     setIsRecording(false);
