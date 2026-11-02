@@ -10,10 +10,10 @@ interface BookPageViewerProps {
   currentWordId: string | null;
   isTransitioning?: boolean;
   mispronouncedWordIds?: Set<string>;
+  uncertainWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
-  spokenWords?: Set<string>;
 }
 
 export function BookPageViewer({
@@ -21,10 +21,10 @@ export function BookPageViewer({
   currentWordId,
   isTransitioning = false,
   mispronouncedWordIds,
+  uncertainWordIds,
   onWordClick,
   page,
   comparisonResult,
-  spokenWords,
 }: BookPageViewerProps) {
   const hasWords = page.words && page.words.length > 0;
   const currentWordRef = useRef<HTMLSpanElement | null>(null);
@@ -75,7 +75,7 @@ export function BookPageViewer({
           currentWordId={currentWordId}
           correctWordIds={correctWordIds}
           mispronouncedWordIds={mispronouncedWordIds}
-          spokenWords={spokenWords}
+          uncertainWordIds={uncertainWordIds}
           onWordClick={onWordClick}
         />
         <p className="mt-2 text-right text-label text-muted">
