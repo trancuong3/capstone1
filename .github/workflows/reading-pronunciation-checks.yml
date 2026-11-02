@@ -1,0 +1,120 @@
+name: Reading Pronunciation Flow Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "backend/app/providers/elevenlabs_voice_provider.py"
+      - "backend/app/schemas/voice.py"
+      - "backend/app/models/reading.py"
+      - "backend/test_voice.py"
+      - "supabase/migrations/**"
+      - ".github/workflows/reading-pronunciation-checks.yml"
+  push:
+    branches:
+      - fix/reading-pronunciation-flow-20261102
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Reading UI, alignment, typecheck, lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check formatting for changed reading files
+        run: |
+          npx prettier --check \
+            components/reading/reading-screen.tsx \
+            components/reading/reading-layout.tsx \
+            components/reading/book-page-viewer.tsx \
+            components/reading/book-page-content.tsx \
+            components/reading/reading-pronunciation-review.tsx \
+            hooks/use-speech-recorder.ts \
+            lib/api/speech-service.ts \
+            lib/utils/reading-pronunciation-alignment.ts \
+            tests/reading/reading-pronunciation-alignment.test.ts \
+            tests/reading/reading-pronunciation-review.test.tsx \
+            types/reading.ts
+
+      - name: Run pronunciation alignment and review tests
+        run: |
+          npm test -- \
+            tests/reading/reading-pronunciation-alignment.test.ts \
+            tests/reading/reading-pronunciation-review.test.tsx
+
+      - name: Run complete frontend test suite
+        run: npm test
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run full TypeScript check
+        run: npm run typecheck
+
+      - name: Run production build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+        run: npm run build
+
+  backend:
+    name: Backend unit and API regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_KEY: test-publishable-key
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space for OCR and ML dependencies
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libgomp1 tesseract-ocr tesseract-ocr-vie
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --no-cache-dir --upgrade pip
+          python -m pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-cache-dir -r requirements.txt
+
+      - name: Verify Python source compiles
+        run: python -m compileall -q app
+
+      - name: Run full backend unit and API suite
+        run: python -m unittest discover -v
