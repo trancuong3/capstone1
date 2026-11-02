@@ -210,8 +210,8 @@ export function ReadingScreen({
       if (words?.length) bucket.words.push(...words);
 
       const spokenTokens = trimmed
-        .replace(/[.,/#!$%^&*;:{}=\\-_\`~()?"'“”—]/g, "")
-        .split(/\\s+/)
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+        .split(/\s+/)
         .map((word) => word.trim())
         .filter((word) => word.length > 0);
 
