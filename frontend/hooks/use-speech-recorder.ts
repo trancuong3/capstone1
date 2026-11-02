@@ -332,11 +332,35 @@ export function useSpeechRecorder(): SpeechRecorder {
 
                   try {
                     activeRecorder.stop();
-                    recorderRef.current = createRecorder();
                   } catch {
+                    // The current recorder is still usable when stop() itself
+                    // fails. Restore its chunks and let VAD attempt the boundary
+                    // again instead of silently discarding the spoken phrase.
                     isRotatingRef.current = false;
+                    chunksRef.current = currentUtteranceChunks;
+                    hasSpeechInCurrentRecorderRef.current = true;
+                    hasSpokenInUtterance = true;
                     pendingRotationsRef.current.delete(rotationCompletion);
                     resolveRotation();
+                    return;
+                  }
+
+                  try {
+                    recorderRef.current = createRecorder();
+                    if (!recorderRef.current) {
+                      throw new Error("A replacement MediaRecorder was unavailable.");
+                    }
+                  } catch (error) {
+                    console.warn("Could not start the next speech recorder:", error);
+                    recorderRef.current = null;
+                    isRecordingRef.current = false;
+                    setIsRecording(false);
+                    void Promise.all(
+                      Array.from(pendingRotationsRef.current),
+                    ).then(() => {
+                      stopTracks(stream);
+                      cleanupAudioNodes();
+                    });
                   }
                 }
               }
