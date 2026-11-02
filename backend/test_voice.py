@@ -2,6 +2,7 @@
 
 import os
 import unittest
+import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
