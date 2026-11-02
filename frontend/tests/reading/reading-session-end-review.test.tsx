@@ -244,7 +244,7 @@ describe("ReadingScreen session-end word review", () => {
       await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+          screen.getByRole("button", { name: /nhận diện giọng nói/ }),
         );
       });
       await act(async () => {
@@ -265,8 +265,9 @@ describe("ReadingScreen session-end word review", () => {
         screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
       ).not.toBeInTheDocument();
       expect(readingService.finish).toHaveBeenCalledOnce();
-      expect(readingService.createEvent).toHaveBeenCalledTimes(2);
-      for (const [event] of readingService.createEvent.mock.calls) {
+      const createEventMock = vi.mocked(readingService.createEvent);
+      expect(createEventMock).toHaveBeenCalledTimes(2);
+      for (const [event] of createEventMock.mock.calls) {
         expect(event).toMatchObject({
           Type: "MISPRONUNCIATION",
           Status: "IGNORED_BY_GATE",
