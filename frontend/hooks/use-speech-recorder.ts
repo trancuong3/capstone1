@@ -135,7 +135,14 @@ export function useSpeechRecorder(): SpeechRecorder {
       captureStartedAtMsRef.current = Date.now();
       recorderSegmentStartedAtMsRef.current = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (error) {
+        cleanupAudioNodes();
+        setIsRecording(false);
+        throw error;
+      }
       if (
         captureGeneration !== captureGenerationRef.current ||
         !isRecordingRef.current
@@ -228,12 +235,13 @@ export function useSpeechRecorder(): SpeechRecorder {
                 }
               }
 
-              // Cut only after a real pause. A hard maximum-duration cut can
-              // split a Vietnamese word and remove its initial/final phonemes.
+              // Cut only after roughly 500 ms of silence. Short pauses between
+              // Vietnamese syllables should not split a spoken phrase into tiny
+              // low-context segments.
               if (
                 onUtteranceRef.current &&
                 hasSpokenInUtterance &&
-                silentFrames >= 15 &&
+                silentFrames >= 30 &&
                 !isRotatingRef.current
               ) {
                 hasSpokenInUtterance = false;
