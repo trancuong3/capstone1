@@ -767,7 +767,7 @@ export function ReadingScreen({
     return resolvedText;
   }
 
-  async function handleReadSample()  async function handleReadSample() {
+  async function handleReadSample() {
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
@@ -1252,8 +1252,6 @@ async function finishReading() {
     }
 
     if (!mountedRef.current) return;
-
-    // 4. Kết thúc session    if (!mountedRef.current) return;
 
     // 4. Kết thúc session
     const [finishedSession] = await Promise.all([
