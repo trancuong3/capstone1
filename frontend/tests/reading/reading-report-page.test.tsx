@@ -155,9 +155,7 @@ describe("per-session reading report page", () => {
     render(<ReadingReportPage />);
 
     await screen.findByTestId("saved-report-report-to-delete");
-    await user.click(
-      screen.getAllByRole("button", { name: "Xóa báo cáo" })[0],
-    );
+    await user.click(screen.getAllByRole("button", { name: "Xóa báo cáo" })[0]);
 
     await waitFor(() => {
       expect(api.deleteReadingReport).toHaveBeenCalledWith("report-to-delete");
