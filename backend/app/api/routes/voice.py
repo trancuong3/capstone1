@@ -26,7 +26,10 @@ AUDIO_MIME_BY_EXTENSION = {
     ".aac": "audio/aac",
     ".flac": "audio/flac",
 }
-AUDIO_MIME_ALIASES = {"audio/x-wav": "audio/wav"}
+AUDIO_MIME_ALIASES = {
+    "audio/x-wav": "audio/wav",
+    "audio/mp3": "audio/mpeg",
+}
 
 
 def provider_http_exception(error: VoiceProviderError) -> HTTPException:
@@ -113,14 +116,10 @@ async def speech_to_text(
             detail={"code": "AUDIO_TOO_LARGE"},
         )
 
-    # Preserve a recognized provider-compatible MIME type. Only use the
-    # extension-derived value when the browser supplied no useful type.
-    content_type = file.content_type
-    if not content_type or content_type.split(";", 1)[0].strip().lower() in (
-        "application/octet-stream",
-        "",
-    ):
-        content_type = resolved_mime_type
+    # Forward the validated base MIME type. Codec parameters from the
+    # browser are useful metadata, but are not needed in the provider's
+    # multipart content-type and must not override the validated container type.
+    content_type = resolved_mime_type
 
     try:
         transcription = await ElevenLabsVoiceProvider().transcribe(
