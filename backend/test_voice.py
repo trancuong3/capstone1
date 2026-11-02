@@ -1,10 +1,12 @@
 """Focused contract tests for the isolated ElevenLabs voice routes."""
 
+import asyncio
 import os
 import unittest
-import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
+
+import httpx
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
@@ -181,8 +183,6 @@ class VoiceRouteTests(unittest.TestCase):
             MockAsyncClient,
         ):
             with self.assertRaises(VoiceProviderError) as caught:
-                import asyncio
-
                 asyncio.run(
                     provider.transcribe(
                         audio=b"audio-bytes",
