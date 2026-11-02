@@ -31,6 +31,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   const onUtteranceRef = useRef<((blob: Blob) => void) | null>(null);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
+  const captureGenerationRef = useRef(0);
 
   const resolveStopRef = useRef<((recording: Blob | null) => void) | null>(
     null,
@@ -73,6 +74,7 @@ export function useSpeechRecorder(): SpeechRecorder {
 
   const finish = useCallback(
     (recording: Blob | null, error?: Error) => {
+      captureGenerationRef.current += 1;
       const recorder = recorderRef.current;
       recorderRef.current = null;
       chunksRef.current = [];
@@ -95,6 +97,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   );
 
   const cancel = useCallback(() => {
+    captureGenerationRef.current += 1;
     const recorder = recorderRef.current;
     if (!recorder) {
       cleanupAudioNodes();
@@ -124,8 +127,16 @@ export function useSpeechRecorder(): SpeechRecorder {
       chunksRef.current = [];
       allChunksRef.current = [];
       isRecordingRef.current = true;
+      const captureGeneration = captureGenerationRef.current;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (
+        captureGeneration !== captureGenerationRef.current ||
+        !isRecordingRef.current
+      ) {
+        stopTracks(stream);
+        throw new Error("Microphone capture was cancelled.");
+      }
       streamRef.current = stream;
 
       const mimeType = preferredMimeTypes.find((candidate) =>
@@ -137,9 +148,13 @@ export function useSpeechRecorder(): SpeechRecorder {
         const rec = mimeType
           ? new MediaRecorder(streamRef.current, { mimeType })
           : new MediaRecorder(streamRef.current);
+        // Each MediaRecorder owns its own chunk array. A final dataavailable
+        // event from the previous recorder must never leak into the next segment.
+        const recorderChunks: Blob[] = [];
+        chunksRef.current = recorderChunks;
         rec.ondataavailable = (event) => {
           if (event.data.size) {
-            chunksRef.current.push(event.data);
+            recorderChunks.push(event.data);
             allChunksRef.current.push(event.data);
           }
         };
@@ -178,7 +193,6 @@ export function useSpeechRecorder(): SpeechRecorder {
             let speakingFrames = 0;
             let silentFrames = 0;
             let hasSpokenInUtterance = false;
-            let utteranceDurationFrames = 0;
 
             const checkAudio = () => {
               if (!analyserRef.current || !isRecordingRef.current) return;
@@ -195,7 +209,6 @@ export function useSpeechRecorder(): SpeechRecorder {
               if (avg > 10) {
                 speakingFrames++;
                 hasSpokenInUtterance = true;
-                utteranceDurationFrames++;
                 silentFrames = 0;
                 if (speakingFrames >= 2) {
                   setIsSpeaking(true);
@@ -208,23 +221,22 @@ export function useSpeechRecorder(): SpeechRecorder {
                 }
               }
 
-              // Automatic live utterance segmentation:
-              // When child vocalized and pauses for ~500ms (silentFrames >= 15) OR spoke for > 2.5s:
+              // Cut only after a real pause. A hard maximum-duration cut can
+              // split a Vietnamese word and remove its initial/final phonemes.
               if (
                 onUtteranceRef.current &&
                 hasSpokenInUtterance &&
-                (silentFrames >= 15 || utteranceDurationFrames >= 70) &&
+                silentFrames >= 15 &&
                 !isRotatingRef.current
               ) {
                 hasSpokenInUtterance = false;
-                utteranceDurationFrames = 0;
                 silentFrames = 0;
                 speakingFrames = 0;
 
                 const activeRecorder = recorderRef.current;
                 if (activeRecorder && activeRecorder.state === "recording") {
                   isRotatingRef.current = true;
-                  const currentUtteranceChunks = [...chunksRef.current];
+                  const currentUtteranceChunks = chunksRef.current;
                   chunksRef.current = [];
 
                   activeRecorder.onstop = () => {
@@ -257,8 +269,36 @@ export function useSpeechRecorder(): SpeechRecorder {
           }
         }
 
-        recorderRef.current = createRecorder();
+        const initialRecorder = createRecorder();
+        if (!initialRecorder) {
+          throw new Error("Microphone recorder could not be initialized.");
+        }
+        recorderRef.current = initialRecorder;
         setIsRecording(true);
+
+        // Wait for the first MediaRecorder timeslice before reporting that
+        // capture is ready. Audio gathered during this warm-up is retained as
+        // pre-roll, protecting the first phoneme after the UI starts listening.
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const settle = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(warmupTimeout);
+            resolve();
+          };
+          const warmupTimeout = setTimeout(settle, 400);
+          initialRecorder.addEventListener("dataavailable", settle, {
+            once: true,
+          });
+        });
+
+        if (
+          captureGeneration !== captureGenerationRef.current ||
+          !isRecordingRef.current
+        ) {
+          throw new Error("Microphone capture was cancelled.");
+        }
       } catch (error) {
         stopTracks(stream);
         cleanupAudioNodes();
@@ -282,12 +322,22 @@ export function useSpeechRecorder(): SpeechRecorder {
     return new Promise<Blob | null>((resolve, reject) => {
       resolveStopRef.current = resolve;
       rejectStopRef.current = reject;
+      const finalSegmentChunks = chunksRef.current;
       recorder.onstop = () => {
         const contentType = recorder.mimeType || "audio/webm";
-        const finalBlob = allChunksRef.current.length
+        const finalSegment = finalSegmentChunks.length
+          ? new Blob(finalSegmentChunks, { type: contentType })
+          : null;
+        // Emit the unsegmented tail exactly once. Previously this tail was
+        // returned as a whole-session Blob and the caller could either lose it
+        // or re-transcribe all already-processed audio.
+        if (finalSegment && finalSegment.size > 800) {
+          onUtteranceRef.current?.(finalSegment);
+        }
+        const fullRecording = allChunksRef.current.length
           ? new Blob(allChunksRef.current, { type: contentType })
           : null;
-        finish(finalBlob);
+        finish(fullRecording);
       };
       try {
         recorder.stop();
