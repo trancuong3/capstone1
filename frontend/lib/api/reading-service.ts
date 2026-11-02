@@ -10,7 +10,31 @@ import type {
   ReadingSessionPageProgressDTO,
 } from "@/types/reading";
 
+export type ReadingEventCreateType =
+  | "MISPRONUNCIATION"
+  | "SELF_CORRECTION"
+  | "READ_EXAMPLE";
+
+export type ReadingEventCreateStatus =
+  | "DETECTED"
+  | "IGNORED_BY_GATE"
+  | "FEEDBACK_GIVEN";
+
+export interface ReadingEventCreateInput {
+  SessionId: string;
+  PageId: string;
+  PageRevisionId: string;
+  WordId: string;
+  Type: ReadingEventCreateType;
+  StartMs: number;
+  EndMs: number | null;
+  Confidence: number | null;
+  Status: ReadingEventCreateStatus;
+  Metadata: Record<string, unknown>;
+}
+
 export interface ReadingService {
+  createEvent(input: ReadingEventCreateInput): Promise<void>;
   create(
     input: ReadingSessionCreateDTO,
   ): Promise<ReadingSessionCreateResponseDTO>;
@@ -112,6 +136,21 @@ export const readingPageDtoSchema = z.object({
   indented_line_indices: z.array(z.number().int().nonnegative()).optional(),
 });
 
+const readingEventResponseSchema = z.object({
+  Id: z.uuid(),
+  SessionId: z.uuid(),
+  PageId: z.uuid(),
+  PageRevisionId: z.uuid(),
+  WordId: z.uuid().nullable(),
+  Type: z.string(),
+  StartMs: z.number().int().nonnegative(),
+  EndMs: z.number().int().nonnegative().nullable(),
+  Confidence: z.number().min(0).max(1).nullable(),
+  Status: z.string(),
+  Metadata: z.record(z.string(), z.unknown()),
+  CreatedAt: z.iso.datetime({ offset: true }),
+});
+
 const completionSummarySchema = z.object({
   duration_minutes: z.number().int().nonnegative().nullable(),
   pages_explored: z.number().int().nonnegative().nullable(),
@@ -126,6 +165,18 @@ const completionSummarySchema = z.object({
 
 export function createReadingService(): ReadingService {
   return {
+    async createEvent(input: ReadingEventCreateInput): Promise<void> {
+      await requestApi(
+        "/reading/events",
+        readingEventResponseSchema,
+        undefined,
+        {
+          method: "POST",
+          body: input,
+        },
+      );
+    },
+
     async create(
       input: ReadingSessionCreateDTO,
     ): Promise<ReadingSessionCreateResponseDTO> {

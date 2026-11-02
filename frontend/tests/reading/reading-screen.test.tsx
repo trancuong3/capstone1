@@ -172,6 +172,7 @@ function createReadingFixtures() {
         .mockResolvedValue(pageFive),
     },
     readingService: {
+      createEvent: vi.fn<ReadingServices["readingService"]["createEvent"]>().mockResolvedValue(undefined),
       create: vi
         .fn<ReadingServices["readingService"]["create"]>()
         .mockRejectedValue(new Error("Unused test write")),

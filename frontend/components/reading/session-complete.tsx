@@ -47,6 +47,9 @@ export function SessionComplete({
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? spokenWords;
   const mispronouncedWords = summary.mispronounced_words ?? [];
+  const reviewedCorrectWords = summary.reviewed_correct_words ?? [];
+  const assistedWords = summary.assisted_words ?? [];
+  const uncertainWords = summary.uncertain_words ?? [];
   const score =
     summary.score !== undefined && summary.score !== null
       ? summary.score
@@ -62,6 +65,14 @@ export function SessionComplete({
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
       <div className="mx-auto flex w-full max-w-[744px] flex-col gap-4 sm:gap-6">
+        {summary.result_persistence_warning ? (
+          <p
+            className="rounded-card border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            role="status"
+          >
+            {summary.result_persistence_warning}
+          </p>
+        ) : null}
         <div className="flex flex-col items-start gap-5 rounded-card bg-cream p-6 sm:flex-row">
           <Image
             alt=""
@@ -104,6 +115,15 @@ export function SessionComplete({
                   {mispronouncedWords.length > 0
                     ? ` · Cần chú ý ${mispronouncedWords.length} từ`
                     : " · Không sai từ nào"}
+                  {reviewedCorrectWords.length > 0
+                    ? ` · Tự luyện lại đúng ${reviewedCorrectWords.length} từ`
+                    : ""}
+                  {assistedWords.length > 0
+                    ? ` · Nghe mẫu ${assistedWords.length} từ`
+                    : ""}
+                  {uncertainWords.length > 0
+                    ? ` · Chưa đủ dữ liệu ${uncertainWords.length} từ`
+                    : ""}
                 </p>
               </div>
             </div>
@@ -271,6 +291,63 @@ export function SessionComplete({
                             aria-hidden="true"
                             className="size-4 text-rose-600 flex-shrink-0"
                           />
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {reviewedCorrectWords.length > 0 && (
+                  <div className="rounded-card border border-emerald-200 bg-emerald-50/50 p-4">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-800">
+                      <CheckCircle2 aria-hidden="true" className="size-4" />
+                      Tự luyện lại và đọc đúng ({reviewedCorrectWords.length} từ)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {reviewedCorrectWords.map((word, idx) => (
+                        <span
+                          key={`reviewed-${idx}-${word}`}
+                          className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-900"
+                        >
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {assistedWords.length > 0 && (
+                  <div className="rounded-card border border-blue-200 bg-blue-50/50 p-4">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-800">
+                      <Mic aria-hidden="true" className="size-4" />
+                      Đã nghe giọng mẫu hỗ trợ ({assistedWords.length} từ)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {assistedWords.map((word, idx) => (
+                        <span
+                          key={`assisted-${idx}-${word}`}
+                          className="rounded-full border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-900"
+                        >
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {uncertainWords.length > 0 && (
+                  <div className="rounded-card border border-amber-200 bg-amber-50/50 p-4">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-800">
+                      <AlertCircle aria-hidden="true" className="size-4" />
+                      Chưa đủ dữ liệu để đánh giá ({uncertainWords.length} từ)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {uncertainWords.map((word, idx) => (
+                        <span
+                          key={`uncertain-${idx}-${word}`}
+                          className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900"
+                        >
                           {word}
                         </span>
                       ))}

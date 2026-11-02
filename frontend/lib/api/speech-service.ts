@@ -11,6 +11,7 @@ const wordTimestampSchema = z.object({
   text: z.string(),
   start: z.number().nonnegative(),
   end: z.number().nonnegative(),
+  logprob: z.number().nullable().optional(),
 });
 
 const transcriptionSchema = z.object({
@@ -24,6 +25,8 @@ export interface WordTimestamp {
   readonly text: string;
   readonly start: number;
   readonly end: number;
+  /** ElevenLabs Scribe v2 per-word log probability; not language_probability. */
+  readonly logprob?: number | null;
 }
 
 export interface SpeechTranscript {

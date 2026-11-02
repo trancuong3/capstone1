@@ -115,6 +115,36 @@ class VoiceRouteTests(unittest.TestCase):
             language_code="vi",
         )
 
+    def test_speech_to_text_preserves_word_logprob_without_confusing_language_probability(self):
+        provider = MagicMock()
+        provider.transcribe = AsyncMock(
+            return_value=Transcription(
+                text="Con mèo.",
+                language_code="vi",
+                language_probability=0.99,
+                words=[
+                    {"text": "Con", "start": 0.0, "end": 0.2, "logprob": -0.12},
+                    {"text": "mèo", "start": 0.21, "end": 0.5, "logprob": -1.4},
+                ],
+            )
+        )
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.webm", b"audio-bytes", "audio/webm")},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["language_probability"], 0.99)
+        self.assertEqual(
+            response.json()["words"],
+            [
+                {"text": "Con", "start": 0.0, "end": 0.2, "logprob": -0.12},
+                {"text": "mèo", "start": 0.21, "end": 0.5, "logprob": -1.4},
+            ],
+        )
+
     def test_speech_to_text_rejects_non_audio_and_never_forwards_it(self):
         provider = MagicMock()
         with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):

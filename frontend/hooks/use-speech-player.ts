@@ -8,6 +8,7 @@ export interface SpeechPlayOptions {
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
+  onError?: () => void;
 }
 
 export interface SpeechPlayer {
@@ -67,7 +68,10 @@ export function useSpeechPlayer(): SpeechPlayer {
       };
 
       audio.onended = handleEnded;
-      audio.onerror = handleEnded;
+      audio.onerror = () => {
+        options?.onError?.();
+        handleEnded();
+      };
 
       const startProgressLoop = () => {
         const update = () => {

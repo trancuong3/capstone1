@@ -211,6 +211,14 @@ export interface ReadingCompletionSummaryUI {
   readonly transcripts?: readonly string[] | null;
   readonly correct_words?: readonly string[] | null;
   readonly mispronounced_words?: readonly string[] | null;
+  /** Exact occurrences independently corrected by the child during end review. */
+  readonly reviewed_correct_words?: readonly string[] | null;
+  /** Exact occurrences completed after playing the reference TTS voice. */
+  readonly assisted_words?: readonly string[] | null;
+  /** Speech evidence was insufficient to determine independent correctness. */
+  readonly uncertain_words?: readonly string[] | null;
+  /** Explains when some outcome events could not be written to session history. */
+  readonly result_persistence_warning?: string | null;
   readonly score?: number | null;
 }
 
@@ -219,11 +227,18 @@ export type ReadingEventType =
   | "REPETITION"
   | "LONG_PAUSE"
   | "SUBSTITUTION"
+  | "MISPRONUNCIATION"
   | "SELF_CORRECTION"
   | "READ_EXAMPLE";
 
 export type ReadingEventStatus =
-  "CANDIDATE" | "CONFIRMED" | "UNCERTAIN" | "DISMISSED";
+  | "CANDIDATE"
+  | "CONFIRMED"
+  | "UNCERTAIN"
+  | "DISMISSED"
+  | "DETECTED"
+  | "FEEDBACK_GIVEN"
+  | "IGNORED_BY_GATE";
 
 export interface ReadingEventDTO {
   readonly id: UUID;

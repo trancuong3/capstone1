@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 from urllib.parse import quote
 
@@ -97,6 +98,13 @@ class ElevenLabsVoiceProvider:
                     "text": item["text"],
                     "start": item["start"],
                     "end": item["end"],
+                    "logprob": (
+                        float(item["logprob"])
+                        if isinstance(item.get("logprob"), (int, float))
+                        and not isinstance(item.get("logprob"), bool)
+                        and isfinite(float(item["logprob"]))
+                        else None
+                    ),
                 }
                 for item in raw_words
                 if isinstance(item, dict)

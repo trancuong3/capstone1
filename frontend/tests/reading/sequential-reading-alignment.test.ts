@@ -146,4 +146,103 @@ describe("SequentialReadingTracker", () => {
     expect(corrected.currentWordId).toBeNull();
     expect(corrected.complete).toBe(true);
   });
+  it("uses per-word logprob and a configured confidence threshold for first-pass status", () => {
+    const tracker = new SequentialReadingTracker(
+      "page-confidence",
+      "revision-confidence",
+      [
+        { word_id: "confident-correct", text: "khỏe" },
+        { word_id: "confident-wrong", text: "không" },
+        { word_id: "low-confidence", text: "mèo" },
+      ],
+      { minWordConfidence: 0.8, requireWordConfidence: true },
+    );
+
+    const result = tracker.commitFinal(
+      "confidence-event",
+      "khỏe tốt chó",
+      [
+        { text: "khỏe", logprob: Math.log(0.95) },
+        { text: "tốt", logprob: Math.log(0.91) },
+        { text: "chó", logprob: Math.log(0.42) },
+      ],
+    );
+
+    expect(result.correctWordIds).toEqual(new Set(["confident-correct"]));
+    expect(result.needsReviewWordIds).toEqual(new Set(["confident-wrong"]));
+    expect(result.uncertainWordIds).toEqual(new Set(["low-confidence"]));
+    expect(tracker.getReviewCandidates().map((item) => item.wordId)).toEqual([
+      "confident-wrong",
+      "low-confidence",
+    ]);
+  });
+
+  it("fails closed when no calibrated confidence threshold or word evidence exists", () => {
+    const tracker = new SequentialReadingTracker(
+      "page-uncertain",
+      "revision-uncertain",
+      [{ word_id: "uncertain-1", text: "khỏe" }],
+      { minWordConfidence: null, requireWordConfidence: true },
+    );
+
+    const result = tracker.commitFinal("uncalibrated", "khỏe", null);
+
+    expect(result.correctWordIds.size).toBe(0);
+    expect(result.needsReviewWordIds.size).toBe(0);
+    expect(result.uncertainWordIds).toEqual(new Set(["uncertain-1"]));
+    expect(tracker.getReviewCandidates()[0].reason).toBe("UNCERTAIN");
+  });
+
+  it("defers review until the selected session range ends instead of reviewing a page", () => {
+    const tracker = new SequentialReadingTracker(
+      "range-page-1",
+      "range-revision-1",
+      [
+        { word_id: "range-wrong", text: "Hôm" },
+        { word_id: "range-next", text: "nay" },
+      ],
+      {
+        deferReviewUntilSessionEnd: true,
+        minWordConfidence: 0.8,
+        requireWordConfidence: true,
+      },
+    );
+
+    tracker.commitFinal("first", "Hmm", [
+      { text: "Hmm", logprob: Math.log(0.95) },
+    ]);
+    const pageComplete = tracker.commitFinal("second", "nay", [
+      { text: "nay", logprob: Math.log(0.95) },
+    ]);
+
+    expect(pageComplete.complete).toBe(true);
+    expect(tracker.isReviewing).toBe(false);
+    expect(pageComplete.currentWordId).toBeNull();
+    expect(tracker.getReviewCandidates().map((item) => item.wordId)).toEqual([
+      "range-wrong",
+    ]);
+  });
+
+  it("records no speech as uncertain and advances without confirming a pronunciation error", () => {
+    const tracker = new SequentialReadingTracker(
+      "page-no-speech",
+      "revision-no-speech",
+      [
+        { word_id: "silent-0", text: "Con" },
+        { word_id: "silent-1", text: "mèo" },
+      ],
+      {
+        deferReviewUntilSessionEnd: true,
+        minWordConfidence: 0.8,
+        requireWordConfidence: true,
+      },
+    );
+
+    const noSpeech = tracker.markNoSpeech("silence-event", "NO_SPEECH");
+
+    expect(noSpeech.cursorIndex).toBe(1);
+    expect(noSpeech.uncertainWordIds).toEqual(new Set(["silent-0"]));
+    expect(noSpeech.needsReviewWordIds.size).toBe(0);
+    expect(tracker.getReviewCandidates()[0].reason).toBe("NO_SPEECH");
+  });
 });
