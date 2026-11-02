@@ -60,16 +60,20 @@ type LoadState =
   | { status: "ready"; data: ReadingScreenData }
   | { status: "not-found" }
   | { status: "error" };
+interface BrowserSpeechAlternative {
+  transcript: string;
+}
+
+interface BrowserSpeechResult {
+  isFinal: boolean;
+  [index: number]: BrowserSpeechAlternative;
+}
+
 interface BrowserSpeechEvent {
   resultIndex: number;
   results: {
     length: number;
-    [index: number]: {
-      [index: number]: {
-        transcript: string;
-        isFinal: boolean;
-      };
-    };
+    [index: number]: BrowserSpeechResult;
   };
 }
 
@@ -131,16 +135,14 @@ export function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
-  const [finalTranscript, setFinalTranscript] = useState("");
+  const [, setFinalTranscript] = useState("");
   const [isComparing, setIsComparing] = useState(false);
-  const [comparisonResult, setComparisonResult] =
-    useState<ComparisonResult | null>(null);
+  const [, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
-  const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
-  const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
+   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [mispronouncedWordIds, setMispronouncedWordIds] = useState<Set<string>>(
@@ -153,8 +155,7 @@ export function ReadingScreen({
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
   const correctWordIdsRef = useRef<Set<string>>(new Set());
-  const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
-  const failedWordsSetRef = useRef<Set<string>>(new Set());
+   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const finishStartedRef = useRef(false);
@@ -208,8 +209,7 @@ export function ReadingScreen({
     for (const w of words) {
       spokenWordsSetRef.current.add(w);
     }
-    setSpokenWords(new Set(spokenWordsSetRef.current));
-  }, []);
+   }, []);
 
   const handleWordClick = useCallback(
     async (word: ReadingPageWordDTO) => {
@@ -414,10 +414,7 @@ export function ReadingScreen({
     for (const wordId of result.correctWordIds) {
       correctWordIdsRef.current.add(wordId);
     }
-    for (const wordId of result.needsReviewWordIds) {
-      mispronouncedWordIdsRef.current.add(wordId);
-    }
-    if (result.mismatchWordId) {
+     if (result.mismatchWordId) {
       const failedWord = wordTextByIdRef.current.get(result.mismatchWordId);
       if (failedWord) failedWordsSetRef.current.add(failedWord);
     }
@@ -475,18 +472,19 @@ export function ReadingScreen({
       isUsingRecorderRef.current = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (message.includes("not supported")) {
-        if (mountedRef.current) setLatestTranscript(null);
-        return true;
+      if (!message.includes("not supported")) {
+        isListeningActiveRef.current = false;
+        if (mountedRef.current) {
+          setConnectionState("reconnecting");
+          setUiState("microphone-denied");
+        }
+        return false;
       }
-      if (mountedRef.current) {
-        setConnectionState("reconnecting");
-        setUiState("microphone-denied");
-      }
-      return false;
+      if (mountedRef.current) setLatestTranscript(null);
+      // Continue to the browser SpeechRecognition fallback below.
     }
 
-    // 2. Concurrently attempt Web Speech API for low-latency streaming text if supported by browser
+    // Browser recognition is a visual preview only while MediaRecorder is active.
     if (typeof window !== "undefined") {
       try {
         const win = window as unknown as WindowWithSpeech;
@@ -607,6 +605,7 @@ export function ReadingScreen({
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
       setIsReadingWord(false);
+      setCurrentWordId(trackerRef.current?.currentWordId ?? null);
       setIsBusy(false);
       return;
     }
@@ -647,13 +646,8 @@ export function ReadingScreen({
       cumulativeWeights.push(running);
     }
 
-    // Clear previous word tracking so sample read starts fresh
-    correctWordIdsRef.current.clear();
-    mispronouncedWordIdsRef.current.clear();
-    spokenWordsSetRef.current.clear();
-    setCorrectWordIds(new Set());
-    setMispronouncedWordIds(new Set());
-    setSpokenWords(new Set());
+    // The sample temporarily moves the visual focus but is not child reading
+    // evidence and must not clear or commit any token status.
 
     // Set first word active immediately so user sees what is being queued
     setCurrentWordId(words[0].word_id);
@@ -674,7 +668,7 @@ export function ReadingScreen({
 
           const targetWord = words[idx];
           if (targetWord) {
-            // TTS playback is not evidence that the child read these words.
+            setCurrentWordId(targetWord.word_id);
           }
         },
         onEnded: () => {
@@ -747,13 +741,11 @@ export function ReadingScreen({
     setCountdown(3);
     if (page) resetPageTracking(page);
     correctWordIdsRef.current.clear();
-    mispronouncedWordIdsRef.current.clear();
     failedWordsSetRef.current.clear();
     spokenWordsSetRef.current.clear();
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
     setReviewedWordIds(new Set());
-    setSpokenWords(new Set());
   }
 
   async function resumeReading() {
