@@ -774,16 +774,28 @@ export function ReadingScreen({
   async function resumeReading() {
     if (isBusy) return;
     setIsBusy(true);
-    const nextState = await services.readingSocketAdapter.sendControl(
-      sessionId,
-      "resume",
-    );
-    if (!mountedRef.current) return;
-    setCanonicalState(nextState);
-    setConnectionState("connected");
-    setUiState("reading");
-    setIsMicRecording(false);
-    setIsBusy(false);
+    try {
+      const nextState = await services.readingSocketAdapter.sendControl(
+        sessionId,
+        "resume",
+      );
+      if (!mountedRef.current) return;
+
+      const microphoneReady = await startListening();
+      if (!mountedRef.current) return;
+      setCanonicalState(nextState);
+      setConnectionState("connected");
+      setIsMicRecording(microphoneReady);
+      setUiState(microphoneReady ? "reading" : "microphone-denied");
+    } catch (error) {
+      console.warn("Could not resume reading:", error);
+      if (mountedRef.current) {
+        setUiState("microphone-denied");
+        setIsMicRecording(false);
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function pauseReading() {
@@ -808,16 +820,30 @@ export function ReadingScreen({
   async function retryPermission(kind: DeviceKind) {
     if (isBusy) return;
     setIsBusy(true);
-    await services.devicePermissionService.retry(kind);
-    if (!mountedRef.current) return;
-    if (kind === "microphone" && !(await startListening())) {
+    try {
+      await services.devicePermissionService.retry(kind);
+      if (!mountedRef.current) return;
+
+      const microphoneReady = isMicRecording || (await startListening());
+      if (!mountedRef.current) return;
+      if (!microphoneReady) {
+        setIsMicRecording(false);
+        setUiState("microphone-denied");
+        return;
+      }
+
+      setIsMicRecording(true);
+      setConnectionState("connected");
+      setUiState("reading");
+      setCanonicalState("LISTENING");
+    } catch (error) {
+      console.warn("Could not recover reading device:", error);
+      if (mountedRef.current) {
+        setUiState(kind === "microphone" ? "microphone-denied" : "camera-denied");
+      }
+    } finally {
       if (mountedRef.current) setIsBusy(false);
-      return;
     }
-    setConnectionState("connected");
-    setUiState("reading");
-    setCanonicalState("LISTENING");
-    setIsBusy(false);
   }
 
   async function navigateWithinRange(targetIndex: number) {
@@ -841,19 +867,27 @@ export function ReadingScreen({
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
       }
+
       const nextProgress = await services.readingService.navigateToPage(
         sessionId,
         target.page_id,
       );
       const nextPage = await services.readingService.getCurrentPage(sessionId);
       if (!mountedRef.current) return;
+
+      activePageRef.current = nextPage;
       setPageProgress(nextProgress);
       setPage(nextPage);
       setCurrentWordId(nextPage.words[0]?.word_id ?? null);
       setSelectedManualPageId(nextPage.page_id);
       setCountdown(null);
-      setUiState("reading");
-    } catch {
+
+      const microphoneReady = await startListening();
+      if (!mountedRef.current) return;
+      setIsMicRecording(microphoneReady);
+      setUiState(microphoneReady ? "reading" : "microphone-denied");
+    } catch (error) {
+      console.warn("Could not navigate reading page:", error);
       if (mountedRef.current) {
         setPageNavigationError(
           "Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.",
@@ -889,39 +923,71 @@ export function ReadingScreen({
   async function retryPageMatch() {
     if (isBusy) return;
     setIsBusy(true);
-    const matchedPage =
-      await services.pageMatchService.retryCurrentPage(sessionId);
-    if (!mountedRef.current) return;
-    setPage(matchedPage);
-    setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
-    setSelectedManualPageId(matchedPage.page_id);
-    setPageProgress(await services.readingService.getPageProgress(sessionId));
-    setPageNavigationError(null);
-    setCanonicalState("LISTENING");
-    setConnectionState("connected");
-    setUiState("reading");
-    setIsBusy(false);
+    try {
+      if (isMicRecording) {
+        await stopListeningAndTranscribe();
+        if (mountedRef.current) setIsMicRecording(false);
+      }
+
+      const matchedPage =
+        await services.pageMatchService.retryCurrentPage(sessionId);
+      if (!mountedRef.current) return;
+      activePageRef.current = matchedPage;
+      setPage(matchedPage);
+      setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
+      setSelectedManualPageId(matchedPage.page_id);
+      setPageProgress(await services.readingService.getPageProgress(sessionId));
+      setPageNavigationError(null);
+
+      const microphoneReady = await startListening();
+      if (!mountedRef.current) return;
+      setCanonicalState("LISTENING");
+      setConnectionState("connected");
+      setIsMicRecording(microphoneReady);
+      setUiState(microphoneReady ? "reading" : "microphone-denied");
+    } catch (error) {
+      console.warn("Could not retry page recognition:", error);
+      if (mountedRef.current) setUiState("page-confidence-low");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function confirmManualPage() {
     if (!selectedManualPageId || isBusy) return;
     setIsBusy(true);
-    const matchedPage = await services.pageMatchService.selectPage(
-      sessionId,
-      selectedManualPageId,
-    );
-    if (!mountedRef.current) return;
-    setPage(matchedPage);
-    setPageProgress(await services.readingService.getPageProgress(sessionId));
-    setPageNavigationError(null);
-    setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
-    setCanonicalState("LISTENING");
-    setConnectionState("connected");
-    setUiState("reading");
-    setIsBusy(false);
+    try {
+      if (isMicRecording) {
+        await stopListeningAndTranscribe();
+        if (mountedRef.current) setIsMicRecording(false);
+      }
+
+      const matchedPage = await services.pageMatchService.selectPage(
+        sessionId,
+        selectedManualPageId,
+      );
+      if (!mountedRef.current) return;
+      activePageRef.current = matchedPage;
+      setPage(matchedPage);
+      setPageProgress(await services.readingService.getPageProgress(sessionId));
+      setPageNavigationError(null);
+      setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
+
+      const microphoneReady = await startListening();
+      if (!mountedRef.current) return;
+      setCanonicalState("LISTENING");
+      setConnectionState("connected");
+      setIsMicRecording(microphoneReady);
+      setUiState(microphoneReady ? "reading" : "microphone-denied");
+    } catch (error) {
+      console.warn("Could not select reading page:", error);
+      if (mountedRef.current) setUiState("manual-page");
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
-  async function reconnect(mode: ReadingReconnectDemoMode) {
+  async function reconnect(mode: ReadingReconnectDemoMode) {  async function reconnect(mode: ReadingReconnectDemoMode) {
     if (isBusy) return;
     const resumeMicrophone = uiState === "stt-error";
     setIsBusy(true);
