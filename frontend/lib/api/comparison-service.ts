@@ -67,10 +67,16 @@ export type ReadingPage = z.infer<typeof readingPageSchema>;
 
 export type ComparisonResult = z.infer<typeof comparisonSchema>;
 
+export interface ComparisonPageReference {
+  readonly page_id: string;
+  readonly page_revision_id: string;
+}
+
 export async function compareTranscript(
   sessionId: string,
   transcript: string,
   words?: readonly WordTimestamp[] | null,
+  page?: ComparisonPageReference,
 ): Promise<ComparisonResult> {
   return requestApi(
     `/reading/sessions/${sessionId}/compare`,
@@ -81,6 +87,12 @@ export async function compareTranscript(
       body: {
         transcript,
         ...(words?.length ? { words } : {}),
+        ...(page
+          ? {
+              page_id: page.page_id,
+              page_revision_id: page.page_revision_id,
+            }
+          : {}),
       },
     },
   );
