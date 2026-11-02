@@ -510,6 +510,7 @@ export function ReadingScreen({
     stage: "WORD" | "SENTENCE",
     outcome: "CORRECT" | "ASSISTED",
     confidence: number | null,
+    recognizedTranscript: string | null,
   ) {
     const eventKey = [
       candidate.page_id,
@@ -517,6 +518,7 @@ export function ReadingScreen({
       candidate.word_id,
       "PRACTICE",
       stage,
+      outcome,
     ].join(":");
     if (persistedReadingEventKeysRef.current.has(eventKey)) return;
 
@@ -547,6 +549,7 @@ export function ReadingScreen({
         expected_word: candidate.expected_word,
         recognized_word: candidate.recognized_word,
         original_sentence: candidate.sentence_text,
+        practice_transcript: recognizedTranscript,
       },
     });
 
