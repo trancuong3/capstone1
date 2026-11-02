@@ -6,9 +6,18 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession, ReadingSessionPage
+from app.models import (
+    BookPage,
+    FluencyAssessment,
+    ReadingComparisonReport,
+    ReadingEvent,
+    ReadingSession,
+    ReadingSessionPage,
+)
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
+    CompareReadingRequest,
+    CompareReadingResponse,
     FluencyAssessmentCreate,
     ReadingCompletionSummaryDTO,
     ReadingEventCreate,
@@ -21,6 +30,7 @@ from app.schemas.reading import (
     ReadingSessionPageProgressItem,
 )
 from app.services.storage_service import create_signed_image_url
+from app.services.text_alignment import align_text, summarize_alignment
 
 
 class ReadingContentService:
@@ -412,6 +422,56 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
         return self._summary(session)
+
+    async def compare_reading(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+        payload: CompareReadingRequest,
+    ) -> CompareReadingResponse:
+        # get_session_page enforces parent ownership and resolves the immutable
+        # page/revision snapshot saved in this session, including multi-page sessions.
+        page = await self.get_session_page(session_id, actor_id)
+        reference_text = page.text or " ".join(word.text for word in page.words)
+        if not reference_text.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Book text is empty",
+            )
+
+        result = align_text(reference_text, payload.transcript)
+        words = (
+            [word.model_dump() for word in payload.words]
+            if payload.words is not None
+            else None
+        )
+        summary = summarize_alignment(
+            result["alignment"],
+            words=words,
+            threshold=1.0,
+        )
+
+        report = ReadingComparisonReport(
+            SessionId=session_id,
+            PageId=page.page_id,
+            PageRevisionId=page.page_revision_id,
+            Transcript=payload.transcript,
+            Distance=result["distance"],
+            Alignment=result["alignment"],
+            Summary=summary,
+        )
+        saved_report = await self.repository.create_reading_comparison_report(report)
+        return CompareReadingResponse(
+            report_id=saved_report.Id,
+            session_id=session_id,
+            page_id=page.page_id,
+            page_revision_id=page.page_revision_id,
+            transcript=payload.transcript,
+            distance=result["distance"],
+            alignment=result["alignment"],
+            summary=summary,
+            created_at=saved_report.CreatedAt,
+        )
 
     async def get_session_page(self, session_id: UUID, actor_id: UUID) -> ReadingPageDTO:
         await self.require_parent(actor_id)
