@@ -218,7 +218,7 @@ class VoiceRouteTests(unittest.TestCase):
             with make_client() as client:
                 response = client.post(
                     "/voice/speech-to-text",
-                    files={"file": ("reading.webm", b"audio-bytes", "audio/webm")},
+                    files={"file": ("reading.wav", make_wav_bytes(), "audio/wav")},
                 )
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"detail": {"code": "SPEECH_UNAVAILABLE"}})
