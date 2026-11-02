@@ -115,32 +115,35 @@ describe("per-session reading report page", () => {
     expect(api.getSessionReports).toHaveBeenCalledTimes(2);
   });
 
-  it("shows an API failure separately from empty data and supports retry", async () => {
-    const user = userEvent.setup();
-    api.getSessionReports
-      .mockRejectedValueOnce(new Error("Không thể tải báo cáo đọc."))
-      .mockResolvedValueOnce(
-        reportsResponse([
-          savedReport("report-recovered", "Transcript đã lưu."),
-        ]),
-      );
+  it(
+    "shows an API failure separately from empty data and supports retry",
+    async () => {
+      const user = userEvent.setup();
+      api.getSessionReports
+        .mockRejectedValueOnce(new Error("Không thể tải báo cáo đọc."))
+        .mockResolvedValueOnce(
+          reportsResponse([
+            savedReport("report-recovered", "Transcript đã lưu."),
+          ]),
+        );
 
-    render(<ReadingReportPage />);
+      render(<ReadingReportPage />);
 
-    expect(
-      await screen.findByText("Không thể tải báo cáo đọc."),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/chưa có báo cáo đối chiếu nào được lưu/i),
-    ).not.toBeInTheDocument();
+      expect(
+        await screen.findByText("Không thể tải báo cáo đọc."),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/chưa có báo cáo đối chiếu nào được lưu/i),
+      ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Thử tải lại" }));
+      await user.click(screen.getByRole("button", { name: "Thử tải lại" }));
 
-    expect(
-      await screen.findByTestId("saved-report-report-recovered"),
-    ).toHaveTextContent("Transcript đã lưu.");
-    expect(api.getSessionReports).toHaveBeenCalledTimes(2);
-  });
+      expect(
+        await screen.findByTestId("saved-report-report-recovered"),
+      ).toHaveTextContent("Transcript đã lưu.");
+      expect(api.getSessionReports).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("removes only the selected report after successful deletion", async () => {
     const user = userEvent.setup();
