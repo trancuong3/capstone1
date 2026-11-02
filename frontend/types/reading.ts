@@ -225,6 +225,19 @@ export type ReadingEventType =
 export type ReadingEventStatus =
   "CANDIDATE" | "CONFIRMED" | "UNCERTAIN" | "DISMISSED";
 
+export interface ReadingEventCreateDTO {
+  readonly session_id: UUID;
+  readonly page_id: UUID;
+  readonly page_revision_id: UUID;
+  readonly word_id: UUID;
+  readonly type: ReadingEventType;
+  readonly start_ms: number;
+  readonly end_ms: number | null;
+  readonly confidence: number | null;
+  readonly status: ReadingEventStatus;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface ReadingEventDTO {
   readonly id: UUID;
   readonly session_id: UUID;
