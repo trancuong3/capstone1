@@ -35,10 +35,7 @@ import type {
   ReadingUiState,
   TutorAction,
 } from "@/types/reading";
-import {
-  compareTranscript,
-  type ComparisonResult,
-} from "@/lib/api/comparison-service";
+import { compareTranscript } from "@/lib/api/comparison-service";
 import {
   alignReadingSegment,
   findOriginalSentence,
@@ -67,7 +64,7 @@ type LoadState =
   | { status: "ready"; data: ReadingScreenData }
   | { status: "not-found" }
   | { status: "error" };
-export function ReadingScreenexport function ReadingScreen({
+export function ReadingScreen({
   initialPageId,
   initialUiState,
   reconnectMode,
@@ -103,15 +100,9 @@ export function ReadingScreenexport function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
-  const [finalTranscript, setFinalTranscript] = useState("");
-  const [isComparing, setIsComparing] = useState(false);
-  const [comparisonResult, setComparisonResult] =
-    useState<ComparisonResult | null>(null);
-  const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
-  const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -145,7 +136,6 @@ export function ReadingScreenexport function ReadingScreen({
   const startListeningRef = useRef<() => Promise<boolean>>(() =>
     Promise.resolve(false),
   );
-  const isUsingRecorderRef = useRef(false);
 
   const recordSpokenText = useCallback((text: string) => {
     const trimmed = text.trim();
@@ -163,7 +153,6 @@ export function ReadingScreenexport function ReadingScreen({
     for (const w of words) {
       spokenWordsSetRef.current.add(w);
     }
-    setSpokenWords(new Set(spokenWordsSetRef.current));
   }, []);
 
   const handleWordClick = useCallback(
@@ -447,9 +436,6 @@ export function ReadingScreenexport function ReadingScreen({
 
   async function startListening(): Promise<boolean> {
     setLatestTranscript(null);
-    setComparisonResult(null);
-    setComparisonError(null);
-    setIsComparing(false);
     isListeningActiveRef.current = true;
     try {
       // MediaRecorder + Scribe is the sole authoritative recognition pipeline.
@@ -488,7 +474,7 @@ export function ReadingScreenexport function ReadingScreen({
     }
   }
 
-  async function handleReadSample()  async function handleReadSample() {
+  async function handleReadSample() {
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
@@ -539,7 +525,6 @@ export function ReadingScreenexport function ReadingScreen({
     spokenWordsSetRef.current.clear();
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
-    setSpokenWords(new Set());
 
     // Set first word active immediately so user sees what is being queued
     setCurrentWordId(words[0].word_id);
@@ -561,15 +546,6 @@ export function ReadingScreenexport function ReadingScreen({
           const targetWord = words[idx];
           if (targetWord) {
             setCurrentWordId(targetWord.word_id);
-            correctWordIdsRef.current.clear();
-            spokenWordsSetRef.current.clear();
-            for (let i = 0; i < idx; i++) {
-              correctWordIdsRef.current.add(words[i].word_id);
-              spokenWordsSetRef.current.add(words[i].text);
-            }
-            mispronouncedWordIdsRef.current.delete(targetWord.word_id);
-            setCorrectWordIds(new Set(correctWordIdsRef.current));
-            setSpokenWords(new Set(spokenWordsSetRef.current));
           }
         },
         onEnded: () => {
@@ -578,12 +554,6 @@ export function ReadingScreenexport function ReadingScreen({
           const lastWord = words[words.length - 1];
           if (lastWord) {
             setCurrentWordId(lastWord.word_id);
-            for (const w of words) {
-              correctWordIdsRef.current.add(w.word_id);
-              spokenWordsSetRef.current.add(w.text);
-            }
-            setCorrectWordIds(new Set(correctWordIdsRef.current));
-            setSpokenWords(new Set(spokenWordsSetRef.current));
           }
         },
       });
@@ -642,23 +612,25 @@ export function ReadingScreenexport function ReadingScreen({
     //Set lại ghi âm mới
     transcriptsListRef.current = [];
 
-    setLatestTranscript("");
-    setFinalTranscript("");
-    setComparisonResult(null);
-    setComparisonError(null);
-    setIsComparing(false);
+    setLatestTranscript(null);
     setIsBusy(false);
     setCountdown(3);
     if (page && page.words.length > 0) {
       setCurrentWordId(page.words[0].word_id);
     }
+    pageCursorByRevisionRef.current.clear();
+    processedSpeechSegmentIdsRef.current.clear();
+    speechSegmentSequenceRef.current = 0;
+    recognitionQueueRef.current = Promise.resolve();
+    pronunciationReviewCandidatesRef.current.clear();
     correctWordIdsRef.current.clear();
     mispronouncedWordIdsRef.current.clear();
+    uncertainWordIdsRef.current.clear();
     failedWordsSetRef.current.clear();
     spokenWordsSetRef.current.clear();
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
-    setSpokenWords(new Set());
+    setUncertainWordIds(new Set());
   }
 
   async function resumeReading() {
@@ -921,14 +893,9 @@ async function finishReading() {
       .join(" ")
       .trim();
 
-    setFinalTranscript(combinedTranscript);
 
     // 3. So sánh transcript đúng một lần khi bé đọc xong
     if (combinedTranscript && (pageProgress?.total_pages ?? 1) === 1) {
-      setIsComparing(true);
-      setComparisonError(null);
-      setComparisonResult(null);
-
       try {
         const result = await compareTranscript(
           sessionId,
@@ -937,21 +904,11 @@ async function finishReading() {
 
         if (!mountedRef.current) return;
 
-        setComparisonResult(result);
       } catch (error) {
         console.error("Lỗi so sánh bài đọc:", error);
 
         if (mountedRef.current) {
-          setComparisonError(
-            error instanceof Error
-              ? error.message
-              : "Không thể so sánh bài đọc.",
-          );
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsComparing(false);
-        }
+          }
       }
     }
 
@@ -1040,7 +997,6 @@ async function finishReading() {
     finishStartedRef.current = false;
   } finally {
     if (mountedRef.current) {
-      setIsComparing(false);
       setIsBusy(false);
     }
   }
@@ -1244,9 +1200,6 @@ async function finishReading() {
           page.words.find((w) => w.word_id === currentWordId)?.text ?? null
         }
         exitHref={detailHref}
-        isCurrentWordMispronounced={Boolean(
-          currentWordId && mispronouncedWordIds.has(currentWordId),
-        )}
         isListening={uiState === "reading"}
         isMicRecording={isMicRecording}
         isPageTransitioning={uiState === "page-turn"}
@@ -1265,7 +1218,6 @@ async function finishReading() {
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
-        spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
