@@ -14,6 +14,7 @@ import {
   Mic,
   Star,
   Users,
+  Volume2,
   XCircle,
 } from "lucide-react";
 import Image from "next/image";
@@ -21,6 +22,7 @@ import Image from "next/image";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { ButtonLink } from "@/components/common/button";
 import { cn } from "@/lib/utils/cn";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingCompletionSummaryUI } from "@/types/reading";
 
@@ -38,6 +40,19 @@ export function SessionComplete({
   summary,
 }: SessionCompleteProps) {
   const [showWordList, setShowWordList] = useState(false);
+  const [playingUncertainWordIndex, setPlayingUncertainWordIndex] = useState<number | null>(null);
+  const speechPlayer = useSpeechPlayer();
+
+  function playUncertainWordSample(word: string, index: number) {
+    if (playingUncertainWordIndex !== null) return;
+    setPlayingUncertainWordIndex(index);
+    void speechPlayer
+      .play(word, {
+        onEnded: () => setPlayingUncertainWordIndex(null),
+        onError: () => setPlayingUncertainWordIndex(null),
+      })
+      .catch(() => setPlayingUncertainWordIndex(null));
+  }
   const rangeWasPartial =
     summary.selected_range_pages !== undefined &&
     summary.selected_range_pages !== null &&
@@ -346,9 +361,19 @@ export function SessionComplete({
                       {uncertainWords.map((word, idx) => (
                         <span
                           key={`uncertain-${idx}-${word}`}
-                          className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900"
+                          className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900"
                         >
                           {word}
+                          <button
+                            type="button"
+                            aria-label={`Nghe mẫu từ ${word}`}
+                            disabled={playingUncertainWordIndex !== null}
+                            onClick={() => playUncertainWordSample(word, idx)}
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+                          >
+                            <Volume2 aria-hidden="true" className="size-3.5" />
+                            {playingUncertainWordIndex === idx ? "Đang phát…" : "Nghe mẫu"}
+                          </button>
                         </span>
                       ))}
                     </div>
