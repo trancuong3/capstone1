@@ -18,6 +18,9 @@ from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
     CompareReadingRequest,
     CompareReadingResponse,
+    DeleteReadingReportResponse,
+    ReadingComparisonReportListResponse,
+    ReadingComparisonReportItem,
     FluencyAssessmentCreate,
     ReadingCompletionSummaryDTO,
     ReadingEventCreate,
@@ -422,6 +425,49 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
         return self._summary(session)
+
+    async def get_session_reports(
+        self,
+        session_id: UUID,
+        actor_id: UUID,
+    ) -> ReadingComparisonReportListResponse:
+        await self.get_session_summary(session_id, actor_id)
+        reports = await self.repository.reading_comparison_reports(session_id)
+        return ReadingComparisonReportListResponse(
+            session_id=session_id,
+            total=len(reports),
+            reports=[
+                ReadingComparisonReportItem(
+                    report_id=report.Id,
+                    page_id=report.PageId,
+                    page_revision_id=report.PageRevisionId,
+                    transcript=report.Transcript,
+                    distance=report.Distance,
+                    alignment=report.Alignment,
+                    summary=report.Summary,
+                    created_at=report.CreatedAt,
+                )
+                for report in reports
+            ],
+        )
+
+    async def delete_reading_report(
+        self,
+        report_id: UUID,
+        actor_id: UUID,
+    ) -> DeleteReadingReportResponse:
+        report = await self.repository.reading_comparison_report(report_id)
+        if report is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Reading report not found",
+            )
+        await self.get_session_summary(report.SessionId, actor_id)
+        await self.repository.delete_reading_comparison_report(report)
+        return DeleteReadingReportResponse(
+            message="Report deleted successfully",
+            report_id=report_id,
+        )
 
     async def compare_reading(
         self,
