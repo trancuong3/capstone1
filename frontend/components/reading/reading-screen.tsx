@@ -406,9 +406,17 @@ export function ReadingScreen({
     uiState,
   ]);
 
-  function commitRecognizedTranscript(eventId: string, spokenText: string) {
+  function commitRecognizedTranscript(
+    eventId: string,
+    spokenText: string,
+    expectedTracker?: SequentialReadingTracker,
+  ) {
     const tracker = trackerRef.current;
-    if (!tracker || !spokenText.trim()) return;
+    if (
+      !tracker ||
+      (expectedTracker !== undefined && tracker !== expectedTracker) ||
+      !spokenText.trim()
+    ) return;
 
     const result = tracker.commitFinal(eventId, spokenText);
     if (result.duplicate) return;
@@ -455,7 +463,7 @@ export function ReadingScreen({
         const finalText = transcript.text.trim();
         if (finalText) {
           setLatestTranscript(finalText);
-          commitRecognizedTranscript(eventId, finalText);
+          commitRecognizedTranscript(eventId, finalText, tracker);
         }
       } catch (error) {
         console.warn("Live ElevenLabs STT utterance notice:", error);
@@ -659,47 +667,11 @@ export function ReadingScreen({
     setIsBusy(true);
     setIsReadingWord(false);
 
-    // Calculate word duration weights for natural Vietnamese speech rhythm
-    const weights = words.map((w) => {
-      let weight = Math.max(2, w.text.length);
-      if (/[.,;:!?…"”]/.test(w.text)) {
-        weight += 4;
-      }
-      return weight;
-    });
-    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-    const cumulativeWeights: number[] = [];
-    let running = 0;
-    for (const w of weights) {
-      running += w;
-      cumulativeWeights.push(running);
-    }
-
-    // The sample temporarily moves the visual focus but is not child reading
-    // evidence and must not clear or commit any token status.
-
-    // Set first word active immediately so user sees what is being queued
-    setCurrentWordId(words[0].word_id);
+    // A sample playback is not child reading evidence. Keep the authoritative
+    // reading cursor fixed while the example voice is playing.
 
     try {
       await speechPlayer.play(fullText, {
-        onPlay: () => {
-          if (!mountedRef.current) return;
-          setCurrentWordId(words[0].word_id);
-        },
-        onTimeUpdate: (currentTime, duration) => {
-          if (!mountedRef.current || !duration || duration <= 0) return;
-          const progress = Math.min(0.999, Math.max(0, currentTime / duration));
-          const targetWeight = progress * totalWeight;
-          let idx = cumulativeWeights.findIndex((cw) => cw >= targetWeight);
-          if (idx < 0) idx = 0;
-          if (idx >= words.length) idx = words.length - 1;
-
-          const targetWord = words[idx];
-          if (targetWord) {
-            setCurrentWordId(targetWord.word_id);
-          }
-        },
         onEnded: () => {
           if (!mountedRef.current) return;
           setIsBusy(false);
