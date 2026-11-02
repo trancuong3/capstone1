@@ -45,7 +45,6 @@ import {
 } from "@/lib/utils/sequential-reading-alignment";
 import { getReadingWordConfidenceThreshold } from "@/lib/utils/reading-confidence";
 import {
-  confirmedIncorrectReviewCandidates,
   MAX_REVIEW_ATTEMPTS,
   SessionReviewQueue,
   type SessionReviewQueueSnapshot,
@@ -276,7 +275,7 @@ export function ReadingScreen({
       pageProgress?.current_index ??
       0;
     sessionReviewQueueRef.current.replacePageCandidates(
-      confirmedIncorrectReviewCandidates(tracker.getReviewCandidates()),
+      tracker.getReviewCandidates(),
       pageOrder,
       tracker.pageId,
       tracker.pageRevisionId,
