@@ -45,8 +45,8 @@ class FakeAudioContext {
 
 class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = [];
-  static isTypeSupported = vi.fn((mimeType: string) =>
-    mimeType === "audio/webm;codecs=opus",
+  static isTypeSupported = vi.fn(
+    (mimeType: string) => mimeType === "audio/webm;codecs=opus",
   );
 
   readonly mimeType: string;
@@ -85,8 +85,7 @@ const getUserMedia = vi.fn(async () => stream);
 
 function flushFrame() {
   const first = frames.entries().next().value as
-    | [number, FrameRequestCallback]
-    | undefined;
+    [number, FrameRequestCallback] | undefined;
   if (!first) throw new Error("No animation frame was scheduled.");
   const [id, callback] = first;
   frames.delete(id);
