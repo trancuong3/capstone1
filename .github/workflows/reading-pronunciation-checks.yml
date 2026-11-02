@@ -71,6 +71,7 @@ jobs:
             lib/api/speech-service.ts \
             lib/utils/reading-pronunciation-alignment.ts \
             test/speech-service.test.ts \
+            test/use-speech-recorder.test.tsx \
             tests/reading/reading-pronunciation-alignment.test.ts \
             tests/reading/reading-pronunciation-review.test.tsx \
             types/reading.ts
