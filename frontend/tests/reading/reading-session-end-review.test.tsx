@@ -383,15 +383,11 @@ describe("ReadingScreen session-end word review", () => {
       />,
     );
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Bắt đầu đọc" }));
     await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
     expect(screen.getByText(/Chuẩn bị đọc/)).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Tạm dừng buổi đọc" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Tạm dừng buổi đọc" }));
     await screen.findByRole("dialog", { name: "Bé đang nghỉ một chút" });
     expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
       TEST_SESSION_ID,
@@ -456,5 +452,4 @@ describe("ReadingScreen session-end word review", () => {
     );
     expect(services.readingService.finish).not.toHaveBeenCalled();
   }, 12_000);
-
 });

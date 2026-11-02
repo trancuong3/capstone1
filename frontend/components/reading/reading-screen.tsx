@@ -1227,7 +1227,9 @@ export function ReadingScreen({
               onError: () =>
                 reject(new Error("Reference pronunciation playback failed.")),
               onStopped: () =>
-                reject(new Error("Reference pronunciation playback was stopped.")),
+                reject(
+                  new Error("Reference pronunciation playback was stopped."),
+                ),
             })
             .catch(reject);
         });
@@ -1447,7 +1449,6 @@ export function ReadingScreen({
       }
     }, 100);
   }
-
 
   async function pauseSessionReview(): Promise<boolean> {
     if (reviewActivity === "processing" || reviewActivity === "assisting") {

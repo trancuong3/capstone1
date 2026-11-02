@@ -73,7 +73,10 @@ export function useSpeechPlayer(): SpeechPlayer {
           signal: controller.signal,
         });
       } catch (error) {
-        if (controller.signal.aborted || generation !== playGenerationRef.current) {
+        if (
+          controller.signal.aborted ||
+          generation !== playGenerationRef.current
+        ) {
           return;
         }
         synthesisAbortRef.current = null;
@@ -81,7 +84,10 @@ export function useSpeechPlayer(): SpeechPlayer {
         throw error;
       }
 
-      if (controller.signal.aborted || generation !== playGenerationRef.current) {
+      if (
+        controller.signal.aborted ||
+        generation !== playGenerationRef.current
+      ) {
         return;
       }
       synthesisAbortRef.current = null;
