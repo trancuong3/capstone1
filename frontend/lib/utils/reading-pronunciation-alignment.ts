@@ -116,7 +116,7 @@ function tokenSimilarity(left: string, right: string): number {
     { length: rightChars.length + 1 },
     (_, index) => index,
   );
-  let current = Array<number>(rightChars.length + 1).fill(0);
+  const current = Array<number>(rightChars.length + 1).fill(0);
 
   for (let i = 1; i <= leftChars.length; i += 1) {
     current[0] = i;
