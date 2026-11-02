@@ -32,7 +32,7 @@ export function useSpeechRecorder(): SpeechRecorder {
     ((blob: Blob, segmentStartedAtMs?: number) => void) | null
   >(null);
   const captureStartedAtMsRef = useRef<number | null>(null);
-  const utteranceStartedAtMsRef = useRef<number | null>(null);
+  const recorderSegmentStartedAtMsRef = useRef<number | null>(null);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const captureGenerationRef = useRef(0);
@@ -133,7 +133,7 @@ export function useSpeechRecorder(): SpeechRecorder {
       isRecordingRef.current = true;
       const captureGeneration = captureGenerationRef.current;
       captureStartedAtMsRef.current = Date.now();
-      utteranceStartedAtMsRef.current = null;
+      recorderSegmentStartedAtMsRef.current = null;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (
@@ -165,6 +165,7 @@ export function useSpeechRecorder(): SpeechRecorder {
           }
         };
         rec.onerror = () => {};
+        recorderSegmentStartedAtMsRef.current = Date.now();
         rec.start(150);
         return rec;
       };
@@ -213,11 +214,6 @@ export function useSpeechRecorder(): SpeechRecorder {
 
               // VAD: avg > 10 corresponds to audible human speech
               if (avg > 10) {
-                if (!hasSpokenInUtterance) {
-                  // The recorder is already collecting 150 ms timeslices, so
-                  // include a small lead-in before the VAD threshold crossing.
-                  utteranceStartedAtMsRef.current = Date.now() - 150;
-                }
                 speakingFrames++;
                 hasSpokenInUtterance = true;
                 silentFrames = 0;
@@ -244,11 +240,12 @@ export function useSpeechRecorder(): SpeechRecorder {
                 silentFrames = 0;
                 speakingFrames = 0;
 
+                // Scribe word offsets are relative to this MediaRecorder
+                // segment's start, not to the later VAD threshold crossing.
                 const segmentStartedAtMs =
-                  utteranceStartedAtMsRef.current ??
+                  recorderSegmentStartedAtMsRef.current ??
                   captureStartedAtMsRef.current ??
                   Date.now();
-                utteranceStartedAtMsRef.current = null;
                 const activeRecorder = recorderRef.current;
                 if (activeRecorder && activeRecorder.state === "recording") {
                   isRotatingRef.current = true;
@@ -340,7 +337,7 @@ export function useSpeechRecorder(): SpeechRecorder {
       rejectStopRef.current = reject;
       const finalSegmentChunks = chunksRef.current;
       const finalSegmentStartedAtMs =
-        utteranceStartedAtMsRef.current ??
+        recorderSegmentStartedAtMsRef.current ??
         captureStartedAtMsRef.current ??
         Date.now();
       recorder.onstop = () => {
