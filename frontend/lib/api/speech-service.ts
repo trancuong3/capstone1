@@ -6,6 +6,8 @@ import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage =
   "Chức năng giọng nói đang chưa sẵn sàng. Vui lòng thử lại sau.";
+const invalidAudioMessage =
+  "Đoạn ghi âm không hợp lệ. Bé vui lòng đọc lại để thử lần nữa.";
 
 const wordTimestampSchema = z.object({
   text: z.string(),
@@ -59,6 +61,7 @@ function failure(
   status: number,
   requestId = "",
   retryable = false,
+  message = safeMessage,
 ): ServiceError {
   let code: ServiceErrorCode = capabilityCode;
   if (status === 401) code = "AUTH_REQUIRED";
@@ -66,7 +69,7 @@ function failure(
   if (status === 422) code = "VALIDATION_ERROR";
   return new ServiceError({
     code,
-    message: safeMessage,
+    message,
     status,
     request_id: requestId,
     retryable,
@@ -108,11 +111,31 @@ async function speechRequest(
       signal,
     });
     if (!response.ok) {
+      let message = safeMessage;
+      if (response.status === 422 && path === "/voice/speech-to-text") {
+        try {
+          const errorPayload: unknown = await response.clone().json();
+          if (
+            typeof errorPayload === "object" &&
+            errorPayload !== null &&
+            "detail" in errorPayload &&
+            typeof errorPayload.detail === "object" &&
+            errorPayload.detail !== null &&
+            "code" in errorPayload.detail &&
+            errorPayload.detail.code === "INVALID_AUDIO"
+          ) {
+            message = invalidAudioMessage;
+          }
+        } catch {
+          // Keep a safe generic message when the error body is not valid JSON.
+        }
+      }
       throw failure(
         capabilityCode,
         response.status,
         response.headers.get("x-request-id") ?? "",
         response.status === 429 || response.status >= 500,
+        message,
       );
     }
     return response;
