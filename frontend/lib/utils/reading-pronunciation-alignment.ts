@@ -91,7 +91,7 @@ function transcriptWords(
 function isLikelyIncompleteToken(spoken: string, expected: string): boolean {
   if (!spoken || !expected) return true;
   if (spoken.length === 1 && expected.length >= 3) return true;
-  return expected.length >= 4 && spoken.length / expected.length < 0.5;
+  return expected.length >= 4 && spoken.length / expected.length <= 0.5;
 }
 
 type AlignmentStep =
@@ -105,7 +105,7 @@ type AlignmentStep =
 
 const SUBSTITUTION_COST = 1.25;
 const GAP_COST = 1;
-const MIN_PRONUNCIATION_SIMILARITY = 0.45;
+const MIN_TOKEN_SIMILARITY = 0.45;
 
 function tokenSimilarity(left: string, right: string): number {
   const leftChars = Array.from(left);
@@ -348,7 +348,7 @@ export function alignReadingSegment(
       status = "CORRECT";
       reason = "EXACT_WORD_MATCH";
     } else if (
-      evidence.similarity >= MIN_PRONUNCIATION_SIMILARITY &&
+      evidence.similarity >= MIN_TOKEN_SIMILARITY &&
       hasReliableAdjacentContext
     ) {
       // A non-matching word is only a confirmed pronunciation candidate when
