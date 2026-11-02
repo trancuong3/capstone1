@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Mic, Volume2 } from "lucide-react";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -48,6 +48,10 @@ export function ReadingPronunciationReview({
   );
   const reportedOutcomesRef = useRef<Set<string>>(new Set());
   const currentPracticeTranscriptRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => recorder.cancel();
+  }, [recorder.cancel]);
 
   const group = groups[groupIndex] ?? null;
   const currentWord = group?.words[wordIndex] ?? null;
@@ -145,11 +149,15 @@ export function ReadingPronunciationReview({
 
     if (!isRecording) {
       setFeedback("Mình đang nghe con đọc…");
+      setIsProcessing(true);
       try {
         await recorder.start();
         setIsRecording(true);
       } catch {
-        setFeedback("Chưa mở được micro. Con nhờ ba mẹ kiểm tra quyền micro nhé.");
+        setCanContinue(true);
+        setFeedback("Chưa mở được micro. Con có thể nghe đọc mẫu hoặc nhờ ba mẹ kiểm tra quyền micro nhé.");
+      } finally {
+        setIsProcessing(false);
       }
       return;
     }
@@ -159,7 +167,14 @@ export function ReadingPronunciationReview({
       const recording = await recorder.stop();
       setIsRecording(false);
       if (!recording || recording.size <= 800) {
-        setFeedback("Mình chưa nghe rõ. Con thử đọc lại nhé.");
+        const nextAttempt = attempts + 1;
+        setAttempts(nextAttempt);
+        setCanContinue(nextAttempt >= MAX_ATTEMPTS);
+        setFeedback(
+          nextAttempt >= MAX_ATTEMPTS
+            ? "Mình chưa nghe thấy giọng đọc rõ ràng. Con có thể nghe mẫu rồi chuyển tiếp nhé."
+            : "Mình chưa nghe rõ. Con thử đọc lại nhé.",
+        );
         return;
       }
 
@@ -323,17 +338,20 @@ export function ReadingPronunciationReview({
             </span>
             <p className="font-semibold text-rose-700">Mình đang nghe con đọc…</p>
           </div>
-        ) : (
-          <button
-            type="button"
-            disabled={isProcessing}
-            onClick={() => void handleRecordButton()}
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-primary px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Mic aria-hidden="true" className="size-5" />
-            {isProcessing ? "Đang kiểm tra…" : "Bắt đầu đọc"}
-          </button>
-        )}
+        ) : null}
+        <button
+          type="button"
+          disabled={isProcessing || player.isPlaying}
+          onClick={() => void handleRecordButton()}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-primary px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
+        >
+          <Mic aria-hidden="true" className={isRecording ? "size-5 animate-pulse" : "size-5"} />
+          {isProcessing
+            ? "Đang kiểm tra…"
+            : isRecording
+              ? "Dừng và kiểm tra"
+              : "Bắt đầu đọc"}
+        </button>
 
         <p className="min-h-6 text-sm font-semibold text-muted" aria-live="polite">
           {feedback}
