@@ -57,9 +57,7 @@ function savedReport(reportId: string, transcript: string) {
   };
 }
 
-function reportsResponse(
-  reports: ReturnType<typeof savedReport>[],
-) {
+function reportsResponse(reports: ReturnType<typeof savedReport>[]) {
   return {
     session_id: sessionId,
     total: reports.length,
@@ -122,7 +120,9 @@ describe("per-session reading report page", () => {
     api.getSessionReports
       .mockRejectedValueOnce(new Error("Không thể tải báo cáo đọc."))
       .mockResolvedValueOnce(
-        reportsResponse([savedReport("report-recovered", "Transcript đã lưu.")]),
+        reportsResponse([
+          savedReport("report-recovered", "Transcript đã lưu."),
+        ]),
       );
 
     render(<ReadingReportPage />);
@@ -152,7 +152,9 @@ describe("per-session reading report page", () => {
     render(<ReadingReportPage />);
 
     await screen.findByTestId("saved-report-report-to-delete");
-    await user.click(screen.getAllByRole("button", { name: "Xóa báo cáo" })[0]);
+    await user.click(
+      screen.getAllByRole("button", { name: "Xóa báo cáo" })[0],
+    );
 
     await waitFor(() => {
       expect(api.deleteReadingReport).toHaveBeenCalledWith("report-to-delete");
