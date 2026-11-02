@@ -1399,7 +1399,7 @@ export function ReadingScreen({
     attempt.deadlineMs = Date.now() + 3_000;
     setReviewActivity("listening");
     setReviewSecondsRemaining(3);
-    setReviewFeedback("Mình đang nghe con đọc…");
+    setReviewFeedback("Con cứ đọc nhé!");
 
     // The deadline ends capture, not recognition processing. A final STT
     // request that is still running is awaited after stop() has emitted its tail.
