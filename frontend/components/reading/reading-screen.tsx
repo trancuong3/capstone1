@@ -643,8 +643,15 @@ export function ReadingScreen({
     // MediaRecorder utterances are the authoritative final STT stream.
     try {
       await speechRecorder.start(enqueueRecordedUtterance);
+      if (!mountedRef.current || !isListeningActiveRef.current) {
+        speechRecorder.cancel();
+        return false;
+      }
       isUsingRecorderRef.current = true;
     } catch (error) {
+      // A pause, finish, or unmount invalidates this asynchronous permission
+      // request. Do not let its cancellation overwrite the newer UI state.
+      if (!mountedRef.current || !isListeningActiveRef.current) return false;
       const message = error instanceof Error ? error.message : "";
       if (!message.includes("not supported")) {
         isListeningActiveRef.current = false;
