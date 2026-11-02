@@ -172,7 +172,7 @@ export function ReadingScreen({
   }, []);
 
   async function pauseMicrophoneForReferenceAudio() {
-    if (!isMicRecording) return;
+    if (!isMicRecording && !isListeningActiveRef.current) return;
     resumeMicrophoneAfterSpeechRef.current = true;
     try {
       await stopListeningAndTranscribe();
