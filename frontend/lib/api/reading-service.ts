@@ -8,6 +8,8 @@ import type {
   ReadingSessionCreateResponseDTO,
   ReadingSessionSummaryDTO,
   ReadingSessionPageProgressDTO,
+  ReadingEventCreateDTO,
+  ReadingEventDTO,
 } from "@/types/reading";
 
 export interface ReadingService {
@@ -27,6 +29,7 @@ export interface ReadingService {
   ): Promise<ReadingSessionPageProgressDTO>;
   getCompletionSummary(sessionId: string): Promise<ReadingCompletionSummaryUI>;
   finish(sessionId: string): Promise<ReadingSessionSummaryDTO>;
+  createEvent?(input: ReadingEventCreateDTO): Promise<ReadingEventDTO>;
 }
 
 const sessionCreateResponseSchema = z.object({
@@ -122,6 +125,21 @@ const completionSummarySchema = z.object({
   correct_words: z.array(z.string()).nullable().optional(),
   mispronounced_words: z.array(z.string()).nullable().optional(),
   score: z.number().min(0).max(100).nullable().optional(),
+});
+
+const readingEventResponseSchema = z.object({
+  Id: z.uuid(),
+  SessionId: z.uuid(),
+  PageId: z.uuid(),
+  PageRevisionId: z.uuid(),
+  WordId: z.uuid().nullable(),
+  Type: z.string(),
+  StartMs: z.number().int().nonnegative(),
+  EndMs: z.number().int().nonnegative().nullable(),
+  Confidence: z.number().min(0).max(1).nullable(),
+  Status: z.string(),
+  Metadata: z.record(z.string(), z.unknown()),
+  CreatedAt: z.iso.datetime({ offset: true }),
 });
 
 export function createReadingService(): ReadingService {
@@ -221,6 +239,43 @@ export function createReadingService(): ReadingService {
         `/reading/sessions/${encodeURIComponent(sessionId)}/completion-summary`,
         completionSummarySchema,
       );
+    },
+
+    async createEvent(input: ReadingEventCreateDTO): Promise<ReadingEventDTO> {
+      const event = await requestApi(
+        "/reading/events",
+        readingEventResponseSchema,
+        undefined,
+        {
+          method: "POST",
+          body: {
+            SessionId: input.session_id,
+            PageId: input.page_id,
+            PageRevisionId: input.page_revision_id,
+            WordId: input.word_id,
+            Type: input.type,
+            StartMs: input.start_ms,
+            EndMs: input.end_ms,
+            Confidence: input.confidence,
+            Status: input.status,
+            Metadata: input.metadata,
+          },
+        },
+      );
+
+      return {
+        id: event.Id,
+        session_id: event.SessionId,
+        page_id: event.PageId,
+        page_revision_id: event.PageRevisionId,
+        page_revision_word_id: event.WordId,
+        type: event.Type as ReadingEventDTO["type"],
+        start_ms: event.StartMs,
+        end_ms: event.EndMs,
+        confidence: event.Confidence,
+        status: event.Status as ReadingEventDTO["status"],
+        metadata: event.Metadata,
+      };
     },
 
     async finish(sessionId: string): Promise<ReadingSessionSummaryDTO> {
