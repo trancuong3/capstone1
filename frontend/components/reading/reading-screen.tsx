@@ -11,7 +11,10 @@ import { ManualPageSelector } from "@/components/reading/manual-page-selector";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import type { WordTimestamp } from "@/lib/api/speech-service";
-import { BrowserTranscriptCollector } from "@/lib/reading/browser-transcript-collector";
+import {
+  BrowserTranscriptCollector,
+  resolveTranscriptForSegment,
+} from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
@@ -747,7 +750,10 @@ export function ReadingScreen({
 
     // Use exactly one source for this capture segment: ElevenLabs first,
     // browser final recognition only when provider STT did not return text.
-    const resolvedText = elevenLabsResult?.text || browserText;
+    const resolvedText = resolveTranscriptForSegment(
+      elevenLabsResult?.text,
+      browserText,
+    );
     if (resolvedText && targetPage) {
       recordSpokenText(
         resolvedText,
