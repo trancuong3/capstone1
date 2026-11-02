@@ -163,6 +163,24 @@ describe("speech service", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("reports invalid recorded audio as a non-retryable validation error", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { detail: { code: "INVALID_AUDIO" } },
+        { status: 422 },
+      ),
+    );
+
+    await expect(
+      createSpeechService().transcribe(createWavRecording()),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      status: 422,
+      retryable: false,
+      message: "Đoạn ghi âm không hợp lệ. Bé vui lòng đọc lại để thử lần nữa.",
+    });
+  });
+
   it("does not call the API without a browser session", async () => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
     await expect(
