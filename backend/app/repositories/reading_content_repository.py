@@ -214,6 +214,41 @@ class ReadingContentRepository:
             .limit(1)
         )
 
+    async def reading_comparison_reports(
+        self,
+        session_id: UUID,
+    ) -> list[ReadingComparisonReport]:
+        result = await self.db.execute(
+            select(ReadingComparisonReport)
+            .where(ReadingComparisonReport.SessionId == session_id)
+            .order_by(
+                ReadingComparisonReport.CreatedAt.desc(),
+                ReadingComparisonReport.Id.desc(),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def reading_comparison_report(
+        self,
+        report_id: UUID,
+    ) -> ReadingComparisonReport | None:
+        return await self.db.scalar(
+            select(ReadingComparisonReport).where(
+                ReadingComparisonReport.Id == report_id
+            )
+        )
+
+    async def delete_reading_comparison_report(
+        self,
+        report: ReadingComparisonReport,
+    ) -> None:
+        await self.db.delete(report)
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+
     async def create_reading_comparison_report(
         self,
         report: ReadingComparisonReport,
