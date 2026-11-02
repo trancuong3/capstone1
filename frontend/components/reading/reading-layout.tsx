@@ -169,7 +169,7 @@ export function ReadingLayout({
               <p className="truncate text-sm font-semibold text-ink">
                 {latestTranscript
                   ? `Đã nghe: “${latestTranscript}”`
-                  : "Mình đang lắng nghe. Con cứ đọc tiếp nhé."}
+                  : "Mình đang nghe bé đọc. Con cứ đọc tiếp nhé."}
               </p>
               <p className="text-xs text-muted">
                 Các từ cần luyện sẽ được xem lại sau khi con đọc xong.
