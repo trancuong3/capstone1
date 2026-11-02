@@ -24,16 +24,21 @@ DEFAULT_MODEL_ID = "eleven_flash_v2_5"
 
 
 class VoiceProviderError(Exception):
-    """A provider failure that can be exposed only as a safe HTTP status."""
+    """A provider failure represented by a safe application code and HTTP status."""
 
-    def __init__(self, status_code: int = 502):
+    def __init__(
+        self,
+        status_code: int = 502,
+        code: str = "SPEECH_UNAVAILABLE",
+    ):
         self.status_code = status_code
+        self.code = code
         super().__init__("Voice provider request failed")
 
 
 class VoiceProviderUnavailable(VoiceProviderError):
     def __init__(self):
-        super().__init__(status_code=503)
+        super().__init__(status_code=503, code="SPEECH_UNAVAILABLE")
 
 
 @dataclass(frozen=True)
@@ -228,17 +233,80 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderError() from error
 
         if response.is_error:
-            logger.warning(
-                "ElevenLabs STT HTTP error: status=%s, request_id=%s, "
-                "content_type=%s, body=%s",
-                response.status_code,
-                response.headers.get("request-id", "unavailable"),
-                response.headers.get("content-type", "unknown"),
-                response.text[:1000],
-            )
-            if response.status_code == 429 or response.status_code >= 500:
+            provider_code = None
+            try:
+                error_payload = response.json()
+            except ValueError:
+                error_payload = None
+
+            if isinstance(error_payload, dict):
+                detail = error_payload.get("detail")
+                if isinstance(detail, dict):
+                    candidate = detail.get("code")
+                    if isinstance(candidate, str):
+                        provider_code = candidate.lower()
+
+            request_id = response.headers.get("request-id", "unavailable")
+            if provider_code == "quota_exceeded":
+                logger.warning(
+                    "ElevenLabs STT quota exhausted: status=%s, request_id=%s",
+                    response.status_code,
+                    request_id,
+                )
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_QUOTA_EXCEEDED",
+                )
+            if response.status_code in (401, 403):
+                logger.error(
+                    "ElevenLabs STT authentication rejected: status=%s, request_id=%s",
+                    response.status_code,
+                    request_id,
+                )
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_AUTH_FAILED",
+                )
+            if response.status_code == 422 or provider_code in {
+                "invalid_audio",
+                "unsupported_audio",
+            }:
+                logger.warning(
+                    "ElevenLabs STT rejected audio: status=%s, request_id=%s",
+                    response.status_code,
+                    request_id,
+                )
+                raise VoiceProviderError(
+                    status_code=422,
+                    code="STT_INVALID_AUDIO",
+                )
+            if response.status_code == 429:
+                logger.warning(
+                    "ElevenLabs STT rate limited: status=%s, request_id=%s",
+                    response.status_code,
+                    request_id,
+                )
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_RATE_LIMITED",
+                )
+            if response.status_code >= 500:
+                logger.warning(
+                    "ElevenLabs STT provider unavailable: status=%s, request_id=%s",
+                    response.status_code,
+                    request_id,
+                )
                 raise VoiceProviderUnavailable()
-            raise VoiceProviderError()
+
+            logger.warning(
+                "ElevenLabs STT provider rejected request: status=%s, request_id=%s",
+                response.status_code,
+                request_id,
+            )
+            raise VoiceProviderError(
+                status_code=503,
+                code="STT_PROVIDER_REJECTED",
+            )
 
         try:
             payload = response.json()
