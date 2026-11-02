@@ -164,6 +164,7 @@ export function ReadingScreen({
   const isListeningActiveRef = useRef(false);
   const trackerRef = useRef<SequentialReadingTracker | null>(null);
   const utteranceSequenceRef = useRef(0);
+  const utteranceEventIdsRef = useRef(new WeakMap<Blob, string>());
   const browserRecognitionEpochRef = useRef(0);
   const recognitionQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -431,13 +432,17 @@ export function ReadingScreen({
   function enqueueRecordedUtterance(utteranceBlob: Blob) {
     const tracker = trackerRef.current;
     if (!tracker || utteranceBlob.size <= 800) return;
-    const eventId = [
-      "media-recorder",
-      sessionId,
-      tracker.pageId,
-      tracker.pageRevisionId,
-      ++utteranceSequenceRef.current,
-    ].join(":");
+    let eventId = utteranceEventIdsRef.current.get(utteranceBlob);
+    if (!eventId) {
+      eventId = [
+        "media-recorder",
+        sessionId,
+        tracker.pageId,
+        tracker.pageRevisionId,
+        ++utteranceSequenceRef.current,
+      ].join(":");
+      utteranceEventIdsRef.current.set(utteranceBlob, eventId);
+    }
 
     const pending = recognitionQueueRef.current.then(async () => {
       if (!mountedRef.current || !isListeningActiveRef.current) return;
@@ -487,6 +492,7 @@ export function ReadingScreen({
     }
 
     // Browser recognition is a visual preview only while MediaRecorder is active.
+    let hasSpeechInput = isUsingRecorderRef.current;
     if (typeof window !== "undefined") {
       try {
         const win = window as unknown as WindowWithSpeech;
@@ -567,6 +573,7 @@ export function ReadingScreen({
           try {
             rec.start();
             recognitionRef.current = rec;
+            hasSpeechInput = true;
           } catch {
             // Safe ignore if browser blocks concurrent audio capture
           }
@@ -574,6 +581,15 @@ export function ReadingScreen({
       } catch (e) {
         console.warn("SpeechRecognition initialization skipped:", e);
       }
+    }
+
+    if (!hasSpeechInput) {
+      isListeningActiveRef.current = false;
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("microphone-denied");
+      }
+      return false;
     }
 
     return true;
