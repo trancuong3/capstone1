@@ -1,4 +1,4 @@
-name: Temporary full verification for sequential reading
+name: Temporary full verification for sequential reading # retry after focused test fixes
 
 on:
   push:
