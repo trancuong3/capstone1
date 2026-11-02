@@ -83,6 +83,9 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             reading_event_by_idempotency_key=AsyncMock(return_value=None),
             create_reading_event=AsyncMock(side_effect=lambda row: row),
             create_reading_comparison_report=AsyncMock(side_effect=lambda row: row),
+            reading_comparison_reports=AsyncMock(return_value=[]),
+            reading_comparison_report=AsyncMock(),
+            delete_reading_comparison_report=AsyncMock(),
             create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
             events_for_session=AsyncMock(return_value=[]),
         )
@@ -213,6 +216,82 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.status_code, 422)
         repo.create_reading_comparison_report.assert_not_awaited()
+
+    async def test_saved_comparison_reports_are_scoped_to_owned_session(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        created_at = datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc)
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="FINISHED",
+            StartedAt=datetime(2026, 11, 2, 8, 0, tzinfo=timezone.utc),
+            EndedAt=created_at,
+        )
+        repo.reading_comparison_reports.return_value = [
+            SimpleNamespace(
+                Id=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+                PageId=PAGE_ID,
+                PageRevisionId=REVISION_ID,
+                Transcript="Chú mèo",
+                Distance=0,
+                Alignment=[{"status": "MATCH"}],
+                Summary={"missing_words": []},
+                CreatedAt=created_at,
+            )
+        ]
+
+        result = await service.get_session_reports(session_id, PARENT_ID)
+
+        self.assertEqual(result.session_id, session_id)
+        self.assertEqual(result.total, 1)
+        self.assertEqual(result.reports[0].page_id, PAGE_ID)
+        repo.reading_comparison_reports.assert_awaited_once_with(session_id)
+
+    async def test_delete_comparison_report_checks_session_ownership(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        report_id = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        repo.reading_comparison_report.return_value = SimpleNamespace(
+            Id=report_id,
+            SessionId=session_id,
+        )
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="FINISHED",
+            StartedAt=datetime(2026, 11, 2, 8, 0, tzinfo=timezone.utc),
+            EndedAt=datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc),
+        )
+
+        result = await service.delete_reading_report(report_id, PARENT_ID)
+
+        self.assertEqual(result.report_id, report_id)
+        repo.reading_comparison_report.assert_awaited_once_with(report_id)
+        repo.delete_reading_comparison_report.assert_awaited_once()
+
+    async def test_delete_comparison_report_rejects_report_from_another_parent(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        report_id = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        repo.reading_comparison_report.return_value = SimpleNamespace(
+            Id=report_id,
+            SessionId=session_id,
+        )
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        repo.child_belongs_to_parent.return_value = False
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.delete_reading_report(report_id, PARENT_ID)
+
+        self.assertEqual(raised.exception.status_code, 404)
+        repo.delete_reading_comparison_report.assert_not_awaited()
 
     async def test_reading_event_requires_owned_session_and_verified_page_revision(self):
         service, repo = self.make_service()
