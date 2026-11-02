@@ -95,8 +95,8 @@ describe("speech service", () => {
 
   it("preserves provider word timestamps for reading alignment", async () => {
     const words = [
-      { text: "Con", start: 0.1, end: 0.2 },
-      { text: "mèo", start: 0.21, end: 0.4 },
+      { text: "Con", start: 0.1, end: 0.2, logprob: -0.08 },
+      { text: "mèo", start: 0.21, end: 0.4, logprob: -0.12 },
     ];
     fetchMock.mockResolvedValue(
       Response.json({
