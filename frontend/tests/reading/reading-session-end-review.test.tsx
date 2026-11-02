@@ -229,6 +229,62 @@ afterEach(() => {
 
 describe("ReadingScreen session-end word review", () => {
   it(
+    "keeps uncalibrated recognition uncertain, persists it as ignored-by-gate, and does not force a whole-range reread",
+    async () => {
+      vi.stubEnv("NEXT_PUBLIC_READING_WORD_CONFIDENCE_THRESHOLD", "");
+      const readingService = services.readingService;
+      render(
+        <ReadingScreen
+          initialUiState="reading"
+          reconnectMode="recover"
+          sessionId={TEST_SESSION_ID}
+        />,
+      );
+
+      await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+        );
+      });
+      await act(async () => {
+        mocks.recorder.callback?.(
+          new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
+        );
+      });
+      await screen.findByText("Bé mây");
+
+      fireEvent.click(screen.getByRole("button", { name: "Xong" }));
+      await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
+      fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
+
+      expect(
+        await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("main", { name: "Luyện lại từ sau khi đọc" }),
+      ).not.toBeInTheDocument();
+      expect(readingService.finish).toHaveBeenCalledOnce();
+      expect(readingService.createEvent).toHaveBeenCalledTimes(2);
+      for (const [event] of readingService.createEvent.mock.calls) {
+        expect(event).toMatchObject({
+          Type: "MISPRONUNCIATION",
+          Status: "IGNORED_BY_GATE",
+        });
+      }
+
+      fireEvent.click(screen.getByRole("button", { name: /2 từ/i }));
+      expect(
+        screen.getByRole("button", { name: "Nghe mẫu từ Bé" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Nghe mẫu từ mèo" }),
+      ).toBeInTheDocument();
+    },
+    12_000,
+  );
+
+  it(
     "defers word review until finish, then persists the exact self-corrected occurrence before finishing",
     async () => {
       render(
