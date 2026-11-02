@@ -36,7 +36,7 @@ describe("EndOfReadingReview", () => {
     );
 
     expect(screen.getByTestId("review-target-word")).toHaveTextContent("khỏe");
-    expect(screen.getByText("Từ thứ 1 / 3")).toBeInTheDocument();
+    expect(screen.getByText(/Có 3 từ cần nghe lại/)).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Tiến trình luyện từ" })).toHaveAttribute(
       "aria-valuemax",
       "3",
@@ -49,7 +49,7 @@ describe("EndOfReadingReview", () => {
       <EndOfReadingReview
         activity="listening"
         currentPosition={2}
-        feedback="Mình đang nghe con đọc…"
+        feedback="Con cứ đọc nhé!"
         item={{ ...item, attempts: 1 }}
         onStartAttempt={vi.fn()}
         secondsRemaining={2}
@@ -59,6 +59,7 @@ describe("EndOfReadingReview", () => {
 
     expect(screen.getByText("Còn 2 giây")).toBeInTheDocument();
     expect(screen.getByText("Mình đang nghe con đọc…")).toBeInTheDocument();
+    expect(screen.getByText("Con cứ đọc nhé!")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
