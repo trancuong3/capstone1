@@ -421,7 +421,8 @@ export function ReadingScreen({
       !tracker ||
       (expectedTracker !== undefined && tracker !== expectedTracker) ||
       !spokenText.trim()
-    ) return;
+    )
+      return;
 
     const result = tracker.commitFinal(eventId, spokenText);
     if (result.duplicate) return;
@@ -1008,9 +1009,7 @@ export function ReadingScreen({
       if (!mountedRef.current) return;
 
       // 2. Ghép transcript của tất cả các lần ghi âm
-      const combinedTranscript = transcriptsListRef.current
-        .join(" ")
-        .trim();
+      const combinedTranscript = transcriptsListRef.current.join(" ").trim();
 
       setFinalTranscript(combinedTranscript);
 
@@ -1021,10 +1020,7 @@ export function ReadingScreen({
         setComparisonResult(null);
 
         try {
-          const result = await compareTranscript(
-            sessionId,
-            combinedTranscript,
-          );
+          const result = await compareTranscript(sessionId, combinedTranscript);
 
           if (!mountedRef.current) return;
 
@@ -1051,10 +1047,7 @@ export function ReadingScreen({
       // 4. Kết thúc session
       const [finishedSession] = await Promise.all([
         services.readingService.finish(sessionId),
-        services.readingSocketAdapter.sendControl(
-          sessionId,
-          "finish",
-        ),
+        services.readingSocketAdapter.sendControl(sessionId, "finish"),
       ]);
 
       if (!mountedRef.current) return;
@@ -1062,17 +1055,13 @@ export function ReadingScreen({
       // 5. Lấy thống kê buổi đọc
       const wordsList = Array.from(spokenWordsSetRef.current);
 
-      const durationMinutes = getDurationMinutes(
-        finishedSession.duration_ms,
-      );
+      const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
 
       const persistedCompletion = await services.readingService
         .getCompletionSummary(sessionId)
         .catch(() => null);
 
-      const correctWordsList = Array.from(
-        correctWordIdsRef.current,
-      )
+      const correctWordsList = Array.from(correctWordIdsRef.current)
         .map((wordId) => wordTextByIdRef.current.get(wordId))
         .filter((word): word is string => Boolean(word));
 
@@ -1085,9 +1074,7 @@ export function ReadingScreen({
 
       const score =
         totalTracked > 0
-          ? Math.round(
-              (correctWordsList.length / totalTracked) * 100,
-            )
+          ? Math.round((correctWordsList.length / totalTracked) * 100)
           : null;
 
       // 6. Tạo thống kê hoàn thành
@@ -1097,14 +1084,10 @@ export function ReadingScreen({
         mispronounced_words: mispronouncedWordsList,
         pages_explored:
           persistedCompletion?.pages_explored ??
-          (pageProgress?.persisted
-            ? pageProgress.completed_pages
-            : null),
+          (pageProgress?.persisted ? pageProgress.completed_pages : null),
         selected_range_pages:
           persistedCompletion?.selected_range_pages ??
-          (pageProgress?.persisted
-            ? pageProgress.total_pages
-            : null),
+          (pageProgress?.persisted ? pageProgress.total_pages : null),
         practiced_words: wordsList.length,
         score,
         spoken_words: wordsList,

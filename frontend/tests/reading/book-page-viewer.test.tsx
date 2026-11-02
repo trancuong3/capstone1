@@ -171,12 +171,7 @@ describe("BookPageViewer", () => {
     const { container } = render(
       <BookPageViewer
         correctWordIds={
-          new Set([
-            "line-a-0",
-            "line-a-1",
-            "line-a-2",
-            "line-a-3",
-          ])
+          new Set(["line-a-0", "line-a-1", "line-a-2", "line-a-3"])
         }
         currentWordId="line-b-0"
         mispronouncedWordIds={new Set(["line-b-1"])}

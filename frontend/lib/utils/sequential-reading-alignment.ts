@@ -82,8 +82,9 @@ export class SequentialReadingTracker {
   }
 
   get isReviewing(): boolean {
-    return this.cursorIndex >= this.tokens.length &&
-      this.needsReviewWordIds.size > 0;
+    return (
+      this.cursorIndex >= this.tokens.length && this.needsReviewWordIds.size > 0
+    );
   }
 
   /**
@@ -91,8 +92,10 @@ export class SequentialReadingTracker {
    * on the initial pass.
    */
   get complete(): boolean {
-    return this.cursorIndex >= this.tokens.length &&
-      this.needsReviewWordIds.size === 0;
+    return (
+      this.cursorIndex >= this.tokens.length &&
+      this.needsReviewWordIds.size === 0
+    );
   }
 
   /**
@@ -145,8 +148,7 @@ export class SequentialReadingTracker {
     for (const spoken of transcriptTokens(transcript)) {
       if (this.cursorIndex < this.tokens.length) {
         const expected = this.tokens[this.cursorIndex];
-        const matches =
-          normalizeReadingToken(expected.text) === spoken;
+        const matches = normalizeReadingToken(expected.text) === spoken;
 
         if (matches) {
           this.correctWordIds.add(expected.word_id);

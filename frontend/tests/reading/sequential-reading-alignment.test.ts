@@ -20,11 +20,7 @@ const words: SequentialReadingToken[] = [
 
 describe("SequentialReadingTracker", () => {
   it("commits duplicate words in reading order", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", words);
 
     const firstLine = tracker.commitFinal("utterance-1", "Hôm nay khỏe không!");
 
@@ -46,11 +42,7 @@ describe("SequentialReadingTracker", () => {
   });
 
   it("does not jump to later duplicate occurrences", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", words);
 
     const result = tracker.commitFinal("utterance-1", "khỏe");
 
@@ -63,11 +55,7 @@ describe("SequentialReadingTracker", () => {
   });
 
   it("aligns multiword transcripts in original reading order", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", words);
 
     const result = tracker.commitFinal(
       "utterance-1",
@@ -80,11 +68,7 @@ describe("SequentialReadingTracker", () => {
   });
 
   it("does not advance twice for a duplicate final event", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", words);
 
     const first = tracker.commitFinal("same-event", "Hôm nay");
     const duplicate = tracker.commitFinal("same-event", "khỏe không");
@@ -96,11 +80,7 @@ describe("SequentialReadingTracker", () => {
   });
 
   it("keeps interim recognition non-committing", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", words);
 
     const preview = tracker.previewInterim("Hôm nay khỏe");
     const committed = tracker.commitFinal("final-1", "Hôm nay khỏe");
@@ -160,13 +140,10 @@ describe("SequentialReadingTracker", () => {
     expect(endOfPass.currentWordId).toBe("review-0");
 
     const corrected = tracker.commitFinal("retry", "Hôm");
-    expect(corrected.correctWordIds).toEqual(
-      new Set(["review-0", "review-1"]),
-    );
+    expect(corrected.correctWordIds).toEqual(new Set(["review-0", "review-1"]));
     expect(corrected.needsReviewWordIds.size).toBe(0);
     expect(corrected.reviewedWordIds).toEqual(new Set(["review-0"]));
     expect(corrected.currentWordId).toBeNull();
     expect(corrected.complete).toBe(true);
   });
-
 });

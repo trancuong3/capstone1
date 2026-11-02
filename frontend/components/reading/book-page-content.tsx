@@ -71,25 +71,20 @@ export function BookPageContent({
             const previousLineIndex = previousWord?.line_index ?? 0;
 
             const startsLine =
-              previousWord !== undefined &&
-              lineIndex !== previousLineIndex;
+              previousWord !== undefined && lineIndex !== previousLineIndex;
 
             const verticalGap = previousWord
-              ? word.bbox[1] -
-                (previousWord.bbox[1] + previousWord.bbox[3])
+              ? word.bbox[1] - (previousWord.bbox[1] + previousWord.bbox[3])
               : 0;
 
             const inferredParagraphBreak =
               startsLine &&
               previousWord !== undefined &&
-              verticalGap >
-                Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
+              verticalGap > Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
 
             const startsParagraph =
               startsLine &&
-              ((page.paragraph_start_line_indices ?? []).includes(
-                lineIndex,
-              ) ||
+              ((page.paragraph_start_line_indices ?? []).includes(lineIndex) ||
                 inferredParagraphBreak);
 
             const isIndented =
@@ -120,8 +115,7 @@ export function BookPageContent({
                 <span
                   className={cn(
                     "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150",
-                    !readOnly &&
-                      "cursor-pointer select-none active:scale-95",
+                    !readOnly && "cursor-pointer select-none active:scale-95",
                     colorClass,
 
                     isCurrent &&
@@ -160,9 +154,7 @@ export function BookPageContent({
                   data-line-index={lineIndex}
                   data-page-revision-id={page.page_revision_id}
                   data-word-id={word.word_id}
-                  onClick={
-                    readOnly ? undefined : () => onWordClick?.(word)
-                  }
+                  onClick={readOnly ? undefined : () => onWordClick?.(word)}
                   role={readOnly ? undefined : "button"}
                   tabIndex={readOnly ? undefined : 0}
                   title={
@@ -176,10 +168,7 @@ export function BookPageContent({
                     readOnly
                       ? undefined
                       : (event) => {
-                          if (
-                            event.key === "Enter" ||
-                            event.key === " "
-                          ) {
+                          if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             onWordClick?.(word);
                           }
