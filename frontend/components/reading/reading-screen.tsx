@@ -232,7 +232,7 @@ export function ReadingScreen({
     [],
   );
 
-  const handleWordClick =  const handleWordClick = useCallback(
+  const handleWordClick = useCallback(
     async (word: ReadingPageWordDTO) => {
       setCurrentWordId(word.word_id);
       setLatestTranscript(word.text);
