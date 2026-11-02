@@ -30,6 +30,8 @@ export function useSpeechRecorder(): SpeechRecorder {
   const onUtteranceRef = useRef<((blob: Blob) => void) | null>(null);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
+  // Invalidates a pending getUserMedia permission request when capture is cancelled.
+  const captureGenerationRef = useRef(0);
 
   const resolveStopRef = useRef<((recording: Blob | null) => void) | null>(
     null,
@@ -72,6 +74,7 @@ export function useSpeechRecorder(): SpeechRecorder {
 
   const finish = useCallback(
     (recording: Blob | null, error?: Error) => {
+      captureGenerationRef.current += 1;
       const recorder = recorderRef.current;
       recorderRef.current = null;
       chunksRef.current = [];
@@ -93,6 +96,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   );
 
   const cancel = useCallback(() => {
+    captureGenerationRef.current += 1;
     const recorder = recorderRef.current;
     if (!recorder) {
       cleanupAudioNodes();
@@ -121,8 +125,29 @@ export function useSpeechRecorder(): SpeechRecorder {
       onUtteranceRef.current = onUtterance ?? null;
       chunksRef.current = [];
       isRecordingRef.current = true;
+      const captureGeneration = captureGenerationRef.current;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (error) {
+        if (captureGenerationRef.current === captureGeneration) {
+          cleanupAudioNodes();
+          setIsRecording(false);
+        }
+        throw error;
+      }
+
+      // A browser permission prompt can resolve after the component has been
+      // unmounted or a new capture has replaced this one. Release that stream
+      // instead of constructing a recorder against stale UI state.
+      if (
+        captureGenerationRef.current !== captureGeneration ||
+        !isRecordingRef.current
+      ) {
+        stopTracks(stream);
+        throw new Error("Microphone capture was cancelled.");
+      }
       streamRef.current = stream;
 
       const mimeType = preferredMimeTypes.find((candidate) =>
