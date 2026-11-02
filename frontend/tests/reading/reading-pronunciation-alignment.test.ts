@@ -190,6 +190,7 @@ describe("source sentence extraction and review grouping", () => {
     const candidates = [
       {
         page_id: "page-1",
+        page_number: 1,
         page_revision_id: "revision-1",
         word_id: "word-1",
         word_index: 1,
