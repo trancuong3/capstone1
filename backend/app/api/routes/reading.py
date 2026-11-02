@@ -16,13 +16,7 @@ from app.schemas import (
     ReadingEventResponse, ReadingEventCreate,
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
-from app.schemas.reading import CompareReadingRequest
-from app.services.text_alignment import (
-    align_text,
-    detect_hesitations,
-    summarize_alignment,
-    detect_hesitations,
-)
+from app.schemas.reading import CompareReadingRequest, CompareReadingResponse
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
@@ -436,74 +430,19 @@ async def get_owned_session_book(
 
 
 
-@router.post("/sessions/{session_id}/compare")
+@router.post(
+    "/sessions/{session_id}/compare",
+    response_model=CompareReadingResponse,
+)
 async def compare_reading(
     session_id: UUID,
     request: CompareReadingRequest,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Lấy trang hiện tại và kiểm tra quyền truy cập session
-    page = await ReadingContentService(
+    return await ReadingContentService(
         ReadingContentRepository(db)
-    ).get_session_page(session_id, actor_id)
-
-    # 2. Lấy nội dung sách
-    reference_text = (
-        page.text or " ".join(word.text for word in page.words)
-    )
-
-    if not reference_text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="Book text is empty",
-        )
-
-    # 3. So sánh nội dung bé đọc với nội dung sách
-    result = align_text(reference_text, request.transcript)
-
-    # 4. Xử lý timestamp
-    words = (
-        [word.model_dump() for word in request.words]
-        if request.words is not None
-        else None
-    )
-
-    # 5. Tổng hợp kết quả
-    summary = summarize_alignment(
-        result["alignment"],
-        words=words,
-        threshold=1.0,
-    )
-
-    # 6. Tạo bản ghi báo cáo
-    report = ReadingComparisonReport(
-        SessionId=session_id,
-        PageId=page.page_id,
-        PageRevisionId=page.page_revision_id,
-        Transcript=request.transcript,
-        Distance=result["distance"],
-        Alignment=result["alignment"],
-        Summary=summary,
-    )
-
-    # 7. Lưu database
-    db.add(report)
-    await db.commit()
-    await db.refresh(report)
-
-    # 8. Trả kết quả
-    return {
-        "report_id": str(report.Id),
-        "session_id": str(session_id),
-        "page_id": str(page.page_id),
-        "page_revision_id": str(page.page_revision_id),
-        "transcript": request.transcript,
-        "distance": result["distance"],
-        "alignment": result["alignment"],
-        "summary": summary,
-        "created_at": report.CreatedAt,
-    }
+    ).compare_reading(session_id, actor_id, request)
 
 @router.get("/sessions/{session_id}/reports")
 async def get_session_reports(
