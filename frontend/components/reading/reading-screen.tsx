@@ -488,6 +488,7 @@ export function ReadingScreen({
                 confidence: assessment.confidence,
                 status: "CONFIRMED",
                 metadata: {
+                  idempotency_key: candidateKey,
                   phase: "FIRST_PASS",
                   occurrence_key: candidateKey,
                   word_index: assessment.word_index,
@@ -583,6 +584,7 @@ export function ReadingScreen({
       confidence,
       status: outcome === "CORRECT" ? "CONFIRMED" : "UNCERTAIN",
       metadata: {
+        idempotency_key: eventKey,
         phase: "POST_SESSION_PRACTICE",
         practice_stage: stage,
         practice_outcome: outcome,
@@ -1164,6 +1166,10 @@ async function finishReading() {
     ]);
 
     if (!mountedRef.current) return;
+    // Retry any event whose first request may have failed during a transient
+    // network interruption. The backend idempotency key prevents duplicates.
+    await persistPendingReadingEvents();
+    if (!mountedRef.current) return;
 
     // 5. Lấy thống kê buổi đọc
     const wordsList = Array.from(spokenWordsSetRef.current);
@@ -1302,6 +1308,7 @@ async function finishReading() {
         groups={pronunciationReviewGroups}
         onComplete={() => {
           void (async () => {
+            await persistPendingReadingEvents();
             await persistPendingPracticeEvents();
             setIsPronunciationReview(false);
             setUiState("complete");
