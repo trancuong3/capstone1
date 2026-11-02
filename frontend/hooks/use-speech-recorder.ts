@@ -35,7 +35,11 @@ export function useSpeechRecorder(): SpeechRecorder {
   const chunksRef = useRef<Blob[]>([]);
   const allChunksRef = useRef<Blob[]>([]);
   const onUtteranceRef = useRef<
-    ((blob: Blob, segmentStartedAtMs?: number) => void) | null
+    ((
+      blob: Blob,
+      segmentStartedAtMs?: number,
+      audioSegmentId?: string,
+    ) => void) | null
   >(null);
   const captureStartedAtMsRef = useRef<number | null>(null);
   const recorderSegmentStartedAtMsRef = useRef<number | null>(null);
@@ -43,6 +47,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   const segmentSequenceRef = useRef(0);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
+  const hasSpeechInCurrentRecorderRef = useRef(false);
   const captureGenerationRef = useRef(0);
 
   const resolveStopRef = useRef<((recording: Blob | null) => void) | null>(
@@ -124,7 +129,13 @@ export function useSpeechRecorder(): SpeechRecorder {
   }, [cleanupAudioNodes, finish]);
 
   const start = useCallback(
-    async (onUtterance?: (blob: Blob) => void) => {
+    async (
+      onUtterance?: (
+        blob: Blob,
+        segmentStartedAtMs?: number,
+        audioSegmentId?: string,
+      ) => void,
+    ) => {
       cancel();
       if (
         !navigator.mediaDevices?.getUserMedia ||
@@ -139,6 +150,7 @@ export function useSpeechRecorder(): SpeechRecorder {
       chunksRef.current = [];
       allChunksRef.current = [];
       isRecordingRef.current = true;
+      hasSpeechInCurrentRecorderRef.current = false;
       const captureGeneration = captureGenerationRef.current;
       captureStartedAtMsRef.current = Date.now();
       recorderSegmentStartedAtMsRef.current = null;
@@ -215,9 +227,11 @@ export function useSpeechRecorder(): SpeechRecorder {
             analyserRef.current = analyser;
 
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const waveform = new Uint8Array(analyser.fftSize);
             let speakingFrames = 0;
             let silentFrames = 0;
             let hasSpokenInUtterance = false;
+            let noiseFloor = 0.008;
 
             const checkAudio = () => {
               if (!analyserRef.current || !isRecordingRef.current) return;
@@ -227,18 +241,30 @@ export function useSpeechRecorder(): SpeechRecorder {
                 sum += dataArray[i];
               }
               const avg = sum / dataArray.length;
+              analyserRef.current.getByteTimeDomainData(waveform);
+              let squaredAmplitude = 0;
+              for (let i = 0; i < waveform.length; i++) {
+                const centered = (waveform[i] - 128) / 128;
+                squaredAmplitude += centered * centered;
+              }
+              const rms = Math.sqrt(squaredAmplitude / waveform.length);
+              const speechThreshold = Math.max(0.025, noiseFloor * 2.5);
+              const hasVoiceEnergy = rms >= speechThreshold && avg >= 3;
               const normalized = Math.min(100, Math.round((avg / 128) * 100));
               setAudioLevel(normalized);
 
-              // VAD: avg > 10 corresponds to audible human speech
-              if (avg > 10) {
+              // A short adaptive RMS gate rejects silence and steady low-level
+              // environmental noise before an audio segment reaches STT.
+              if (hasVoiceEnergy) {
                 speakingFrames++;
                 hasSpokenInUtterance = true;
+                hasSpeechInCurrentRecorderRef.current = true;
                 silentFrames = 0;
                 if (speakingFrames >= 2) {
                   setIsSpeaking(true);
                 }
               } else {
+                noiseFloor = noiseFloor * 0.98 + rms * 0.02;
                 silentFrames++;
                 if (silentFrames >= 5) {
                   speakingFrames = 0;
@@ -256,6 +282,7 @@ export function useSpeechRecorder(): SpeechRecorder {
                 !isRotatingRef.current
               ) {
                 hasSpokenInUtterance = false;
+                hasSpeechInCurrentRecorderRef.current = false;
                 silentFrames = 0;
                 speakingFrames = 0;
 
@@ -365,6 +392,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         captureStartedAtMsRef.current ??
         Date.now();
       const finalAudioSegmentId = recorderSegmentIdRef.current;
+      const finalHasSpeech = hasSpeechInCurrentRecorderRef.current;
       recorder.onstop = () => {
         const contentType = recorder.mimeType || "audio/webm";
         const finalSegment = finalSegmentChunks.length
@@ -373,7 +401,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         // Emit the unsegmented tail exactly once. Previously this tail was
         // returned as a whole-session Blob and the caller could either lose it
         // or re-transcribe all already-processed audio.
-        if (finalSegment && finalSegment.size > 800) {
+        if (finalHasSpeech && finalSegment && finalSegment.size > 800) {
           onUtteranceRef.current?.(
             finalSegment,
             finalSegmentStartedAtMs,
