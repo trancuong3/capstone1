@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BrowserTranscriptCollector,
+  resolveTranscriptForSegment,
   type BrowserRecognitionEventLike,
 } from "@/lib/reading/browser-transcript-collector";
 
@@ -68,6 +69,20 @@ describe("BrowserTranscriptCollector", () => {
     collector.completeRecognitionCycle();
 
     expect(collector.getTranscript()).toBe("Con mèo đang ngủ");
+  });
+
+  it("prefers a successful provider transcript for the same capture", () => {
+    expect(resolveTranscriptForSegment("  Provider transcript  ", "Browser transcript"))
+      .toBe("Provider transcript");
+  });
+
+  it("uses only real browser final text when provider STT fails", () => {
+    expect(resolveTranscriptForSegment(null, "  Browser final text  "))
+      .toBe("Browser final text");
+  });
+
+  it("does not fabricate a transcript when both recognition sources are empty", () => {
+    expect(resolveTranscriptForSegment("  ", null)).toBeNull();
   });
 
   it("resets all collected speech for a new capture", () => {
