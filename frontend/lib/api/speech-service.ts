@@ -11,6 +11,7 @@ const wordTimestampSchema = z.object({
   text: z.string(),
   start: z.number().nonnegative(),
   end: z.number().nonnegative(),
+  logprob: z.number().finite().nullable().optional(),
 });
 
 const transcriptionSchema = z.object({
@@ -24,6 +25,7 @@ export interface WordTimestamp {
   readonly text: string;
   readonly start: number;
   readonly end: number;
+  readonly logprob?: number | null;
 }
 
 export interface SpeechTranscript {
