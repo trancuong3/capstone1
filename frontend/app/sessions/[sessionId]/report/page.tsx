@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { useParams } from "next/navigation";
 
 import {
@@ -11,6 +12,7 @@ import {
 } from "@/lib/api/comparison-service";
 
 import { ReadingReport } from "@/components/reading/ReadingReport";
+import { Button } from "@/components/common/button";
 
 export default function ReadingReportPage() {
   const params = useParams<{ sessionId: string }>();
@@ -19,6 +21,7 @@ export default function ReadingReportPage() {
   const [reports, setReports] = useState<SavedReadingReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   
     async function handleDeleteReport(reportId: string) {
         const confirmed = window.confirm(
@@ -51,14 +54,13 @@ export default function ReadingReportPage() {
         setError(null);
 
         const data = await getSessionReports(sessionId);
-        console.log("Saved reports:", data.reports);
-        console.log("Saved alignment:", data.reports[0]?.alignment);
 
         if (active) {
           setReports(data.reports);
         }
       } catch (err) {
         if (active) {
+          setReports([]);
           setError(
             err instanceof Error
               ? err.message
@@ -79,7 +81,7 @@ export default function ReadingReportPage() {
     return () => {
       active = false;
     };
-  }, [sessionId]);
+  }, [reloadKey, sessionId]);
 
   if (loading) {
     return (
@@ -95,6 +97,14 @@ export default function ReadingReportPage() {
       <main className="mx-auto max-w-4xl space-y-4 p-6">
         <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
         <p className="text-red-600">{error}</p>
+        <Button
+          className="sm:w-auto"
+          onClick={() => setReloadKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Thử tải lại
+        </Button>
       </main>
     );
   }
@@ -103,7 +113,18 @@ export default function ReadingReportPage() {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
         <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
-        <p>Session này chưa có báo cáo đọc.</p>
+        <p>
+          Buổi đọc đã được lưu nhưng hiện chưa có báo cáo đối chiếu nào được
+          lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực tế.
+        </p>
+        <Button
+          className="sm:w-auto"
+          onClick={() => setReloadKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Kiểm tra lại
+        </Button>
       </main>
     );
   }
