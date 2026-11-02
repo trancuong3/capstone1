@@ -22,6 +22,7 @@ interface ReadingPronunciationReviewProps {
     stage: "WORD" | "SENTENCE",
     outcome: "CORRECT" | "ASSISTED",
     confidence: number | null,
+    recognizedTranscript: string | null,
   ) => Promise<void>;
 }
 
@@ -46,6 +47,7 @@ export function ReadingPronunciationReview({
     "Con đọc từ này một lần nữa nhé.",
   );
   const reportedOutcomesRef = useRef<Set<string>>(new Set());
+  const currentPracticeTranscriptRef = useRef<string | null>(null);
 
   const group = groups[groupIndex] ?? null;
   const currentWord = group?.words[wordIndex] ?? null;
@@ -89,11 +91,17 @@ export function ReadingPronunciationReview({
     confidence: number | null,
   ) {
     for (const candidate of candidates) {
-      const key = `${candidate.page_id}:${candidate.page_revision_id}:${candidate.word_id}:${stage}`;
+      const key = `${candidate.page_id}:${candidate.page_revision_id}:${candidate.word_id}:${stage}:${outcome}`;
       if (reportedOutcomesRef.current.has(key)) continue;
-      reportedOutcomesRef.current.add(key);
       try {
-        await onPracticeOutcome(candidate, stage, outcome, confidence);
+        await onPracticeOutcome(
+          candidate,
+          stage,
+          outcome,
+          confidence,
+          outcome === "CORRECT" ? currentPracticeTranscriptRef.current : null,
+        );
+        reportedOutcomesRef.current.add(key);
       } catch (error) {
         // Practice feedback must not trap the child in the review screen.
         console.warn("Could not persist pronunciation practice outcome:", error);
@@ -183,6 +191,7 @@ export function ReadingPronunciationReview({
         result.next_word_index === targetWords.length;
 
       if (isConfirmedCorrect) {
+        currentPracticeTranscriptRef.current = transcript.text;
         if (phase === "word" && currentWord) {
           await reportOutcomes(
             [currentWord],
@@ -250,6 +259,7 @@ export function ReadingPronunciationReview({
     if (!targetText) return;
     try {
       await player.play(targetText);
+      currentPracticeTranscriptRef.current = null;
       if (phase === "word" && currentWord) {
         await reportOutcomes([currentWord], "WORD", "ASSISTED", null);
       } else if (phase === "sentence") {
