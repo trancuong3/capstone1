@@ -142,7 +142,7 @@ export function ReadingScreen({
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
-   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
+  const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [mispronouncedWordIds, setMispronouncedWordIds] = useState<Set<string>>(
@@ -155,7 +155,7 @@ export function ReadingScreen({
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
   const correctWordIdsRef = useRef<Set<string>>(new Set());
-   const failedWordsSetRef = useRef<Set<string>>(new Set());
+  const failedWordIdsRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const finishStartedRef = useRef(false);
@@ -414,9 +414,11 @@ export function ReadingScreen({
     for (const wordId of result.correctWordIds) {
       correctWordIdsRef.current.add(wordId);
     }
-     if (result.mismatchWordId) {
-      const failedWord = wordTextByIdRef.current.get(result.mismatchWordId);
-      if (failedWord) failedWordsSetRef.current.add(failedWord);
+    if (result.mismatchWordId) {
+      failedWordIdsRef.current.add(result.mismatchWordId);
+    }
+    for (const wordId of result.reviewedWordIds) {
+      failedWordIdsRef.current.delete(wordId);
     }
 
     setCurrentWordId(result.currentWordId);
@@ -542,8 +544,8 @@ export function ReadingScreen({
           };
 
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
-            // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
-            // and ElevenLabs STT will transcribe the full audio upon pause/finish.
+            // Browser recognition remains a preview source when MediaRecorder is active.
+            // Without MediaRecorder, only browser results marked isFinal are committed.
             console.warn("Browser SpeechRecognition notice:", event?.error);
           };
 
@@ -741,7 +743,7 @@ export function ReadingScreen({
     setCountdown(3);
     if (page) resetPageTracking(page);
     correctWordIdsRef.current.clear();
-    failedWordsSetRef.current.clear();
+    failedWordIdsRef.current.clear();
     spokenWordsSetRef.current.clear();
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
@@ -1069,9 +1071,9 @@ async function finishReading() {
       .map((wordId) => wordTextByIdRef.current.get(wordId))
       .filter((word): word is string => Boolean(word));
 
-    const mispronouncedWordsList = Array.from(
-      failedWordsSetRef.current,
-    );
+    const mispronouncedWordsList = Array.from(failedWordIdsRef.current)
+      .map((wordId) => wordTextByIdRef.current.get(wordId))
+      .filter((word): word is string => Boolean(word));
 
     const totalTracked =
       correctWordsList.length + mispronouncedWordsList.length;
