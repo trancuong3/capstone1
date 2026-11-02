@@ -112,6 +112,35 @@ describe("speech service", () => {
     ).resolves.toMatchObject({ words });
   });
 
+  it("maps ElevenLabs quota exhaustion to a safe non-retryable STT code", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          detail: {
+            code: "STT_QUOTA_EXCEEDED",
+            provider_message: "0 credits remaining; 22 credits required",
+          },
+        },
+        { status: 503, headers: { "x-request-id": "quota-request" } },
+      ),
+    );
+
+    const request = createSpeechService().transcribe(
+      new Blob(["recorded-audio"], { type: "audio/webm" }),
+    );
+    await expect(request).rejects.toMatchObject({
+      code: "STT_QUOTA_EXCEEDED",
+      status: 503,
+      request_id: "quota-request",
+      retryable: false,
+    });
+    await request.catch((error: unknown) => {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("0 credits");
+      expect((error as Error).message).not.toContain("22 credits");
+    });
+  });
+
   it("does not call the API without a browser session", async () => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
     await expect(

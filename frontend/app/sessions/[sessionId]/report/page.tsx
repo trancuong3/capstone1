@@ -1,7 +1,7 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { useParams } from "next/navigation";
 
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/comparison-service";
 
 import { ReadingReport } from "@/components/reading/ReadingReport";
+import { Button } from "@/components/common/button";
 
 export default function ReadingReportPage() {
   const params = useParams<{ sessionId: string }>();
@@ -19,28 +20,27 @@ export default function ReadingReportPage() {
   const [reports, setReports] = useState<SavedReadingReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-    async function handleDeleteReport(reportId: string) {
-        const confirmed = window.confirm(
-            "Bạn có chắc chắn muốn xóa báo cáo này không?",
-        );
+  const [reloadKey, setReloadKey] = useState(0);
 
-        if (!confirmed) return;
+  async function handleDeleteReport(reportId: string) {
+    const confirmed = window.confirm(
+      "Bạn có chắc chắn muốn xóa báo cáo này không?",
+    );
 
-        try {
-            await deleteReadingReport(reportId);
+    if (!confirmed) return;
 
-            setReports((prev) =>
-            prev.filter((report) => report.report_id !== reportId),
-            );
-        } catch (err) {
-            window.alert(
-            err instanceof Error
-                ? err.message
-                : "Không thể xóa báo cáo.",
-            );
-        }
+    try {
+      await deleteReadingReport(reportId);
+
+      setReports((prev) =>
+        prev.filter((report) => report.report_id !== reportId),
+      );
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "Không thể xóa báo cáo.",
+      );
     }
+  }
 
   useEffect(() => {
     let active = true;
@@ -51,18 +51,15 @@ export default function ReadingReportPage() {
         setError(null);
 
         const data = await getSessionReports(sessionId);
-        console.log("Saved reports:", data.reports);
-        console.log("Saved alignment:", data.reports[0]?.alignment);
 
         if (active) {
           setReports(data.reports);
         }
       } catch (err) {
         if (active) {
+          setReports([]);
           setError(
-            err instanceof Error
-              ? err.message
-              : "Không thể tải báo cáo đọc.",
+            err instanceof Error ? err.message : "Không thể tải báo cáo đọc.",
           );
         }
       } finally {
@@ -79,7 +76,7 @@ export default function ReadingReportPage() {
     return () => {
       active = false;
     };
-  }, [sessionId]);
+  }, [reloadKey, sessionId]);
 
   if (loading) {
     return (
@@ -95,6 +92,14 @@ export default function ReadingReportPage() {
       <main className="mx-auto max-w-4xl space-y-4 p-6">
         <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
         <p className="text-red-600">{error}</p>
+        <Button
+          className="sm:w-auto"
+          onClick={() => setReloadKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Thử tải lại
+        </Button>
       </main>
     );
   }
@@ -103,7 +108,19 @@ export default function ReadingReportPage() {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
         <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
-        <p>Session này chưa có báo cáo đọc.</p>
+        <p>
+          Buổi đọc đã được lưu nhưng hiện chưa có báo cáo đối chiếu nào được
+          lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực
+          tế.
+        </p>
+        <Button
+          className="sm:w-auto"
+          onClick={() => setReloadKey((key) => key + 1)}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Kiểm tra lại
+        </Button>
       </main>
     );
   }
@@ -119,32 +136,27 @@ export default function ReadingReportPage() {
 
       {reports.map((report, index) => (
         <section key={report.report_id} className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">
-                Lần đọc {reports.length - index}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Lần đọc {reports.length - index}</h2>
 
             <div className="flex items-center gap-3">
-                <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500">
                 {new Date(report.created_at).toLocaleString("vi-VN")}
-                </p>
+              </p>
 
-                <button
+              <button
                 type="button"
                 onClick={() => handleDeleteReport(report.report_id)}
                 className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-                >
+              >
                 Xóa báo cáo
-                </button>
+              </button>
             </div>
-            </div>
+          </div>
 
-            <ReadingReport
-            result={report}
-            sessionId={sessionId}
-            />
+          <ReadingReport result={report} sessionId={sessionId} />
         </section>
-        ))}
+      ))}
     </main>
   );
 }

@@ -1,9 +1,12 @@
 """Focused contract tests for the isolated ElevenLabs voice routes."""
 
+import asyncio
 import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
+
+import httpx
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ["SUPABASE_URL"] = "https://example.supabase.co"
@@ -18,6 +21,7 @@ from app.providers.elevenlabs_voice_provider import (
     SynthesizedAudio,
     Transcription,
     VoiceProviderError,
+    ElevenLabsVoiceProvider,
 )
 
 
@@ -126,6 +130,71 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.json(), {"detail": {"code": "UNSUPPORTED_AUDIO"}})
         provider.transcribe.assert_not_called()
+
+    def test_speech_to_text_returns_safe_specific_quota_code(self):
+        provider = MagicMock()
+        provider.transcribe = AsyncMock(
+            side_effect=VoiceProviderError(
+                status_code=503,
+                code="STT_QUOTA_EXCEEDED",
+            )
+        )
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.webm", b"audio-bytes", "audio/webm")},
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {"detail": {"code": "STT_QUOTA_EXCEEDED"}},
+        )
+        self.assertNotIn("credits", response.text.lower())
+        self.assertNotIn("ElevenLabs", response.text)
+
+    def test_provider_classifies_nested_quota_exceeded_without_exposing_body(self):
+        class MockAsyncClient:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return httpx.Response(
+                    401,
+                    json={
+                        "detail": {
+                            "type": "invalid_request",
+                            "code": "quota_exceeded",
+                            "message": "0 credits remaining; 22 credits required",
+                        }
+                    },
+                )
+
+        provider = ElevenLabsVoiceProvider(api_key="isolated-test-key")
+        with patch(
+            "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
+            MockAsyncClient,
+        ):
+            with self.assertRaises(VoiceProviderError) as caught:
+                asyncio.run(
+                    provider.transcribe(
+                        audio=b"audio-bytes",
+                        filename="reading.webm",
+                        content_type="audio/webm",
+                        language_code="vi",
+                    )
+                )
+
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.code, "STT_QUOTA_EXCEEDED")
+        self.assertNotIn("credits", str(caught.exception).lower())
 
     def test_speech_to_text_hides_provider_failure_details(self):
         provider = MagicMock()

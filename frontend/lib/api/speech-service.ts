@@ -26,7 +26,7 @@ export interface WordTimestamp {
   readonly start: number;
   readonly end: number;
   readonly type?: string;
-}  
+}
 
 export interface SpeechTranscript {
   readonly text: string;
@@ -59,17 +59,53 @@ function failure(
   status: number,
   requestId = "",
   retryable = false,
+  providerCode?: string,
 ): ServiceError {
   let code: ServiceErrorCode = capabilityCode;
-  if (status === 401) code = "AUTH_REQUIRED";
-  if (status === 403) code = "FORBIDDEN";
-  if (status === 422) code = "VALIDATION_ERROR";
+  let message = safeMessage;
+  let shouldRetry = retryable;
+
+  if (capabilityCode === "STT_UNAVAILABLE") {
+    switch (providerCode) {
+      case "STT_QUOTA_EXCEEDED":
+        code = "STT_QUOTA_EXCEEDED";
+        message =
+          "Dịch vụ nhận diện giọng nói đã hết lượt sử dụng. ViRead sẽ dùng kết quả nhận diện cuối cùng của trình duyệt nếu có.";
+        shouldRetry = false;
+        break;
+      case "STT_AUTH_FAILED":
+        code = "STT_AUTH_FAILED";
+        shouldRetry = false;
+        break;
+      case "STT_RATE_LIMITED":
+        code = "STT_RATE_LIMITED";
+        shouldRetry = true;
+        break;
+      case "STT_INVALID_AUDIO":
+        code = "STT_INVALID_AUDIO";
+        shouldRetry = false;
+        break;
+      case "STT_PROVIDER_REJECTED":
+        code = "STT_PROVIDER_REJECTED";
+        shouldRetry = false;
+        break;
+      default:
+        if (status === 401) code = "AUTH_REQUIRED";
+        if (status === 403) code = "FORBIDDEN";
+        if (status === 422) code = "VALIDATION_ERROR";
+    }
+  } else {
+    if (status === 401) code = "AUTH_REQUIRED";
+    if (status === 403) code = "FORBIDDEN";
+    if (status === 422) code = "VALIDATION_ERROR";
+  }
+
   return new ServiceError({
     code,
-    message: safeMessage,
+    message,
     status,
     request_id: requestId,
-    retryable,
+    retryable: shouldRetry,
   });
 }
 
@@ -108,11 +144,31 @@ async function speechRequest(
       signal,
     });
     if (!response.ok) {
+      let providerCode: string | undefined;
+      if (path === "/voice/speech-to-text") {
+        try {
+          const payload: unknown = await response.clone().json();
+          if (
+            typeof payload === "object" &&
+            payload !== null &&
+            "detail" in payload &&
+            typeof payload.detail === "object" &&
+            payload.detail !== null &&
+            "code" in payload.detail &&
+            typeof payload.detail.code === "string"
+          ) {
+            providerCode = payload.detail.code;
+          }
+        } catch {
+          // Non-JSON provider responses remain a generic safe service error.
+        }
+      }
       throw failure(
         capabilityCode,
         response.status,
         response.headers.get("x-request-id") ?? "",
         response.status === 429 || response.status >= 500,
+        providerCode,
       );
     }
     return response;

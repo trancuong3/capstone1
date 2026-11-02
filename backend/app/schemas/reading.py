@@ -290,6 +290,28 @@ class WordTimestamp(BaseModel):
 class CompareReadingRequest(BaseModel):
     transcript: str = Field(..., min_length=1)
     words: list[WordTimestamp] | None = None
+    # New clients bind each transcript to the immutable page snapshot they read.
+    # Both fields remain optional for backward compatibility with legacy callers.
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+
+
+class ReadingComparisonReportRead(BaseModel):
+    report_id: UUID
+    session_id: UUID
+    page_id: UUID
+    page_revision_id: UUID
+    transcript: str
+    distance: int
+    alignment: list[dict[str, Any]]
+    summary: dict[str, Any]
+    created_at: datetime
+
+
+class ReadingSessionReportsRead(BaseModel):
+    session_id: UUID
+    total: int = Field(ge=0)
+    reports: list[ReadingComparisonReportRead]
 
 
 class ReadingPageWordRead(BaseModel):
