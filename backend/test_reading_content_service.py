@@ -78,6 +78,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             page_by_id=AsyncMock(),
             revision_snapshot=AsyncMock(),
             revision_word_exists=AsyncMock(return_value=True),
+            reading_event_by_idempotency_key=AsyncMock(return_value=None),
             create_reading_event=AsyncMock(side_effect=lambda row: row),
             create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
             events_for_session=AsyncMock(return_value=[]),
@@ -158,6 +159,41 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.verified_page.assert_awaited_once_with(PAGE_ID, BOOK_ID)
         repo.verified_revision.assert_awaited_once_with(PAGE_ID, REVISION_ID)
         repo.create_reading_event.assert_awaited_once_with(event)
+
+
+    async def test_reading_event_idempotency_returns_existing_occurrence(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        existing_event = SimpleNamespace(
+            Id=UUID("88888888-8888-4888-8888-888888888888"),
+            SessionId=session_id,
+        )
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+        )
+        repo.reading_event_by_idempotency_key.return_value = existing_event
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            WordId=UUID("99999999-9999-4999-8999-999999999999"),
+            Type="SUBSTITUTION",
+            StartMs=100,
+            Confidence=0.9,
+            Status="CONFIRMED",
+            Metadata={"idempotency_key": "session:page:revision:word"},
+        )
+
+        result = await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertIs(result, existing_event)
+        repo.reading_event_by_idempotency_key.assert_awaited_once_with(
+            session_id,
+            "session:page:revision:word",
+        )
+        repo.create_reading_event.assert_not_awaited()
 
     async def test_reading_event_cannot_reference_unverified_or_foreign_page(self):
         service, repo = self.make_service()
