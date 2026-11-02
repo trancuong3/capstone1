@@ -433,7 +433,10 @@ export function ReadingScreen({
                 page_id: pageAtCapture.page_id,
                 page_revision_id: pageAtCapture.page_revision_id,
                 word_id: assessment.word_id,
-                type: "SUBSTITUTION",
+                type:
+                  assessment.reason === "BOUNDED_OMISSION"
+                    ? "OMISSION"
+                    : "SUBSTITUTION",
                 start_ms: eventStartMs,
                 end_ms: null,
                 confidence: assessment.confidence,
@@ -1085,7 +1088,7 @@ async function finishReading() {
     const score =
       totalTracked > 0
         ? Math.round(
-            (correctWordsList.length / totalTracked) * 100,
+            (correctWordIdsRef.current.size / totalTracked) * 100,
           )
         : null;
 
