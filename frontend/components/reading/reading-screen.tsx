@@ -230,12 +230,6 @@ export function ReadingScreen({
     }
   }
 
-  function handleReadCurrentWord() {
-    if (!page || !currentWordId) return;
-    const word = page.words.find((item) => item.word_id === currentWordId);
-    if (word) void handleWordClick(word);
-  }
-
   const cancelSpeechRecorder = speechRecorder.cancel;
 
   useEffect(() => {
@@ -1466,7 +1460,6 @@ export function ReadingScreen({
         isPageTransitioning={uiState === "page-turn"}
         isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
         isReadingWord={isReadingWord}
-        isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
         mispronouncedWordIds={mispronouncedWordIds}
         uncertainWordIds={uncertainWordIds}
@@ -1475,7 +1468,6 @@ export function ReadingScreen({
         onManualPage={() => setUiState("manual-page")}
         onPause={() => void pauseReading()}
         onReadSample={() => void handleReadSample()}
-        onReadWord={handleReadCurrentWord}
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
