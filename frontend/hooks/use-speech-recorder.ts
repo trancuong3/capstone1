@@ -312,7 +312,10 @@ export function useSpeechRecorder(): SpeechRecorder {
                         const blob = new Blob(currentUtteranceChunks, {
                           type: contentType,
                         });
-                        if (blob.size > 800) {
+                        if (
+                          blob.size > 800 &&
+                          captureGeneration === captureGenerationRef.current
+                        ) {
                           onUtteranceRef.current?.(
                             blob,
                             segmentStartedAtMs,
@@ -427,7 +430,12 @@ export function useSpeechRecorder(): SpeechRecorder {
         // Earlier recorder instances may still be finalizing. Dispatch the tail
         // only after they finish so recognition preserves spoken utterance order.
         void Promise.all(Array.from(pendingRotationsRef.current)).then(() => {
-          if (finalHasSpeech && finalSegment && finalSegment.size > 800) {
+          if (
+            finalHasSpeech &&
+            finalSegment &&
+            finalSegment.size > 800 &&
+            captureGeneration === captureGenerationRef.current
+          ) {
             onUtteranceRef.current?.(
               finalSegment,
               finalSegmentStartedAtMs,
