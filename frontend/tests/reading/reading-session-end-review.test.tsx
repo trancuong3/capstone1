@@ -373,4 +373,88 @@ describe("ReadingScreen session-end word review", () => {
       await screen.findByRole("heading", { name: "Bé đọc xong rồi!" }),
     ).toBeInTheDocument();
   }, 12_000);
+
+  it("cancels the microphone countdown when the child pauses before recording starts", async () => {
+    render(
+      <ReadingScreen
+        initialUiState="ready"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+    );
+    await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
+    expect(screen.getByText(/Chuẩn bị đọc/)).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Tạm dừng buổi đọc" }),
+    );
+    await screen.findByRole("dialog", { name: "Bé đang nghỉ một chút" });
+    expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      "pause",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(mocks.recorder.start).not.toHaveBeenCalled();
+  }, 8_000);
+
+  it("pauses and resumes the end-review queue without skipping its current occurrence", async () => {
+    render(
+      <ReadingScreen
+        initialUiState="reading"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Bé đọc với nhận diện giọng nói/ }),
+    );
+    await waitFor(() => expect(mocks.recorder.start).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      mocks.recorder.callback?.(
+        new Blob([new Uint8Array(1_000)], { type: "audio/webm" }),
+      );
+    });
+    await waitFor(() =>
+      expect(mocks.speech.transcribe).toHaveBeenCalledTimes(1),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await screen.findByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu và dừng" }));
+
+    const reviewPage = await screen.findByRole("main", {
+      name: "Luyện lại từ sau khi đọc",
+    });
+    const targetWord = screen.getByTestId("review-target-word").textContent;
+    expect(reviewPage).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Tạm dừng ôn tập" }));
+    await screen.findByRole("dialog", { name: "Bé đang nghỉ một chút" });
+    expect(services.readingService.finish).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Tiếp tục luyện từ" }));
+    expect(
+      await screen.findByRole("main", { name: "Luyện lại từ sau khi đọc" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("review-target-word")).toHaveTextContent(
+      targetWord ?? "",
+    );
+    expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      "pause",
+    );
+    expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      "resume",
+    );
+    expect(services.readingService.finish).not.toHaveBeenCalled();
+  }, 12_000);
+
 });

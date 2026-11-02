@@ -14,6 +14,8 @@ interface EndOfReadingReviewProps {
   readonly secondsRemaining: number | null;
   readonly feedback: string;
   readonly onStartAttempt: () => void;
+  readonly onPause: () => void;
+  readonly onExit: () => void;
 }
 
 export function EndOfReadingReview({
@@ -24,6 +26,8 @@ export function EndOfReadingReview({
   secondsRemaining,
   feedback,
   onStartAttempt,
+  onPause,
+  onExit,
 }: EndOfReadingReviewProps) {
   const progress = totalItems > 0 ? (currentPosition / totalItems) * 100 : 100;
 
@@ -138,6 +142,25 @@ export function EndOfReadingReview({
           / 2
         </p>
       </section>
+
+      <div className="flex flex-col justify-center gap-3 sm:flex-row">
+        <button
+          type="button"
+          onClick={onPause}
+          disabled={activity === "processing" || activity === "assisting"}
+          className="inline-flex min-h-11 items-center justify-center rounded-control border border-line bg-white px-5 py-2 text-sm font-bold text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Tạm dừng ôn tập
+        </button>
+        <button
+          type="button"
+          onClick={onExit}
+          disabled={activity === "processing" || activity === "assisting"}
+          className="inline-flex min-h-11 items-center justify-center rounded-control border border-line bg-white px-5 py-2 text-sm font-bold text-ink transition hover:bg-cream disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Lưu và dừng buổi đọc
+        </button>
+      </div>
     </main>
   );
 }

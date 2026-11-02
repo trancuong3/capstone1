@@ -374,21 +374,21 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        if session.State not in ("COMPLETED", "FINISHED"):
+        if session.State not in ("COMPLETED", "FINISHED", "ABORTED"):
             rows = await self.repository.session_page_rows(session.Id)
             ended_at = datetime.now(timezone.utc)
+            range_completed = bool(rows) and all(
+                row.Status == "COMPLETED" for row in rows
+            )
+            terminal_state = "COMPLETED" if range_completed else "ABORTED"
+            self.repository.update_session_state(
+                session, state=terminal_state, ended_at=ended_at
+            )
             if rows:
-                # Finishing a session is not, by itself, proof that its
-                # current page was read. Page completion is persisted by explicit
-                # confirmation or when the child advances to the next page.
-                self.repository.update_session_state(
-                    session, state="COMPLETED", ended_at=ended_at
-                )
                 session = await self.repository.save_session_progress(session, rows)
             else:
-                self.repository.update_session_state(
-                    session, state="COMPLETED", ended_at=ended_at
-                )
+                # Legacy sessions have no durable proof that the selected page
+                # was completed; preserve them as incomplete instead.
                 session = await self.repository.save_session(session)
         return self._summary(session)
 

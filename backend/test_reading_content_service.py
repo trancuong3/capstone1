@@ -292,11 +292,39 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.session.return_value = session
         repo.session_page_rows.return_value = [page_row]
 
-        await service.finish_session(session_id, PARENT_ID)
+        result = await service.finish_session(session_id, PARENT_ID)
 
+        self.assertEqual(result.state, "ABORTED")
+        self.assertEqual(session.State, "ABORTED")
         self.assertEqual(page_row.Status, "IN_PROGRESS")
         self.assertIsNone(page_row.CompletedAt)
         repo.save_session_progress.assert_awaited_once_with(session, [page_row])
+
+
+    async def test_finish_marks_range_finished_only_when_every_page_is_completed(self):
+        service, repo = self.make_service()
+        session = SimpleNamespace(
+            Id=UUID("77777777-7777-4777-8777-777777777777"),
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+            StartedAt=datetime(2026, 10, 21, 7, 0, tzinfo=timezone.utc),
+            EndedAt=None,
+        )
+        page_rows = [
+            SimpleNamespace(Status="COMPLETED"),
+            SimpleNamespace(Status="COMPLETED"),
+        ]
+        repo.session_for_update.return_value = session
+        repo.session_page_rows.return_value = page_rows
+
+        result = await service.finish_session(session.Id, PARENT_ID)
+
+        self.assertEqual(result.state, "FINISHED")
+        self.assertEqual(session.State, "COMPLETED")
+        self.assertIsNotNone(result.ended_at)
+        repo.save_session_progress.assert_awaited_once_with(session, page_rows)
+        repo.save_session.assert_not_awaited()
 
     async def test_create_session_rejects_reversed_page_range(self):
         service, repo = self.make_service()
@@ -452,9 +480,12 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             PARENT_ID,
         )
 
-        self.assertEqual(result.state, "FINISHED")
+        self.assertEqual(result.state, "ABORTED")
         self.assertIsNotNone(result.ended_at)
         repo.update_session_state.assert_called_once()
+        repo.update_session_state.assert_called_with(
+            session, state="ABORTED", ended_at=result.ended_at
+        )
         repo.save_session.assert_awaited_once_with(session)
 
     async def test_finish_session_is_idempotent_after_completion(self):

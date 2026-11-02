@@ -33,6 +33,7 @@ export default async function ReadingPage({
   return (
     <AppServicesProvider scenario="default">
       <ReadingScreen
+        key={sessionId}
         initialPageId={firstValue(query.pageId)}
         initialUiState={parseReadingUiState(query.state)}
         reconnectMode={parseReconnectDemoMode(query.reconnect)}

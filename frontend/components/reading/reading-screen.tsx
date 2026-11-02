@@ -188,6 +188,7 @@ export function ReadingScreen({
     () => new Set(),
   );
   const [isSessionReviewing, setIsSessionReviewing] = useState(false);
+  const [isReviewPaused, setIsReviewPaused] = useState(false);
   const [reviewQueueSnapshot, setReviewQueueSnapshot] =
     useState<SessionReviewQueueSnapshot>({
       items: [],
@@ -365,7 +366,7 @@ export function ReadingScreen({
   }, []);
 
   useEffect(() => {
-    if (countdown === null) return;
+    if (countdown === null || uiState !== "reading") return;
     if (countdown > 0) {
       const timer = setTimeout(() => {
         if (mountedRef.current) {
@@ -385,7 +386,7 @@ export function ReadingScreen({
       }
     }, 400);
     return () => clearTimeout(finishTimer);
-  }, [countdown]);
+  }, [countdown, uiState]);
 
   useEffect(() => {
     if (!page) return;
@@ -657,9 +658,10 @@ export function ReadingScreen({
       // Continue to the browser SpeechRecognition fallback below.
     }
 
-    // Browser recognition is a visual preview only while MediaRecorder is active.
+    // Browser SpeechRecognition is only a fallback. Starting it beside
+    // MediaRecorder would open a second microphone capture pipeline.
     let hasSpeechInput = isUsingRecorderRef.current;
-    if (typeof window !== "undefined") {
+    if (!isUsingRecorderRef.current && typeof window !== "undefined") {
       try {
         const win = window as unknown as WindowWithSpeech;
         const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
@@ -902,6 +904,7 @@ export function ReadingScreen({
     setComparisonError(null);
     setIsComparing(false);
     setIsBusy(false);
+    setIsReviewPaused(false);
     setCountdown(3);
     if (page) resetPageTracking(page);
     correctWordIdsRef.current.clear();
@@ -930,18 +933,29 @@ export function ReadingScreen({
   async function pauseReading() {
     if (isBusy) return;
     setIsBusy(true);
+    setCountdown(null);
+
+    // Invalidate a pending permission/countdown start before pausing.
+    if (!isMicRecording) {
+      isListeningActiveRef.current = false;
+      speechRecorder.cancel();
+    }
     if (isMicRecording) {
       try {
         await stopListeningAndTranscribe();
       } catch {
         speechRecorder.cancel();
       }
-      if (mountedRef.current) {
-        setIsMicRecording(false);
-      }
+      if (mountedRef.current) setIsMicRecording(false);
     }
     if (!mountedRef.current) return;
-    setCanonicalState("PAUSED");
+
+    const nextState = await services.readingSocketAdapter
+      .sendControl(sessionId, "pause")
+      .catch(() => "PAUSED" as const);
+    if (!mountedRef.current) return;
+    isListeningActiveRef.current = false;
+    setCanonicalState(nextState);
     setUiState("paused");
     setIsBusy(false);
   }
@@ -1212,6 +1226,8 @@ export function ReadingScreen({
               onEnded: resolve,
               onError: () =>
                 reject(new Error("Reference pronunciation playback failed.")),
+              onStopped: () =>
+                reject(new Error("Reference pronunciation playback was stopped.")),
             })
             .catch(reject);
         });
@@ -1432,6 +1448,93 @@ export function ReadingScreen({
     }, 100);
   }
 
+
+  async function pauseSessionReview(): Promise<boolean> {
+    if (reviewActivity === "processing" || reviewActivity === "assisting") {
+      return false;
+    }
+
+    const attempt = reviewAttemptRef.current;
+    if (attempt) {
+      if (attempt.interval !== null) {
+        clearInterval(attempt.interval);
+        attempt.interval = null;
+      }
+      attempt.abortController.abort();
+      reviewAttemptRef.current = null;
+      await attempt.queue;
+    }
+
+    speechRecorder.cancel();
+    speechPlayer.stop();
+    const failedWrites = await persistSessionReviewEvents();
+    const nextState = await services.readingSocketAdapter
+      .sendControl(sessionId, "pause")
+      .catch(() => "PAUSED" as const);
+    if (!mountedRef.current) return false;
+
+    setCanonicalState(nextState);
+    setIsMicRecording(false);
+    setReviewActivity("ready");
+    setReviewSecondsRemaining(null);
+    setReviewFeedback(
+      failedWrites > 0
+        ? "Đã tạm dừng. Một số kết quả chưa lưu được; bé có thể thử lại sau."
+        : "Đã tạm dừng. Bé có thể tiếp tục khi sẵn sàng.",
+    );
+    setIsSessionReviewing(false);
+    setIsReviewPaused(true);
+    setUiState("paused");
+    return true;
+  }
+
+  async function resumeSessionReview() {
+    if (isBusy) return;
+    setIsBusy(true);
+    const nextState = await services.readingSocketAdapter
+      .sendControl(sessionId, "resume")
+      .catch(() => "LISTENING" as const);
+    if (!mountedRef.current) return;
+
+    setCanonicalState(nextState);
+    setUiState("reading");
+    setIsReviewPaused(false);
+    setIsSessionReviewing(true);
+    setReviewActivity("ready");
+    setReviewSecondsRemaining(null);
+    setIsBusy(false);
+  }
+
+  async function requestExitSessionReview() {
+    const paused = await pauseSessionReview();
+    if (paused && mountedRef.current) setConfirmFinish(true);
+  }
+
+  async function exitSessionReview() {
+    const attempt = reviewAttemptRef.current;
+    if (attempt) {
+      if (attempt.interval !== null) {
+        clearInterval(attempt.interval);
+        attempt.interval = null;
+      }
+      attempt.abortController.abort();
+      reviewAttemptRef.current = null;
+      await attempt.queue;
+    }
+
+    speechRecorder.cancel();
+    speechPlayer.stop();
+    isListeningActiveRef.current = false;
+    if (!mountedRef.current) return;
+
+    setCountdown(null);
+    setIsMicRecording(false);
+    setIsReviewPaused(false);
+    setIsSessionReviewing(false);
+    setIsBusy(true);
+    await finalizeReadingSession();
+  }
+
   function toReadingEventStartMs(timestamp: number): number {
     // The current PostgreSQL ReadingEvents.StartMs contract is SMALLINT.
     // Preserve the full elapsed value in metadata while clamping this legacy field.
@@ -1620,7 +1723,7 @@ export function ReadingScreen({
       };
 
       setSessionSummary(updatedSummary);
-      setCanonicalState("FINISHED");
+      setCanonicalState(finishedSession.state);
       setConfirmFinish(false);
       setIsSessionReviewing(false);
       setUiState("complete");
@@ -1641,6 +1744,11 @@ export function ReadingScreen({
     if (finishStartedRef.current) return;
     finishStartedRef.current = true;
     setIsBusy(true);
+    setCountdown(null);
+    if (!isMicRecording) {
+      isListeningActiveRef.current = false;
+      speechRecorder.cancel();
+    }
     speechPlayer.stop();
 
     try {
@@ -1749,6 +1857,8 @@ export function ReadingScreen({
         currentPosition={reviewQueueSnapshot.completedCount + 1}
         feedback={reviewFeedback}
         item={reviewQueueSnapshot.current}
+        onExit={() => void requestExitSessionReview()}
+        onPause={() => void pauseSessionReview()}
         onStartAttempt={() => void startReviewAttempt()}
         secondsRemaining={reviewSecondsRemaining}
         totalItems={reviewQueueSnapshot.total}
@@ -1915,13 +2025,18 @@ export function ReadingScreen({
       </ReadingLayout>
       {confirmFinish ? (
         <ReadingStatusDialog
-          body="Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."
+          body={
+            isReviewPaused
+              ? "Mình sẽ lưu phần bé đã đọc. Những từ chưa luyện xong sẽ không bị tính là bé đã đọc đúng."
+              : "Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."
+          }
           closeOnEscape
           onClose={() => setConfirmFinish(false)}
           primaryAction={{
             isLoading: isBusy,
             label: "Lưu và dừng",
-            onClick: () => void finishReading(),
+            onClick: () =>
+              void (isReviewPaused ? exitSessionReview() : finishReading()),
           }}
           secondaryAction={{
             label: "Đọc tiếp",
@@ -1931,16 +2046,23 @@ export function ReadingScreen({
         />
       ) : uiState === "paused" ? (
         <ReadingStatusDialog
-          body="Khi sẵn sàng, mình đọc tiếp nhé. Đánh giá đang tạm dừng và không tạo lỗi đọc."
+          body={
+            isReviewPaused
+              ? "Phần luyện từ đang được lưu tạm. Bé có thể tiếp tục đúng từ đang luyện hoặc lưu và dừng buổi đọc."
+              : "Khi sẵn sàng, mình đọc tiếp nhé. Đánh giá đang tạm dừng và không tạo lỗi đọc."
+          }
           closeOnEscape
-          onClose={() => void resumeReading()}
+          onClose={() =>
+            void (isReviewPaused ? resumeSessionReview() : resumeReading())
+          }
           primaryAction={{
             isLoading: isBusy,
-            label: "Đọc tiếp",
-            onClick: () => void resumeReading(),
+            label: isReviewPaused ? "Tiếp tục luyện từ" : "Đọc tiếp",
+            onClick: () =>
+              void (isReviewPaused ? resumeSessionReview() : resumeReading()),
           }}
           secondaryAction={{
-            label: "Dừng buổi đọc",
+            label: isReviewPaused ? "Lưu và dừng" : "Dừng buổi đọc",
             onClick: () => setConfirmFinish(true),
           }}
           title="Bé đang nghỉ một chút"
