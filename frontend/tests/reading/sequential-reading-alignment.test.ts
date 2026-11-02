@@ -52,12 +52,13 @@ describe("SequentialReadingTracker", () => {
       words,
     );
 
-    const result = tracker.commitFinal("utterance-1", "Tôi khỏe");
+    const result = tracker.commitFinal("utterance-1", "khỏe");
 
-    expect(result.cursorIndex).toBe(0);
-    expect(result.currentWordId).toBe("a-0");
+    expect(result.cursorIndex).toBe(1);
+    expect(result.currentWordId).toBe("a-1");
     expect(result.mismatchWordId).toBe("a-0");
     expect(result.needsReviewWordIds).toEqual(new Set(["a-0"]));
+    expect(result.correctWordIds.has("b-1")).toBe(false);
     expect(result.correctWordIds.size).toBe(0);
   });
 
@@ -141,21 +142,31 @@ describe("SequentialReadingTracker", () => {
     expect(result.correctWordIds.has("a-0")).toBe(false);
   });
 
-  it("marks corrected occurrences as reviewed", () => {
-    const tracker = new SequentialReadingTracker(
-      "page-1",
-      "revision-1",
-      words,
-    );
+  it("reviews missed occurrences after the first reading pass", () => {
+    const tracker = new SequentialReadingTracker("page-1", "revision-1", [
+      { word_id: "review-0", text: "Hôm" },
+      { word_id: "review-1", text: "nay" },
+    ]);
 
     const incorrect = tracker.commitFinal("wrong", "Hmm");
-    expect(incorrect.needsReviewWordIds).toEqual(new Set(["a-0"]));
+    expect(incorrect.cursorIndex).toBe(1);
+    expect(incorrect.needsReviewWordIds).toEqual(new Set(["review-0"]));
     expect(incorrect.reviewedWordIds.size).toBe(0);
+    expect(tracker.isReviewing).toBe(false);
+
+    const endOfPass = tracker.commitFinal("remaining", "nay");
+    expect(endOfPass.complete).toBe(false);
+    expect(tracker.isReviewing).toBe(true);
+    expect(endOfPass.currentWordId).toBe("review-0");
 
     const corrected = tracker.commitFinal("retry", "Hôm");
-    expect(corrected.correctWordIds).toEqual(new Set(["a-0"]));
+    expect(corrected.correctWordIds).toEqual(
+      new Set(["review-0", "review-1"]),
+    );
     expect(corrected.needsReviewWordIds.size).toBe(0);
-    expect(corrected.reviewedWordIds).toEqual(new Set(["a-0"]));
+    expect(corrected.reviewedWordIds).toEqual(new Set(["review-0"]));
+    expect(corrected.currentWordId).toBeNull();
+    expect(corrected.complete).toBe(true);
   });
 
   it("excludes speaker labels from the spoken token list", () => {
