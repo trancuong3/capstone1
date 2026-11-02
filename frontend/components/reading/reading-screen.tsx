@@ -45,6 +45,7 @@ import {
 } from "@/lib/utils/sequential-reading-alignment";
 import { getReadingWordConfidenceThreshold } from "@/lib/utils/reading-confidence";
 import {
+  confirmedIncorrectReviewCandidates,
   MAX_REVIEW_ATTEMPTS,
   SessionReviewQueue,
   type SessionReviewQueueSnapshot,
@@ -275,7 +276,7 @@ export function ReadingScreen({
       pageProgress?.current_index ??
       0;
     sessionReviewQueueRef.current.replacePageCandidates(
-      tracker.getReviewCandidates(),
+      confirmedIncorrectReviewCandidates(tracker.getReviewCandidates()),
       pageOrder,
       tracker.pageId,
       tracker.pageRevisionId,
@@ -1381,6 +1382,13 @@ export function ReadingScreen({
       await speechRecorder.start((audio) =>
         enqueueReviewUtterance(attempt, audio),
       );
+      // Permission prompts can resolve after this screen has unmounted or the
+      // review item has been invalidated. Never arm a countdown for a stale attempt.
+      if (!mountedRef.current || reviewAttemptRef.current !== attempt) {
+        speechRecorder.cancel();
+        attempt.abortController.abort();
+        return;
+      }
     } catch (error) {
       attempt.sttFailed = true;
       console.warn("Could not start the review microphone:", error);
