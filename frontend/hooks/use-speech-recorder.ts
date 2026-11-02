@@ -6,7 +6,7 @@ export interface SpeechRecorder {
   readonly isRecording: boolean;
   readonly isSpeaking: boolean;
   readonly audioLevel: number;
-  start(onUtterance?: (blob: Blob) => void): Promise<void>;
+  start(onUtterance?: (blob: Blob, segmentStartedAtMs?: number) => void): Promise<void>;
   stop(): Promise<Blob | null>;
   cancel(): void;
   getStream(): MediaStream | null;
@@ -28,7 +28,11 @@ export function useSpeechRecorder(): SpeechRecorder {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const allChunksRef = useRef<Blob[]>([]);
-  const onUtteranceRef = useRef<((blob: Blob) => void) | null>(null);
+  const onUtteranceRef = useRef<
+    ((blob: Blob, segmentStartedAtMs?: number) => void) | null
+  >(null);
+  const captureStartedAtMsRef = useRef<number | null>(null);
+  const utteranceStartedAtMsRef = useRef<number | null>(null);
   const isRotatingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const captureGenerationRef = useRef(0);
@@ -128,6 +132,8 @@ export function useSpeechRecorder(): SpeechRecorder {
       allChunksRef.current = [];
       isRecordingRef.current = true;
       const captureGeneration = captureGenerationRef.current;
+      captureStartedAtMsRef.current = Date.now();
+      utteranceStartedAtMsRef.current = null;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (
@@ -207,6 +213,11 @@ export function useSpeechRecorder(): SpeechRecorder {
 
               // VAD: avg > 10 corresponds to audible human speech
               if (avg > 10) {
+                if (!hasSpokenInUtterance) {
+                  // The recorder is already collecting 150 ms timeslices, so
+                  // include a small lead-in before the VAD threshold crossing.
+                  utteranceStartedAtMsRef.current = Date.now() - 150;
+                }
                 speakingFrames++;
                 hasSpokenInUtterance = true;
                 silentFrames = 0;
@@ -233,6 +244,11 @@ export function useSpeechRecorder(): SpeechRecorder {
                 silentFrames = 0;
                 speakingFrames = 0;
 
+                const segmentStartedAtMs =
+                  utteranceStartedAtMsRef.current ??
+                  captureStartedAtMsRef.current ??
+                  Date.now();
+                utteranceStartedAtMsRef.current = null;
                 const activeRecorder = recorderRef.current;
                 if (activeRecorder && activeRecorder.state === "recording") {
                   isRotatingRef.current = true;
@@ -247,7 +263,7 @@ export function useSpeechRecorder(): SpeechRecorder {
                         type: contentType,
                       });
                       if (blob.size > 800) {
-                        onUtteranceRef.current?.(blob);
+                        onUtteranceRef.current?.(blob, segmentStartedAtMs);
                       }
                     }
                   };
@@ -323,6 +339,10 @@ export function useSpeechRecorder(): SpeechRecorder {
       resolveStopRef.current = resolve;
       rejectStopRef.current = reject;
       const finalSegmentChunks = chunksRef.current;
+      const finalSegmentStartedAtMs =
+        utteranceStartedAtMsRef.current ??
+        captureStartedAtMsRef.current ??
+        Date.now();
       recorder.onstop = () => {
         const contentType = recorder.mimeType || "audio/webm";
         const finalSegment = finalSegmentChunks.length
@@ -332,7 +352,7 @@ export function useSpeechRecorder(): SpeechRecorder {
         // returned as a whole-session Blob and the caller could either lose it
         // or re-transcribe all already-processed audio.
         if (finalSegment && finalSegment.size > 800) {
-          onUtteranceRef.current?.(finalSegment);
+          onUtteranceRef.current?.(finalSegment, finalSegmentStartedAtMs);
         }
         const fullRecording = allChunksRef.current.length
           ? new Blob(allChunksRef.current, { type: contentType })
