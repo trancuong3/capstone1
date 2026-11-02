@@ -43,9 +43,7 @@ export function ReadingPronunciationReview({
   const [isProcessing, setIsProcessing] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [canContinue, setCanContinue] = useState(false);
-  const [feedback, setFeedback] = useState(
-    "Con đọc từ này một lần nữa nhé.",
-  );
+  const [feedback, setFeedback] = useState("Con đọc từ này một lần nữa nhé.");
   const reportedOutcomesRef = useRef<Set<string>>(new Set());
   const currentPracticeTranscriptRef = useRef<string | null>(null);
 
@@ -56,7 +54,9 @@ export function ReadingPronunciationReview({
   const group = groups[groupIndex] ?? null;
   const currentWord = group?.words[wordIndex] ?? null;
   const targetText =
-    phase === "word" ? currentWord?.expected_word ?? "" : group?.sentence_text ?? "";
+    phase === "word"
+      ? (currentWord?.expected_word ?? "")
+      : (group?.sentence_text ?? "");
 
   const targetWords = useMemo<ReadingSourceWord[]>(
     () =>
@@ -108,7 +108,10 @@ export function ReadingPronunciationReview({
         reportedOutcomesRef.current.add(key);
       } catch (error) {
         // Practice feedback must not trap the child in the review screen.
-        console.warn("Could not persist pronunciation practice outcome:", error);
+        console.warn(
+          "Could not persist pronunciation practice outcome:",
+          error,
+        );
       }
     }
   }
@@ -155,7 +158,9 @@ export function ReadingPronunciationReview({
         setIsRecording(true);
       } catch {
         setCanContinue(true);
-        setFeedback("Chưa mở được micro. Con có thể nghe đọc mẫu hoặc nhờ ba mẹ kiểm tra quyền micro nhé.");
+        setFeedback(
+          "Chưa mở được micro. Con có thể nghe đọc mẫu hoặc nhờ ba mẹ kiểm tra quyền micro nhé.",
+        );
       } finally {
         setIsProcessing(false);
       }
@@ -232,7 +237,11 @@ export function ReadingPronunciationReview({
             ? "Con đọc đúng rồi! Bây giờ mình luyện tiếp nhé."
             : "Con đã đọc lại cả câu rất tốt!",
         );
-        if (phase === "word" && wordIndex + 1 === group.words.length && !group.sentence_text) {
+        if (
+          phase === "word" &&
+          wordIndex + 1 === group.words.length &&
+          !group.sentence_text
+        ) {
           setCanContinue(true);
           setFeedback(
             "Con đọc từ này rồi. Nội dung OCR chưa có dấu câu để xác định nguyên câu, nên mình không tự tạo câu mới nhé.",
@@ -318,7 +327,9 @@ export function ReadingPronunciationReview({
 
       <section className="flex flex-col items-center gap-5 rounded-card border border-line bg-white px-5 py-8 text-center shadow-sm sm:px-8">
         <p className="text-base font-semibold text-muted">
-          {phase === "word" ? "Con đọc lại từ này nhé" : "Con đọc lại cả câu nhé"}
+          {phase === "word"
+            ? "Con đọc lại từ này nhé"
+            : "Con đọc lại cả câu nhé"}
         </p>
         <p
           className={
@@ -336,7 +347,9 @@ export function ReadingPronunciationReview({
             <span className="flex size-12 items-center justify-center rounded-full bg-rose-100 text-rose-700">
               <Mic aria-hidden="true" className="size-6 animate-pulse" />
             </span>
-            <p className="font-semibold text-rose-700">Mình đang nghe con đọc…</p>
+            <p className="font-semibold text-rose-700">
+              Mình đang nghe con đọc…
+            </p>
           </div>
         ) : null}
         <button
@@ -345,7 +358,10 @@ export function ReadingPronunciationReview({
           onClick={() => void handleRecordButton()}
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-primary px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
         >
-          <Mic aria-hidden="true" className={isRecording ? "size-5 animate-pulse" : "size-5"} />
+          <Mic
+            aria-hidden="true"
+            className={isRecording ? "size-5 animate-pulse" : "size-5"}
+          />
           {isProcessing
             ? "Đang kiểm tra…"
             : isRecording
@@ -353,12 +369,18 @@ export function ReadingPronunciationReview({
               : "Bắt đầu đọc"}
         </button>
 
-        <p className="min-h-6 text-sm font-semibold text-muted" aria-live="polite">
+        <p
+          className="min-h-6 text-sm font-semibold text-muted"
+          aria-live="polite"
+        >
           {feedback}
         </p>
-        {phase === "word" && !group.sentence_text && wordIndex === group.words.length - 1 ? (
+        {phase === "word" &&
+        !group.sentence_text &&
+        wordIndex === group.words.length - 1 ? (
           <p className="max-w-xl text-xs text-amber-800">
-            Nội dung trang chưa có dấu câu đủ rõ để xác định nguyên câu. ViRead sẽ không tự bịa câu thay thế.
+            Nội dung trang chưa có dấu câu đủ rõ để xác định nguyên câu. ViRead
+            sẽ không tự bịa câu thay thế.
           </p>
         ) : null}
         <p className="text-xs text-muted">

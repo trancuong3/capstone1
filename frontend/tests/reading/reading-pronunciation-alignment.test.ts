@@ -95,7 +95,6 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
     expect(result.assessments[1].status).toBe("CORRECT");
   });
 
-
   it("marks a confidently mispronounced first word only when the next source word confirms context", () => {
     const result = alignReadingSegment(
       source(["Con", "mèo", "đang", "ngủ."]),
@@ -110,7 +109,9 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
       status: "INCORRECT",
       reason: "CONFIDENT_SUBSTITUTION",
     });
-    expect(result.assessments.slice(1).every((item) => item.status === "CORRECT")).toBe(true);
+    expect(
+      result.assessments.slice(1).every((item) => item.status === "CORRECT"),
+    ).toBe(true);
   });
 
   it("does not mark unrelated background speech as an incorrect word", () => {
@@ -142,11 +143,7 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
   });
 
   it("does not use transcript-only text as word-level confidence", () => {
-    const result = alignReadingSegment(
-      source(["Con", "mèo"]),
-      0,
-      "Con mèo",
-    );
+    const result = alignReadingSegment(source(["Con", "mèo"]), 0, "Con mèo");
 
     expect(result.assessments.map((item) => item.status)).toEqual([
       "UNCERTAIN",
@@ -157,7 +154,12 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
 
   it("continues the next utterance from the previously aligned occurrence", () => {
     const words = source(["Con", "mèo", "đang", "ngủ."]);
-    const first = alignReadingSegment(words, 0, "Con mèo", evidence(["Con", "mèo"]));
+    const first = alignReadingSegment(
+      words,
+      0,
+      "Con mèo",
+      evidence(["Con", "mèo"]),
+    );
     const second = alignReadingSegment(
       words,
       first.next_word_index,
@@ -167,7 +169,9 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
 
     expect(first.next_word_index).toBe(2);
     expect(second.assessments.map((item) => item.word_index)).toEqual([2, 3]);
-    expect(second.assessments.every((item) => item.status === "CORRECT")).toBe(true);
+    expect(second.assessments.every((item) => item.status === "CORRECT")).toBe(
+      true,
+    );
   });
 
   it("treats repeated source words as separate occurrences", () => {
@@ -188,7 +192,9 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
       evidence(texts),
     );
 
-    const khỏe = result.assessments.filter((item) => item.expected_text === "khỏe");
+    const khỏe = result.assessments.filter(
+      (item) => item.expected_text === "khỏe",
+    );
     expect(khỏe.map((item) => item.word_index)).toEqual([2, 6]);
     expect(khỏe.map((item) => item.status)).toEqual(["CORRECT", "CORRECT"]);
   });
@@ -201,15 +207,15 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
       evidence(["đang", "ngủ."]),
     );
 
-    expect(result.assessments.find((item) => item.word_index === 0)?.status).toBe(
-      "UNCERTAIN",
-    );
-    expect(result.assessments.find((item) => item.word_index === 1)?.status).toBe(
-      "UNCERTAIN",
-    );
-    expect(result.assessments.find((item) => item.word_index === 2)?.status).toBe(
-      "CORRECT",
-    );
+    expect(
+      result.assessments.find((item) => item.word_index === 0)?.status,
+    ).toBe("UNCERTAIN");
+    expect(
+      result.assessments.find((item) => item.word_index === 1)?.status,
+    ).toBe("UNCERTAIN");
+    expect(
+      result.assessments.find((item) => item.word_index === 2)?.status,
+    ).toBe("CORRECT");
   });
 });
 

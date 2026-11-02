@@ -7,10 +7,7 @@
  */
 
 export type PronunciationStatus =
-  | "CORRECT"
-  | "INCORRECT"
-  | "UNCERTAIN"
-  | "NOT_REACHED";
+  "CORRECT" | "INCORRECT" | "UNCERTAIN" | "NOT_REACHED";
 
 export interface ReadingSourceWord {
   readonly word_id: string;
@@ -76,7 +73,9 @@ function transcriptWords(
   transcript: string,
 ): RecognizedSpeechWord[] {
   if (words?.length) {
-    return words.filter((word) => normalizeVietnameseToken(word.text).length > 0);
+    return words.filter(
+      (word) => normalizeVietnameseToken(word.text).length > 0,
+    );
   }
 
   // Text-only transcripts are retained for diagnostics, but have no per-word
@@ -96,7 +95,11 @@ function isLikelyIncompleteToken(spoken: string, expected: string): boolean {
 }
 
 type AlignmentStep =
-  | { readonly kind: "mapped"; readonly sourceOffset: number; readonly spokenIndex: number }
+  | {
+      readonly kind: "mapped";
+      readonly sourceOffset: number;
+      readonly spokenIndex: number;
+    }
   | { readonly kind: "skipped-source"; readonly sourceOffset: number }
   | { readonly kind: "extra-spoken"; readonly spokenIndex: number };
 
@@ -129,7 +132,10 @@ function tokenSimilarity(left: string, right: string): number {
     }
   }
 
-  return 1 - previous[rightChars.length] / Math.max(leftChars.length, rightChars.length);
+  return (
+    1 -
+    previous[rightChars.length] / Math.max(leftChars.length, rightChars.length)
+  );
 }
 
 function nearlyEqual(left: number, right: number): boolean {
@@ -189,9 +195,7 @@ export function alignReadingSegment(
   for (let i = 1; i < rows; i += 1) {
     for (let j = 1; j < columns; j += 1) {
       const substitutionCost =
-        expectedTokens[i - 1] === spokenTokens[j - 1]
-          ? 0
-          : SUBSTITUTION_COST;
+        expectedTokens[i - 1] === spokenTokens[j - 1] ? 0 : SUBSTITUTION_COST;
 
       costs[i][j] = Math.min(
         costs[i - 1][j - 1] + substitutionCost,
@@ -205,7 +209,10 @@ export function alignReadingSegment(
   // On ties prefer the shorter prefix so a pause cannot become trailing errors.
   let endSourceOffset = 1;
   for (let i = 2; i < rows; i += 1) {
-    if (costs[i][spoken.length] < costs[endSourceOffset][spoken.length] - 1e-9) {
+    if (
+      costs[i][spoken.length] <
+      costs[endSourceOffset][spoken.length] - 1e-9
+    ) {
       endSourceOffset = i;
     }
   }
@@ -252,7 +259,10 @@ export function alignReadingSegment(
     }
 
     if (spokenIndex > 0) {
-      reversedSteps.push({ kind: "extra-spoken", spokenIndex: spokenIndex - 1 });
+      reversedSteps.push({
+        kind: "extra-spoken",
+        spokenIndex: spokenIndex - 1,
+      });
       spokenIndex -= 1;
       continue;
     }
@@ -290,7 +300,8 @@ export function alignReadingSegment(
       incomplete: isLikelyIncompleteToken(recognized, expected),
       similarity: tokenSimilarity(expected, recognized),
       recognizedStartSeconds:
-        typeof spokenWord.start === "number" && Number.isFinite(spokenWord.start)
+        typeof spokenWord.start === "number" &&
+        Number.isFinite(spokenWord.start)
           ? spokenWord.start
           : null,
     });
@@ -465,10 +476,7 @@ export function findOriginalSentence(
     const firstLetter = Array.from(firstWord)[0] ?? "";
     // A page can begin mid-sentence. Without a preceding page, accept its
     // boundary only when the verified text starts with a capitalized word.
-    if (
-      !firstLetter ||
-      firstLetter === firstLetter.toLocaleLowerCase("vi")
-    ) {
+    if (!firstLetter || firstLetter === firstLetter.toLocaleLowerCase("vi")) {
       return null;
     }
   }
@@ -480,7 +488,10 @@ export function findOriginalSentence(
   if (end >= words.length) return null;
 
   return {
-    text: words.slice(start, end + 1).map((word) => word.text).join(" "),
+    text: words
+      .slice(start, end + 1)
+      .map((word) => word.text)
+      .join(" "),
     startWordIndex: start,
     endWordIndexExclusive: end + 1,
   };

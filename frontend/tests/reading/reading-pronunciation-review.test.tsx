@@ -10,12 +10,17 @@ const mocks = vi.hoisted(() => ({
   recorderStop: vi.fn<() => Promise<Blob | null>>(),
   recorderCancel: vi.fn(),
   playerPlay: vi.fn<(text: string) => Promise<void>>(),
-  transcribe: vi.fn<(blob: Blob, options?: { languageCode?: string }) => Promise<{
-    text: string;
-    words: { text: string; start: number; end: number; logprob: number }[];
-    language_code: string;
-    language_probability: number;
-  }>>(),
+  transcribe: vi.fn<
+    (
+      blob: Blob,
+      options?: { languageCode?: string },
+    ) => Promise<{
+      text: string;
+      words: { text: string; start: number; end: number; logprob: number }[];
+      language_code: string;
+      language_probability: number;
+    }>
+  >(),
 }));
 
 vi.mock("@/hooks/use-speech-recorder", () => ({
@@ -158,9 +163,10 @@ describe("end-of-session pronunciation review", () => {
     expect(screen.getByTestId("pronunciation-review-target")).toHaveTextContent(
       "Bạn An khỏe không?",
     );
-    expect(
-      screen.getByTestId("reading-pronunciation-review"),
-    ).toHaveAttribute("data-review-phase", "sentence");
+    expect(screen.getByTestId("reading-pronunciation-review")).toHaveAttribute(
+      "data-review-phase",
+      "sentence",
+    );
 
     await user.click(screen.getByRole("button", { name: "Bắt đầu đọc" }));
     await screen.findByRole("button", { name: "Dừng và kiểm tra" });

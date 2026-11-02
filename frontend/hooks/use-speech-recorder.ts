@@ -35,11 +35,12 @@ export function useSpeechRecorder(): SpeechRecorder {
   const chunksRef = useRef<Blob[]>([]);
   const allChunksRef = useRef<Blob[]>([]);
   const onUtteranceRef = useRef<
-    ((
-      blob: Blob,
-      segmentStartedAtMs?: number,
-      audioSegmentId?: string,
-    ) => void) | null
+    | ((
+        blob: Blob,
+        segmentStartedAtMs?: number,
+        audioSegmentId?: string,
+      ) => void)
+    | null
   >(null);
   const captureStartedAtMsRef = useRef<number | null>(null);
   const recorderSegmentStartedAtMsRef = useRef<number | null>(null);
