@@ -359,6 +359,7 @@ export function ReadingScreen({
   function enqueueRecordedUtterance(
     utteranceBlob: Blob,
     segmentStartedAtMs = Date.now(),
+    audioSegmentId?: string,
   ) {
     if (utteranceBlob.size <= 800) return;
     const pageAtCapture = activePageRef.current;
@@ -369,7 +370,7 @@ export function ReadingScreen({
       sessionId,
       pageAtCapture.page_id,
       pageAtCapture.page_revision_id,
-      ++speechSegmentSequenceRef.current,
+      audioSegmentId ?? `${Math.round(segmentStartedAtMs)}:${utteranceBlob.size}:${++speechSegmentSequenceRef.current}`,
     ].join(":");
 
     const pending = recognitionQueueRef.current.then(async () => {
