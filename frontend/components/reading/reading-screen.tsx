@@ -207,33 +207,27 @@ export function ReadingScreen({
     }
   }
 
-  const handleWordClick = useCallback(
-    async (word: ReadingPageWordDTO) => {
-      setCurrentWordId(word.word_id);
-      setLatestTranscript(word.text);
-
-      setIsReadingWord(true);
-      try {
-        await playReferenceAudio(word.text, {
-          onEnded: () => {
-            if (mountedRef.current) setIsReadingWord(false);
-          },
-        });
-      } catch (err) {
-        console.warn("Lỗi phát âm 1 từ:", err);
-        if (mountedRef.current) setIsReadingWord(false);
-      }
-    },
-    [speechPlayer, isMicRecording, uiState],
-  );
-
-  const handleReadCurrentWord = useCallback(() => {
-    if (!page || !currentWordId) return;
-    const word = page.words.find((w) => w.word_id === currentWordId);
-    if (word) {
-      void handleWordClick(word);
+  async function handleWordClick(word: ReadingPageWordDTO) {
+    setCurrentWordId(word.word_id);
+    setLatestTranscript(word.text);
+    setIsReadingWord(true);
+    try {
+      await playReferenceAudio(word.text, {
+        onEnded: () => {
+          if (mountedRef.current) setIsReadingWord(false);
+        },
+      });
+    } catch (error) {
+      console.warn("Lỗi phát âm 1 từ:", error);
+      if (mountedRef.current) setIsReadingWord(false);
     }
-  }, [currentWordId, handleWordClick, page]);
+  }
+
+  function handleReadCurrentWord() {
+    if (!page || !currentWordId) return;
+    const word = page.words.find((item) => item.word_id === currentWordId);
+    if (word) void handleWordClick(word);
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -744,6 +738,7 @@ export function ReadingScreen({
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      resumeMicrophoneAfterSpeechRef.current = false;
       setIsReadingWord(false);
       setIsBusy(false);
     }
@@ -1619,6 +1614,7 @@ async function finishReading() {
           isRetrying={isBusy}
           onClose={() => {
             speechPlayer.stop();
+            void resumeMicrophoneAfterReferenceAudio();
             setTutorOpen(false);
             setUiState("reading");
           }}
