@@ -140,6 +140,19 @@ describe("Vietnamese occurrence-based pronunciation alignment", () => {
 
     expect(result.assessments[0].status).toBe("UNCERTAIN");
     expect(result.assessments[0].reason).toBe("INCOMPLETE_TOKEN");
+
+    const syllablePrefix = alignReadingSegment(
+      source(["khỏe", "không?"]),
+      0,
+      "kh không?",
+      evidence(["kh", "không?"]),
+    );
+    expect(syllablePrefix.assessments[0]).toMatchObject({
+      expected_text: "khỏe",
+      recognized_text: "kh",
+      status: "UNCERTAIN",
+      reason: "INCOMPLETE_TOKEN",
+    });
   });
 
   it("does not use transcript-only text as word-level confidence", () => {
