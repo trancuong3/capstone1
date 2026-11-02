@@ -65,6 +65,10 @@ export class SequentialReadingTracker {
     this.tokens = [...tokens];
   }
 
+  get currentWordId(): string | null {
+    return this.tokens[this.cursorIndex]?.word_id ?? null;
+  }
+
   /**
    * Interim recognition may preview only the uninterrupted sequence beginning
    * at the current cursor. It never mutates progress or token statuses.
