@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, SmallInteger, ForeignKey, DateTime, Float, CheckConstraint, UniqueConstraint, text
+from sqlalchemy import Column, String, SmallInteger, Integer, ForeignKey, DateTime, Float, CheckConstraint, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -34,8 +34,8 @@ class ReadingEvent(Base):
     PageRevisionId = Column("pagerevisionid", UUID(as_uuid=True), ForeignKey("pagerevisions.id", ondelete="CASCADE"), nullable=False)
     WordId = Column("wordid", UUID(as_uuid=True), ForeignKey("pagerevisionwords.id", ondelete="SET NULL"))
     Type = Column("type", String, nullable=False)
-    StartMs = Column("startms", SmallInteger, nullable=False)
-    EndMs = Column("endms", SmallInteger)
+    StartMs = Column("startms", Integer, nullable=False)
+    EndMs = Column("endms", Integer)
     Confidence = Column("confidence", Float)
     Status = Column("status", String, nullable=False)
     Metadata = Column("metadata", JSONB, server_default=text("'{}'::jsonb"))
