@@ -42,7 +42,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add             frontend/components/reading/book-page-content.tsx             frontend/components/reading/reading-screen.tsx             frontend/lib/utils/sequential-reading-alignment.ts             frontend/tests/reading/book-page-viewer.test.tsx             frontend/tests/reading/sequential-reading-alignment.test.ts
+          git add -f             frontend/components/reading/book-page-content.tsx             frontend/components/reading/reading-screen.tsx             frontend/lib/utils/sequential-reading-alignment.ts             frontend/tests/reading/book-page-viewer.test.tsx             frontend/tests/reading/sequential-reading-alignment.test.ts
           if ! git diff --cached --quiet; then
             git commit -m "style(reading): apply repository Prettier formatting"
             git push origin HEAD:fix/sequential-word-alignment-20261102
