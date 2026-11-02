@@ -130,6 +130,7 @@ export function ReadingScreen({
   const recognitionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pronunciationReviewCandidatesRef = useRef<Map<string, PronunciationReviewCandidate>>(new Map());
   const pendingReadingEventsRef = useRef<Map<string, ReadingEventCreateDTO>>(new Map());
+  const pendingPracticeEventsRef = useRef<Map<string, ReadingEventCreateDTO>>(new Map());
   const persistedReadingEventKeysRef = useRef<Set<string>>(new Set());
   const sessionStartedAtMsRef = useRef(Date.now());
   const finishStartedRef = useRef(false);
@@ -501,6 +502,77 @@ export function ReadingScreen({
     startListeningRef.current = startListening;
   });
 
+  async function persistPracticeOutcome(
+    candidate: PronunciationReviewCandidate,
+    stage: "WORD" | "SENTENCE",
+    outcome: "CORRECT" | "ASSISTED",
+    confidence: number | null,
+  ) {
+    const eventKey = [
+      candidate.page_id,
+      candidate.page_revision_id,
+      candidate.word_id,
+      "PRACTICE",
+      stage,
+    ].join(":");
+    if (persistedReadingEventKeysRef.current.has(eventKey)) return;
+
+    const startMs = Math.max(
+      0,
+      Date.now() - sessionStartedAtMsRef.current,
+    );
+    pendingPracticeEventsRef.current.set(eventKey, {
+      session_id: sessionId,
+      page_id: candidate.page_id,
+      page_revision_id: candidate.page_revision_id,
+      word_id: candidate.word_id,
+      type: "SELF_CORRECTION",
+      start_ms: startMs,
+      end_ms: null,
+      confidence,
+      status: outcome === "CORRECT" ? "CONFIRMED" : "DISMISSED",
+      metadata: {
+        phase: "POST_SESSION_PRACTICE",
+        practice_stage: stage,
+        practice_outcome: outcome,
+        occurrence_key: [
+          candidate.page_id,
+          candidate.page_revision_id,
+          candidate.word_id,
+        ].join(":"),
+        word_index: candidate.word_index,
+        expected_word: candidate.expected_word,
+        recognized_word: candidate.recognized_word,
+        original_sentence: candidate.sentence_text,
+      },
+    });
+
+    await persistPendingPracticeEvents();
+  }
+
+  async function persistPendingPracticeEvents() {
+    const createEvent = services.readingService.createEvent;
+    if (!createEvent) {
+      console.warn("ReadingService.createEvent is unavailable; practice events were not persisted.");
+      return;
+    }
+
+    for (const [eventKey, event] of pendingPracticeEventsRef.current) {
+      if (persistedReadingEventKeysRef.current.has(eventKey)) {
+        pendingPracticeEventsRef.current.delete(eventKey);
+        continue;
+      }
+      try {
+        await createEvent(event);
+        persistedReadingEventKeysRef.current.add(eventKey);
+        pendingPracticeEventsRef.current.delete(eventKey);
+      } catch (error) {
+        // Keep failed practice events queued so completion can make one final attempt.
+        console.warn("Could not persist a practice outcome:", error);
+      }
+    }
+  }
+
   async function persistPendingReadingEvents() {
     const createEvent = services.readingService.createEvent;
     if (!createEvent) {
@@ -681,6 +753,7 @@ export function ReadingScreen({
     recognitionQueueRef.current = Promise.resolve();
     pronunciationReviewCandidatesRef.current.clear();
     pendingReadingEventsRef.current.clear();
+    pendingPracticeEventsRef.current.clear();
     persistedReadingEventKeysRef.current.clear();
     sessionStartedAtMsRef.current = Date.now();
     correctWordIdsRef.current.clear();
@@ -1117,9 +1190,13 @@ async function finishReading() {
       <ReadingPronunciationReview
         groups={pronunciationReviewGroups}
         onComplete={() => {
-          setIsPronunciationReview(false);
-          setUiState("complete");
+          void (async () => {
+            await persistPendingPracticeEvents();
+            setIsPronunciationReview(false);
+            setUiState("complete");
+          })();
         }}
+        onPracticeOutcome={persistPracticeOutcome}
       />
     );
   }
