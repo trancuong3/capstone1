@@ -17,7 +17,7 @@ on:
       - fix/reading-pronunciation-flow-20261102
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   frontend:
@@ -28,8 +28,11 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - name: Check out repository
+      - name: Check out the task branch
         uses: actions/checkout@v4
+        with:
+          ref: fix/reading-pronunciation-flow-20261102
+          persist-credentials: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -41,6 +44,46 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Format changed reading files
+        run: |
+          npx prettier --write \
+            components/reading/reading-screen.tsx \
+            components/reading/reading-layout.tsx \
+            components/reading/book-page-viewer.tsx \
+            components/reading/book-page-content.tsx \
+            components/reading/reading-pronunciation-review.tsx \
+            hooks/use-speech-recorder.ts \
+            lib/api/reading-service.ts \
+            lib/api/speech-service.ts \
+            lib/utils/reading-pronunciation-alignment.ts \
+            test/speech-service.test.ts \
+            tests/reading/reading-pronunciation-alignment.test.ts \
+            tests/reading/reading-pronunciation-review.test.tsx \
+            types/reading.ts
+
+      - name: Commit formatting changes to the task branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add -- \
+              components/reading/reading-screen.tsx \
+              components/reading/reading-layout.tsx \
+              components/reading/book-page-viewer.tsx \
+              components/reading/book-page-content.tsx \
+              components/reading/reading-pronunciation-review.tsx \
+              hooks/use-speech-recorder.ts \
+              lib/api/reading-service.ts \
+              lib/api/speech-service.ts \
+              lib/utils/reading-pronunciation-alignment.ts \
+              test/speech-service.test.ts \
+              tests/reading/reading-pronunciation-alignment.test.ts \
+              tests/reading/reading-pronunciation-review.test.tsx \
+              types/reading.ts
+            git commit -m "style(reading): format pronunciation workflow"
+            git push origin HEAD:refs/heads/fix/reading-pronunciation-flow-20261102
+          fi
+
       - name: Check formatting for changed reading files
         run: |
           npx prettier --check \
@@ -50,8 +93,10 @@ jobs:
             components/reading/book-page-content.tsx \
             components/reading/reading-pronunciation-review.tsx \
             hooks/use-speech-recorder.ts \
+            lib/api/reading-service.ts \
             lib/api/speech-service.ts \
             lib/utils/reading-pronunciation-alignment.ts \
+            test/speech-service.test.ts \
             tests/reading/reading-pronunciation-alignment.test.ts \
             tests/reading/reading-pronunciation-review.test.tsx \
             types/reading.ts
