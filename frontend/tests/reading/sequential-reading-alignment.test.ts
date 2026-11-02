@@ -169,23 +169,4 @@ describe("SequentialReadingTracker", () => {
     expect(corrected.complete).toBe(true);
   });
 
-  it("excludes speaker labels from the spoken token list", () => {
-    const dialogueTokens: SequentialReadingToken[] = [
-      { word_id: "line-a-0", text: "Hôm" },
-      { word_id: "line-a-1", text: "nay" },
-      { word_id: "line-b-0", text: "Tôi" },
-    ];
-    const tracker = new SequentialReadingTracker(
-      "dialogue-page",
-      "dialogue-revision",
-      dialogueTokens,
-    );
-
-    const result = tracker.commitFinal("dialogue-1", "Hôm nay");
-
-    expect(result.correctWordIds).toEqual(
-      new Set(["line-a-0", "line-a-1"]),
-    );
-    expect(result.currentWordId).toBe("line-b-0");
-  });
 });

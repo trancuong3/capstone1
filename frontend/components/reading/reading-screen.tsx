@@ -150,6 +150,7 @@ export function ReadingScreen({
   const [reviewedWordIds, setReviewedWordIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [isReviewingWords, setIsReviewingWords] = useState(false);
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
@@ -187,6 +188,7 @@ export function ReadingScreen({
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
     setReviewedWordIds(new Set());
+    setIsReviewingWords(false);
   }, []);
 
   const activatePage = useCallback(
@@ -438,6 +440,7 @@ export function ReadingScreen({
     setCorrectWordIds(new Set(result.correctWordIds));
     setMispronouncedWordIds(new Set(result.needsReviewWordIds));
     setReviewedWordIds(new Set(result.reviewedWordIds));
+    setIsReviewingWords(tracker.isReviewing);
     recordSpokenText(spokenText);
   }
 
@@ -1338,7 +1341,7 @@ export function ReadingScreen({
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
           </StatusBanner>
-        ) : trackerRef.current?.isReviewing ? (
+        ) : isReviewingWords ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Bé đã đọc hết trang. Mình cùng đọc lại các từ cần ôn nhé!
           </StatusBanner>
