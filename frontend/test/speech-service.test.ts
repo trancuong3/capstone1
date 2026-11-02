@@ -30,6 +30,41 @@ function headersFromCall(): Headers {
   return fetchMock.mock.calls[0]?.[1]?.headers as Headers;
 }
 
+/** Small, structurally valid mono PCM WAV fixture (not text mislabeled as audio). */
+function createWavRecording(): Blob {
+  const sampleRate = 16_000;
+  const sampleCount = 1_600;
+  const dataLength = sampleCount * 2;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + dataLength, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(36, "data");
+  view.setUint32(40, dataLength, true);
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sample = Math.round(Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 4_000);
+    view.setInt16(44 + index * 2, sample, true);
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
 describe("speech service", () => {
   it("keeps ElevenLabs credentials server-side while requesting binary TTS audio", async () => {
     fetchMock.mockResolvedValue(
@@ -68,11 +103,11 @@ describe("speech service", () => {
         language_probability: 0.99,
       }),
     );
-    const recording = new Blob(["recorded-audio"], { type: "audio/webm" });
+    const recording = createWavRecording();
 
     await expect(
       createSpeechService().transcribe(recording, {
-        filename: "reading.webm",
+        filename: "reading.wav",
         languageCode: "vi",
       }),
     ).resolves.toEqual({
@@ -89,7 +124,11 @@ describe("speech service", () => {
     const body = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(body).toBeInstanceOf(FormData);
     expect(body.get("language_code")).toBe("vi");
-    expect(body.get("file")).toBeTruthy();
+    const uploadedFile = body.get("file") as File;
+    expect(uploadedFile).toBeInstanceOf(File);
+    expect(uploadedFile.name).toBe("reading.wav");
+    expect(uploadedFile.type).toBe("audio/wav");
+    expect(uploadedFile.size).toBe(recording.size);
     expect(headersFromCall().has("content-type")).toBe(false);
   });
 
@@ -108,8 +147,20 @@ describe("speech service", () => {
     );
 
     await expect(
-      createSpeechService().transcribe(new Blob(["recorded-audio"])),
+      createSpeechService().transcribe(createWavRecording()),
     ).resolves.toMatchObject({ words });
+  });
+
+  it("rejects missing or mismatched audio MIME metadata instead of relabeling bytes", async () => {
+    await expect(
+      createSpeechService().transcribe(new Blob([new Uint8Array([1, 2, 3])])),
+    ).rejects.toMatchObject({ status: 422 });
+    await expect(
+      createSpeechService().transcribe(createWavRecording(), {
+        filename: "recording.webm",
+      }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not call the API without a browser session", async () => {
@@ -145,7 +196,7 @@ describe("speech service", () => {
       }),
     );
     await expect(
-      createSpeechService().transcribe(new Blob(["audio"])),
+      createSpeechService().transcribe(createWavRecording()),
     ).rejects.toMatchObject({ code: "STT_UNAVAILABLE" });
   });
 });
