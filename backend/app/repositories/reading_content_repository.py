@@ -200,6 +200,20 @@ class ReadingContentRepository:
         )
         return list(result.scalars().all())
 
+    async def reading_event_by_idempotency_key(
+        self,
+        session_id: UUID,
+        event_key: str,
+    ) -> ReadingEvent | None:
+        return await self.db.scalar(
+            select(ReadingEvent)
+            .where(
+                ReadingEvent.SessionId == session_id,
+                ReadingEvent.Metadata["idempotency_key"].astext == event_key,
+            )
+            .limit(1)
+        )
+
     async def create_reading_event(self, event: ReadingEvent) -> ReadingEvent:
         self.db.add(event)
         try:
