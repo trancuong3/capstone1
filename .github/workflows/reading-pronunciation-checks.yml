@@ -6,15 +6,21 @@ on:
       - main
     paths:
       - "frontend/**"
-      - "backend/app/providers/elevenlabs_voice_provider.py"
-      - "backend/app/schemas/voice.py"
+      - "backend/app/api/routes/reading.py"
       - "backend/app/models/reading.py"
+      - "backend/app/providers/elevenlabs_voice_provider.py"
+      - "backend/app/repositories/reading_content_repository.py"
+      - "backend/app/schemas/reading.py"
+      - "backend/app/schemas/voice.py"
+      - "backend/app/services/reading_content_service.py"
+      - "backend/test_reading_content_service.py"
       - "backend/test_voice.py"
       - "supabase/migrations/**"
       - ".github/workflows/reading-pronunciation-checks.yml"
-  push:
-    branches:
-      - fix/reading-pronunciation-flow-20261102
+
+concurrency:
+  group: reading-pronunciation-flow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
