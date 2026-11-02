@@ -20,7 +20,6 @@ interface ReadingLayoutProps {
   currentWordId: string | null;
   currentWordText?: string | null;
   exitHref: string;
-  isCurrentWordMispronounced?: boolean;
   isListening: boolean;
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
@@ -29,6 +28,7 @@ interface ReadingLayoutProps {
   isSpeaking?: boolean;
   latestTranscript?: string | null;
   mispronouncedWordIds?: Set<string>;
+  uncertainWordIds?: Set<string>;
   onFinish: () => void;
   onHelp: () => void;
   onManualPage: () => void;
@@ -39,7 +39,6 @@ interface ReadingLayoutProps {
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
-  spokenWords?: Set<string>;
 }
 
 export function ReadingLayout({
@@ -51,7 +50,6 @@ export function ReadingLayout({
   currentWordId,
   currentWordText,
   exitHref,
-  isCurrentWordMispronounced = false,
   isListening,
   isMicRecording = false,
   isPageTransitioning = false,
@@ -60,6 +58,7 @@ export function ReadingLayout({
   isSpeaking = false,
   latestTranscript,
   mispronouncedWordIds,
+  uncertainWordIds,
   onFinish,
   onHelp,
   onManualPage,
@@ -70,7 +69,6 @@ export function ReadingLayout({
   onWordClick,
   page,
   comparisonResult,
-  spokenWords,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
@@ -105,10 +103,10 @@ export function ReadingLayout({
           currentWordId={currentWordId}
           isTransitioning={isPageTransitioning}
           mispronouncedWordIds={mispronouncedWordIds}
+          uncertainWordIds={uncertainWordIds}
           onWordClick={onWordClick}
           page={page}
           comparisonResult={comparisonResult}
-          spokenWords={spokenWords}
         />
       </CameraPreview>
 
@@ -158,81 +156,28 @@ export function ReadingLayout({
           </p>
         </div>
       ) : isMicRecording ? (
-        isCurrentWordMispronounced ? (
-          <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-rose-500 bg-rose-50 px-4 py-3 shadow-sm transition-all animate-in fade-in">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <span className="flex size-3 rounded-full bg-rose-600 animate-pulse shrink-0" />
-              <span className="text-xs font-black uppercase tracking-wider text-rose-700 shrink-0">
-                Chưa chính xác:
-              </span>
-              <p className="min-w-0 flex-1 truncate text-base font-extrabold text-rose-950">
-                Bé hãy nhìn từ màu đỏ &ldquo;
-                <span className="underline decoration-2 underline-offset-2">
-                  {currentWordText}
-                </span>
-                &rdquo; và thử đọc lại nhé!
+        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm transition-all animate-in fade-in">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="relative flex size-3.5 shrink-0">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-extrabold uppercase tracking-wider text-primary">
+                Bé đang đọc
+              </p>
+              <p className="truncate text-sm font-semibold text-ink">
+                {latestTranscript
+                  ? `Đã nghe: “${latestTranscript}”`
+                  : "Mình đang lắng nghe. Con cứ đọc tiếp nhé."}
+              </p>
+              <p className="text-xs text-muted">
+                Các từ cần luyện sẽ được xem lại sau khi con đọc xong.
               </p>
             </div>
-            {currentWordText && onReadWord ? (
-              <button
-                type="button"
-                onClick={onReadWord}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
-                title="Bấm để nghe đọc mẫu từ này"
-              >
-                <span>🔊 Nghe mẫu từ này</span>
-              </button>
-            ) : null}
           </div>
-        ) : (
-          <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm transition-all animate-in fade-in">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div className="flex shrink-0 items-center gap-2">
-                {isSpeaking ? (
-                  <span className="flex items-center gap-1" aria-hidden="true">
-                    <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-500" />
-                    <span className="h-6 w-1 animate-pulse rounded-full bg-emerald-500 delay-75" />
-                    <span className="h-3 w-1 animate-pulse rounded-full bg-emerald-500 delay-150" />
-                  </span>
-                ) : (
-                  <span className="relative flex size-3.5">
-                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
-                  </span>
-                )}
-                <span className="text-xs font-extrabold uppercase tracking-wider text-primary">
-                  Bé đang đọc:
-                </span>
-              </div>
-              <p className="min-w-0 flex-1 truncate text-lg font-extrabold text-ink">
-                {latestTranscript ? (
-                  <span className="text-primary underline decoration-2 underline-offset-4 animate-in zoom-in-95">
-                    &ldquo;{latestTranscript}&rdquo;
-                  </span>
-                ) : isSpeaking ? (
-                  <span className="font-bold text-emerald-600 animate-pulse">
-                    Đang nhận diện giọng bé… (bé đọc tiếp đi nào)
-                  </span>
-                ) : (
-                  <span className="font-medium italic text-muted text-sm">
-                    Đang lắng nghe bé đọc… (bé hãy nói vào mic)
-                  </span>
-                )}
-              </p>
-            </div>
-            {currentWordText && onReadWord ? (
-              <button
-                type="button"
-                onClick={onReadWord}
-                className="shrink-0 hidden sm:inline-flex items-center gap-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1 text-xs font-bold transition-all cursor-pointer"
-                title="Bấm để nghe phát âm từ này"
-              >
-                <span>🔊 Đọc 1 chữ: &ldquo;{currentWordText}&rdquo;</span>
-              </button>
-            ) : null}
-          </div>
-        )
-      ) : latestTranscript ? (
+        </div>
+      ) : latestTranscript ? (      ) : latestTranscript ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5 shadow-sm">
           <span className="text-xs font-bold uppercase tracking-wider text-purple-ink">
             Bé vừa đọc:
