@@ -25,7 +25,6 @@ interface ReadingLayoutProps {
   isPageTransitioning?: boolean;
   isPlayingSample?: boolean;
   isReadingWord?: boolean;
-  isSpeaking?: boolean;
   latestTranscript?: string | null;
   mispronouncedWordIds?: Set<string>;
   uncertainWordIds?: Set<string>;
@@ -34,7 +33,6 @@ interface ReadingLayoutProps {
   onManualPage: () => void;
   onPause: () => void;
   onReadSample?: () => void;
-  onReadWord?: () => void;
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
@@ -55,7 +53,6 @@ export function ReadingLayout({
   isPageTransitioning = false,
   isPlayingSample = false,
   isReadingWord = false,
-  isSpeaking = false,
   latestTranscript,
   mispronouncedWordIds,
   uncertainWordIds,
@@ -64,7 +61,6 @@ export function ReadingLayout({
   onManualPage,
   onPause,
   onReadSample,
-  onReadWord,
   onToggleListening,
   onWordClick,
   page,
