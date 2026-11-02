@@ -30,6 +30,7 @@ export interface WordOccurrenceAssessment {
   readonly word_index: number;
   readonly expected_text: string;
   readonly recognized_text: string | null;
+  readonly recognized_start_seconds: number | null;
   readonly confidence: number | null;
   readonly status: Exclude<PronunciationStatus, "NOT_REACHED">;
   readonly reason:
@@ -280,6 +281,10 @@ export function alignReadingSegment(
       word_index: sourceWord.word_index,
       expected_text: sourceWord.text,
       recognized_text: spokenWord.text,
+      recognized_start_seconds:
+        typeof spokenWord.start === "number" && Number.isFinite(spokenWord.start)
+          ? spokenWord.start
+          : null,
       confidence,
       status,
       reason,
@@ -308,6 +313,7 @@ export function alignReadingSegment(
       word_index: sourceWord.word_index,
       expected_text: sourceWord.text,
       recognized_text: null,
+      recognized_start_seconds: null,
       confidence:
         boundedByReliableSpeech && previous && next
           ? Math.min(previous.confidence ?? 0, next.confidence ?? 0)
