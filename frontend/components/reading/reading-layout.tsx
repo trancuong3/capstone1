@@ -177,7 +177,7 @@ export function ReadingLayout({
             </div>
           </div>
         </div>
-      ) : latestTranscript ? (      ) : latestTranscript ? (
+      ) : latestTranscript ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5 shadow-sm">
           <span className="text-xs font-bold uppercase tracking-wider text-purple-ink">
             Bé vừa đọc:
