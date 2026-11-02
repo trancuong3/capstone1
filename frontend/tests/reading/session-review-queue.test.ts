@@ -31,8 +31,8 @@ describe("SessionReviewQueue", () => {
   it("keeps duplicate displayed words as separate token occurrences", () => {
     const queue = new SessionReviewQueue();
     queue.addPageCandidates([
-      candidate("page-a", "line-a-khoe", 2),
-      candidate("page-b", "line-b-khoe", 1),
+      candidate("page-1", "line-a-khoe", 1),
+      candidate("page-1", "line-b-khoe", 3),
     ], 0);
 
     expect(queue.snapshot().total).toBe(2);
