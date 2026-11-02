@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reading_comparison_report import ReadingComparisonReport
 from app.repositories.reading_comparison_repository import ReadingComparisonRepository
@@ -19,7 +20,7 @@ from app.services.text_alignment import align_text, summarize_alignment
 class ReadingComparisonService:
     """Owns authorization, page/revision validation and report lifecycle."""
 
-    def __init__(self, db):
+    def __init__(self, db: AsyncSession):
         self.content = ReadingContentService(ReadingContentRepository(db))
         self.repository = ReadingComparisonRepository(db)
 
