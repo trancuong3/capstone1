@@ -236,11 +236,36 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderError() from error
 
         if response.is_error:
+            request_id = response.headers.get("request-id", "unavailable")
+            if response.status_code == 400:
+                try:
+                    error_payload = response.json()
+                except ValueError:
+                    error_payload = {}
+                detail = (
+                    error_payload.get("detail")
+                    if isinstance(error_payload, dict)
+                    else None
+                )
+                provider_error_code = (
+                    detail.get("code") if isinstance(detail, dict) else None
+                )
+                if provider_error_code == "invalid_audio":
+                    # This is a deterministic client-recording failure, not an
+                    # ElevenLabs outage. Do not expose the vendor's raw message.
+                    logger.warning(
+                        "ElevenLabs rejected uploaded audio: status=%s, "
+                        "request_id=%s, code=invalid_audio",
+                        response.status_code,
+                        request_id,
+                    )
+                    raise VoiceProviderError(status_code=422)
+
             logger.warning(
                 "ElevenLabs STT HTTP error: status=%s, request_id=%s, "
                 "content_type=%s, body=%s",
                 response.status_code,
-                response.headers.get("request-id", "unavailable"),
+                request_id,
                 response.headers.get("content-type", "unknown"),
                 response.text[:1000],
             )
