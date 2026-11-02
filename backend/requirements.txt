@@ -85,6 +85,7 @@ numpy==1.26.4
 # Khóa chặt protobuf < 4.0.0 theo yêu cầu bắt buộc của PaddlePaddle 2.6.2
 protobuf==3.20.2
 
+pytesseract==0.3.13
 # Khóa thống nhất bản headless để tránh xung đột DLL
 opencv-python-headless==4.10.0.84
 
