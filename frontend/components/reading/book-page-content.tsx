@@ -10,7 +10,7 @@ interface BookPageContentProps {
   currentWordId?: string | null;
   correctWordIds?: Set<string>;
   mispronouncedWordIds?: Set<string>;
-  spokenWords?: Set<string>;
+  reviewedWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   readOnly?: boolean;
 }
@@ -21,7 +21,7 @@ export function BookPageContent({
   currentWordId = null,
   correctWordIds,
   mispronouncedWordIds,
-  spokenWords,
+  reviewedWordIds,
   onWordClick,
   readOnly = false,
 }: BookPageContentProps) {
@@ -38,34 +38,32 @@ export function BookPageContent({
               (item) => item.book_index === wordIndex,
             );
 
-            const isHesitation =
-              comparisonResult?.summary.hesitations.some(
-                (item) =>
-                  typeof item === "object" &&
-                  item !== null &&
-                  "after_word" in item &&
-                  String(item.after_word).toLocaleLowerCase("vi") ===
-                    word.text.toLocaleLowerCase("vi"),
-              ) ?? false;
-
-            const isRepeated =
-              comparisonResult?.summary.repeated_words.some(
-                (item) =>
-                  item.toLocaleLowerCase("vi") ===
-                  word.text.toLocaleLowerCase("vi"),
-              ) ?? false;
-
             const isCurrent = word.word_id === currentWordId;
 
             const isMispronounced = Boolean(
               mispronouncedWordIds?.has(word.word_id),
             );
 
-            const isCorrect = Boolean(
-              correctWordIds?.has(word.word_id) ||
-                spokenWords?.has(word.text) ||
-                spokenWords?.has(word.text.toLowerCase()),
-            );
+            const isCorrect = Boolean(correctWordIds?.has(word.word_id));
+            const isReviewed = Boolean(reviewedWordIds?.has(word.word_id));
+            const tokenStatus = isCurrent && isMispronounced
+              ? "NEEDS_REVIEW"
+              : isCurrent
+                ? "ACTIVE"
+                : isReviewed
+                  ? "REVIEWED"
+                  : isMispronounced
+                    ? "NEEDS_REVIEW"
+                    : isCorrect
+                      ? "CORRECT"
+                      : "NOT_REACHED";
+            const accessibleStatus = {
+              NOT_REACHED: "chưa đọc đến",
+              ACTIVE: "đang đọc",
+              CORRECT: "đã đọc đúng",
+              NEEDS_REVIEW: "cần đọc lại",
+              REVIEWED: "đã đọc lại đúng",
+            }[tokenStatus];
 
             const previousWord = page.words[index - 1];
             const lineIndex = word.line_index ?? 0;
@@ -102,13 +100,9 @@ export function BookPageContent({
                 ? "bg-red-200 text-red-900 ring-1 ring-red-500"
                 : alignment?.status === "SUBSTITUTE"
                   ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
-                  : isRepeated
-                    ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
-                    : isHesitation
-                      ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                      : alignment?.status === "MATCH"
-                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                        : "";
+                  : alignment?.status === "MATCH"
+                    ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                    : "";
 
             return (
               <Fragment key={word.word_id}>
@@ -143,6 +137,12 @@ export function BookPageContent({
 
                     !isCurrent &&
                       !isMispronounced &&
+                      isReviewed &&
+                      "bg-sky-50 text-sky-900 font-bold border-b-2 border-sky-500",
+
+                    !isCurrent &&
+                      !isMispronounced &&
+                      !isReviewed &&
                       isCorrect &&
                       "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
 
@@ -153,6 +153,8 @@ export function BookPageContent({
                       !readOnly &&
                       "hover:bg-highlight/40",
                   )}
+                  aria-label={`${word.text}, ${accessibleStatus}`}
+                  data-word-status={tokenStatus}
                   data-bbox={word.bbox.join(",")}
                   data-line-index={lineIndex}
                   data-page-revision-id={page.page_revision_id}
@@ -184,6 +186,11 @@ export function BookPageContent({
                   }
                 >
                   {word.text}
+                  {tokenStatus === "REVIEWED" || tokenStatus === "CORRECT" ? (
+                    <span aria-hidden="true" className="ml-1 text-[0.7em] font-black">✓</span>
+                  ) : tokenStatus === "NEEDS_REVIEW" ? (
+                    <span aria-hidden="true" className="ml-1 text-[0.7em] font-black">!</span>
+                  ) : null}
                 </span>
               </Fragment>
             );
