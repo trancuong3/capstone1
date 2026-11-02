@@ -149,6 +149,31 @@ class VoiceRouteTests(unittest.TestCase):
             language_code="vi",
         )
 
+    def test_speech_to_text_infers_octet_stream_only_from_known_extension(self):
+        provider = MagicMock()
+        provider.transcribe = AsyncMock(
+            return_value=Transcription(
+                text="Xin chào",
+                language_code="vi",
+                language_probability=0.99,
+            )
+        )
+        audio = make_wav_bytes()
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                response = client.post(
+                    "/voice/speech-to-text",
+                    files={"file": ("reading.wav", audio, "application/octet-stream")},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        provider.transcribe.assert_awaited_once_with(
+            audio=audio,
+            filename="reading.wav",
+            content_type="audio/wav",
+            language_code=None,
+        )
+
     def test_speech_to_text_rejects_non_audio_and_never_forwards_it(self):
         provider = MagicMock()
         with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
