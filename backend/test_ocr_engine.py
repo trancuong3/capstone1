@@ -60,6 +60,29 @@ class DualEngineOcrTests(unittest.TestCase):
                     ocr_engine.extract_text_and_boxes(sample_png_bytes())
                 tesseract_fallback.assert_not_called()
 
+    def test_paddle_runtime_error_does_not_trigger_tesseract_fallback(self):
+        """Runtime processing errors must not be reclassified as engine unavailability."""
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.side_effect = ValueError("PaddleOCR runtime failure")
+        mock_viet = MagicMock()
+
+        with patch.object(
+            ocr_engine,
+            "_get_ocr_engines",
+            return_value=(mock_paddle, mock_viet),
+        ):
+            with patch.object(
+                ocr_engine, "_extract_text_and_boxes_tesseract"
+            ) as tesseract_fallback:
+                with self.assertRaises(
+                    ocr_engine.OcrProcessingError
+                ) as raised:
+                    ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+                self.assertIsInstance(raised.exception.__cause__, ValueError)
+                self.assertIn("PaddleOCR runtime failure", str(raised.exception))
+                tesseract_fallback.assert_not_called()
+
     def test_extract_text_and_boxes_dual_engine_contract(self):
         """Kiểm tra hợp đồng dữ liệu chuẩn hóa của Dual-Engine."""
         # Giả lập kết quả trả về từ DBNet của PaddleOCR: 1 dòng chữ gồm 2 từ

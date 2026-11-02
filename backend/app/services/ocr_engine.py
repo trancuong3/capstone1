@@ -44,6 +44,10 @@ class OcrNoTextDetected(RuntimeError):
     """Hình ảnh hợp lệ nhưng hệ thống không phát hiện được chữ tiếng Việt khả dụng."""
 
 
+class OcrProcessingError(RuntimeError):
+    """Dual-engine OCR failed while processing an image after successful initialization."""
+
+
 def normalize_word(value: str) -> str:
     """Chuẩn hóa tiếng Việt canonical dùng chung cho OCR output và review words."""
     value = unicodedata.normalize("NFC", value).strip().lower()
@@ -1295,7 +1299,7 @@ def _extract_text_and_boxes_dual_engine(
     try:
         ocr_res = paddle_engine.ocr(image, cls=False)
     except Exception as exc:
-        raise OcrEngineUnavailable(
+        raise OcrProcessingError(
             f"PaddleOCR xử lý hình ảnh thất bại: {exc}"
         ) from exc
 
