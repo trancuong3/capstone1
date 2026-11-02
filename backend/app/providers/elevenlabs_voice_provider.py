@@ -230,7 +230,7 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderUnavailable() from error
         except httpx.HTTPError as error:
             logger.exception("ElevenLabs STT network/HTTP client error")
-            raise VoiceProviderError() from error
+            raise VoiceProviderUnavailable() from error
 
         if response.is_error:
             provider_code = None
