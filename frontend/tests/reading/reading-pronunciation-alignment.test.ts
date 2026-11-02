@@ -203,6 +203,7 @@ describe("source sentence extraction and review grouping", () => {
       },
       {
         page_id: "page-1",
+        page_number: 1,
         page_revision_id: "revision-1",
         word_id: "word-3",
         word_index: 3,
