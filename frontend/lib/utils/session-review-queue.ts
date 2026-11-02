@@ -2,19 +2,6 @@ import type { SequentialReviewCandidate } from "@/lib/utils/sequential-reading-a
 
 export const MAX_REVIEW_ATTEMPTS = 2;
 
-/**
- * Only confirmed pronunciation mismatches should automatically enter the
- * end-of-session retry queue. UNCERTAIN and NO_SPEECH remain separate outcomes:
- * reviewing every such token would force children to reread the whole range
- * when no calibrated confidence threshold is configured.
- */
-export function confirmedIncorrectReviewCandidates(
-  candidates: readonly SequentialReviewCandidate[],
-): SequentialReviewCandidate[] {
-  return candidates.filter(
-    (candidate) => candidate.reason === "CONFIDENTLY_INCORRECT",
-  );
-}
 
 export type SessionReviewResolution =
   | "PENDING"
@@ -80,7 +67,13 @@ export class SessionReviewQueue {
   }
 
   getCurrent(): SessionReviewItem | null {
-    return this.sortedItems().find((item) => item.resolution === "PENDING") ?? null;
+    return (
+      this.sortedItems().find(
+        (item) =>
+          item.reason === "CONFIDENTLY_INCORRECT" &&
+          item.resolution === "PENDING",
+      ) ?? null
+    );
   }
 
   recordAttempt(
@@ -119,14 +112,21 @@ export class SessionReviewQueue {
   }
 
   snapshot(): SessionReviewQueueSnapshot {
+    // Keep all outcomes for history persistence, but expose only confirmed
+    // pronunciation errors as child-facing end-review work.
     const items = this.sortedItems();
-    const pending = items.filter((item) => item.resolution === "PENDING");
+    const reviewItems = items.filter(
+      (item) => item.reason === "CONFIDENTLY_INCORRECT",
+    );
+    const pending = reviewItems.filter(
+      (item) => item.resolution === "PENDING",
+    );
     return {
       items,
       pendingCount: pending.length,
-      completedCount: items.length - pending.length,
+      completedCount: reviewItems.length - pending.length,
       current: pending[0] ?? null,
-      total: items.length,
+      total: reviewItems.length,
     };
   }
 
