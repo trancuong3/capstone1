@@ -2,7 +2,6 @@
 
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ServiceError } from "@/lib/api/service-error";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -237,14 +236,16 @@ export function ReadingScreen({
     if (word) void handleWordClick(word);
   }
 
+  const cancelSpeechRecorder = speechRecorder.cancel;
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       isListeningActiveRef.current = false;
-      speechRecorder.cancel();
+      cancelSpeechRecorder();
     };
-  }, []);
+  }, [cancelSpeechRecorder]);
 
   useEffect(() => {
     if (countdown === null) return;
