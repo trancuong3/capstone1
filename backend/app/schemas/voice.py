@@ -33,6 +33,8 @@ class SpeechWord(BaseModel):
     text: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
+    # Scribe v2 word-level log probability; do not substitute language_probability.
+    logprob: float | None = None
 
 
 class SpeechToTextResponse(BaseModel):
