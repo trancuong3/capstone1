@@ -1,0 +1,80 @@
+name: Temporary full verification for sequential reading
+
+on:
+  push:
+    branches:
+      - fix/sequential-word-alignment-20261102
+    paths:
+      - ".github/workflows/verify-sequential-reading-temporary.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-frontend:
+    name: Full frontend verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Check Prettier for changed reading files
+        run: |
+          npx prettier --check \
+            components/reading/book-page-content.tsx \
+            components/reading/book-page-viewer.tsx \
+            components/reading/end-of-reading-review.tsx \
+            components/reading/reading-layout.tsx \
+            components/reading/reading-screen.tsx \
+            components/reading/session-complete.tsx \
+            hooks/use-speech-player.ts \
+            hooks/use-speech-recorder.ts \
+            lib/api/reading-service.ts \
+            lib/api/speech-service.ts \
+            lib/utils/reading-confidence.ts \
+            lib/utils/sequential-reading-alignment.ts \
+            lib/utils/session-review-queue.ts \
+            test/reading-event-service.test.ts \
+            test/session-complete.test.tsx \
+            test/speech-service.test.ts \
+            tests/reading/book-page-viewer.test.tsx \
+            tests/reading/end-of-reading-review.test.tsx \
+            tests/reading/reading-async-cleanup.test.tsx \
+            tests/reading/reading-screen.test.tsx \
+            tests/reading/reading-session-end-review.test.tsx \
+            tests/reading/sequential-reading-alignment.test.ts \
+            tests/reading/session-review-queue.test.ts \
+            tests/reading/use-speech-recorder.test.tsx \
+            types/reading.ts
+      - name: Run frontend lint
+        run: npm run lint
+      - name: Run full TypeScript check
+        run: npm run typecheck
+      - name: Run complete frontend test suite
+        run: npm test
+      - name: Build production frontend
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+        run: npm run build
+      - name: Remove temporary verification workflow after success
+        shell: bash
+        run: |
+          cd ..
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/verify-sequential-reading-temporary.yml
+          git commit -m "chore(ci): remove temporary reading verification workflow"
+          git push origin HEAD:fix/sequential-word-alignment-20261102
