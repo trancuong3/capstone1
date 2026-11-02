@@ -16,7 +16,7 @@ import { ReadingPronunciationReview } from "@/components/reading/reading-pronunc
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
-import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useSpeechPlayer, type SpeechPlayOptions } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
@@ -133,6 +133,7 @@ export function ReadingScreen({
   const pendingPracticeEventsRef = useRef<Map<string, ReadingEventCreateDTO>>(new Map());
   const persistedReadingEventKeysRef = useRef<Set<string>>(new Set());
   const sessionStartedAtMsRef = useRef(Date.now());
+  const resumeMicrophoneAfterSpeechRef = useRef(false);
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const isListeningActiveRef = useRef(false);
@@ -159,27 +160,71 @@ export function ReadingScreen({
     }
   }, []);
 
+  async function pauseMicrophoneForReferenceAudio() {
+    if (!isMicRecording) return;
+    resumeMicrophoneAfterSpeechRef.current = true;
+    try {
+      await stopListeningAndTranscribe();
+    } catch (error) {
+      console.warn("Could not flush microphone before TTS playback:", error);
+      speechRecorder.cancel();
+    }
+    if (mountedRef.current) setIsMicRecording(false);
+  }
+
+  async function resumeMicrophoneAfterReferenceAudio() {
+    if (!resumeMicrophoneAfterSpeechRef.current) return;
+    resumeMicrophoneAfterSpeechRef.current = false;
+    if (
+      !mountedRef.current ||
+      uiState !== "reading" ||
+      finishStartedRef.current
+    ) {
+      return;
+    }
+    const microphoneReady = await startListeningRef.current();
+    if (!mountedRef.current) return;
+    setIsMicRecording(microphoneReady);
+    if (!microphoneReady) setUiState("microphone-denied");
+  }
+
+  async function playReferenceAudio(
+    text: string,
+    options?: SpeechPlayOptions,
+  ) {
+    await pauseMicrophoneForReferenceAudio();
+    try {
+      await speechPlayer.play(text, {
+        ...options,
+        onEnded: () => {
+          options?.onEnded?.();
+          void resumeMicrophoneAfterReferenceAudio();
+        },
+      });
+    } catch (error) {
+      await resumeMicrophoneAfterReferenceAudio();
+      throw error;
+    }
+  }
+
   const handleWordClick = useCallback(
     async (word: ReadingPageWordDTO) => {
       setCurrentWordId(word.word_id);
       setLatestTranscript(word.text);
 
-      if (speechPlayer.isPlaying) {
-        speechPlayer.stop();
-      }
-
       setIsReadingWord(true);
       try {
-        await speechPlayer.play(word.text);
+        await playReferenceAudio(word.text, {
+          onEnded: () => {
+            if (mountedRef.current) setIsReadingWord(false);
+          },
+        });
       } catch (err) {
         console.warn("Lỗi phát âm 1 từ:", err);
-      } finally {
-        if (mountedRef.current) {
-          setIsReadingWord(false);
-        }
+        if (mountedRef.current) setIsReadingWord(false);
       }
     },
-    [speechPlayer],
+    [speechPlayer, isMicRecording, uiState],
   );
 
   const handleReadCurrentWord = useCallback(() => {
@@ -622,18 +667,10 @@ export function ReadingScreen({
       speechPlayer.stop();
       setIsReadingWord(false);
       setIsBusy(false);
+      await resumeMicrophoneAfterReferenceAudio();
       return;
     }
     if (!page) return;
-
-    if (isMicRecording) {
-      try {
-        await stopListeningAndTranscribe();
-      } catch {
-        speechRecorder.cancel();
-      }
-      if (mountedRef.current) setIsMicRecording(false);
-    }
 
     const rawText = page.text || page.words.map((w) => w.text).join(" ") || "";
     const fullText = rawText.replace(/\s+/g, " ").trim();
@@ -666,7 +703,7 @@ export function ReadingScreen({
     setCurrentWordId(words[0].word_id);
 
     try {
-      await speechPlayer.play(fullText, {
+      await playReferenceAudio(fullText, {
         onPlay: () => {
           if (!mountedRef.current) return;
           setCurrentWordId(words[0].word_id);
@@ -801,6 +838,8 @@ export function ReadingScreen({
 
   async function pauseReading() {
     if (isBusy) return;
+    if (speechPlayer.isPlaying) speechPlayer.stop();
+    resumeMicrophoneAfterSpeechRef.current = false;
     setIsBusy(true);
     if (isMicRecording) {
       try {
@@ -1029,7 +1068,7 @@ export function ReadingScreen({
         // Audio assistance remains available while the separate tutor-event API
         // is being connected by the reading-session owner.
       }
-      await speechPlayer.play(action?.tts_text ?? word);
+      await playReferenceAudio(action?.tts_text ?? word);
       if (mountedRef.current) setTutorAction(action);
     } catch {
       if (mountedRef.current) setUiState("tts-error");
@@ -1057,7 +1096,7 @@ export function ReadingScreen({
       } catch {
         // A retry must still replay the word even if tutor-event persistence is unavailable.
       }
-      await speechPlayer.play(nextAction?.tts_text ?? word);
+      await playReferenceAudio(nextAction?.tts_text ?? word);
       if (mountedRef.current) {
         setTutorAction(nextAction);
         setUiState("reading");
