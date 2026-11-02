@@ -52,7 +52,7 @@ export class BrowserTranscriptCollector {
     return [...this.completedCycles, pending]
       .filter(Boolean)
       .join(" ")
-      .replace(/\\s+/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
   }
 
