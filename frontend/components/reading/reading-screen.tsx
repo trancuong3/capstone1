@@ -427,8 +427,8 @@ export function ReadingScreen({
     for (const wordId of result.correctWordIds) {
       correctWordIdsRef.current.add(wordId);
     }
-    if (result.mismatchWordId) {
-      failedWordIdsRef.current.add(result.mismatchWordId);
+    for (const wordId of result.needsReviewWordIds) {
+      failedWordIdsRef.current.add(wordId);
     }
     for (const wordId of result.reviewedWordIds) {
       failedWordIdsRef.current.delete(wordId);
@@ -1337,6 +1337,10 @@ export function ReadingScreen({
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
+          </StatusBanner>
+        ) : trackerRef.current?.isReviewing ? (
+          <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
+            Bé đã đọc hết trang. Mình cùng đọc lại các từ cần ôn nhé!
           </StatusBanner>
         ) : null}
       </ReadingLayout>

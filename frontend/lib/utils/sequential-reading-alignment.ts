@@ -34,7 +34,8 @@ export function normalizeReadingToken(value: string): string {
     .normalize("NFC")
     .trim()
     .toLocaleLowerCase("vi")
-    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "");
+    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
+    .trim();
 }
 
 function transcriptTokens(transcript: string): string[] {
@@ -66,37 +67,66 @@ export class SequentialReadingTracker {
     this.tokens = [...tokens];
   }
 
+  /**
+   * The first pass always takes priority. After it reaches the end, the cursor
+   * points to the earliest missed occurrence in original reading order.
+   */
   get currentWordId(): string | null {
-    return this.tokens[this.cursorIndex]?.word_id ?? null;
+    if (this.cursorIndex < this.tokens.length) {
+      return this.tokens[this.cursorIndex]?.word_id ?? null;
+    }
+    return (
+      this.tokens.find((token) => this.needsReviewWordIds.has(token.word_id))
+        ?.word_id ?? null
+    );
+  }
+
+  get isReviewing(): boolean {
+    return this.cursorIndex >= this.tokens.length &&
+      this.needsReviewWordIds.size > 0;
   }
 
   /**
-   * Interim recognition may preview only the uninterrupted sequence beginning
-   * at the current cursor. It never mutates progress or token statuses.
+   * Completion includes the correction phase, not just reaching the final token
+   * on the initial pass.
+   */
+  get complete(): boolean {
+    return this.cursorIndex >= this.tokens.length &&
+      this.needsReviewWordIds.size === 0;
+  }
+
+  /**
+   * Interim recognition previews only the next expected sequence and never
+   * mutates permanent token state or the reading cursor.
    */
   previewInterim(transcript: string): InterimReadingPreview {
-    let cursor = this.cursorIndex;
+    const expectedTokens =
+      this.cursorIndex < this.tokens.length
+        ? this.tokens.slice(this.cursorIndex)
+        : this.tokens.filter((token) =>
+            this.needsReviewWordIds.has(token.word_id),
+          );
     const previewWordIds: string[] = [];
     let mismatchWordId: string | null = null;
 
-    for (const spoken of transcriptTokens(transcript)) {
-      const expected = this.tokens[cursor];
+    for (const [index, spoken] of transcriptTokens(transcript).entries()) {
+      const expected = expectedTokens[index];
       if (!expected) break;
       if (normalizeReadingToken(expected.text) !== spoken) {
         mismatchWordId = expected.word_id;
         break;
       }
       previewWordIds.push(expected.word_id);
-      cursor += 1;
     }
 
     return { previewWordIds, mismatchWordId };
   }
 
   /**
-   * Commit one final transcript against the current cursor only. A mismatch
-   * marks that exact occurrence for review and stops the utterance; later
-   * occurrences are never searched or updated.
+   * Final transcript tokens are consumed in order from the current position.
+   * During the initial pass, a mismatch marks that exact occurrence for later
+   * review and the next recognized token is compared with the next position.
+   * After the pass, only pending review occurrences can be corrected.
    */
   commitFinal(
     eventId: string,
@@ -108,25 +138,48 @@ export class SequentialReadingTracker {
     }
 
     this.processedEventIds.add(stableEventId);
+    const correctionPhaseAtStart = this.isReviewing;
     let matchedCount = 0;
     let mismatchWordId: string | null = null;
 
     for (const spoken of transcriptTokens(transcript)) {
-      const expected = this.tokens[this.cursorIndex];
+      if (this.cursorIndex < this.tokens.length) {
+        const expected = this.tokens[this.cursorIndex];
+        const matches =
+          normalizeReadingToken(expected.text) === spoken;
+
+        if (matches) {
+          this.correctWordIds.add(expected.word_id);
+        } else {
+          this.correctWordIds.delete(expected.word_id);
+          this.needsReviewWordIds.add(expected.word_id);
+          mismatchWordId = expected.word_id;
+        }
+
+        if (matches) matchedCount += 1;
+        this.cursorIndex += 1;
+
+        // Do not reinterpret trailing words from this first-pass utterance as
+        // correction attempts. The correction phase starts with a new utterance.
+        if (this.cursorIndex >= this.tokens.length) break;
+        continue;
+      }
+
+      if (!correctionPhaseAtStart) break;
+
+      const expected = this.tokens.find((token) =>
+        this.needsReviewWordIds.has(token.word_id),
+      );
       if (!expected) break;
 
       if (normalizeReadingToken(expected.text) !== spoken) {
         mismatchWordId = expected.word_id;
-        this.needsReviewWordIds.add(expected.word_id);
         break;
       }
 
-      const wasNeedsReview = this.needsReviewWordIds.delete(expected.word_id);
+      this.needsReviewWordIds.delete(expected.word_id);
       this.correctWordIds.add(expected.word_id);
-      if (wasNeedsReview) {
-        this.reviewedWordIds.add(expected.word_id);
-      }
-      this.cursorIndex += 1;
+      this.reviewedWordIds.add(expected.word_id);
       matchedCount += 1;
     }
 
@@ -142,8 +195,8 @@ export class SequentialReadingTracker {
       pageId: this.pageId,
       pageRevisionId: this.pageRevisionId,
       cursorIndex: this.cursorIndex,
-      currentWordId: this.tokens[this.cursorIndex]?.word_id ?? null,
-      complete: this.cursorIndex >= this.tokens.length,
+      currentWordId: this.currentWordId,
+      complete: this.complete,
       correctWordIds: new Set(this.correctWordIds),
       needsReviewWordIds: new Set(this.needsReviewWordIds),
       reviewedWordIds: new Set(this.reviewedWordIds),
