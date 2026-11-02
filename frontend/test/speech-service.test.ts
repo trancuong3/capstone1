@@ -58,7 +58,9 @@ function createWavRecording(): Blob {
   view.setUint32(40, dataLength, true);
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const sample = Math.round(Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 4_000);
+    const sample = Math.round(
+      Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 4_000,
+    );
     view.setInt16(44 + index * 2, sample, true);
   }
 
@@ -165,10 +167,7 @@ describe("speech service", () => {
 
   it("reports invalid recorded audio as a non-retryable validation error", async () => {
     fetchMock.mockResolvedValue(
-      Response.json(
-        { detail: { code: "INVALID_AUDIO" } },
-        { status: 422 },
-      ),
+      Response.json({ detail: { code: "INVALID_AUDIO" } }, { status: 422 }),
     );
 
     await expect(
