@@ -87,6 +87,33 @@ describe("SessionComplete component", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers optional reference audio for words whose recognition was uncertain", async () => {
+    const user = userEvent.setup();
+    render(
+      <SessionComplete
+        booksHref="/books"
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          ...baseSummary,
+          correct_words: [],
+          mispronounced_words: [],
+          uncertain_words: ["khỏe"],
+          score: null,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /3 từ/i }));
+
+    expect(
+      screen.getByRole("button", { name: "Nghe mẫu từ khỏe" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Chưa đủ dữ liệu để đánh giá (1 từ)"),
+    ).toBeInTheDocument();
+  });
+
   it("does not display missing completion metrics as invented zeroes", () => {
     render(
       <SessionComplete
