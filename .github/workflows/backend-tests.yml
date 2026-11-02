@@ -34,7 +34,7 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo apt-get update && sudo apt-get install -y libgl1 libgomp1
+          sudo apt-get update && sudo apt-get install -y libgl1 libgomp1 tesseract-ocr tesseract-ocr-vie
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,6 +46,11 @@ jobs:
           python -m pip install --no-cache-dir --upgrade pip
           python -m pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --no-cache-dir -r requirements.txt
+
+      - name: Verify OCR runtime dependencies
+        run: |
+          python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
+          tesseract --list-langs | grep -qx "vie"
 
       - name: Run full backend unit and API test suite
         run: python -m unittest discover -v
