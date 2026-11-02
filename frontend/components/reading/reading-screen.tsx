@@ -120,7 +120,6 @@ export function ReadingScreen({
   const correctWordIdsRef = useRef<Set<string>>(new Set());
   const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
   const uncertainWordIdsRef = useRef<Set<string>>(new Set());
-  const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const activePageRef = useRef<ReadingPageDTO | null>(null);
@@ -388,7 +387,6 @@ export function ReadingScreen({
             correctWordIdsRef.current.delete(assessment.word_id);
             uncertainWordIdsRef.current.delete(assessment.word_id);
             mispronouncedWordIdsRef.current.add(assessment.word_id);
-            failedWordsSetRef.current.add(assessment.expected_text);
             const sentence = findOriginalSentence(pageAtCapture.words, assessment.word_index);
             const candidateKey = [
               pageAtCapture.page_id,
@@ -397,6 +395,7 @@ export function ReadingScreen({
             ].join(":");
             pronunciationReviewCandidatesRef.current.set(candidateKey, {
               page_id: pageAtCapture.page_id,
+              page_number: pageAtCapture.page_number,
               page_revision_id: pageAtCapture.page_revision_id,
               word_id: assessment.word_id,
               word_index: assessment.word_index,
@@ -620,7 +619,6 @@ export function ReadingScreen({
     correctWordIdsRef.current.clear();
     mispronouncedWordIdsRef.current.clear();
     uncertainWordIdsRef.current.clear();
-    failedWordsSetRef.current.clear();
     spokenWordsSetRef.current.clear();
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
@@ -930,11 +928,15 @@ async function finishReading() {
       .filter((word): word is string => Boolean(word));
 
     const mispronouncedWordsList = Array.from(
-      failedWordsSetRef.current,
-    );
+      mispronouncedWordIdsRef.current,
+    )
+      .map((wordId) => wordTextByIdRef.current.get(wordId))
+      .filter((word): word is string => Boolean(word));
 
+    // Score source occurrences, not unique word strings: repeated words are
+    // independent pronunciation assessments.
     const totalTracked =
-      correctWordsList.length + mispronouncedWordsList.length;
+      correctWordIdsRef.current.size + mispronouncedWordIdsRef.current.size;
 
     const score =
       totalTracked > 0
