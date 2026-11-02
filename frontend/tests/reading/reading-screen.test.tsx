@@ -285,9 +285,7 @@ beforeEach(() => {
   speechRecorderMock.start.mockReset().mockResolvedValue(undefined);
   speechRecorderMock.stop
     .mockReset()
-    .mockResolvedValue(
-      new Blob(["x".repeat(256)], { type: "audio/webm" }),
-    );
+    .mockResolvedValue(new Blob(["x".repeat(256)], { type: "audio/webm" }));
   speechRecorderMock.cancel.mockReset();
   speechRecorderMock.getStream.mockReset().mockReturnValue(null);
   speechServiceMock.synthesize.mockReset();
@@ -320,7 +318,11 @@ beforeEach(() => {
 
 afterEach(() => {
   if (previousSpeechRecognition) {
-    Object.defineProperty(window, "SpeechRecognition", previousSpeechRecognition);
+    Object.defineProperty(
+      window,
+      "SpeechRecognition",
+      previousSpeechRecognition,
+    );
   } else {
     Reflect.deleteProperty(window, "SpeechRecognition");
   }
@@ -407,7 +409,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
-    await user.click(await screen.findByRole("button", { name: "Lưu và dừng" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Lưu và dừng" }),
+    );
 
     await waitFor(() => {
       expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
@@ -432,10 +436,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
   it("finishes the session without inventing a report when neither STT source has final text", async () => {
     class EmptySpeechRecognition {
       static instances: EmptySpeechRecognition[] = [];
-      onresult: ((event: {
-        resultIndex: number;
-        results: Array<{ isFinal: boolean; 0: { transcript: string } }>;
-      }) => void) | null = null;
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: Array<{ isFinal: boolean; 0: { transcript: string } }>;
+          }) => void)
+        | null = null;
       onerror: ((event: { error?: string }) => void) | null = null;
       onend: (() => void) | null = null;
       continuous = false;
@@ -475,7 +481,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
-    await user.click(await screen.findByRole("button", { name: "Lưu và dừng" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Lưu và dừng" }),
+    );
 
     await waitFor(() => {
       expect(services.readingService.finish).toHaveBeenCalledOnce();

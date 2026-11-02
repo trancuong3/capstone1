@@ -112,7 +112,6 @@ describe("speech service", () => {
     ).resolves.toMatchObject({ words });
   });
 
-
   it("maps ElevenLabs quota exhaustion to a safe non-retryable STT code", async () => {
     fetchMock.mockResolvedValue(
       Response.json(

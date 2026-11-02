@@ -1,4 +1,3 @@
-
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
@@ -40,12 +39,7 @@ const readingPageWordSchema = z.object({
   word_id: z.string(),
   word_index: z.number(),
   text: z.string(),
-  bbox: z.tuple([
-    z.number(),
-    z.number(),
-    z.number(),
-    z.number(),
-  ]),
+  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
   line_index: z.number().optional(),
 });
 
@@ -99,12 +93,10 @@ export async function compareTranscript(
 }
 
 // Schema báo cáo đã lưu
-const savedReportSchema = comparisonSchema
-  .omit({ session_id: true })
-  .extend({
-    report_id: z.string(),
-    created_at: z.string(),
-    transcript: z.string(),
+const savedReportSchema = comparisonSchema.omit({ session_id: true }).extend({
+  report_id: z.string(),
+  created_at: z.string(),
+  transcript: z.string(),
 });
 
 const sessionReportsSchema = z.object({
@@ -139,15 +131,8 @@ export async function getReadingPage(
   );
 }
 
-export async function deleteReadingReport(
-  reportId: string,
-): Promise<void> {
-  await requestApi(
-    `/reading/reports/${reportId}`,
-    z.unknown(),
-    undefined,
-    {
-      method: "DELETE",
-    },
-  );
+export async function deleteReadingReport(reportId: string): Promise<void> {
+  await requestApi(`/reading/reports/${reportId}`, z.unknown(), undefined, {
+    method: "DELETE",
+  });
 }

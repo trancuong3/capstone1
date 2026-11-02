@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -22,28 +21,26 @@ export default function ReadingReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  
-    async function handleDeleteReport(reportId: string) {
-        const confirmed = window.confirm(
-            "Bạn có chắc chắn muốn xóa báo cáo này không?",
-        );
 
-        if (!confirmed) return;
+  async function handleDeleteReport(reportId: string) {
+    const confirmed = window.confirm(
+      "Bạn có chắc chắn muốn xóa báo cáo này không?",
+    );
 
-        try {
-            await deleteReadingReport(reportId);
+    if (!confirmed) return;
 
-            setReports((prev) =>
-            prev.filter((report) => report.report_id !== reportId),
-            );
-        } catch (err) {
-            window.alert(
-            err instanceof Error
-                ? err.message
-                : "Không thể xóa báo cáo.",
-            );
-        }
+    try {
+      await deleteReadingReport(reportId);
+
+      setReports((prev) =>
+        prev.filter((report) => report.report_id !== reportId),
+      );
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "Không thể xóa báo cáo.",
+      );
     }
+  }
 
   useEffect(() => {
     let active = true;
@@ -62,9 +59,7 @@ export default function ReadingReportPage() {
         if (active) {
           setReports([]);
           setError(
-            err instanceof Error
-              ? err.message
-              : "Không thể tải báo cáo đọc.",
+            err instanceof Error ? err.message : "Không thể tải báo cáo đọc.",
           );
         }
       } finally {
@@ -115,7 +110,8 @@ export default function ReadingReportPage() {
         <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
         <p>
           Buổi đọc đã được lưu nhưng hiện chưa có báo cáo đối chiếu nào được
-          lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực tế.
+          lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực
+          tế.
         </p>
         <Button
           className="sm:w-auto"
@@ -140,32 +136,27 @@ export default function ReadingReportPage() {
 
       {reports.map((report, index) => (
         <section key={report.report_id} className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">
-                Lần đọc {reports.length - index}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Lần đọc {reports.length - index}</h2>
 
             <div className="flex items-center gap-3">
-                <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500">
                 {new Date(report.created_at).toLocaleString("vi-VN")}
-                </p>
+              </p>
 
-                <button
+              <button
                 type="button"
                 onClick={() => handleDeleteReport(report.report_id)}
                 className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-                >
+              >
                 Xóa báo cáo
-                </button>
+              </button>
             </div>
-            </div>
+          </div>
 
-            <ReadingReport
-            result={report}
-            sessionId={sessionId}
-            />
+          <ReadingReport result={report} sessionId={sessionId} />
         </section>
-        ))}
+      ))}
     </main>
   );
 }

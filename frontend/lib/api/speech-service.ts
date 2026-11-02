@@ -26,7 +26,7 @@ export interface WordTimestamp {
   readonly start: number;
   readonly end: number;
   readonly type?: string;
-}  
+}
 
 export interface SpeechTranscript {
   readonly text: string;

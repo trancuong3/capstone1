@@ -63,22 +63,25 @@ describe("BrowserTranscriptCollector", () => {
     collector.completeRecognitionCycle();
 
     // Web Speech may restart and reset result indexes to zero.
-    collector.addResults(
-      event(0, [{ text: "đang ngủ", isFinal: true }]),
-    );
+    collector.addResults(event(0, [{ text: "đang ngủ", isFinal: true }]));
     collector.completeRecognitionCycle();
 
     expect(collector.getTranscript()).toBe("Con mèo đang ngủ");
   });
 
   it("prefers a successful provider transcript for the same capture", () => {
-    expect(resolveTranscriptForSegment("  Provider transcript  ", "Browser transcript"))
-      .toBe("Provider transcript");
+    expect(
+      resolveTranscriptForSegment(
+        "  Provider transcript  ",
+        "Browser transcript",
+      ),
+    ).toBe("Provider transcript");
   });
 
   it("uses only real browser final text when provider STT fails", () => {
-    expect(resolveTranscriptForSegment(null, "  Browser final text  "))
-      .toBe("Browser final text");
+    expect(resolveTranscriptForSegment(null, "  Browser final text  ")).toBe(
+      "Browser final text",
+    );
   });
 
   it("does not fabricate a transcript when both recognition sources are empty", () => {
