@@ -384,7 +384,7 @@ export function findOriginalSentence(
   }
   if (start === 0) {
     const firstWord = words[0]?.text.trim() ?? "";
-    const firstLetter = firstWord.match(/^\\p{L}/u)?.[0] ?? "";
+    const firstLetter = Array.from(firstWord)[0] ?? "";
     // A page can begin mid-sentence. Without a preceding page, accept its
     // boundary only when the verified text starts with a capitalized word.
     if (
