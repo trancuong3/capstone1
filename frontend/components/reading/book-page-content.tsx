@@ -10,7 +10,7 @@ interface BookPageContentProps {
   currentWordId?: string | null;
   correctWordIds?: Set<string>;
   mispronouncedWordIds?: Set<string>;
-  spokenWords?: Set<string>;
+  uncertainWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   readOnly?: boolean;
 }
@@ -21,7 +21,7 @@ export function BookPageContent({
   currentWordId = null,
   correctWordIds,
   mispronouncedWordIds,
-  spokenWords,
+  uncertainWordIds,
   onWordClick,
   readOnly = false,
 }: BookPageContentProps) {
@@ -61,11 +61,8 @@ export function BookPageContent({
               mispronouncedWordIds?.has(word.word_id),
             );
 
-            const isCorrect = Boolean(
-              correctWordIds?.has(word.word_id) ||
-                spokenWords?.has(word.text) ||
-                spokenWords?.has(word.text.toLowerCase()),
-            );
+            const isCorrect = Boolean(correctWordIds?.has(word.word_id));
+            const isUncertain = Boolean(uncertainWordIds?.has(word.word_id));
 
             const previousWord = page.words[index - 1];
             const lineIndex = word.line_index ?? 0;
@@ -149,6 +146,12 @@ export function BookPageContent({
                     !isCurrent &&
                       !isMispronounced &&
                       !isCorrect &&
+                      isUncertain &&
+                      "bg-amber-50 text-amber-900 font-semibold border-b-2 border-amber-300",
+
+                    !isCurrent &&
+                      !isMispronounced &&
+                      !isCorrect &&
                       !colorClass &&
                       !readOnly &&
                       "hover:bg-highlight/40",
@@ -166,8 +169,10 @@ export function BookPageContent({
                     readOnly
                       ? undefined
                       : isCurrent && isMispronounced
-                        ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
-                        : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
+                        ? `Từ "${word.text}" sẽ được luyện sau khi đọc xong.`
+                        : isUncertain
+                          ? `Mình chưa đủ dữ liệu để đánh giá từ "${word.text}".`
+                          : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }
                   onKeyDown={
                     readOnly
