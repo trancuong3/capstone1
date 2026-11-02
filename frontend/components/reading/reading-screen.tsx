@@ -10,6 +10,7 @@ import { ComprehensionQuestion } from "@/components/reading/comprehension-questi
 import { ManualPageSelector } from "@/components/reading/manual-page-selector";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
+import type { WordTimestamp } from "@/lib/api/speech-service";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
@@ -101,6 +102,7 @@ export function ReadingScreen({
 }: ReadingScreenProps) {
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
+  const timestampsListRef = useRef<WordTimestamp[]>([]);
   const speechPlayer = useSpeechPlayer();
   const speechRecorder = useSpeechRecorder();
   const [loadKey, setLoadKey] = useState(0);
@@ -497,23 +499,7 @@ export function ReadingScreen({
 
     // 1. Start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
     try {
-      await speechRecorder.start(async (utteranceBlob) => {
-        if (!mountedRef.current || !isListeningActiveRef.current) return;
-        try {
-          const transcript = await speechService.transcribe(utteranceBlob, {
-            languageCode: "vi",
-          });
-          if (!mountedRef.current || !transcript.text) return;
-          const cleanText = transcript.text.trim();
-          if (cleanText) {
-            setLatestTranscript(cleanText);
-            verifySpokenWord(cleanText);
-            recordSpokenText(cleanText);
-          }
-        } catch (e) {
-          console.warn("Live ElevenLabs STT utterance notice:", e);
-        }
-      });
+      await speechRecorder.start();
       isUsingRecorderRef.current = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -605,68 +591,82 @@ export function ReadingScreen({
   });
 
   async function transcribeRecording(recording: Blob): Promise<string> {
-    transcriptionAbortRef.current?.abort();
+  transcriptionAbortRef.current?.abort();
 
-    const controller = new AbortController();
-    transcriptionAbortRef.current = controller;
+  const controller = new AbortController();
+  transcriptionAbortRef.current = controller;
 
-    try {
-      const transcript = await speechService.transcribe(recording, {
-        languageCode: "vi",
-        signal: controller.signal,
-      });
+  try {
+    const transcript = await speechService.transcribe(recording, {
+      languageCode: "vi",
+      signal: controller.signal,
+    });
+
     if (!mountedRef.current || controller.signal.aborted) {
       return "";
     }
 
-    if (transcript.text) {
-      setLatestTranscript(transcript.text);
-      verifySpokenWord(transcript.text);
-    } 
+    const text = transcript.text?.trim() ?? "";
 
-      const text = transcript.text?.trim() ?? "";
-
-      if (!text) {
-        return "";
-      }
-
-      setLatestTranscript(text);
-      setComparisonError(null);
-
-      // Lưu transcript của đoạn ghi âm này.
-      recordSpokenText(text);
-      return text;
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        console.error("Lỗi chuyển ghi âm thành văn bản:", err);
-      }
-
+    if (!text) {
       return "";
     }
+
+    setLatestTranscript(text);
+    setComparisonError(null);
+
+    verifySpokenWord(text);
+
+    // Lưu timestamp của lần ghi âm hiện tại.
+    if (transcript.words?.length) {
+      timestampsListRef.current.push(...transcript.words);
+    }
+
+    // Lưu transcript của đoạn ghi âm này.
+    recordSpokenText(text);
+
+    return text;
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      console.error("Lỗi chuyển ghi âm thành văn bản:", err);
+    }
+
+    return "";
   }
-  async function stopListeningAndTranscribe() {
-    isListeningActiveRef.current = false;
+}
+ async function stopListeningAndTranscribe() {
+    // Dừng nhận diện trực tiếp từ trình duyệt
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {
         // Safe ignore
       }
+
       recognitionRef.current = null;
     }
+
     try {
+      // Chờ MediaRecorder hoàn tất và trả về file âm thanh
       const recording = await speechRecorder.stop();
+
+      // Sau khi recorder dừng mới đánh dấu không còn nhận diện
+      isListeningActiveRef.current = false;
+
       if (recording && recording.size > 200) {
         const text = await transcribeRecording(recording);
+
         if (text) {
           console.log("Đoạn văn đã nhận diện:", text);
         }
       }
-    } catch {
+    } catch (error) {
+      isListeningActiveRef.current = false;
       speechRecorder.cancel();
+
+      console.error("Lỗi khi dừng ghi âm:", error);
     }
   }
-
   async function handleReadSample() {
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
@@ -1099,7 +1099,7 @@ async function finishReading() {
     const combinedTranscript = transcriptsListRef.current
       .join(" ")
       .trim();
-
+    const combinedWords = timestampsListRef.current;
     setFinalTranscript(combinedTranscript);
 
     // 3. So sánh transcript đúng một lần khi bé đọc xong
@@ -1112,6 +1112,7 @@ async function finishReading() {
         const result = await compareTranscript(
           sessionId,
           combinedTranscript,
+          combinedWords,
         );
 
         if (!mountedRef.current) return;

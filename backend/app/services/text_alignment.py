@@ -129,13 +129,12 @@ def detect_repeated_words(alignment):
         "repeated_words": repeated_words
     }
 
-def detect_hesitations(words, threshold=1.0):
+def detect_hesitations(words, threshold=2.0):
     hesitations = []
 
     if not words:
         return hesitations
 
-    # Sort words by their start time
     words = sorted(words, key=lambda word: word["start"])
 
     for i in range(1, len(words)):
@@ -143,6 +142,10 @@ def detect_hesitations(words, threshold=1.0):
         next_word = words[i]
 
         pause = next_word["start"] - current["end"]
+
+        # Bỏ qua timestamp không hợp lệ
+        if pause < 0:
+            continue
 
         if pause >= threshold:
             hesitations.append({

@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import {
   getReadingPage,
-  deleteReadingReport,
   type ReadingPage,
   type ComparisonResult,
 } from "@/lib/api/comparison-service";
@@ -46,9 +45,13 @@ function isHesitation(value: unknown): value is Hesitation {
   );
 }
 
+
+
 export function ReadingReport({ result, sessionId }: Props) {
   const [page, setPage] = useState<ReadingPage | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+
+  
 
   useEffect(() => {
     let cancelled = false;
