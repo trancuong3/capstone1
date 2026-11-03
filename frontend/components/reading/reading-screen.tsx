@@ -1267,10 +1267,16 @@ export function ReadingScreen({
       if (!mountedRef.current) return;
 
       // 4. Kết thúc session
-      const [finishedSession] = await Promise.all([
-        services.readingService.finish(sessionId),
-        services.readingSocketAdapter.sendControl(sessionId, "finish"),
-      ]);
+      // The REST finish call is the durable source of truth. A failed
+      // WebSocket notification must not make the UI retry an already-finished
+      // session or submit the finish operation a second time.
+      const finishedSession =
+        await services.readingService.finish(sessionId);
+      void services.readingSocketAdapter
+        .sendControl(sessionId, "finish")
+        .catch((error: unknown) => {
+          console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
+        });
 
       if (!mountedRef.current) return;
 
