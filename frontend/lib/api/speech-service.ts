@@ -94,6 +94,14 @@ function failure(
         code = "STT_TEMPORARILY_UNAVAILABLE";
         shouldRetry = true;
         break;
+      case "STT_TIMEOUT":
+        code = "STT_TIMEOUT";
+        shouldRetry = true;
+        break;
+      case "STT_NETWORK_ERROR":
+        code = "STT_NETWORK_ERROR";
+        shouldRetry = true;
+        break;
       case "STT_RATE_LIMITED":
         code = "STT_RATE_LIMITED";
         shouldRetry = true;
