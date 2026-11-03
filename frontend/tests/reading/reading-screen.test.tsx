@@ -435,9 +435,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).not.toBeInTheDocument();
   });
 
-  it(
-    "finishes once when comparison and websocket notification fail",
-    async () => {
+  it("does not finish twice on compare or socket failure", async () => {
       class FakeSpeechRecognition {
         static instances: FakeSpeechRecognition[] = [];
         onresult:
@@ -516,8 +514,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       expect(
         services.readingSocketAdapter.sendControl,
       ).toHaveBeenCalledWith(TEST_SESSION_ID, "finish");
-    },
-  );
+  });
 
   it("finishes the session without inventing a report when neither STT source has final text", async () => {
     class EmptySpeechRecognition {
