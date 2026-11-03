@@ -44,7 +44,11 @@ class IdentityTests(unittest.TestCase):
                 get_current_parent_id(
                     HTTPAuthorizationCredentials(scheme="Bearer", credentials="bad-token")
                 )
-        self.assertEqual(caught.exception.status_code, 401)
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(
+            caught.exception.detail,
+            "Authentication service temporarily unavailable",
+        )
         self.assertNotIn("private-key", caught.exception.detail)
 
     def test_missing_or_invalid_user_id_is_unauthorized(self):
