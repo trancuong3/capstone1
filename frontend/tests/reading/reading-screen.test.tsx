@@ -435,7 +435,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).not.toBeInTheDocument();
   });
 
-  it("finishes once when comparison and websocket notification fail", async () => {
+  it(
+    "finishes once when comparison and websocket notification fail",
+    async () => {
     class FakeSpeechRecognition {
       static instances: FakeSpeechRecognition[] = [];
       onresult:
