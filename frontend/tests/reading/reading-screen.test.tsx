@@ -438,83 +438,84 @@ describe("ReadingScreen presentation with typed test-local service responses", (
   it(
     "finishes once when comparison and websocket notification fail",
     async () => {
-    class FakeSpeechRecognition {
-      static instances: FakeSpeechRecognition[] = [];
-      onresult:
-        | ((event: {
-            resultIndex: number;
-            results: Array<{ isFinal: boolean; 0: { transcript: string } }>;
-          }) => void)
-        | null = null;
-      onerror: ((event: { error?: string }) => void) | null = null;
-      onend: (() => void) | null = null;
-      continuous = false;
-      interimResults = false;
-      lang = "";
-      maxAlternatives = 1;
+      class FakeSpeechRecognition {
+        static instances: FakeSpeechRecognition[] = [];
+        onresult:
+          | ((event: {
+              resultIndex: number;
+              results: Array<{ isFinal: boolean; 0: { transcript: string } }>;
+            }) => void)
+          | null = null;
+        onerror: ((event: { error?: string }) => void) | null = null;
+        onend: (() => void) | null = null;
+        continuous = false;
+        interimResults = false;
+        lang = "";
+        maxAlternatives = 1;
 
-      constructor() {
-        FakeSpeechRecognition.instances.push(this);
-      }
-      start() {}
-      stop() {
-        this.onend?.();
-      }
-    }
-
-    Object.defineProperty(window, "SpeechRecognition", {
-      configurable: true,
-      value: FakeSpeechRecognition,
-    });
-    compareTranscriptMock.mockRejectedValueOnce(
-      new Error("temporary comparison failure"),
-    );
-    services.readingSocketAdapter.sendControl.mockImplementation(
-      async (_sessionId, command) => {
-        if (command === "finish") {
-          throw new Error("websocket unavailable");
+        constructor() {
+          FakeSpeechRecognition.instances.push(this);
         }
-        return "LISTENING";
-      },
-    );
+        start() {}
+        stop() {
+          this.onend?.();
+        }
+      }
 
-    const user = userEvent.setup();
-    renderReading("ready");
-    await user.click(
-      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
-    );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Bé đọc với nhận diện giọng nói",
-      }),
-    );
-    await screen.findByRole("button", {
-      name: "Dừng nhận diện giọng nói",
-    });
-    await waitFor(() => {
-      expect(FakeSpeechRecognition.instances).toHaveLength(1);
-    });
-
-    act(() => {
-      FakeSpeechRecognition.instances[0].onresult?.({
-        resultIndex: 0,
-        results: [{ isFinal: true, 0: { transcript: "Con mèo" } }],
+      Object.defineProperty(window, "SpeechRecognition", {
+        configurable: true,
+        value: FakeSpeechRecognition,
       });
-    });
-    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Lưu và dừng" }),
-    );
+      compareTranscriptMock.mockRejectedValueOnce(
+        new Error("temporary comparison failure"),
+      );
+      services.readingSocketAdapter.sendControl.mockImplementation(
+        async (_sessionId, command) => {
+          if (command === "finish") {
+            throw new Error("websocket unavailable");
+          }
+          return "LISTENING";
+        },
+      );
 
-    await waitFor(() => {
-      expect(compareTranscriptMock).toHaveBeenCalledOnce();
-      expect(services.readingService.finish).toHaveBeenCalledOnce();
-      expect(services.readingService.getCompletionSummary).toHaveBeenCalled();
-    });
-    expect(
-      services.readingSocketAdapter.sendControl,
-    ).toHaveBeenCalledWith(TEST_SESSION_ID, "finish");
-  });
+      const user = userEvent.setup();
+      renderReading("ready");
+      await user.click(
+        await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+      );
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Bé đọc với nhận diện giọng nói",
+        }),
+      );
+      await screen.findByRole("button", {
+        name: "Dừng nhận diện giọng nói",
+      });
+      await waitFor(() => {
+        expect(FakeSpeechRecognition.instances).toHaveLength(1);
+      });
+
+      act(() => {
+        FakeSpeechRecognition.instances[0].onresult?.({
+          resultIndex: 0,
+          results: [{ isFinal: true, 0: { transcript: "Con mèo" } }],
+        });
+      });
+      await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Lưu và dừng" }),
+      );
+
+      await waitFor(() => {
+        expect(compareTranscriptMock).toHaveBeenCalledOnce();
+        expect(services.readingService.finish).toHaveBeenCalledOnce();
+        expect(services.readingService.getCompletionSummary).toHaveBeenCalled();
+      });
+      expect(
+        services.readingSocketAdapter.sendControl,
+      ).toHaveBeenCalledWith(TEST_SESSION_ID, "finish");
+    },
+  );;
 
   it("finishes the session without inventing a report when neither STT source has final text", async () => {
     class EmptySpeechRecognition {
