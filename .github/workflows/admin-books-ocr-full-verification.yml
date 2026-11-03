@@ -69,6 +69,12 @@ jobs:
           cd frontend
           printf '%s\n' "$changed_files" | xargs -r npx prettier --check --
 
+      - name: Debug Prettier diff for reading test
+        if: always()
+        run: |
+          npx prettier tests/reading/reading-screen.test.tsx > /tmp/reading-screen.test.formatted.tsx
+          diff -u tests/reading/reading-screen.test.tsx /tmp/reading-screen.test.formatted.tsx || true
+
       - name: Lint all frontend files
         id: lint
         continue-on-error: true
