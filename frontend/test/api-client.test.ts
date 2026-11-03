@@ -31,48 +31,42 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real API client", () => {
-  it(
-    "sends the session Bearer token, disables cache and validates JSON",
-    async () => {
-      fetchMock.mockResolvedValue(Response.json({ title: "Tên sách từ API" }));
-      expect(await requestApi("/books/", schema)).toEqual({
-        title: "Tên sách từ API",
-      });
-      expect(initialize).toHaveBeenCalledOnce();
-      expect(getSession).toHaveBeenCalledOnce();
-      expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
-        getSession.mock.invocationCallOrder[0],
-      );
-      expect(fetchMock).toHaveBeenCalledWith(
-        "http://127.0.0.1:8000/books/",
-        expect.objectContaining({
-          method: "GET",
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          headers: {
-            Accept: "application/json",
-            Authorization: "Bearer isolated-test-token",
-          },
-        }),
-      );
-    },
-  );
+  it("sends the session Bearer token, disables cache and validates JSON", async () => {
+    fetchMock.mockResolvedValue(Response.json({ title: "Tên sách từ API" }));
+    expect(await requestApi("/books/", schema)).toEqual({
+      title: "Tên sách từ API",
+    });
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(getSession).toHaveBeenCalledOnce();
+    expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
+      getSession.mock.invocationCallOrder[0],
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/books/",
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer isolated-test-token",
+        },
+      }),
+    );
+  });
 
-  it(
-    "waits for session restoration and does not call FastAPI when initialization fails",
-    async () => {
-      initialize.mockResolvedValue({
-        error: new Error("private initialization error"),
-      });
-      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-        code: "AUTH_REQUIRED",
-        status: 401,
-      });
-      expect(getSession).not.toHaveBeenCalled();
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
+  it("waits for session restoration and does not call FastAPI when initialization fails", async () => {
+    initialize.mockResolvedValue({
+      error: new Error("private initialization error"),
+    });
+    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      status: 401,
+    });
+    expect(getSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("does not call FastAPI when unauthenticated", async () => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
@@ -83,19 +77,16 @@ describe("real API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it(
-    "rejects session provider errors even if a token is present",
-    async () => {
-      getSession.mockResolvedValue({
-        data: { session: { access_token: "not-valid" } },
-        error: new Error("private"),
-      });
-      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-        code: "AUTH_REQUIRED",
-      });
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
+  it("rejects session provider errors even if a token is present", async () => {
+    getSession.mockResolvedValue({
+      data: { session: { access_token: "not-valid" } },
+      error: new Error("private"),
+    });
+    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it.each([
     [401, "AUTH_REQUIRED"],
@@ -103,37 +94,31 @@ describe("real API client", () => {
     [404, "RESOURCE_NOT_FOUND"],
     [422, "VALIDATION_ERROR"],
     [500, "NETWORK_ERROR"],
-  ])(
-    "maps HTTP %i without exposing server details",
-    async (status, code) => {
-      fetchMock.mockResolvedValue(
-        Response.json(
-          { detail: "password=private sql token" },
-          {
-            status,
-            headers: { "x-request-id": "test-request" },
-          },
-        ),
-      );
-      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-        code,
-        status,
-        request_id: "test-request",
-        retryable: status >= 500,
-      });
-      await expect(requestApi("/books/", schema)).rejects.not.toThrow("private");
-    },
-  );
+  ])("maps HTTP %i without exposing server details", async (status, code) => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { detail: "password=private sql token" },
+        {
+          status,
+          headers: { "x-request-id": "test-request" },
+        },
+      ),
+    );
+    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+      code,
+      status,
+      request_id: "test-request",
+      retryable: status >= 500,
+    });
+    await expect(requestApi("/books/", schema)).rejects.not.toThrow("private");
+  });
 
-  it(
-    "rejects invalid DTO rather than casting or returning mock fallback",
-    async () => {
-      fetchMock.mockResolvedValue(Response.json({ title: 12 }));
-      await expect(requestApi("/books/", schema)).rejects.toBeInstanceOf(
-        ServiceError,
-      );
-    },
-  );
+  it("rejects invalid DTO rather than casting or returning mock fallback", async () => {
+    fetchMock.mockResolvedValue(Response.json({ title: 12 }));
+    await expect(requestApi("/books/", schema)).rejects.toBeInstanceOf(
+      ServiceError,
+    );
+  });
 
   it("rejects non-JSON success responses", async () => {
     fetchMock.mockResolvedValue(new Response("<html>Error</html>"));
@@ -175,18 +160,15 @@ describe("real API client", () => {
     expect(apiQuery({})).toBe("");
   });
 
-  it(
-    "rejects non-local route strings before loading the session",
-    async () => {
-      await expect(
-        requestApi("https://other.example/books", schema),
-      ).rejects.toBeInstanceOf(ServiceError);
-      await expect(
-        requestApi("//other.example/books", schema),
-      ).rejects.toBeInstanceOf(ServiceError);
-      expect(getSession).not.toHaveBeenCalled();
-    },
-  );
+  it("rejects non-local route strings before loading the session", async () => {
+    await expect(
+      requestApi("https://other.example/books", schema),
+    ).rejects.toBeInstanceOf(ServiceError);
+    await expect(
+      requestApi("//other.example/books", schema),
+    ).rejects.toBeInstanceOf(ServiceError);
+    expect(getSession).not.toHaveBeenCalled();
+  });
 
   it("sends authenticated JSON bodies for mutation requests", async () => {
     fetchMock.mockResolvedValue(Response.json({ title: "Updated" }));

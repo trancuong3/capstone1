@@ -173,8 +173,7 @@ export async function requestApi<T>(
 
   let response: Response;
   const isFormDataBody =
-    typeof FormData !== "undefined" &&
-    requestOptions.body instanceof FormData;
+    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
   const headers: Record<string, string> = {
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
@@ -207,9 +206,7 @@ export async function requestApi<T>(
   if (!response.ok) {
     const backendMessage = await safeBackendMessage(response);
     const correlation =
-      response.status >= 500 && requestId
-        ? ` Mã yêu cầu: ${requestId}.`
-        : "";
+      response.status >= 500 && requestId ? ` Mã yêu cầu: ${requestId}.` : "";
     throw failure(
       response.status,
       requestId,
