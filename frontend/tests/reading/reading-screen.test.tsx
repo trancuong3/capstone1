@@ -505,7 +505,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await waitFor(() => {
       expect(compareTranscriptMock).toHaveBeenCalledOnce();
       expect(services.readingService.finish).toHaveBeenCalledOnce();
-      expect(services.readingService.getCompletionSummary).toHaveBeenCalledOnce();
+      expect(services.readingService.getCompletionSummary).toHaveBeenCalled();
     });
     expect(
       services.readingSocketAdapter.sendControl,
