@@ -111,84 +111,85 @@ describe("speech service", () => {
   it(
     "preserves provider word timestamps for reading alignment",
     async () => {
-    const words = [
-      { text: "Con", start: 0.1, end: 0.2 },
-      { text: "mèo", start: 0.21, end: 0.4 },
-    ];
-    fetchMock.mockResolvedValue(
-      Response.json({
-        text: "Con mèo",
-        language_code: "vi",
-        language_probability: 0.99,
-        words,
-      }),
+      const words = [
+        { text: "Con", start: 0.1, end: 0.2 },
+        { text: "mèo", start: 0.21, end: 0.4 },
+      ];
+      fetchMock.mockResolvedValue(
+        Response.json({
+          text: "Con mèo",
+          language_code: "vi",
+          language_probability: 0.99,
+          words,
+        }),
+      );
+
+      await expect(
+        createSpeechService().transcribe(new Blob(["recorded-audio"])),
+      ).resolves.toMatchObject({ words });
+      },
     );
 
-    await expect(
-      createSpeechService().transcribe(new Blob(["recorded-audio"])),
-    ).resolves.toMatchObject({ words });
-    },
-  );
-
-  it(
-    "maps ElevenLabs quota exhaustion to a safe non-retryable STT code",
-    async () => {
-      fetchMock.mockResolvedValue(
-        Response.json(
-          {
-            detail: {
-              code: "STT_QUOTA_EXCEEDED",
-              provider_message: "0 credits remaining; 22 credits required",
+    it(
+      "maps ElevenLabs quota exhaustion to a safe non-retryable STT code",
+      async () => {
+        fetchMock.mockResolvedValue(
+          Response.json(
+            {
+              detail: {
+                code: "STT_QUOTA_EXCEEDED",
+                provider_message: "0 credits remaining; 22 credits required",
+              },
             },
-          },
-          { status: 503, headers: { "x-request-id": "quota-request" } },
-        ),
-      );
+            { status: 503, headers: { "x-request-id": "quota-request" } },
+          ),
+        );
 
-      const request = createSpeechService().transcribe(
-        new Blob(["recorded-audio"], { type: "audio/webm" }),
-      );
-      await expect(request).rejects.toMatchObject({
-        code: "STT_QUOTA_EXCEEDED",
-        status: 503,
-        request_id: "quota-request",
-        retryable: false,
-      });
-      await request.catch((error: unknown) => {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).not.toContain("0 credits");
-        expect((error as Error).message).not.toContain("22 credits");
-      });
-    },
-  );
+        const request = createSpeechService().transcribe(
+          new Blob(["recorded-audio"], { type: "audio/webm" }),
+        );
+        await expect(request).rejects.toMatchObject({
+          code: "STT_QUOTA_EXCEEDED",
+          status: 503,
+          request_id: "quota-request",
+          retryable: false,
+        });
+        await request.catch((error: unknown) => {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).not.toContain("0 credits");
+          expect((error as Error).message).not.toContain("22 credits");
+        });
+      },
+    );
 
-  it(
-    "does not call the API before a failed Supabase session initialization",
-    async () => {
-      initialize.mockResolvedValue({
-        error: new Error("private initialization error"),
-      });
+    it(
+      "does not call the API before a failed Supabase session initialization",
+      async () => {
+        initialize.mockResolvedValue({
+          error: new Error("private initialization error"),
+        });
+        await expect(
+          createSpeechService().synthesize("Xin chào"),
+        ).rejects.toMatchObject({
+          code: "AUTH_REQUIRED",
+          status: 401,
+        });
+        expect(getSession).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not call the API without a browser session", async () => {
+      getSession.mockResolvedValue({ data: { session: null }, error: null });
       await expect(
         createSpeechService().synthesize("Xin chào"),
       ).rejects.toMatchObject({
         code: "AUTH_REQUIRED",
         status: 401,
       });
-      expect(getSession).not.toHaveBeenCalled();
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
-
-  it("does not call the API without a browser session", async () => {
-    getSession.mockResolvedValue({ data: { session: null }, error: null });
-    await expect(
-      createSpeechService().synthesize("Xin chào"),
-    ).rejects.toMatchObject({
-      code: "AUTH_REQUIRED",
-      status: 401,
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it(
     "reports safe STT and TTS errors without reflecting provider responses",

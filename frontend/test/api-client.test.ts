@@ -86,15 +86,16 @@ describe("real API client", () => {
   it(
     "rejects session provider errors even if a token is present",
     async () => {
-    getSession.mockResolvedValue({
-      data: { session: { access_token: "not-valid" } },
-      error: new Error("private"),
-    });
-    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-      code: "AUTH_REQUIRED",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+      getSession.mockResolvedValue({
+        data: { session: { access_token: "not-valid" } },
+        error: new Error("private"),
+      });
+      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+        code: "AUTH_REQUIRED",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     [401, "AUTH_REQUIRED"],
@@ -105,22 +106,22 @@ describe("real API client", () => {
   ])(
     "maps HTTP %i without exposing server details",
     async (status, code) => {
-    fetchMock.mockResolvedValue(
-      Response.json(
-        { detail: "password=private sql token" },
-        {
-          status,
-          headers: { "x-request-id": "test-request" },
-        },
-      ),
-    );
-    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-      code,
-      status,
-      request_id: "test-request",
-      retryable: status >= 500,
-    });
-    await expect(requestApi("/books/", schema)).rejects.not.toThrow("private");
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { detail: "password=private sql token" },
+          {
+            status,
+            headers: { "x-request-id": "test-request" },
+          },
+        ),
+      );
+      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+        code,
+        status,
+        request_id: "test-request",
+        retryable: status >= 500,
+      });
+      await expect(requestApi("/books/", schema)).rejects.not.toThrow("private");
     },
   );
 
@@ -177,13 +178,13 @@ describe("real API client", () => {
   it(
     "rejects non-local route strings before loading the session",
     async () => {
-    await expect(
-      requestApi("https://other.example/books", schema),
-    ).rejects.toBeInstanceOf(ServiceError);
-    await expect(
-      requestApi("//other.example/books", schema),
-    ).rejects.toBeInstanceOf(ServiceError);
-    expect(getSession).not.toHaveBeenCalled();
+      await expect(
+        requestApi("https://other.example/books", schema),
+      ).rejects.toBeInstanceOf(ServiceError);
+      await expect(
+        requestApi("//other.example/books", schema),
+      ).rejects.toBeInstanceOf(ServiceError);
+      expect(getSession).not.toHaveBeenCalled();
     },
   );
 
