@@ -156,13 +156,18 @@ describe("speech service", () => {
     ["STT_TEMPORARILY_UNAVAILABLE", true],
     ["STT_TIMEOUT", true],
     ["STT_NETWORK_ERROR", true],
-  ] as const)("preserves STT provider code %s with retryable=%s", async (providerCode, retryable) => {
-    fetchMock.mockResolvedValue(
-      Response.json(
-        { detail: { code: providerCode } },
-        { status: 503, headers: { "x-request-id": "provider-diagnostic-request" } },
-      ),
-    );
+  ] as const)(
+    "preserves STT provider code %s with retryable=%s",
+    async (providerCode, retryable) => {
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { detail: { code: providerCode } },
+          {
+            status: 503,
+            headers: { "x-request-id": "provider-diagnostic-request" },
+          },
+        ),
+      );
 
     await expect(
       createSpeechService().transcribe(
@@ -173,8 +178,9 @@ describe("speech service", () => {
       status: 503,
       request_id: "provider-diagnostic-request",
       retryable,
-    });
-  });
+      });
+    },
+  );
 
   it("does not call the API before a failed Supabase session initialization", async () => {
     initialize.mockResolvedValue({
