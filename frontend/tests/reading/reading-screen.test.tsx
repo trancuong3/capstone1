@@ -507,9 +507,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       expect(services.readingService.finish).toHaveBeenCalledOnce();
       expect(services.readingService.getCompletionSummary).toHaveBeenCalled();
     });
-    expect(
-      services.readingSocketAdapter.sendControl,
-    ).toHaveBeenCalledWith(TEST_SESSION_ID, "finish");
+    expect(services.readingSocketAdapter.sendControl).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      "finish",
+    );
   });
 
   it("finishes the session without inventing a report when neither STT source has final text", async () => {
