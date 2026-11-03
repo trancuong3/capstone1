@@ -37,9 +37,6 @@ def make_client(authenticated: bool = True) -> TestClient:
     return TestClient(app)
 
 
-
-
-
 def run_mocked_transcription(responses, api_key="unit-test-secret"):
     class MockAsyncClient:
         request_count = 0
