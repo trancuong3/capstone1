@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
 import re
 import time
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException as FastAPIHTTPException, Request
@@ -18,8 +18,8 @@ from sqlalchemy.exc import InterfaceError, TimeoutError as SQLAlchemyTimeoutErro
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
-from app.diagnostic_logging import log_diagnostic
 from app.database.session import engine
+from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 
 logger = logging.getLogger(__name__)
