@@ -169,15 +169,15 @@ describe("speech service", () => {
         ),
       );
 
-    await expect(
-      createSpeechService().transcribe(
-        new Blob(["recorded-audio"], { type: "audio/webm" }),
-      ),
-    ).rejects.toMatchObject({
-      code: providerCode,
-      status: 503,
-      request_id: "provider-diagnostic-request",
-      retryable,
+      await expect(
+        createSpeechService().transcribe(
+          new Blob(["recorded-audio"], { type: "audio/webm" }),
+        ),
+      ).rejects.toMatchObject({
+        code: providerCode,
+        status: 503,
+        request_id: "provider-diagnostic-request",
+        retryable,
       });
     },
   );
