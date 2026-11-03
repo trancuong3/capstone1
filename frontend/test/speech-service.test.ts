@@ -66,7 +66,9 @@ describe("speech service", () => {
         "Bearer isolated-test-token",
       );
       expect(headersFromCall().get("content-type")).toBe("application/json");
-      expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("ELEVENLABS");
+      expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain(
+        "ELEVENLABS",
+      );
     },
   );
 
