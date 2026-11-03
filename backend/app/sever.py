@@ -170,6 +170,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         stage="request_dispatch",
         exception=exc,
         include_traceback=True,
+        request_id=request_id,
         method=request.method,
         route=_route_template(request),
     )
