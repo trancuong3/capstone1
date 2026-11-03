@@ -1270,8 +1270,7 @@ export function ReadingScreen({
       // The REST finish call is the durable source of truth. A failed
       // WebSocket notification must not make the UI retry an already-finished
       // session or submit the finish operation a second time.
-      const finishedSession =
-        await services.readingService.finish(sessionId);
+      const finishedSession = await services.readingService.finish(sessionId);
       void services.readingSocketAdapter
         .sendControl(sessionId, "finish")
         .catch((error: unknown) => {
