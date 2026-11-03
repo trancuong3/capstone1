@@ -315,7 +315,7 @@ class VoiceRouteTests(unittest.TestCase):
         error, calls = run_mocked_transcription(
             [
                 httpx.Response(
-                    401,
+                    503,
                     json={
                         "detail": {
                             "code": "quota_exceeded",
