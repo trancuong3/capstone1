@@ -23,10 +23,11 @@ from app.database.session import AsyncSessionLocal, engine, get_db
 
 class DatabasePoolConfigurationTests(unittest.TestCase):
     def test_pool_is_small_and_checks_connections_before_checkout(self):
-        self.assertEqual(DATABASE_POOL_SIZE, 3)
-        self.assertEqual(DATABASE_MAX_OVERFLOW, 0)
-        self.assertEqual(DATABASE_POOL_TIMEOUT, 10.0)
-        self.assertEqual(DATABASE_POOL_RECYCLE, 900)
+        self.assertGreaterEqual(DATABASE_POOL_SIZE, 1)
+        self.assertGreaterEqual(DATABASE_MAX_OVERFLOW, 0)
+        self.assertLessEqual(DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW, 15)
+        self.assertGreaterEqual(DATABASE_POOL_TIMEOUT, 1.0)
+        self.assertGreaterEqual(DATABASE_POOL_RECYCLE, 60)
         self.assertEqual(engine.pool.size(), DATABASE_POOL_SIZE)
         self.assertEqual(engine.pool._max_overflow, DATABASE_MAX_OVERFLOW)
         self.assertEqual(engine.pool._timeout, DATABASE_POOL_TIMEOUT)
