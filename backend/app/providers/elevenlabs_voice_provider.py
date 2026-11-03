@@ -298,6 +298,38 @@ class ElevenLabsVoiceProvider:
                     )
                     if response.status_code < 500 or attempt == 1:
                         break
+
+                    try:
+                        retry_payload = response.json()
+                    except ValueError:
+                        retry_payload = None
+                    retry_code, retry_status, retry_message = (
+                        self._provider_error_fields(retry_payload)
+                    )
+                    retry_classification = " ".join(
+                        value or ""
+                        for value in (retry_code, retry_status, retry_message)
+                    ).lower()
+                    definitive_failure = any(
+                        marker in retry_classification
+                        for marker in (
+                            "quota",
+                            "credit",
+                            "subscription_limit",
+                            "usage_limit",
+                            "invalid_api_key",
+                            "authentication",
+                            "permission",
+                            "forbidden",
+                            "terms",
+                            "rate_limit",
+                            "concurr",
+                            "invalid_audio",
+                            "unsupported_audio",
+                        )
+                    )
+                    if definitive_failure:
+                        break
                     await asyncio.sleep(0.25 * (2**attempt))
         except httpx.TimeoutException as error:
             logger.warning(
