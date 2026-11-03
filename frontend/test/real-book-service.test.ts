@@ -4,6 +4,7 @@ import { createBookService } from "@/lib/api/book-service";
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
+      initialize: async () => ({ error: null }),
       getSession: async () => ({
         data: { session: { access_token: "test-token" } },
         error: null,
