@@ -1,12 +1,10 @@
 import logging
-from collections.abc import AsyncGenerator
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.session import AsyncSessionLocal
+from app.database.session import get_db
 from app.database.supabase_client import get_supabase_client
 from app.diagnostic_logging import log_diagnostic
 
@@ -24,18 +22,6 @@ def _auth_provider_status(error: BaseException) -> int | None:
     except (TypeError, ValueError):
         return None
     return status_code if 100 <= status_code <= 599 else None
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency Injection để lấy Database Session.
-    Mỗi request dùng một session và tự động đóng khi xử lý xong.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
 
 
 def get_current_parent_id(
