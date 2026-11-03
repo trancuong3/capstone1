@@ -113,8 +113,13 @@ async function accessToken(
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
 ) {
   try {
-    const { data, error } =
-      await createBrowserSupabaseClient().auth.getSession();
+    const supabase = createBrowserSupabaseClient();
+    // Keep STT/TTS requests behind Supabase session restoration, just like
+    // ordinary API requests. initialize() is idempotent across concurrent calls.
+    const { error: initializationError } = await supabase.auth.initialize();
+    if (initializationError) throw failure(capabilityCode, 401);
+
+    const { data, error } = await supabase.auth.getSession();
     if (error || !data.session?.access_token)
       throw failure(capabilityCode, 401);
     return data.session.access_token;
