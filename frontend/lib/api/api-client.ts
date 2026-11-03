@@ -154,8 +154,13 @@ export async function requestApi<T>(
 
   let token: string;
   try {
-    const { data, error } =
-      await createBrowserSupabaseClient().auth.getSession();
+    const supabase = createBrowserSupabaseClient();
+    // Automatic initialization is disabled to let AuthServiceProvider subscribe
+    // before initialization. Every API caller must therefore await restoration.
+    const { error: initializationError } = await supabase.auth.initialize();
+    if (initializationError) throw failure(401);
+
+    const { data, error } = await supabase.auth.getSession();
     if (error || !data.session?.access_token) throw failure(401);
     token = data.session.access_token;
   } catch (error) {

@@ -2,19 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSpeechService } from "@/lib/api/speech-service";
 
-const { getSession, fetchMock } = vi.hoisted(() => ({
+const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
+  initialize: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/client", () => ({
-  createBrowserSupabaseClient: () => ({ auth: { getSession } }),
+  createBrowserSupabaseClient: () => ({ auth: { initialize, getSession } }),
 }));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
 
 beforeEach(() => {
+  initialize.mockReset().mockResolvedValue({ error: null });
   getSession.mockReset();
   getSession.mockResolvedValue({
     data: { session: { access_token: "isolated-test-token" } },
@@ -43,6 +45,11 @@ describe("speech service", () => {
     );
 
     expect(await audio.text()).toBe("audio-bytes");
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(getSession).toHaveBeenCalledOnce();
+    expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
+      getSession.mock.invocationCallOrder[0],
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/voice/text-to-speech",
       expect.objectContaining({
@@ -139,6 +146,18 @@ describe("speech service", () => {
       expect((error as Error).message).not.toContain("0 credits");
       expect((error as Error).message).not.toContain("22 credits");
     });
+  });
+
+  it("does not call the API before a failed Supabase session initialization", async () => {
+    initialize.mockResolvedValue({ error: new Error("private initialization error") });
+    await expect(
+      createSpeechService().synthesize("Xin chào"),
+    ).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      status: 401,
+    });
+    expect(getSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not call the API without a browser session", async () => {

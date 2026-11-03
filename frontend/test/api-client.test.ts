@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { ServiceError } from "@/lib/api/service-error";
 
-const { getSession, fetchMock } = vi.hoisted(() => ({
+const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
+  initialize: vi.fn(),
   fetchMock: vi.fn(),
 }));
 vi.mock("@/lib/supabase/client", () => ({
-  createBrowserSupabaseClient: () => ({ auth: { getSession } }),
+  createBrowserSupabaseClient: () => ({ auth: { initialize, getSession } }),
 }));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
@@ -18,6 +19,7 @@ vi.mock("@/lib/supabase/config", () => ({
 const schema = z.object({ title: z.string() });
 
 beforeEach(() => {
+  initialize.mockReset().mockResolvedValue({ error: null });
   getSession.mockReset();
   getSession.mockResolvedValue({
     data: { session: { access_token: "isolated-test-token" } },
@@ -34,6 +36,11 @@ describe("real API client", () => {
     expect(await requestApi("/books/", schema)).toEqual({
       title: "Tên sách từ API",
     });
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(getSession).toHaveBeenCalledOnce();
+    expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
+      getSession.mock.invocationCallOrder[0],
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/books/",
       expect.objectContaining({
@@ -47,6 +54,16 @@ describe("real API client", () => {
         },
       }),
     );
+  });
+
+  it("waits for session restoration and does not call FastAPI when initialization fails", async () => {
+    initialize.mockResolvedValue({ error: new Error("private initialization error") });
+    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      status: 401,
+    });
+    expect(getSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not call FastAPI when unauthenticated", async () => {
