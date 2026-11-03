@@ -339,7 +339,7 @@ class VoiceRouteTests(unittest.TestCase):
                     )
                 )
 
-        diagnostic = "\\n".join(captured.output)
+        diagnostic = "\n".join(captured.output)
         self.assertEqual(caught.exception.code, "STT_PERMISSION_DENIED")
         self.assertIn("elevenlabs-request-123", diagnostic)
         self.assertIn("provider_code=model_access_denied", diagnostic)
