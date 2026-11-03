@@ -68,7 +68,7 @@ describe("speech service", () => {
       expect(headersFromCall().get("content-type")).toBe("application/json");
       expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("ELEVENLABS");
     },
-  );;
+  );
 
   it(
     "uploads a recorded Blob as FormData and validates the STT response",
@@ -104,7 +104,7 @@ describe("speech service", () => {
       expect(body.get("file")).toBeTruthy();
       expect(headersFromCall().has("content-type")).toBe(false);
     },
-  );;
+  );
 
   it("preserves provider word timestamps for reading alignment", async () => {
     const words = [
@@ -155,7 +155,7 @@ describe("speech service", () => {
         expect((error as Error).message).not.toContain("22 credits");
       });
     },
-  );;
+  );
 
   it(
     "does not call the API before a failed Supabase session initialization",
@@ -172,7 +172,7 @@ describe("speech service", () => {
       expect(getSession).not.toHaveBeenCalled();
       expect(fetchMock).not.toHaveBeenCalled();
     },
-  );;
+  );
 
   it("does not call the API without a browser session", async () => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
@@ -212,5 +212,5 @@ describe("speech service", () => {
         createSpeechService().transcribe(new Blob(["audio"])),
       ).rejects.toMatchObject({ code: "STT_UNAVAILABLE" });
     },
-  );;
+  );
 });
