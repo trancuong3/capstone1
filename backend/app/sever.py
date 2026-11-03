@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 import re
 import time
 from uuid import uuid4
@@ -17,11 +18,22 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
 from app.diagnostic_logging import log_diagnostic
+from app.database.session import engine
 from app.request_context import request_id_context
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="ReadAlong Vision API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Dispose this worker's SQLAlchemy pool cleanly during application shutdown."""
+    try:
+        yield
+    finally:
+        await engine.dispose()
+
+
+app = FastAPI(title="ReadAlong Vision API", version="1.0.0", lifespan=lifespan)
 
 
 def _route_template(request: Request) -> str:
@@ -157,6 +169,35 @@ async def http_exception_diagnostic_handler(
         **fields,
     )
     return await default_http_exception_handler(request, exc)
+
+
+@app.exception_handler(InterfaceError)
+@app.exception_handler(SQLAlchemyTimeoutError)
+async def database_connection_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    """Return a retryable 503 for stale connections and exhausted pool waits."""
+    request_id = getattr(request.state, "request_id", uuid4().hex)
+    log_diagnostic(
+        logger,
+        logging.ERROR,
+        event="database_connection_unavailable",
+        stage="database_pool",
+        exception=exc,
+        request_id=request_id,
+        method=request.method,
+        route=_route_template(request),
+        database_error_type=type(exc).__name__,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database temporarily unavailable",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
 
 
 @app.exception_handler(Exception)
