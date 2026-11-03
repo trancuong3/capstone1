@@ -408,9 +408,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
-    await user.click(
-      screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
@@ -499,9 +497,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         results: [{ isFinal: true, 0: { transcript: "Con mèo" } }],
       });
     });
-    await user.click(
-      screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
