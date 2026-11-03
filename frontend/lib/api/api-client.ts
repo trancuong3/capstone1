@@ -170,7 +170,8 @@ export async function requestApi<T>(
 
   let response: Response;
   const isFormDataBody =
-    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+    typeof FormData !== "undefined" &&
+    requestOptions.body instanceof FormData;
   const headers: Record<string, string> = {
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
@@ -226,7 +227,7 @@ export async function requestApi<T>(
       {
         issues: parsed.error.issues,
         response: payload,
-      }
+      },
     );
 
     throw failure(response.status, requestId);
