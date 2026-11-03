@@ -259,7 +259,7 @@ class VoiceRouteTests(unittest.TestCase):
             ),
             (
                 403,
-                {"detail": {"status": "terms_not_accepted", "message": "Accept terms"}},
+                {"detail": {"code": "unaccepted_terms", "message": "Accept terms"}},
                 "STT_TERMS_NOT_ACCEPTED",
             ),
             (
@@ -269,7 +269,7 @@ class VoiceRouteTests(unittest.TestCase):
             ),
             (
                 429,
-                {"detail": {"code": "concurrency_limit_exceeded", "message": "Too many active"}},
+                {"detail": {"code": "concurrent_limit_exceeded", "message": "Too many active"}},
                 "STT_CONCURRENCY_LIMITED",
             ),
             (
@@ -292,6 +292,59 @@ class VoiceRouteTests(unittest.TestCase):
                 self.assertIsInstance(error, VoiceProviderError)
                 self.assertEqual(error.code, expected_code)
                 self.assertEqual(calls, 1)
+
+    def test_provider_logs_body_request_id_and_redacts_key_from_provider_message(self):
+        secret = "unit-test-secret-provider-key"
+
+        class MockAsyncClient:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return httpx.Response(
+                    403,
+                    json={
+                        "detail": {
+                            "type": "authorization_error",
+                            "code": "model_access_denied",
+                            "message": f"Request rejected for key {secret}",
+                            "request_id": "elevenlabs-request-123",
+                        }
+                    },
+                )
+
+        provider = ElevenLabsVoiceProvider(api_key=secret)
+        with (
+            patch(
+                "app.providers.elevenlabs_voice_provider.httpx.AsyncClient",
+                MockAsyncClient,
+            ),
+            self.assertLogs(
+                "app.providers.elevenlabs_voice_provider", level="WARNING"
+            ) as captured,
+        ):
+            with self.assertRaises(VoiceProviderError) as caught:
+                asyncio.run(
+                    provider.transcribe(
+                        audio=b"audio-bytes",
+                        filename="reading.webm",
+                        content_type="audio/webm",
+                        language_code="vi",
+                    )
+                )
+
+        diagnostic = "\\n".join(captured.output)
+        self.assertEqual(caught.exception.code, "STT_PERMISSION_DENIED")
+        self.assertIn("elevenlabs-request-123", diagnostic)
+        self.assertIn("provider_code=model_access_denied", diagnostic)
+        self.assertIn("[REDACTED]", diagnostic)
+        self.assertNotIn(secret, diagnostic)
 
     def test_provider_retries_one_temporary_server_failure_with_a_bound(self):
         result, calls = run_mocked_transcription(
