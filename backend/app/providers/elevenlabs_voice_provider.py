@@ -6,8 +6,11 @@ response bodies are never passed back to application clients.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -63,7 +66,67 @@ class ElevenLabsVoiceProvider:
     """
 
     def __init__(self, api_key: str | None = None) -> None:
-        self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "").strip()
+        configured_key = (
+            api_key if api_key is not None else os.getenv("ELEVENLABS_API_KEY", "")
+        )
+        self._api_key = configured_key.strip()
+        self._key_fingerprint = (
+            hashlib.sha256(self._api_key.encode("utf-8")).hexdigest()[:12]
+            if self._api_key
+            else None
+        )
+        # A one-way fingerprint lets operators compare which key the running
+        # process loaded without ever logging or exposing the key itself.
+        logger.info(
+            "ElevenLabs configuration loaded: key_configured=%s key_fingerprint=%s",
+            bool(self._api_key),
+            self._key_fingerprint or "unavailable",
+        )
+
+    @staticmethod
+    def _safe_provider_message(value: Any, api_key: str) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        message = value
+        if api_key:
+            message = message.replace(api_key, "[REDACTED]")
+        message = re.sub(
+            r"(?i)(xi-api-key|authorization|api[_ -]?key)\s*[:=]\s*[^,;\s]+",
+            r"\1=[REDACTED]",
+            message,
+        )
+        message = re.sub(
+            r"(?i)bearer\s+[A-Za-z0-9._~+/-]+",
+            "Bearer [REDACTED]",
+            message,
+        )
+        return " ".join(message.split())[:400]
+
+    @staticmethod
+    def _provider_error_fields(
+        payload: Any,
+    ) -> tuple[str | None, str | None, str | None]:
+        if not isinstance(payload, dict):
+            return None, None, None
+
+        detail = payload.get("detail", payload.get("error", payload))
+        if isinstance(detail, list):
+            first = detail[0] if detail else None
+            detail = first if isinstance(first, dict) else None
+        if isinstance(detail, dict):
+            code = detail.get("code") or detail.get("type")
+            status = detail.get("status")
+            message = detail.get("message") or detail.get("msg")
+        else:
+            code = payload.get("code")
+            status = payload.get("status")
+            message = detail if isinstance(detail, str) else payload.get("message")
+
+        return (
+            code.strip() if isinstance(code, str) and code.strip() else None,
+            status.strip() if isinstance(status, str) and status.strip() else None,
+            message if isinstance(message, str) else None,
+        )
 
     def _headers(self) -> dict[str, str]:
         if not self._api_key:
@@ -219,12 +282,20 @@ class ElevenLabsVoiceProvider:
             timeout = httpx.Timeout(90.0, connect=10.0)
             # Use HTTPX's default network configuration to avoid forcing a local address.
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    f"{ELEVENLABS_API_BASE_URL}/speech-to-text",
-                    headers={**self._headers(), "Accept": "application/json"},
-                    data=form,
-                    files={"file": (filename, audio, content_type)},
-                )
+                response = None
+                # Retry only explicit provider 5xx responses once. Do not retry
+                # quota, authentication, permission, rate-limit or ambiguous
+                # timeout failures because a completed STT request may consume usage.
+                for attempt in range(2):
+                    response = await client.post(
+                        f"{ELEVENLABS_API_BASE_URL}/speech-to-text",
+                        headers={**self._headers(), "Accept": "application/json"},
+                        data=form,
+                        files={"file": (filename, audio, content_type)},
+                    )
+                    if response.status_code < 500 or attempt == 1:
+                        break
+                    await asyncio.sleep(0.25 * (2**attempt))
         except httpx.TimeoutException as error:
             logger.exception("ElevenLabs STT request timed out")
             raise VoiceProviderUnavailable() from error
@@ -233,78 +304,98 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderUnavailable() from error
 
         if response.is_error:
-            provider_code = None
             try:
                 error_payload = response.json()
             except ValueError:
                 error_payload = None
 
-            if isinstance(error_payload, dict):
-                detail = error_payload.get("detail")
-                if isinstance(detail, dict):
-                    candidate = detail.get("code")
-                    if isinstance(candidate, str):
-                        provider_code = candidate.lower()
-
-            request_id = response.headers.get("request-id", "unavailable")
-            if provider_code == "quota_exceeded":
-                logger.warning(
-                    "ElevenLabs STT quota exhausted: status=%s, request_id=%s",
-                    response.status_code,
-                    request_id,
-                )
-                raise VoiceProviderError(
-                    status_code=503,
-                    code="STT_QUOTA_EXCEEDED",
-                )
-            if response.status_code in (401, 403):
-                logger.error(
-                    "ElevenLabs STT authentication rejected: status=%s, request_id=%s",
-                    response.status_code,
-                    request_id,
-                )
-                raise VoiceProviderError(
-                    status_code=503,
-                    code="STT_AUTH_FAILED",
-                )
-            if response.status_code == 422 or provider_code in {
-                "invalid_audio",
-                "unsupported_audio",
-            }:
-                logger.warning(
-                    "ElevenLabs STT rejected audio: status=%s, request_id=%s",
-                    response.status_code,
-                    request_id,
-                )
-                raise VoiceProviderError(
-                    status_code=422,
-                    code="STT_INVALID_AUDIO",
-                )
-            if response.status_code == 429:
-                logger.warning(
-                    "ElevenLabs STT rate limited: status=%s, request_id=%s",
-                    response.status_code,
-                    request_id,
-                )
-                raise VoiceProviderError(
-                    status_code=503,
-                    code="STT_RATE_LIMITED",
-                )
-            if response.status_code >= 500:
-                logger.warning(
-                    "ElevenLabs STT provider unavailable: status=%s, request_id=%s",
-                    response.status_code,
-                    request_id,
-                )
-                raise VoiceProviderUnavailable()
+            provider_code, provider_status, raw_message = (
+                self._provider_error_fields(error_payload)
+            )
+            provider_message = self._safe_provider_message(
+                raw_message, self._api_key
+            )
+            request_id = (
+                response.headers.get("request-id")
+                or response.headers.get("xi-request-id")
+                or "unavailable"
+            )
+            classification = " ".join(
+                value or ""
+                for value in (provider_code, provider_status, provider_message)
+            ).lower()
 
             logger.warning(
-                "ElevenLabs STT provider rejected request: status=%s, request_id=%s",
+                "ElevenLabs STT provider error: operation=speech_to_text "
+                "endpoint=/v1/speech-to-text http_status=%s provider_code=%s "
+                "provider_status=%s request_id=%s message=%s key_configured=%s "
+                "key_fingerprint=%s",
                 response.status_code,
+                provider_code or "unavailable",
+                provider_status or "unavailable",
                 request_id,
+                provider_message or "unavailable",
+                bool(self._api_key),
+                self._key_fingerprint or "unavailable",
             )
+
+            if response.status_code == 402 or any(
+                marker in classification
+                for marker in (
+                    "quota_exceeded",
+                    "insufficient_credits",
+                    "credit_limit",
+                    "usage_limit",
+                )
+            ):
+                raise VoiceProviderError(status_code=503, code="STT_QUOTA_EXCEEDED")
+            if any(
+                marker in classification
+                for marker in ("terms_not_accepted", "terms_of_service", "accept_terms")
+            ):
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_TERMS_NOT_ACCEPTED",
+                )
+            if response.status_code == 401 or any(
+                marker in classification
+                for marker in ("invalid_api_key", "authentication_failed", "unauthorized")
+            ):
+                raise VoiceProviderError(status_code=503, code="STT_AUTH_FAILED")
+            if response.status_code == 403 or any(
+                marker in classification
+                for marker in ("permission_denied", "insufficient_permissions", "forbidden")
+            ):
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_PERMISSION_DENIED",
+                )
+            if response.status_code == 429 or "rate_limit" in classification:
+                concurrency_limited = any(
+                    marker in classification
+                    for marker in ("concurr", "simultaneous_request", "too_many_active")
+                )
+                raise VoiceProviderError(
+                    status_code=503,
+                    code=(
+                        "STT_CONCURRENCY_LIMITED"
+                        if concurrency_limited
+                        else "STT_RATE_LIMITED"
+                    ),
+                )
+            if response.status_code == 422 or any(
+                marker in classification
+                for marker in ("invalid_audio", "unsupported_audio", "audio_too_short")
+            ):
+                raise VoiceProviderError(status_code=422, code="STT_INVALID_AUDIO")
+            if response.status_code >= 500:
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_TEMPORARILY_UNAVAILABLE",
+                )
+
             raise VoiceProviderError(
-                status_code=503,
+                status_code=502,
                 code="STT_PROVIDER_REJECTED",
             )
 
