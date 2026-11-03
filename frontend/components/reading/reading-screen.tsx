@@ -22,6 +22,10 @@ import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import {
+  RealtimeAlignmentEngine,
+  type RealtimeAlignmentSnapshot,
+} from "@/lib/reading/realtime-alignment";
 import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
@@ -151,6 +155,8 @@ export function ReadingScreen({
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
+  const [previewSnapshot, setPreviewSnapshot] =
+  useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
@@ -158,6 +164,16 @@ export function ReadingScreen({
   const [mispronouncedWordIds, setMispronouncedWordIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [skippedWordIds, setSkippedWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [repeatedWordIds, setRepeatedWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [hesitationWordIds, setHesitationWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
   const spokenWordsSetRef = useRef<Set<string>>(new Set());
@@ -165,6 +181,30 @@ export function ReadingScreen({
   const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
+  const alignmentEngineRef = useRef<RealtimeAlignmentEngine | null>(null);
+  const lastPreviewWordIndexRef = useRef(-1);
+  const skippedWordIdsRef = useRef<Set<string>>(new Set());
+  const repeatedWordIdsRef = useRef<Set<string>>(new Set());
+  const hesitationWordIdsRef = useRef<Set<string>>(new Set());
+
+
+  useEffect(() => {
+    if (!page?.words?.length) {
+      alignmentEngineRef.current = null;
+      return;
+    }
+
+    lastPreviewWordIndexRef.current = -1;
+    alignmentEngineRef.current = new RealtimeAlignmentEngine(
+      page.words,
+      3,
+      2,
+    );
+
+    return () => {
+      alignmentEngineRef.current = null;
+    };
+  }, [page]);
   const pageTranscriptsRef = useRef<Map<string, PageTranscriptBucket>>(
     new Map(),
   );
@@ -349,7 +389,7 @@ export function ReadingScreen({
             ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
             : null,
         );
-        setCurrentWordId(currentPage.words[3]?.word_id ?? null);
+        setCurrentWordId(currentPage.words[0]?.word_id ?? null);
         setSelectedManualPageId(currentPage.page_id);
         setCanonicalState(session.state);
         setLoadState({
@@ -407,7 +447,7 @@ export function ReadingScreen({
         setPage(matchedPage);
         setPageProgress(progress);
         setPageNavigationError(null);
-        setCurrentWordId(matchedPage.words[3]?.word_id ?? null);
+        setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
         setSelectedManualPageId(matchedPage.page_id);
         setCanonicalState("LISTENING");
         setUiState("reading");
@@ -443,103 +483,116 @@ export function ReadingScreen({
       .trim();
   }
 
-  function verifySpokenWord(spokenText: string) {
-    if (!page || !page.words.length || !spokenText) return;
-    const cleanSpoken = normalizeVietnamese(spokenText);
-    const tokens = cleanSpoken.split(/\s+/).filter((t) => t.length > 0);
-    if (!tokens.length) return;
+  
+  function applyRealtimeSnapshot(snapshot: RealtimeAlignmentSnapshot) {
+    // Đây là kết quả đã xác nhận, không phải preview.
+    const nextCorrectIds = new Set(correctWordIdsRef.current);
+    const nextMispronouncedIds = new Set(mispronouncedWordIdsRef.current);
+    const nextSkippedIds = new Set(skippedWordIdsRef.current);
+    const nextRepeatedIds = new Set(repeatedWordIdsRef.current);
+    const nextHesitationIds = new Set(hesitationWordIdsRef.current);
 
-    const words = page.words;
-    const currentIdx = words.findIndex((w) => w.word_id === currentWordId);
-    const searchIdx = currentIdx >= 0 ? currentIdx : 0;
-    const targetWord = words[searchIdx];
-    if (!targetWord) return;
-
-    const targetClean = normalizeVietnamese(targetWord.text);
-
-    // Look for target word match in the spoken tokens, with small lookahead for natural child speech
-    let activeMatchIdx = -1;
-    let matchedTokenIdx = -1;
-
-    for (let t = 0; t < tokens.length; t++) {
-      const tok = tokens[t];
-      if (
-        tok === targetClean ||
-        (targetClean.length >= 2 && tok.includes(targetClean)) ||
-        (tok.length >= 2 && targetClean.includes(tok))
-      ) {
-        activeMatchIdx = searchIdx;
-        matchedTokenIdx = t;
-        break;
-      }
-    }
-
-    if (activeMatchIdx === -1 && searchIdx + 1 < words.length) {
-      const nextWord = words[searchIdx + 1];
-      const nextClean = normalizeVietnamese(nextWord.text);
-      for (let t = 0; t < tokens.length; t++) {
-        const tok = tokens[t];
-        if (
-          tok === nextClean ||
-          (nextClean.length >= 2 && tok.includes(nextClean)) ||
-          (tok.length >= 2 && nextClean.includes(tok))
-        ) {
-          activeMatchIdx = searchIdx + 1;
-          matchedTokenIdx = t;
+    for (const word of snapshot.statusByWordId.values()) {
+      switch (word.status) {
+        case "MATCH":
+          nextCorrectIds.add(word.wordId);
+          nextMispronouncedIds.delete(word.wordId);
+          nextSkippedIds.delete(word.wordId);
+          nextRepeatedIds.delete(word.wordId);
           break;
-        }
-      }
-    }
 
-    if (activeMatchIdx >= 0) {
-      // Correct pronunciation!
-      const matchedWord = words[activeMatchIdx];
-      correctWordIdsRef.current.add(matchedWord.word_id);
-      mispronouncedWordIdsRef.current.delete(matchedWord.word_id);
-      spokenWordsSetRef.current.add(matchedWord.text);
-
-      let nextIdx = activeMatchIdx + 1;
-      let nextTokIdx = matchedTokenIdx + 1;
-
-      // Match subsequent words if user spoke a fluent phrase in one go
-      while (nextIdx < words.length && nextTokIdx < tokens.length) {
-        const nextTargetClean = normalizeVietnamese(words[nextIdx].text);
-        const nextTok = tokens[nextTokIdx];
-        if (
-          nextTok === nextTargetClean ||
-          (nextTargetClean.length >= 2 && nextTok.includes(nextTargetClean)) ||
-          (nextTok.length >= 2 && nextTargetClean.includes(nextTok))
-        ) {
-          correctWordIdsRef.current.add(words[nextIdx].word_id);
-          mispronouncedWordIdsRef.current.delete(words[nextIdx].word_id);
-          spokenWordsSetRef.current.add(words[nextIdx].text);
-          nextIdx++;
-          nextTokIdx++;
-        } else {
-          // Child stumbled or mispronounced this subsequent word
-          mispronouncedWordIdsRef.current.add(words[nextIdx].word_id);
-          failedWordsSetRef.current.add(words[nextIdx].text);
+        case "SUBSTITUTE":
+          nextMispronouncedIds.add(word.wordId);
+          nextCorrectIds.delete(word.wordId);
+          nextSkippedIds.delete(word.wordId);
+          nextRepeatedIds.delete(word.wordId);
           break;
-        }
-      }
 
-      // Advance yellow highlight to the next word
-      if (nextIdx < words.length) {
-        setCurrentWordId(words[nextIdx].word_id);
-      } else {
-        setCurrentWordId(words[words.length - 1].word_id);
+        case "DELETE":
+          nextSkippedIds.add(word.wordId);
+          nextCorrectIds.delete(word.wordId);
+          nextMispronouncedIds.delete(word.wordId);
+          nextRepeatedIds.delete(word.wordId);
+          break;
+
+        case "REPEATED":
+          nextRepeatedIds.add(word.wordId);
+          nextCorrectIds.delete(word.wordId);
+          nextMispronouncedIds.delete(word.wordId);
+          nextSkippedIds.delete(word.wordId);
+          break;
       }
-    } else {
-      // Child spoke, but did not pronounce the target word correctly -> Alert RED!
-      mispronouncedWordIdsRef.current.add(targetWord.word_id);
-      failedWordsSetRef.current.add(targetWord.text);
-      // Keep currentWordId on targetWord (DO NOT jump forward)
-      setCurrentWordId(targetWord.word_id);
     }
 
-    setCorrectWordIds(new Set(correctWordIdsRef.current));
-    setMispronouncedWordIds(new Set(mispronouncedWordIdsRef.current));
-    setSpokenWords(new Set(spokenWordsSetRef.current));
+    for (const id of snapshot.repeatedWordIds) {
+      nextRepeatedIds.add(id);
+    }
+
+    for (const id of snapshot.hesitationWordIds) {
+      nextHesitationIds.add(id);
+    }
+
+    correctWordIdsRef.current = nextCorrectIds;
+    mispronouncedWordIdsRef.current = nextMispronouncedIds;
+    skippedWordIdsRef.current = nextSkippedIds;
+    repeatedWordIdsRef.current = nextRepeatedIds;
+    hesitationWordIdsRef.current = nextHesitationIds;
+
+    const nextFailedWords = new Set<string>();
+
+    for (const id of nextMispronouncedIds) {
+      const word = wordTextByIdRef.current.get(id);
+      if (word) nextFailedWords.add(word);
+    }
+
+    failedWordsSetRef.current = nextFailedWords;
+
+    setCorrectWordIds(nextCorrectIds);
+    setMispronouncedWordIds(nextMispronouncedIds);
+    setSkippedWordIds(nextSkippedIds);
+    setRepeatedWordIds(nextRepeatedIds);
+    setHesitationWordIds(nextHesitationIds);
+
+    setCurrentWordId(snapshot.currentWordId);
+
+    const nextSpokenWords = new Set(spokenWordsSetRef.current);
+
+    for (const word of snapshot.spokenWords) {
+      nextSpokenWords.add(word);
+    }
+
+    spokenWordsSetRef.current = nextSpokenWords;
+    setSpokenWords(nextSpokenWords);
+  }
+
+  function applyPreviewSnapshot(snapshot: RealtimeAlignmentSnapshot) {
+    // Không ghi preview vào các ref thống kê chính thức.
+    setPreviewSnapshot(snapshot);
+
+    // Cập nhật từ đang đọc ngay cả khi chưa có final transcript.
+    setCurrentWordId(snapshot.currentWordId);
+  }
+
+  function resetWordTracking() {
+    setPreviewSnapshot(null);
+    lastPreviewWordIndexRef.current = -1;
+    spokenWordsSetRef.current.clear();
+    correctWordIdsRef.current.clear();
+    mispronouncedWordIdsRef.current.clear();
+    skippedWordIdsRef.current.clear();
+    repeatedWordIdsRef.current.clear();
+    hesitationWordIdsRef.current.clear();
+    failedWordsSetRef.current.clear();
+
+    setSpokenWords(new Set());
+    setCorrectWordIds(new Set());
+    setMispronouncedWordIds(new Set());
+    setSkippedWordIds(new Set());
+    setRepeatedWordIds(new Set());
+    setHesitationWordIds(new Set());
+    setLatestTranscript(null);
+    setComparisonResult(null);
+    setCurrentWordId(null);
   }
 
   async function startListening(): Promise<boolean> {
@@ -581,30 +634,89 @@ export function ReadingScreen({
           rec.lang = "vi-VN";
           rec.maxAlternatives = 1;
 
+          
           rec.onresult = (event: BrowserSpeechEvent) => {
             browserTranscriptCollectorRef.current.addResults(event);
 
-            let latestText = "";
+            const engine = alignmentEngineRef.current;
+
+            if (!engine || !mountedRef.current) return;
+
+            let interimText = "";
+            let latestFinalText = "";
+
+            // 1. Xử lý các kết quả FINAL mới.
             for (
               let index = event.resultIndex;
               index < event.results.length;
               index += 1
             ) {
-              const part = event.results[index][0]?.transcript || "";
-              if (part.trim()) {
-                latestText += (latestText ? " " : "") + part.trim();
+              const result = event.results[index];
+              const part = result[0]?.transcript?.trim() || "";
+
+              if (!part || !result.isFinal) continue;
+
+              latestFinalText +=
+                (latestFinalText ? " " : "") + part;
+
+              const snapshot = engine.addFinalTranscript(part);
+
+              applyRealtimeSnapshot(snapshot);
+            }
+
+            // 2. Lấy toàn bộ INTERIM hiện tại.
+            for (let index = 0; index < event.results.length; index += 1) {
+              const result = event.results[index];
+
+              if (result.isFinal) continue;
+
+              const part = result[0]?.transcript?.trim() || "";
+
+              if (part) {
+                interimText +=
+                  (interimText ? " " : "") + part;
               }
             }
 
-            const currentText = latestText.trim();
-            if (currentText && mountedRef.current) {
-              setLatestTranscript(currentText);
-              verifySpokenWord(currentText);
+            // 3. Cập nhật preview ngay khi bé đang nói.
+            if (interimText.trim()) {
+              const preview = engine.previewAlignment(interimText);
+
+              applyPreviewSnapshot(preview);
+            } else {
+              setPreviewSnapshot(null);
+            }
+
+            // 4. Cập nhật nội dung transcript.
+            if (!mountedRef.current) return;
+
+            if (interimText.trim()) {
+              setLatestTranscript(interimText.trim());
+            } else if (latestFinalText.trim()) {
+              setLatestTranscript((previous) =>
+                [previous, latestFinalText.trim()]
+                  .filter(Boolean)
+                  .join(" "),
+              );
             }
           };
 
+
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
-            console.warn("Browser SpeechRecognition notice:", event?.error);
+            console.error("[REALTIME STT ERROR]", {
+              error: event.error,
+              recorderStarted,
+              browserRecognitionStarted,
+              isListeningActive: isListeningActiveRef.current,
+            });
+
+            if (
+              event.error === "not-allowed" ||
+              event.error === "service-not-allowed" ||
+              event.error === "language-not-supported"
+            ) {
+              isListeningActiveRef.current = false;
+            }
           };
 
           rec.onend = () => {
@@ -716,7 +828,6 @@ export function ReadingScreen({
 
       setLatestTranscript(text);
       setComparisonError(null);
-      verifySpokenWord(text);
 
       return {
         text,
@@ -773,6 +884,29 @@ export function ReadingScreen({
         targetPage,
         elevenLabsResult?.words ?? null,
       );
+
+      // Nếu Browser SpeechRecognition không có transcript,
+      // sử dụng kết quả ElevenLabs cho realtime alignment.
+      if (!browserText && elevenLabsResult?.text) {
+        const engine = alignmentEngineRef.current;
+
+        if (engine) {
+          const snapshot = engine.addFinalTranscript(
+            elevenLabsResult.text,
+          );
+
+          applyRealtimeSnapshot(snapshot);
+        }
+      }
+
+      // Xác nhận từ cuối cùng đang chờ xử lý SUBSTITUTE.
+      const engine = alignmentEngineRef.current;
+
+      if (engine) {
+        const snapshot = engine.finish();
+        applyRealtimeSnapshot(snapshot);
+      }
+
       setLatestTranscript(resolvedText);
       setComparisonError(null);
     }
@@ -808,7 +942,8 @@ export function ReadingScreen({
 
     setIsBusy(true);
     setIsReadingWord(false);
-
+    lastPreviewWordIndexRef.current = -1;
+    alignmentEngineRef.current?.reset();
     // Calculate word duration weights for natural Vietnamese speech rhythm
     const weights = words.map((w) => {
       let weight = Math.max(2, w.text.length);
@@ -829,6 +964,15 @@ export function ReadingScreen({
     correctWordIdsRef.current.clear();
     mispronouncedWordIdsRef.current.clear();
     spokenWordsSetRef.current.clear();
+    skippedWordIdsRef.current.clear();
+    repeatedWordIdsRef.current.clear();
+    hesitationWordIdsRef.current.clear();
+
+    failedWordsSetRef.current.clear();
+
+    setSkippedWordIds(new Set());
+    setRepeatedWordIds(new Set());
+    setHesitationWordIds(new Set());
     setCorrectWordIds(new Set());
     setMispronouncedWordIds(new Set());
     setSpokenWords(new Set());
@@ -855,12 +999,22 @@ export function ReadingScreen({
             setCurrentWordId(targetWord.word_id);
             correctWordIdsRef.current.clear();
             spokenWordsSetRef.current.clear();
+
             for (let i = 0; i < idx; i++) {
               correctWordIdsRef.current.add(words[i].word_id);
               spokenWordsSetRef.current.add(words[i].text);
             }
+
             mispronouncedWordIdsRef.current.delete(targetWord.word_id);
+            skippedWordIdsRef.current.delete(targetWord.word_id);
+            repeatedWordIdsRef.current.delete(targetWord.word_id);
+            hesitationWordIdsRef.current.delete(targetWord.word_id);
+
             setCorrectWordIds(new Set(correctWordIdsRef.current));
+            setMispronouncedWordIds(new Set(mispronouncedWordIdsRef.current));
+            setSkippedWordIds(new Set(skippedWordIdsRef.current));
+            setRepeatedWordIds(new Set(repeatedWordIdsRef.current));
+            setHesitationWordIds(new Set(hesitationWordIdsRef.current));
             setSpokenWords(new Set(spokenWordsSetRef.current));
           }
         },
@@ -921,38 +1075,72 @@ export function ReadingScreen({
 
   async function startReading() {
     if (isBusy) return;
-    setIsBusy(true);
-    const nextState = await services.readingSocketAdapter.sendControl(
-      sessionId,
-      "start",
-    );
-    if (!mountedRef.current) return;
-    setCanonicalState(nextState);
-    setConnectionState("connected");
-    setUiState("reading");
-    setIsMicRecording(false);
-    // Reset transcript evidence only when a new reading session starts.
-    transcriptsListRef.current = [];
-    pageTranscriptsRef.current.clear();
-    browserTranscriptCollectorRef.current.reset();
 
-    setLatestTranscript("");
-    setFinalTranscript("");
-    setComparisonResult(null);
-    setComparisonError(null);
-    setIsComparing(false);
-    setIsBusy(false);
-    setCountdown(3);
-    if (page && page.words.length > 0) {
-      setCurrentWordId(page.words[0].word_id);
+    setIsBusy(true);
+
+    try {
+      const nextState = await services.readingSocketAdapter.sendControl(
+        sessionId,
+        "start",
+      );
+
+      if (!mountedRef.current) return;
+
+      setCanonicalState(nextState);
+      setConnectionState("connected");
+      setUiState("reading");
+      setIsMicRecording(false);
+
+      // Xóa dữ liệu transcript của buổi đọc mới.
+      transcriptsListRef.current = [];
+      pageTranscriptsRef.current.clear();
+      browserTranscriptCollectorRef.current.reset();
+
+      // Reset toàn bộ trạng thái nhận diện.
+      correctWordIdsRef.current.clear();
+      mispronouncedWordIdsRef.current.clear();
+      skippedWordIdsRef.current.clear();
+      repeatedWordIdsRef.current.clear();
+      hesitationWordIdsRef.current.clear();
+
+      failedWordsSetRef.current.clear();
+      spokenWordsSetRef.current.clear();
+
+      setCorrectWordIds(new Set());
+      setMispronouncedWordIds(new Set());
+      setSkippedWordIds(new Set());
+      setRepeatedWordIds(new Set());
+      setHesitationWordIds(new Set());
+      setSpokenWords(new Set());
+
+      // Reset alignment engine cho trang hiện tại.
+      lastPreviewWordIndexRef.current = -1;
+      const initialSnapshot = alignmentEngineRef.current?.reset();
+
+      if (initialSnapshot) {
+        setCurrentWordId(initialSnapshot.currentWordId);
+      } else if (page?.words.length) {
+        setCurrentWordId(page.words[0].word_id);
+      }
+
+      setLatestTranscript("");
+      setFinalTranscript("");
+      setComparisonResult(null);
+      setComparisonError(null);
+      setIsComparing(false);
+
+      setCountdown(3);
+    } catch (error) {
+      console.error("Không thể bắt đầu buổi đọc:", error);
+
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+      }
+    } finally {
+      if (mountedRef.current) {
+        setIsBusy(false);
+      }
     }
-    correctWordIdsRef.current.clear();
-    mispronouncedWordIdsRef.current.clear();
-    failedWordsSetRef.current.clear();
-    spokenWordsSetRef.current.clear();
-    setCorrectWordIds(new Set());
-    setMispronouncedWordIds(new Set());
-    setSpokenWords(new Set());
   }
 
   async function resumeReading() {
@@ -1032,8 +1220,9 @@ export function ReadingScreen({
       const nextPage = await services.readingService.getCurrentPage(sessionId);
       if (!mountedRef.current) return;
       setPageProgress(nextProgress);
+      resetWordTracking();
       setPage(nextPage);
-      setCurrentWordId(nextPage.words[3]?.word_id ?? null);
+      setCurrentWordId(nextPage.words[0]?.word_id ?? null);
       setSelectedManualPageId(nextPage.page_id);
       setCountdown(null);
       setUiState("reading");
@@ -1209,7 +1398,14 @@ export function ReadingScreen({
       }
 
       if (!mountedRef.current) return;
+      // Hoàn tất alignment khi bé kết thúc buổi đọc.
+      // Các từ còn lại trong sách sẽ được đánh dấu DELETE.
+      const engine = alignmentEngineRef.current;
 
+      if (engine) {
+        const finalSnapshot = engine.finish();
+        applyRealtimeSnapshot(finalSnapshot);
+      }
       // 2. Resolve actual recognized transcript evidence page by page.
       const combinedTranscript = transcriptsListRef.current.join(" ").trim();
       setFinalTranscript(combinedTranscript);
@@ -1509,6 +1705,7 @@ export function ReadingScreen({
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
         bookTitle={book.title}
+        previewSnapshot={previewSnapshot}
         controlsDisabled={
           uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
         }
@@ -1540,6 +1737,10 @@ export function ReadingScreen({
         onWordClick={handleWordClick}
         page={page}
         spokenWords={spokenWords}
+        skippedWordIds={skippedWordIds}
+        repeatedWordIds={repeatedWordIds}
+        hesitationWordIds={hesitationWordIds}
+        comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">

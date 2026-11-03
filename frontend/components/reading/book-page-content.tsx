@@ -3,6 +3,7 @@ import { Fragment } from "react";
 import { cn } from "@/lib/utils/cn";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
+import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface BookPageContentProps {
   page: ReadingPageDTO;
@@ -13,6 +14,11 @@ interface BookPageContentProps {
   spokenWords?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   readOnly?: boolean;
+  skippedWordIds?: Set<string>;
+  repeatedWordIds?: Set<string>;
+  hesitationWordIds?: Set<string>;
+  previewSnapshot?: RealtimeAlignmentSnapshot | null;
+
 }
 
 export function BookPageContent({
@@ -24,6 +30,10 @@ export function BookPageContent({
   spokenWords,
   onWordClick,
   readOnly = false,
+  skippedWordIds,
+  repeatedWordIds,
+  hesitationWordIds,
+  previewSnapshot,
 }: BookPageContentProps) {
   const hasWords = page.words.length > 0;
 
@@ -38,33 +48,58 @@ export function BookPageContent({
               (item) => item.book_index === wordIndex,
             );
 
-            const isHesitation =
+            const isPreviewActive = previewSnapshot !== null &&
+              previewSnapshot !== undefined;
+
+            const isPreviewCurrent =
+              word.word_id === previewSnapshot?.currentWordId;
+
+            // Khi có preview, chỉ sử dụng vị trí preview.
+            // Không cộng thêm currentWordId chính thức.
+            const isCurrent = isPreviewActive
+              ? isPreviewCurrent
+              : word.word_id === currentWordId;
+
+            const previewStatus = previewSnapshot?.statusByWordId.get(word.word_id);
+
+            const isPreviewMatched =
+              previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
+
+            const isSkipped = Boolean(
+              skippedWordIds?.has(word.word_id) ||
+              alignment?.status === "DELETE" ||
+              previewStatus?.status === "DELETE",
+            );
+
+            const isRepeated = Boolean(
+              repeatedWordIds?.has(word.word_id) ||
+              comparisonResult?.summary.repeated_book_indices?.includes(wordIndex) ||
+              previewStatus?.status === "REPEATED",
+            );
+
+            const isHesitation = Boolean(
+              hesitationWordIds?.has(word.word_id) ||
+              previewSnapshot?.hesitationWordIds.has(word.word_id) ||
               comparisonResult?.summary.hesitations.some(
                 (item) =>
                   typeof item === "object" &&
                   item !== null &&
-                  "after_word" in item &&
-                  String(item.after_word).toLocaleLowerCase("vi") ===
-                    word.text.toLocaleLowerCase("vi"),
-              ) ?? false;
-
-            const isRepeated =
-              comparisonResult?.summary.repeated_words.some(
-                (item) =>
-                  item.toLocaleLowerCase("vi") ===
-                  word.text.toLocaleLowerCase("vi"),
-              ) ?? false;
-
-            const isCurrent = word.word_id === currentWordId;
+                  "before_book_index" in item &&
+                  item.before_book_index === wordIndex,
+              ),
+            );
 
             const isMispronounced = Boolean(
-              mispronouncedWordIds?.has(word.word_id),
+              mispronouncedWordIds?.has(word.word_id) ||
+              alignment?.status === "SUBSTITUTE" ||
+              previewStatus?.status === "SUBSTITUTE",
             );
 
             const isCorrect = Boolean(
               correctWordIds?.has(word.word_id) ||
-                spokenWords?.has(word.text) ||
-                spokenWords?.has(word.text.toLowerCase()),
+              alignment?.status === "MATCH" ||
+              previewStatus?.status === "MATCH" ||
+              isPreviewMatched,
             );
 
             const previousWord = page.words[index - 1];
@@ -97,18 +132,35 @@ export function BookPageContent({
               (index === 0 || startsLine) &&
               (page.indented_line_indices ?? []).includes(lineIndex);
 
-            const colorClass =
-              alignment?.status === "DELETE"
-                ? "bg-red-200 text-red-900 ring-1 ring-red-500"
-                : alignment?.status === "SUBSTITUTE"
-                  ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
-                  : isRepeated
-                    ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
-                    : isHesitation
-                      ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                      : alignment?.status === "MATCH"
-                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                        : "";
+            const statusClass = isSkipped
+              ? "bg-red-200 text-red-900 ring-1 ring-red-500"
+              : isMispronounced
+                ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
+                : isRepeated
+                  ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
+                  : isHesitation
+                    ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
+                    : isCorrect
+                      ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                      : "";
+
+            const hasConfirmedStatus =
+              isSkipped ||
+              isMispronounced ||
+              isRepeated ||
+              isHesitation ||
+              isCorrect;
+
+            
+
+            const currentClass = isCurrent
+              ? cn(
+                  "scale-105 font-black shadow-sm",
+                  hasConfirmedStatus
+                    ? "ring-2 ring-current"
+                    : "bg-yellow-300 text-primary ring-2 ring-yellow-500",
+                )
+              : "";
 
             return (
               <Fragment key={word.word_id}>
@@ -125,31 +177,17 @@ export function BookPageContent({
                 <span
                   className={cn(
                     "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150",
-                    !readOnly &&
-                      "cursor-pointer select-none active:scale-95",
-                    colorClass,
-
-                    isCurrent &&
-                      isMispronounced &&
-                      "bg-rose-100 text-rose-700 font-black scale-105 ring-2 ring-rose-500 shadow-sm animate-pulse",
-
+                    !readOnly && "cursor-pointer select-none active:scale-95",
+                    statusClass,
+                    currentClass,
                     !isCurrent &&
                       isMispronounced &&
-                      "bg-rose-50 text-rose-800 font-bold border-b-2 border-rose-400",
-
-                    isCurrent &&
-                      !isMispronounced &&
-                      "bg-highlight scale-105 font-black text-primary shadow-sm ring-2 ring-primary",
-
+                      "font-bold border-b-2 border-orange-500",
                     !isCurrent &&
-                      !isMispronounced &&
                       isCorrect &&
-                      "bg-emerald-50 text-emerald-800 font-bold border-b-2 border-emerald-400",
-
+                      "font-bold border-b-2 border-emerald-400",
                     !isCurrent &&
-                      !isMispronounced &&
-                      !isCorrect &&
-                      !colorClass &&
+                      !hasConfirmedStatus &&
                       !readOnly &&
                       "hover:bg-highlight/40",
                   )}
@@ -157,9 +195,7 @@ export function BookPageContent({
                   data-line-index={lineIndex}
                   data-page-revision-id={page.page_revision_id}
                   data-word-id={word.word_id}
-                  onClick={
-                    readOnly ? undefined : () => onWordClick?.(word)
-                  }
+                  onClick={readOnly ? undefined : () => onWordClick?.(word)}
                   role={readOnly ? undefined : "button"}
                   tabIndex={readOnly ? undefined : 0}
                   title={
@@ -173,10 +209,7 @@ export function BookPageContent({
                     readOnly
                       ? undefined
                       : (event) => {
-                          if (
-                            event.key === "Enter" ||
-                            event.key === " "
-                          ) {
+                          if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
                             onWordClick?.(word);
                           }

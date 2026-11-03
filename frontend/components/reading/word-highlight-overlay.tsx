@@ -1,10 +1,16 @@
 import type { ReadingPageDTO } from "@/types/reading";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
+import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface WordHighlightOverlayProps {
   currentWordId: string | null;
   page: ReadingPageDTO;
-  comparisonResult?: ComparisonResult | null;
+  correctWordIds?: Set<string>;
+  mispronouncedWordIds?: Set<string>;
+  skippedWordIds?: Set<string>;
+  repeatedWordIds?: Set<string>;
+  hesitationWordIds?: Set<string>;
+  previewSnapshot?: RealtimeAlignmentSnapshot | null;
 }
 
 function normalizeWord(word: string): string {
@@ -15,46 +21,55 @@ function normalizeWord(word: string): string {
 }
 
 function getWordStatus(
-  wordIndex: number,
-  wordText: string,
-  result?: ComparisonResult | null,
+  wordId: string,
+  currentWordId: string | null,
+  correctWordIds?: Set<string>,
+  mispronouncedWordIds?: Set<string>,
+  skippedWordIds?: Set<string>,
+  repeatedWordIds?: Set<string>,
+  hesitationWordIds?: Set<string>,
+  previewSnapshot?: RealtimeAlignmentSnapshot | null,
 ): string {
-  if (!result) return "";
+  const previewStatus = previewSnapshot?.statusByWordId.get(wordId);
 
-  const item = result.alignment.find(
-    (entry) => entry.book_index === wordIndex,
-  );
+  if (skippedWordIds?.has(wordId) || previewStatus?.status === "DELETE") {
+    return "missing";
+  }
 
-  if (!item) return "";
+  if (
+    mispronouncedWordIds?.has(wordId) ||
+    previewStatus?.status === "SUBSTITUTE"
+  ) {
+    return "wrong";
+  }
 
-  if (item.status === "DELETE") return "missing";
-  if (item.status === "SUBSTITUTE") return "wrong";
+  if (
+    repeatedWordIds?.has(wordId) ||
+    previewSnapshot?.repeatedWordIds.has(wordId)
+  ) {
+    return "repeated";
+  }
 
-  const normalized = normalizeWord(wordText);
+  if (
+    hesitationWordIds?.has(wordId) ||
+    previewSnapshot?.hesitationWordIds.has(wordId)
+  ) {
+    return "hesitation";
+  }
 
-  const repeated = result.summary.repeated_words.some(
-    (word) => normalizeWord(word) === normalized,
-  );
+  if (
+    wordId === currentWordId
+  ) {
+    return "current";
+  }
 
-  if (repeated) return "repeated";
-
-  const hesitation = result.summary.hesitations.some((item) => {
-    if (
-      typeof item !== "object" ||
-      item === null ||
-      !("after_word" in item)
-    ) {
-      return false;
-    }
-
-    return (
-      normalizeWord(String(item.after_word)) === normalized
-    );
-  });
-
-  if (hesitation) return "hesitation";
-
-  if (item.status === "MATCH") return "correct";
+  if (
+    correctWordIds?.has(wordId) ||
+    previewStatus?.status === "MATCH" ||
+    previewSnapshot?.previewMatchedWordIds.has(wordId)
+  ) {
+    return "correct";
+  }
 
   return "";
 }
@@ -87,7 +102,12 @@ function getWordColor(status: string): string {
 export function WordHighlightOverlay({
   currentWordId,
   page,
-  comparisonResult,
+  correctWordIds,
+  mispronouncedWordIds,
+  skippedWordIds,
+  repeatedWordIds,
+  hesitationWordIds,
+  previewSnapshot,
 }: WordHighlightOverlayProps) {
   const word = page.words.find(
     (item) => item.word_id === currentWordId,
@@ -97,14 +117,16 @@ export function WordHighlightOverlay({
     <>
       {page.words.map((item, index) => {
         const wordIndex = item.word_index ?? index;
-        const status =
-          item.word_id === currentWordId
-            ? "current"
-            : getWordStatus(
-              wordIndex,
-              item.text,
-              comparisonResult,
-            );
+        const status = getWordStatus(
+          item.word_id,
+          currentWordId,
+          correctWordIds,
+          mispronouncedWordIds,
+          skippedWordIds,
+          repeatedWordIds,
+          hesitationWordIds,
+          previewSnapshot,
+        );
 
         return (
           <span

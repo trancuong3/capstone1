@@ -234,6 +234,9 @@ class ElevenLabsVoiceProvider:
 
         if response.is_error:
             provider_code = None
+            provider_type = None
+            provider_request_id = None
+
             try:
                 error_payload = response.json()
             except ValueError:
@@ -241,10 +244,33 @@ class ElevenLabsVoiceProvider:
 
             if isinstance(error_payload, dict):
                 detail = error_payload.get("detail")
+
                 if isinstance(detail, dict):
-                    candidate = detail.get("code")
-                    if isinstance(candidate, str):
-                        provider_code = candidate.lower()
+                    code = detail.get("code") or detail.get("status")
+                    error_type = detail.get("type")
+
+                    if isinstance(code, str):
+                        provider_code = code.lower()
+
+                    if isinstance(error_type, str):
+                        provider_type = error_type.lower()
+
+                    provider_request_id = detail.get("request_id")
+
+            request_id = (
+                response.headers.get("request-id")
+                or response.headers.get("x-request-id")
+                or provider_request_id
+                or "unavailable"
+            )
+
+            logger.warning(
+                "ElevenLabs STT error: http_status=%s, code=%s, type=%s, request_id=%s",
+                response.status_code,
+                provider_code,
+                provider_type,
+                request_id,
+            )
 
             request_id = response.headers.get("request-id", "unavailable")
             if provider_code == "quota_exceeded":

@@ -101,32 +101,55 @@ def align_text(reference_text: str, transcript: str) -> dict:
 
 
 def detect_repeated_words(alignment):
-    repeated_words = []
+    repeated_items = []
 
     for i, item in enumerate(alignment):
         if item["status"] != "INSERT":
-            continue
+            continue    
 
         word = item.get("spoken_word")
         if not word:
             continue
 
-        # Check whether this word also appears in a nearby MATCH
-        previous_word = (
-            alignment[i - 1].get("spoken_word")
-            if i > 0 else None
-        )
-        next_word = (
-            alignment[i + 1].get("spoken_word")
-            if i + 1 < len(alignment) else None
+        previous = alignment[i - 1] if i > 0 else None
+        next_item = (
+            alignment[i + 1]
+            if i + 1 < len(alignment)
+            else None
         )
 
-        if word == previous_word or word == next_word:
-            repeated_words.append(word)
+        matched_item = None
+
+        if (
+            previous
+            and previous.get("spoken_word") == word
+            and previous.get("book_index") is not None
+        ):
+            matched_item = previous
+
+        elif (
+            next_item
+            and next_item.get("spoken_word") == word
+            and next_item.get("book_index") is not None
+        ):
+            matched_item = next_item
+
+        if matched_item:
+            repeated_items.append({
+                "word": word,
+                "spoken_index": item["spoken_index"],
+                "book_index": matched_item["book_index"],
+            })
 
     return {
-        "repeated_count": len(repeated_words),
-        "repeated_words": repeated_words
+        "repeated_count": len(repeated_items),
+        "repeated_words": [
+            item["word"] for item in repeated_items
+        ],
+        "repeated_items": repeated_items,
+        "repeated_book_indices": list({
+            item["book_index"] for item in repeated_items
+        }),
     }
 
 def detect_hesitations(words, threshold=2.0):
@@ -143,7 +166,6 @@ def detect_hesitations(words, threshold=2.0):
 
         pause = next_word["start"] - current["end"]
 
-        # Bỏ qua timestamp không hợp lệ
         if pause < 0:
             continue
 
@@ -151,6 +173,8 @@ def detect_hesitations(words, threshold=2.0):
             hesitations.append({
                 "after_word": current["text"],
                 "before_word": next_word["text"],
+                "after_spoken_index": i - 1,
+                "before_spoken_index": i,
                 "pause": round(pause, 2),
             })
 
@@ -164,12 +188,20 @@ def summarize_hesitations(hesitations):
     )
 
 
-def summarize_alignment(alignment, words=None, threshold=1.0):
+def summarize_alignment(alignment, words=None, threshold=2.0):
     missing_words = []
     extra_words = []
     substitutions = []
 
     repeated_result = detect_repeated_words(alignment)
+
+    # Ánh xạ vị trí từ được nói sang vị trí từ trong sách
+    spoken_to_book = {
+        item["spoken_index"]: item["book_index"]
+        for item in alignment
+        if item["spoken_index"] is not None
+        and item["book_index"] is not None
+    }
 
     for item in alignment:
         if item["status"] == "DELETE":
@@ -182,9 +214,19 @@ def summarize_alignment(alignment, words=None, threshold=1.0):
             substitutions.append({
                 "book_word": item["book_word"],
                 "spoken_word": item["spoken_word"],
+                "book_index": item["book_index"],
             })
 
     hesitations = detect_hesitations(words, threshold)
+
+    # Ánh xạ vị trí ngập ngừng sang từ trong sách
+    for item in hesitations:
+        item["after_book_index"] = spoken_to_book.get(
+            item["after_spoken_index"]
+        )
+        item["before_book_index"] = spoken_to_book.get(
+            item["before_spoken_index"]
+        )
 
     return {
         "missing_words": missing_words,
@@ -192,6 +234,10 @@ def summarize_alignment(alignment, words=None, threshold=1.0):
         "substitutions": substitutions,
         "repeated_count": repeated_result["repeated_count"],
         "repeated_words": repeated_result["repeated_words"],
+        "repeated_items": repeated_result["repeated_items"],
+        "repeated_book_indices": repeated_result[
+            "repeated_book_indices"
+        ],
         "hesitations": hesitations,
         "hesitation_seconds": (
             summarize_hesitations(hesitations)

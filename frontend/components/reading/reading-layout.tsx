@@ -9,11 +9,13 @@ import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
+import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface ReadingLayoutProps {
   audioLevel?: number;
   bookTitle: string;
   children?: ReactNode;
+  previewSnapshot?: RealtimeAlignmentSnapshot | null;
   controlsDisabled?: boolean;
   countdown?: number | null;
   correctWordIds?: Set<string>;
@@ -40,6 +42,9 @@ interface ReadingLayoutProps {
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
   spokenWords?: Set<string>;
+  skippedWordIds?: Set<string>;
+  repeatedWordIds?: Set<string>;
+  hesitationWordIds?: Set<string>;
 }
 
 export function ReadingLayout({
@@ -71,6 +76,10 @@ export function ReadingLayout({
   page,
   comparisonResult,
   spokenWords,
+  skippedWordIds,
+  repeatedWordIds,
+  hesitationWordIds,
+  previewSnapshot,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
@@ -107,8 +116,12 @@ export function ReadingLayout({
           mispronouncedWordIds={mispronouncedWordIds}
           onWordClick={onWordClick}
           page={page}
-          comparisonResult={comparisonResult}
+          previewSnapshot={previewSnapshot}
           spokenWords={spokenWords}
+          skippedWordIds={skippedWordIds}
+          repeatedWordIds={repeatedWordIds}
+          hesitationWordIds={hesitationWordIds}
+          comparisonResult={comparisonResult}
         />
       </CameraPreview>
 
