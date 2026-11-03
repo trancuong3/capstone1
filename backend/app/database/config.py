@@ -75,6 +75,11 @@ DATABASE_POOL_RECYCLE = _int_env(
     "DATABASE_POOL_RECYCLE", 900, minimum=60, maximum=7200
 )
 
+if DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW > 15:
+    raise ValueError(
+        "DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW must not exceed 15 per worker"
+    )
+
 if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
         "Missing required backend environment variables: DATABASE_URL, SUPABASE_URL, SUPABASE_KEY"
