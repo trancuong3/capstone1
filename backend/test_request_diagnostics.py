@@ -10,6 +10,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import InterfaceError
 
 from app.api.deps import get_current_parent_id, get_db
 from app.sever import app
@@ -25,6 +26,19 @@ class RolelessDatabase:
 
 async def override_roleless_database():
     yield RolelessDatabase()
+
+
+class ClosedConnectionDatabase:
+    async def scalar(self, _statement):
+        raise InterfaceError(
+            "SELECT profiles.role FROM profiles",
+            {},
+            RuntimeError("connection is closed"),
+        )
+
+
+async def override_closed_connection_database():
+    yield ClosedConnectionDatabase()
 
 
 class RequestIdDiagnosticsTests(unittest.TestCase):
@@ -69,13 +83,36 @@ class RequestIdDiagnosticsTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "Parent access required"})
         request_id = response.headers.get("X-Request-ID")
         self.assertIsNotNone(request_id)
-        diagnostic = "\\n".join(captured.output)
+        diagnostic = "\n".join(captured.output)
         self.assertIn('"event":"http_request_rejected"', diagnostic)
         self.assertIn('"stage":"authorization"', diagnostic)
         self.assertIn('"route":"/reading/sessions/{session_id}/reports"', diagnostic)
         self.assertIn('"http_status":403', diagnostic)
         self.assertNotIn(session_id, diagnostic)
         self.assertNotIn("Parent access required", diagnostic)
+
+    def test_closed_database_connection_returns_retryable_503(self):
+        app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+        app.dependency_overrides[get_db] = override_closed_connection_database
+
+        session_id = "22222222-2222-4222-8222-222222222222"
+        with self.assertLogs("app.sever", level=logging.ERROR) as captured:
+            response = TestClient(app).get(
+                f"/reading/sessions/{session_id}/reports"
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json().get("detail"),
+            "Database temporarily unavailable",
+        )
+        request_id = response.headers.get("X-Request-ID")
+        self.assertIsNotNone(request_id)
+        diagnostic = "\n".join(captured.output)
+        self.assertIn('"event":"database_connection_unavailable"', diagnostic)
+        self.assertIn('"database_error_type":"InterfaceError"', diagnostic)
+        self.assertNotIn("connection is closed", diagnostic)
+        self.assertNotIn(session_id, diagnostic)
 
     def test_invalid_session_uuid_returns_original_422_and_safe_field_diagnostics(self):
         app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
@@ -89,7 +126,7 @@ class RequestIdDiagnosticsTests(unittest.TestCase):
         self.assertTrue(response.json().get("detail"))
         request_id = response.headers.get("X-Request-ID")
         self.assertIsNotNone(request_id)
-        diagnostic = "\\n".join(captured.output)
+        diagnostic = "\n".join(captured.output)
         self.assertIn('"event":"http_request_validation_failed"', diagnostic)
         self.assertIn('"route":"/reading/sessions/{session_id}/reports"', diagnostic)
         self.assertIn('"validation_fields":"path.session_id"', diagnostic)

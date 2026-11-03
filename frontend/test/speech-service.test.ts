@@ -148,6 +148,40 @@ describe("speech service", () => {
     });
   });
 
+  it.each([
+    ["STT_AUTH_FAILED", false],
+    ["STT_PERMISSION_DENIED", false],
+    ["STT_TERMS_NOT_ACCEPTED", false],
+    ["STT_CONCURRENCY_LIMITED", true],
+    ["STT_TEMPORARILY_UNAVAILABLE", true],
+    ["STT_TIMEOUT", true],
+    ["STT_NETWORK_ERROR", true],
+  ] as const)(
+    "preserves STT provider code %s with retryable=%s",
+    async (providerCode, retryable) => {
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { detail: { code: providerCode } },
+          {
+            status: 503,
+            headers: { "x-request-id": "provider-diagnostic-request" },
+          },
+        ),
+      );
+
+      await expect(
+        createSpeechService().transcribe(
+          new Blob(["recorded-audio"], { type: "audio/webm" }),
+        ),
+      ).rejects.toMatchObject({
+        code: providerCode,
+        status: 503,
+        request_id: "provider-diagnostic-request",
+        retryable,
+      });
+    },
+  );
+
   it("does not call the API before a failed Supabase session initialization", async () => {
     initialize.mockResolvedValue({
       error: new Error("private initialization error"),

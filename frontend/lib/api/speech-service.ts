@@ -77,6 +77,31 @@ function failure(
         code = "STT_AUTH_FAILED";
         shouldRetry = false;
         break;
+      case "STT_PERMISSION_DENIED":
+        code = "STT_PERMISSION_DENIED";
+        shouldRetry = false;
+        break;
+      case "STT_TERMS_NOT_ACCEPTED":
+        code = "STT_TERMS_NOT_ACCEPTED";
+        shouldRetry = false;
+        break;
+      case "STT_CONCURRENCY_LIMITED":
+        code = "STT_CONCURRENCY_LIMITED";
+        message = "Dịch vụ nhận diện đang bận. Bé có thể thử lại sau nhé.";
+        shouldRetry = true;
+        break;
+      case "STT_TEMPORARILY_UNAVAILABLE":
+        code = "STT_TEMPORARILY_UNAVAILABLE";
+        shouldRetry = true;
+        break;
+      case "STT_TIMEOUT":
+        code = "STT_TIMEOUT";
+        shouldRetry = true;
+        break;
+      case "STT_NETWORK_ERROR":
+        code = "STT_NETWORK_ERROR";
+        shouldRetry = true;
+        break;
       case "STT_RATE_LIMITED":
         code = "STT_RATE_LIMITED";
         shouldRetry = true;

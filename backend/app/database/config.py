@@ -36,6 +36,50 @@ SUPABASE_SECRET_KEY = (os.getenv("SUPABASE_SECRET_KEY") or "").strip() or None
 SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip() or None
 SUPABASE_ADMIN_KEY = SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY
 
+
+def _int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def _float_env(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+# Keep each process deliberately below the observed 15-client Supabase
+# session-pool limit. Multiply (pool size + overflow) by every app worker and
+# instance when setting production values.
+DATABASE_POOL_SIZE = _int_env("DATABASE_POOL_SIZE", 3, minimum=1, maximum=15)
+DATABASE_MAX_OVERFLOW = _int_env("DATABASE_MAX_OVERFLOW", 0, minimum=0, maximum=14)
+DATABASE_POOL_TIMEOUT = _float_env(
+    "DATABASE_POOL_TIMEOUT", 10.0, minimum=1.0, maximum=120.0
+)
+DATABASE_POOL_RECYCLE = _int_env(
+    "DATABASE_POOL_RECYCLE", 900, minimum=60, maximum=7200
+)
+
+if DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW > 15:
+    raise ValueError(
+        "DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW must not exceed 15 per worker"
+    )
+
 if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
         "Missing required backend environment variables: DATABASE_URL, SUPABASE_URL, SUPABASE_KEY"
