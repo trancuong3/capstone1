@@ -28,9 +28,6 @@ async def override_roleless_database():
     yield RolelessDatabase()
 
 
-
-
-
 class ClosedConnectionDatabase:
     async def scalar(self, _statement):
         raise InterfaceError(
@@ -42,6 +39,8 @@ class ClosedConnectionDatabase:
 
 async def override_closed_connection_database():
     yield ClosedConnectionDatabase()
+
+
 class RequestIdDiagnosticsTests(unittest.TestCase):
     def tearDown(self):
         app.dependency_overrides.pop(get_current_parent_id, None)
