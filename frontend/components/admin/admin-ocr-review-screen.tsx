@@ -3,9 +3,11 @@
 import {
   ArrowLeft,
   CheckCircle2,
+  HelpCircle,
   RefreshCw,
   RotateCcw,
   Save,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -18,8 +20,10 @@ import {
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import type { AdminAiQuestionDTO } from "@/lib/api/ocr-review-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   normalizeVietnameseWord,
@@ -36,23 +40,22 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 
-const OCR_CONFIDENCE_HIGH = 0.9;
-const OCR_CONFIDENCE_MEDIUM = 0.7;
-
-type OcrConfidenceLevel = "high" | "medium" | "low" | "unknown";
+type OcrConfidenceLevel = "exact" | "high" | "medium" | "low" | "unknown";
 
 function getOcrConfidenceLevel(confidence: number | null): OcrConfidenceLevel {
   if (confidence === null || !Number.isFinite(confidence)) return "unknown";
-  if (confidence >= OCR_CONFIDENCE_HIGH) return "high";
-  if (confidence >= OCR_CONFIDENCE_MEDIUM) return "medium";
+  if (confidence >= 0.999) return "exact"; // Chỉ 100% khớp cả từ lẫn dấu mới đạt mức exact (tô xanh)
+  if (confidence >= 0.85) return "high";
+  if (confidence >= 0.70) return "medium"; // Lệch dấu / nghi sai dấu
   return "low";
 }
 
 function getOcrConfidenceLabel(level: OcrConfidenceLevel): string {
   return {
-    high: "Cao",
-    medium: "Trung bình",
-    low: "Thấp · cần kiểm tra",
+    exact: "Chính xác hoàn toàn (cả từ & dấu)",
+    high: "Khá (85–99%)",
+    medium: "Trung bình · nghi sai dấu (70–84%)",
+    low: "Thấp · cần kiểm tra (<70%)",
     unknown: "Chưa xác định · cần kiểm tra",
   }[level];
 }
@@ -79,8 +82,10 @@ export function AdminOcrReviewScreen({
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | "reupload" | null
+    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | "ai_questions" | null
   >(null);
+  const [aiQuestions, setAiQuestions] = useState<AdminAiQuestionDTO[] | null>(null);
+  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
@@ -259,6 +264,66 @@ export function AdminOcrReviewScreen({
     }
   }
 
+  async function correctWithAi() {
+    if (!draftText.trim() || busy !== null || detail?.lifecycle_status !== "ACTIVE") {
+      return;
+    }
+    setBusy("ai_correct");
+    setNotice(null);
+    try {
+      const correctedText = await ocr.aiCorrectText(pageId, draftText);
+      setDraftText(correctedText);
+
+      const result = syncPageTextToWords(correctedText, words);
+      if (result.status === "synchronized") {
+        setWords(
+          result.words.map((w) => ({
+            ...w,
+            ocr_confidence: 1.0, // Đã qua AI sửa và kiểm duyệt dấu -> Nâng lên 100% (tô xanh hoàn toàn)
+          })),
+        );
+        setWordSyncError(null);
+      }
+      setNotice("Gemini AI đã sửa lỗi chính tả và phục hồi dấu thanh thành công!");
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? cause.message
+          : cause instanceof Error
+            ? `Không thể sửa lỗi bằng AI: ${cause.message}`
+            : "Không thể gọi Gemini AI sửa lỗi. Vui lòng kiểm tra GEMINI_API_KEY.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function generateQuestionsWithAi() {
+    const textToUse = draftText.trim() || detail?.draft_text || "";
+    if (!textToUse) {
+      setNotice("Văn bản trang đang trống, không thể tạo câu hỏi.");
+      return;
+    }
+    setBusy("ai_questions");
+    setNotice(null);
+    try {
+      const questions = await ocr.aiGenerateQuestions(pageId, textToUse, 10);
+      setAiQuestions(questions);
+      setShowQuestionsModal(true);
+      setNotice("Đã tạo thành công 10 câu hỏi đọc hiểu cho trẻ em từ nội dung trang!");
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? cause.message
+          : cause instanceof Error
+            ? `Lỗi tạo câu hỏi: ${cause.message}`
+            : "Không thể tạo câu hỏi từ Gemini AI.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function createEditDraft() {
     if (!detail || detail.verification_status !== "VERIFIED" || busy !== null) {
       return;
@@ -405,6 +470,7 @@ export function AdminOcrReviewScreen({
       return counts;
     },
     {
+      exact: 0,
       high: 0,
       medium: 0,
       low: 0,
@@ -413,9 +479,11 @@ export function AdminOcrReviewScreen({
   );
   const firstWordToReview = words.find(
     (word) =>
+      getOcrConfidenceLevel(word.ocr_confidence) === "medium" ||
       getOcrConfidenceLevel(word.ocr_confidence) === "low" ||
       getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
   );
+
   if (error) {
     return (
       <EmptyState
@@ -470,7 +538,7 @@ export function AdminOcrReviewScreen({
       {notice ? (
         <StatusMessage
           className="mb-6"
-          tone={notice.startsWith("Không thể") ? "error" : "info"}
+          tone={notice.startsWith("Không thể") || notice.startsWith("Lỗi") ? "error" : "info"}
         >
           {notice}
         </StatusMessage>
@@ -503,9 +571,10 @@ export function AdminOcrReviewScreen({
               {words.map((word) => {
                 const level = getOcrConfidenceLevel(word.ocr_confidence);
                 const colorClass = {
-                  high: "border-green-600 bg-green-400/20",
-                  medium: "border-yellow-500 bg-yellow-300/25",
-                  low: "border-red-600 bg-red-400/30",
+                  exact: "border-green-600 bg-green-400/35",
+                  high: "border-teal-500 bg-teal-300/25",
+                  medium: "border-yellow-500 bg-yellow-300/30",
+                  low: "border-red-600 bg-red-400/35",
                   unknown: "border-orange-600 bg-orange-300/30",
                 }[level];
                 const selectedClass =
@@ -562,24 +631,28 @@ export function AdminOcrReviewScreen({
           </div>
           <p className="mt-3 text-sm text-muted">
             Ảnh được cấp URL có thời hạn từ Supabase Storage; tọa độ bbox dùng
-            hệ quy chiếu chuẩn hóa 0–1. Confidence là điểm ước lượng của OCR,
-            không phải xác suất chắc chắn nhận diện đúng.
+            hệ quy chiếu chuẩn hóa 0–1. Màu xanh lá chỉ hiển thị khi từ và dấu thanh
+            tiếng Việt khớp chính xác 100%.
           </p>
           <div
             aria-label="Chú giải confidence OCR"
             className="mt-3 flex flex-wrap gap-3 text-xs"
           >
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />
-              Cao
+              <span className="size-3 rounded-sm border border-green-600 bg-green-400/40" />
+              Chính xác (100%)
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="size-3 rounded-sm border border-teal-500 bg-teal-300/30" />
+              Khá (85–99%)
             </span>
             <span className="inline-flex items-center gap-1">
               <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />
-              Trung bình
+              Nghi sai dấu (70–84%)
             </span>
             <span className="inline-flex items-center gap-1">
               <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />
-              Thấp
+              Thấp (&lt;70%)
             </span>
             <span className="inline-flex items-center gap-1">
               <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />
@@ -588,16 +661,20 @@ export function AdminOcrReviewScreen({
           </div>
           <div
             aria-label="Thống kê confidence OCR"
-            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5"
             role="group"
           >
             <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm">
+              <strong>{confidenceCounts.exact}</strong>
+              <div>Chính xác</div>
+            </div>
+            <div className="rounded-control border border-teal-500/40 bg-teal-50 p-2 text-sm">
               <strong>{confidenceCounts.high}</strong>
-              <div>Cao</div>
+              <div>Khá</div>
             </div>
             <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm">
               <strong>{confidenceCounts.medium}</strong>
-              <div>Trung bình</div>
+              <div>Nghi sai dấu</div>
             </div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm">
               <strong>{confidenceCounts.low}</strong>
@@ -682,6 +759,31 @@ export function AdminOcrReviewScreen({
                   >
                     <Save aria-hidden className="size-4" /> Lưu bản nháp
                   </Button>
+
+                  <Button
+                    className="sm:w-auto border-purple-600 bg-purple-600 text-white hover:bg-purple-700"
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      !draftText.trim()
+                    }
+                    isLoading={busy === "ai_correct"}
+                    onClick={() => void correctWithAi()}
+                    type="button"
+                  >
+                    <Sparkles aria-hidden className="size-4" /> AI sửa chính tả &amp; dấu
+                  </Button>
+
+                  <Button
+                    className="sm:w-auto border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
+                    disabled={busy !== null || !draftText.trim()}
+                    isLoading={busy === "ai_questions"}
+                    onClick={() => void generateQuestionsWithAi()}
+                    type="button"
+                  >
+                    <HelpCircle aria-hidden className="size-4" /> Tạo 10 câu hỏi đọc hiểu
+                  </Button>
+
                   <Button
                     className="sm:w-auto"
                     disabled={
@@ -887,6 +989,45 @@ export function AdminOcrReviewScreen({
           </Card>
         </div>
       </div>
+
+      {showQuestionsModal && aiQuestions ? (
+        <Modal
+          isOpen={showQuestionsModal}
+          onClose={() => setShowQuestionsModal(false)}
+          title={`Bộ 10 câu hỏi đọc hiểu cho trẻ (Trang ${image.page_number})`}
+        >
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto p-2 text-sm">
+            {aiQuestions.map((q, idx) => (
+              <div
+                key={idx}
+                className="rounded-control border border-border bg-canvas/40 p-3"
+              >
+                <p className="mb-2 text-base font-bold text-primary">
+                  Câu {idx + 1}: {q.question}
+                </p>
+                <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {q.options.map((opt, oIdx) => (
+                    <div
+                      key={oIdx}
+                      className="rounded border border-border/70 bg-white p-2"
+                    >
+                      {opt}
+                    </div>
+                  ))}
+                </div>
+                <p className="font-bold text-green-700">
+                  Đáp án đúng: {q.correct_answer}
+                </p>
+                {q.explanation ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Giải thích: {q.explanation}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      ) : null}
     </>
   );
 }

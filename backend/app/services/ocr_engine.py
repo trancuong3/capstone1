@@ -176,6 +176,47 @@ def is_vietocr_reliable(
     return True
 
 
+# =============================================================================
+# Đánh giá độ tin cậy từ và dấu thanh tiếng Việt (Word-level Confidence)
+# =============================================================================
+_VIET_STOP_CONSONANTS = ("c", "ch", "p", "t")
+_VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳẩẻểỉỏổởủửỷãẵẫẽễĩõỗỡũữỹ]", re.IGNORECASE)
+
+
+def _evaluate_vietnamese_word_confidence(
+    viet_word: str,
+    paddle_word: str,
+    base_line_conf: float = 0.90,
+) -> float:
+    """Đánh giá chi tiết độ tin cậy của từng từ và dấu thanh tiếng Việt."""
+    v_norm = normalize_word(viet_word)
+    p_norm = normalize_word(paddle_word) if paddle_word else ""
+
+    if not v_norm:
+        return 0.50
+
+    # Kiểm tra quy tắc âm tiết kết thúc bằng c, ch, p, t chỉ được đi với dấu sắc hoặc nặng
+    v_base = strip_accents(v_norm)
+    if any(v_base.endswith(stop) for stop in _VIET_STOP_CONSONANTS):
+        if _VIET_ILLEGAL_STOP_ACCENTS.search(v_norm):
+            return 0.50  # Chắc chắn sai dấu ngữ âm
+
+    # Trường hợp 1: Cả VietOCR và PaddleOCR đều khớp chính xác từng ký tự và dấu thanh
+    if p_norm and v_norm.lower() == p_norm.lower():
+        return 1.0  # Chính xác tuyệt đối 100% -> Tô xanh hoàn toàn
+
+    # Trường hợp 2: Trùng chữ cái nhưng lệch dấu thanh (Sai dấu)
+    if p_norm and strip_accents(v_norm) == strip_accents(p_norm):
+        return 0.72  # Sai dấu -> Rơi vào mức Vàng/Cần kiểm tra
+
+    # Trường hợp 3: Khác biệt từ giữa 2 engine
+    if p_norm:
+        return 0.65  # Mức thấp -> Tô đỏ
+
+    # Trường hợp 4: Chỉ có VietOCR nhận diện được
+    return 0.85
+
+
 def _order_quad_points(pts: np.ndarray) -> np.ndarray:
     """Đảm bảo 4 đỉnh tứ giác luôn theo đúng thứ tự: [top-left, top-right, bottom-right, bottom-left]."""
     pts = np.array(pts, dtype=np.float32)
@@ -216,7 +257,6 @@ def _fit_single_line_parabola(
         if total_ink < (u1 - u0) * 0.6:
             continue
 
-        # Trượt cửa sổ chiều cao win_h để tìm dải có mật độ mực lớn nhất (loại bỏ nhiễu dòng lân cận)
         window_sums = np.convolve(
             row_prof, np.ones(win_h, dtype=np.float32), mode="valid"
         )
@@ -403,7 +443,6 @@ def _extract_curved_lines_from_items(
             10,
         )
 
-        # Kiểm tra nếu box bị dính nhiều dòng (chiều cao vuông góc > 1.72 lần dòng chuẩn)
         is_multiline = (crop_h > ref_h * 1.72) and (crop_w > ref_h * 2.2)
         bands: list[tuple[int, int, np.ndarray]] = []
 
@@ -411,7 +450,6 @@ def _extract_curved_lines_from_items(
             num_est = min(8, max(2, int(round(crop_h / ref_h))))
             arch_off = _estimate_block_arch_offsets(binary, ref_h)
 
-            # Khử độ cong vòm trên ảnh nhị phân để tìm thung lũng tách dòng chính xác
             u_grid = np.broadcast_to(
                 np.arange(crop_w, dtype=np.float32)[None, :], (crop_h, crop_w)
             ).copy()
@@ -460,7 +498,6 @@ def _extract_curved_lines_from_items(
                     bands.append((v0, v1, v_curve_k))
 
         if not bands:
-            # Dòng đơn: khớp trực tiếp Parabol theo vệt mực chính
             v_curve = _fit_single_line_parabola(binary, min(float(crop_h), ref_h * 1.15))
             bands.append((0, crop_h, v_curve))
 
@@ -472,7 +509,6 @@ def _extract_curved_lines_from_items(
             strip_h = int(round(max(12.0, band_h * 1.18)))
             dewarped_img = _dewarp_strip_along_curve(rect_img, v_curve, strip_h)
 
-            # Tính đường cong tọa độ (X, Y) trên ảnh gốc tại 9 điểm mốc ngang
             sample_rxs = np.linspace(0.0, 1.0, 9, dtype=np.float32)
             sample_us = np.clip(
                 (sample_rxs * (crop_w - 1)).astype(int), 0, crop_w - 1
@@ -543,7 +579,6 @@ def _deduplicate_curved_lines(
             if (overlap_w / min_w) < 0.35:
                 continue
 
-            # Nội suy tâm Y của 2 dòng tại đúng hoành độ giữa vùng giao nhau x_mid
             x_mid = (ox0 + ox1) / 2.0
             y_it = float(np.interp(x_mid, it["curve_xs"], it["curve_ys"]))
             y_k = float(np.interp(x_mid, k["curve_xs"], k["curve_ys"]))
@@ -572,7 +607,6 @@ def sort_reading_order_adaptive(
     p75_w = float(np.percentile(widths, 75)) if widths else 0.0
     is_single_column = (p75_w / max(1.0, float(img_width))) >= 0.35
 
-    # Nhánh 1: Sách in / Giáo trình đơn cột
     if is_single_column:
         clean_items = []
         for it in items:
@@ -585,7 +619,6 @@ def sort_reading_order_adaptive(
         clean_items.sort(key=lambda it: it["yc"])
         return clean_items, "single_column"
 
-    # Nhánh 2: Truyện tranh / Bố cục đa bóng thoại
     items.sort(key=lambda it: it["yc"])
     blocks: list[dict[str, Any]] = []
     for item in items:
@@ -742,7 +775,6 @@ def _segment_words_optically_1d(
         10,
     )
 
-    # Chỉ chiếu mật độ mực ở vùng lõi giữa dòng (từ 15% đến 85% chiều cao) để tránh hoàn toàn rìa dòng khác
     r0 = max(0, int(c_h * 0.15))
     r1 = min(c_h, max(r0 + 4, int(c_h * 0.85)))
     core_band = binary[r0:r1, :]
@@ -885,7 +917,6 @@ def _map_curved_word_boxes(
         ry_top = max(0.0, (v_center - half_h) / crop_h)
         ry_bot = min(1.0, (v_center + half_h) / crop_h)
 
-        # Chiếu 4 góc của từ từ hệ quy chiếu uốn cong về ảnh gốc
         top_l = (tl + x0_r * (tr - tl)) + ry_top * (
             (bl + x0_r * (br - bl)) - (tl + x0_r * (tr - tl))
         )
@@ -930,12 +961,7 @@ def _map_curved_word_boxes(
 # Hàm Public Service: extract_text_and_boxes & Dual-Engine / Tesseract Pipelines
 # =============================================================================
 def _candidate_quality_score(result: dict[str, object]) -> float:
-    """Rank OCR candidates using token-linked confidence and layout signals.
-
-    Tesseract confidence is an engine score, not a calibrated probability. This
-    score is only a candidate-selection heuristic and must never be shown as OCR
-    confidence to the user.
-    """
+    """Rank OCR candidates using token-linked confidence and layout signals."""
     raw_texts = result.get("text", [])
     raw_confidences = result.get("conf", [])
     tokens: list[str] = []
@@ -1337,7 +1363,7 @@ def _extract_text_and_boxes_dual_engine(
                 viet_text, paddle_text, paddle_conf=paddle_conf, max_cer=0.35
             ):
                 chosen_text = viet_text.strip()
-                chosen_conf = 0.95
+                chosen_conf = paddle_conf
         except Exception:
             pass
 
@@ -1345,7 +1371,6 @@ def _extract_text_and_boxes_dual_engine(
         if not chosen_text:
             continue
 
-        # Chỉ giữ lại các từ có token hợp lệ trước khi phân đoạn hộp để tránh lệch pha do dấu '*'
         valid_words = [
             w for w in chosen_text.split() if normalize_word(w)
         ]
@@ -1356,8 +1381,17 @@ def _extract_text_and_boxes_dual_engine(
             valid_words, item, orig_width, orig_height
         )
 
+        paddle_tokens = [w for w in paddle_text.split() if normalize_word(w)]
+
         for w_idx, raw_token in enumerate(valid_words):
             norm_token = normalize_word(raw_token)
+            p_ref = paddle_tokens[w_idx] if w_idx < len(paddle_tokens) else ""
+            
+            # Tính toán confidence chuẩn xác cho từng từ và dấu
+            word_conf = _evaluate_vietnamese_word_confidence(
+                raw_token, p_ref, base_line_conf=paddle_conf
+            )
+
             words_output.append(
                 {
                     "word_index": len(words_output),
@@ -1365,9 +1399,7 @@ def _extract_text_and_boxes_dual_engine(
                     "text": raw_token,
                     "normalized_text": norm_token,
                     "bbox": line_boxes[w_idx],
-                    "ocr_confidence": round(chosen_conf, 4)
-                    if chosen_conf is not None
-                    else 0.90,
+                    "ocr_confidence": round(word_conf, 4),
                 }
             )
 

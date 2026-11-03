@@ -5,6 +5,23 @@ import type {
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
 
+export const aiQuestionSchema = z.object({
+  question: z.string(),
+  options: z.array(z.string()),
+  correct_answer: z.string(),
+  explanation: z.string().optional().default(""),
+});
+
+export type AdminAiQuestionDTO = z.infer<typeof aiQuestionSchema>;
+
+export const aiCorrectResponseSchema = z.object({
+  corrected_text: z.string(),
+});
+
+export const aiGenerateQuestionsResponseSchema = z.object({
+  questions: z.array(aiQuestionSchema),
+});
+
 export interface OcrReviewService {
   getRevision(
     pageId: string,
@@ -16,6 +33,15 @@ export interface OcrReviewService {
     draftText: string,
     words: readonly AdminRevisionWordDTO[],
   ): Promise<AdminPageRevisionDetailDTO>;
+  aiCorrectText(
+    pageId: string,
+    draftText: string,
+  ): Promise<string>;
+  aiGenerateQuestions(
+    pageId: string,
+    text: string,
+    count?: number,
+  ): Promise<AdminAiQuestionDTO[]>;
 }
 
 export const adminRevisionDetailSchema = z.object({
@@ -79,5 +105,30 @@ export function createOcrReviewService(): OcrReviewService {
           },
         },
       ),
+    aiCorrectText: (pageId, draftText) =>
+      requestApi(
+        `/books/admin/pages/${encodeURIComponent(pageId)}/ai-correct`,
+        aiCorrectResponseSchema,
+        undefined,
+        {
+          method: "POST",
+          body: {
+            draft_text: draftText,
+          },
+        },
+      ).then((res) => res.corrected_text),
+    aiGenerateQuestions: (pageId, text, count = 10) =>
+      requestApi(
+        `/books/admin/pages/${encodeURIComponent(pageId)}/generate-questions`,
+        aiGenerateQuestionsResponseSchema,
+        undefined,
+        {
+          method: "POST",
+          body: {
+            text,
+            count,
+          },
+        },
+      ).then((res) => res.questions),
   };
 }
