@@ -108,7 +108,9 @@ describe("speech service", () => {
     },
   );
 
-  it("preserves provider word timestamps for reading alignment", async () => {
+  it(
+    "preserves provider word timestamps for reading alignment",
+    async () => {
     const words = [
       { text: "Con", start: 0.1, end: 0.2 },
       { text: "mèo", start: 0.21, end: 0.4 },
@@ -125,7 +127,8 @@ describe("speech service", () => {
     await expect(
       createSpeechService().transcribe(new Blob(["recorded-audio"])),
     ).resolves.toMatchObject({ words });
-  });
+    },
+  );
 
   it(
     "maps ElevenLabs quota exhaustion to a safe non-retryable STT code",

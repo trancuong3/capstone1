@@ -141,7 +141,10 @@ export interface RequestApiOptions {
   readonly body?: unknown;
 }
 
-/** Existing GET callers keep their signature; mutations pass RequestApiOptions as argument four. */
+/**
+ * Existing GET callers keep their signature; mutations pass RequestApiOptions as
+ * argument four.
+ */
 export async function requestApi<T>(
   path: string,
   schema: ZodType<T>,
@@ -204,7 +207,9 @@ export async function requestApi<T>(
   if (!response.ok) {
     const backendMessage = await safeBackendMessage(response);
     const correlation =
-      response.status >= 500 && requestId ? ` Mã yêu cầu: ${requestId}.` : "";
+      response.status >= 500 && requestId
+        ? ` Mã yêu cầu: ${requestId}.`
+        : "";
     throw failure(
       response.status,
       requestId,
@@ -246,7 +251,9 @@ export function apiQuery(
   return query.size ? `?${query.toString()}` : "";
 }
 
-/** Out-of-scope writes preserve their interface but never report fake success. */
+/**
+ * Out-of-scope writes preserve their interface but never report fake success.
+ */
 export function unavailableOperation(): Promise<never> {
   return Promise.reject(
     new ServiceError({
