@@ -31,7 +31,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real API client", () => {
-  it("sends the session Bearer token, disables cache and validates JSON", async () => {
+  it(
+    "sends the session Bearer token, disables cache and validates JSON",
+    async () => {
     fetchMock.mockResolvedValue(Response.json({ title: "Tên sách từ API" }));
     expect(await requestApi("/books/", schema)).toEqual({
       title: "Tên sách từ API",
@@ -54,17 +56,23 @@ describe("real API client", () => {
         },
       }),
     );
-  });
+    },
+  );
 
-  it("waits for session restoration and does not call FastAPI when initialization fails", async () => {
-    initialize.mockResolvedValue({ error: new Error("private initialization error") });
+  it(
+    "waits for session restoration and does not call FastAPI when initialization fails",
+    async () => {
+    initialize.mockResolvedValue({
+      error: new Error("private initialization error"),
+    });
     await expect(requestApi("/books/", schema)).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
       status: 401,
     });
     expect(getSession).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
-  });
+    },
+  );
 
   it("does not call FastAPI when unauthenticated", async () => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
@@ -111,12 +119,15 @@ describe("real API client", () => {
     await expect(requestApi("/books/", schema)).rejects.not.toThrow("private");
   });
 
-  it("rejects invalid DTO rather than casting or returning mock fallback", async () => {
+  it(
+    "rejects invalid DTO rather than casting or returning mock fallback",
+    async () => {
     fetchMock.mockResolvedValue(Response.json({ title: 12 }));
     await expect(requestApi("/books/", schema)).rejects.toBeInstanceOf(
       ServiceError,
     );
-  });
+    },
+  );
 
   it("rejects non-JSON success responses", async () => {
     fetchMock.mockResolvedValue(new Response("<html>Error</html>"));
