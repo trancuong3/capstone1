@@ -13,7 +13,18 @@ jobs:
   backend-tests:
     name: Backend unit and API tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_DB: test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
 
     defaults:
       run:
@@ -23,6 +34,8 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_KEY: test-publishable-key
+      READING_REPORT_TEST_DATABASE_URL: postgresql+asyncpg://test@127.0.0.1:5432/test
+      TESSERACT_CMD: /usr/bin/tesseract
 
     steps:
       - name: Check out repository
@@ -34,7 +47,8 @@ jobs:
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo apt-get update && sudo apt-get install -y libgl1 libgomp1
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libgomp1 tesseract-ocr tesseract-ocr-vie
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,6 +60,11 @@ jobs:
           python -m pip install --no-cache-dir --upgrade pip
           python -m pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --no-cache-dir -r requirements.txt
-
+      - name: Verify Tesseract
+        run: |
+          which tesseract
+          tesseract --version
+          tesseract --list-langs
+          python -c "import pytesseract; print(pytesseract.__version__)"
       - name: Run full backend unit and API test suite
         run: python -m unittest discover -v

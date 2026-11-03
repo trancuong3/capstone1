@@ -15,6 +15,7 @@ import {
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
+      initialize: async () => ({ error: null }),
       getSession: async () => ({
         data: { session: { access_token: "isolated-test-token" } },
         error: null,

@@ -18,8 +18,14 @@ if not hasattr(PIL.Image, "ANTIALIAS"):
 import cv2
 import jiwer
 import numpy as np
-import pytesseract
-from pytesseract import Output
+
+try:
+    import pytesseract
+    from pytesseract import Output
+except ImportError:
+    pytesseract = None  # type: ignore
+    Output = None  # type: ignore
+
 import torch
 from PIL import Image
 
@@ -1026,6 +1032,9 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
 
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Run Vietnamese Tesseract OCR against preprocessing candidates and select the best."""
+    if pytesseract is None:
+        raise OcrEngineUnavailable("Thư viện pytesseract chưa được cài đặt trong môi trường.")
+
     configured_binary = os.getenv("TESSERACT_CMD")
     if configured_binary:
         configured_binary = configured_binary.strip('"\'')
@@ -1131,11 +1140,12 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     successful_evaluations = 0
     for preprocessing_name, candidate_image, psm in candidates:
         try:
+            output_dict = Output.DICT if Output is not None else "dict"
             result = pytesseract.image_to_data(
                 candidate_image,
                 lang=target_lang,
                 config=f"--oem 1 --psm {psm}",
-                output_type=Output.DICT,
+                output_type=output_dict,
             )
             successful_evaluations += 1
         except Exception:

@@ -2,19 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSpeechService } from "@/lib/api/speech-service";
 
-const { getSession, fetchMock } = vi.hoisted(() => ({
+const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
+  initialize: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/client", () => ({
-  createBrowserSupabaseClient: () => ({ auth: { getSession } }),
+  createBrowserSupabaseClient: () => ({ auth: { initialize, getSession } }),
 }));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
 
 beforeEach(() => {
+  initialize.mockReset().mockResolvedValue({ error: null });
   getSession.mockReset();
   getSession.mockResolvedValue({
     data: { session: { access_token: "isolated-test-token" } },
@@ -43,6 +45,11 @@ describe("speech service", () => {
     );
 
     expect(await audio.text()).toBe("audio-bytes");
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(getSession).toHaveBeenCalledOnce();
+    expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
+      getSession.mock.invocationCallOrder[0],
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/voice/text-to-speech",
       expect.objectContaining({
@@ -110,6 +117,83 @@ describe("speech service", () => {
     await expect(
       createSpeechService().transcribe(new Blob(["recorded-audio"])),
     ).resolves.toMatchObject({ words });
+  });
+
+  it("maps ElevenLabs quota exhaustion to a safe non-retryable STT code", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          detail: {
+            code: "STT_QUOTA_EXCEEDED",
+            provider_message: "0 credits remaining; 22 credits required",
+          },
+        },
+        { status: 503, headers: { "x-request-id": "quota-request" } },
+      ),
+    );
+
+    const request = createSpeechService().transcribe(
+      new Blob(["recorded-audio"], { type: "audio/webm" }),
+    );
+    await expect(request).rejects.toMatchObject({
+      code: "STT_QUOTA_EXCEEDED",
+      status: 503,
+      request_id: "quota-request",
+      retryable: false,
+    });
+    await request.catch((error: unknown) => {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("0 credits");
+      expect((error as Error).message).not.toContain("22 credits");
+    });
+  });
+
+  it.each([
+    ["STT_AUTH_FAILED", false],
+    ["STT_PERMISSION_DENIED", false],
+    ["STT_TERMS_NOT_ACCEPTED", false],
+    ["STT_CONCURRENCY_LIMITED", true],
+    ["STT_TEMPORARILY_UNAVAILABLE", true],
+    ["STT_TIMEOUT", true],
+    ["STT_NETWORK_ERROR", true],
+  ] as const)(
+    "preserves STT provider code %s with retryable=%s",
+    async (providerCode, retryable) => {
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { detail: { code: providerCode } },
+          {
+            status: 503,
+            headers: { "x-request-id": "provider-diagnostic-request" },
+          },
+        ),
+      );
+
+      await expect(
+        createSpeechService().transcribe(
+          new Blob(["recorded-audio"], { type: "audio/webm" }),
+        ),
+      ).rejects.toMatchObject({
+        code: providerCode,
+        status: 503,
+        request_id: "provider-diagnostic-request",
+        retryable,
+      });
+    },
+  );
+
+  it("does not call the API before a failed Supabase session initialization", async () => {
+    initialize.mockResolvedValue({
+      error: new Error("private initialization error"),
+    });
+    await expect(
+      createSpeechService().synthesize("Xin chào"),
+    ).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      status: 401,
+    });
+    expect(getSession).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not call the API without a browser session", async () => {

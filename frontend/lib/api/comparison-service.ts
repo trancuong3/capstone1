@@ -1,4 +1,3 @@
-
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
@@ -40,12 +39,7 @@ const readingPageWordSchema = z.object({
   word_id: z.string(),
   word_index: z.number(),
   text: z.string(),
-  bbox: z.tuple([
-    z.number(),
-    z.number(),
-    z.number(),
-    z.number(),
-  ]),
+  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
   line_index: z.number().optional(),
 });
 
@@ -67,10 +61,16 @@ export type ReadingPage = z.infer<typeof readingPageSchema>;
 
 export type ComparisonResult = z.infer<typeof comparisonSchema>;
 
+export interface ComparisonPageReference {
+  readonly page_id: string;
+  readonly page_revision_id: string;
+}
+
 export async function compareTranscript(
   sessionId: string,
   transcript: string,
   words?: readonly WordTimestamp[] | null,
+  page?: ComparisonPageReference,
 ): Promise<ComparisonResult> {
   return requestApi(
     `/reading/sessions/${sessionId}/compare`,
@@ -81,18 +81,22 @@ export async function compareTranscript(
       body: {
         transcript,
         ...(words?.length ? { words } : {}),
+        ...(page
+          ? {
+              page_id: page.page_id,
+              page_revision_id: page.page_revision_id,
+            }
+          : {}),
       },
     },
   );
 }
 
 // Schema báo cáo đã lưu
-const savedReportSchema = comparisonSchema
-  .omit({ session_id: true })
-  .extend({
-    report_id: z.string(),
-    created_at: z.string(),
-    transcript: z.string(),
+const savedReportSchema = comparisonSchema.omit({ session_id: true }).extend({
+  report_id: z.string(),
+  created_at: z.string(),
+  transcript: z.string(),
 });
 
 const sessionReportsSchema = z.object({
@@ -127,15 +131,8 @@ export async function getReadingPage(
   );
 }
 
-export async function deleteReadingReport(
-  reportId: string,
-): Promise<void> {
-  await requestApi(
-    `/reading/reports/${reportId}`,
-    z.unknown(),
-    undefined,
-    {
-      method: "DELETE",
-    },
-  );
+export async function deleteReadingReport(reportId: string): Promise<void> {
+  await requestApi(`/reading/reports/${reportId}`, z.unknown(), undefined, {
+    method: "DELETE",
+  });
 }
