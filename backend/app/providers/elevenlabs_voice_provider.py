@@ -266,7 +266,10 @@ class ElevenLabsVoiceProvider:
 
         if not audio:
             logger.warning("STT request rejected: audio is empty")
-            raise VoiceProviderError()
+            raise VoiceProviderError(status_code=422, code="STT_INVALID_AUDIO")
+        if not self._api_key:
+            logger.warning("STT request rejected: ElevenLabs API key is not configured")
+            raise VoiceProviderError(status_code=503, code="STT_AUTH_FAILED")
 
         logger.info(
             "STT request started: filename=%s, content_type=%s, audio_bytes=%d, "
@@ -297,11 +300,23 @@ class ElevenLabsVoiceProvider:
                         break
                     await asyncio.sleep(0.25 * (2**attempt))
         except httpx.TimeoutException as error:
-            logger.exception("ElevenLabs STT request timed out")
-            raise VoiceProviderUnavailable() from error
+            logger.warning(
+                "ElevenLabs STT request timed out: error_type=%s request_id=unavailable",
+                type(error).__name__,
+            )
+            raise VoiceProviderError(
+                status_code=503,
+                code="STT_TIMEOUT",
+            ) from None
         except httpx.HTTPError as error:
-            logger.exception("ElevenLabs STT network/HTTP client error")
-            raise VoiceProviderUnavailable() from error
+            logger.warning(
+                "ElevenLabs STT network failure: error_type=%s request_id=unavailable",
+                type(error).__name__,
+            )
+            raise VoiceProviderError(
+                status_code=503,
+                code="STT_NETWORK_ERROR",
+            ) from None
 
         if response.is_error:
             try:
