@@ -26,7 +26,7 @@ def provider_http_exception(error: VoiceProviderError) -> HTTPException:
 
     return HTTPException(
         status_code=error.status_code,
-        detail={"code": "SPEECH_UNAVAILABLE"},
+        detail={"code": error.code},
     )
 
 

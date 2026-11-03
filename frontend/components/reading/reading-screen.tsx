@@ -10,11 +10,15 @@ import { ComprehensionQuestion } from "@/components/reading/comprehension-questi
 import { ManualPageSelector } from "@/components/reading/manual-page-selector";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
+import type { WordTimestamp } from "@/lib/api/speech-service";
+import {
+  BrowserTranscriptCollector,
+  resolveTranscriptForSegment,
+} from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
-import { ReadingReport } from "@/components/reading/ReadingReport";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -65,6 +69,7 @@ interface BrowserSpeechEvent {
   results: {
     length: number;
     [index: number]: {
+      isFinal: boolean;
       [index: number]: {
         transcript: string;
       };
@@ -92,6 +97,14 @@ interface BrowserSpeechRecognition {
 interface WindowWithSpeech {
   SpeechRecognition?: new () => BrowserSpeechRecognition;
   webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+}
+
+interface PageTranscriptBucket {
+  readonly page_id: string;
+  readonly page_revision_id: string;
+  readonly page_number: number;
+  readonly segments: string[];
+  readonly words: WordTimestamp[];
 }
 
 export function ReadingScreen({
@@ -152,6 +165,13 @@ export function ReadingScreen({
   const mispronouncedWordIdsRef = useRef<Set<string>>(new Set());
   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
+  const pageTranscriptsRef = useRef<Map<string, PageTranscriptBucket>>(
+    new Map(),
+  );
+  const browserTranscriptCollectorRef = useRef(
+    new BrowserTranscriptCollector(),
+  );
+  const browserStopResolveRef = useRef<(() => void) | null>(null);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
@@ -164,29 +184,57 @@ export function ReadingScreen({
   );
   const isUsingRecorderRef = useRef(false);
 
-  const recordSpokenText = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  const recordSpokenText = useCallback(
+    (
+      text: string,
+      pageSnapshot: Pick<
+        ReadingPageDTO,
+        "page_id" | "page_revision_id" | "page_number"
+      >,
+      words: readonly WordTimestamp[] | null = null,
+    ) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
 
-    const transcripts = transcriptsListRef.current;
-    if (
-      transcripts.length === 0 ||
-      transcripts[transcripts.length - 1] !== trimmed
-    ) {
-      transcripts.push(trimmed);
-    }
+      transcriptsListRef.current.push(trimmed);
 
-    const words = trimmed
-      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
-      .split(/\s+/)
-      .map((w) => w.trim())
-      .filter((w) => w.length > 0);
+      const bucketKey = `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
+      let bucket = pageTranscriptsRef.current.get(bucketKey);
+      if (!bucket) {
+        bucket = {
+          page_id: pageSnapshot.page_id,
+          page_revision_id: pageSnapshot.page_revision_id,
+          page_number: pageSnapshot.page_number,
+          segments: [],
+          words: [],
+        };
+        pageTranscriptsRef.current.set(bucketKey, bucket);
+      }
+      const isFirstSegmentForPage = bucket.segments.length === 0;
+      bucket.segments.push(trimmed);
 
-    for (const w of words) {
-      spokenWordsSetRef.current.add(w);
-    }
-    setSpokenWords(new Set(spokenWordsSetRef.current));
-  }, []);
+      // ElevenLabs word timestamps are relative to the uploaded audio segment.
+      // Once a page uses more than one capture segment, their clocks cannot be
+      // safely merged without real inter-segment timing evidence.
+      if (isFirstSegmentForPage && words?.length) {
+        bucket.words.push(...words);
+      } else if (!isFirstSegmentForPage) {
+        bucket.words.length = 0;
+      }
+
+      const spokenTokens = trimmed
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter((word) => word.length > 0);
+
+      for (const word of spokenTokens) {
+        spokenWordsSetRef.current.add(word);
+      }
+      setSpokenWords(new Set(spokenWordsSetRef.current));
+    },
+    [],
+  );
 
   const handleWordClick = useCallback(
     async (word: ReadingPageWordDTO) => {
@@ -499,42 +547,29 @@ export function ReadingScreen({
     setComparisonResult(null);
     setComparisonError(null);
     setIsComparing(false);
-    isListeningActiveRef.current = true;
+    browserTranscriptCollectorRef.current.reset();
 
-    // 1. Start MediaRecorder with continuous live utterance transcription for ElevenLabs STT
+    let recorderStarted = false;
     try {
-      await speechRecorder.start(async (utteranceBlob) => {
-        if (!mountedRef.current || !isListeningActiveRef.current) return;
-        try {
-          const transcript = await speechService.transcribe(utteranceBlob, {
-            languageCode: "vi",
-          });
-          if (!mountedRef.current || !transcript.text) return;
-          const cleanText = transcript.text.trim();
-          if (cleanText) {
-            setLatestTranscript(cleanText);
-            verifySpokenWord(cleanText);
-            recordSpokenText(cleanText);
-          }
-        } catch (e) {
-          console.warn("Live ElevenLabs STT utterance notice:", e);
-        }
-      });
+      await speechRecorder.start();
       isUsingRecorderRef.current = true;
+      recorderStarted = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      if (message.includes("not supported")) {
-        if (mountedRef.current) setLatestTranscript(null);
-        return true;
+      if (!message.toLowerCase().includes("not supported")) {
+        if (mountedRef.current) {
+          setConnectionState("reconnecting");
+          setUiState("microphone-denied");
+        }
+        return false;
       }
-      if (mountedRef.current) {
-        setConnectionState("reconnecting");
-        setUiState("microphone-denied");
-      }
-      return false;
+      // Web Speech can still provide final transcript results without MediaRecorder.
+      isUsingRecorderRef.current = false;
     }
 
-    // 2. Concurrently attempt Web Speech API for low-latency streaming text if supported by browser
+    isListeningActiveRef.current = true;
+    let browserRecognitionStarted = false;
+
     if (typeof window !== "undefined") {
       try {
         const win = window as unknown as WindowWithSpeech;
@@ -547,71 +582,122 @@ export function ReadingScreen({
           rec.maxAlternatives = 1;
 
           rec.onresult = (event: BrowserSpeechEvent) => {
-            let latestWord = "";
-            let fullLive = "";
+            browserTranscriptCollectorRef.current.addResults(event);
 
-            for (let i = 0; i < event.results.length; ++i) {
-              const part = event.results[i][0]?.transcript || "";
+            let latestText = "";
+            for (
+              let index = event.resultIndex;
+              index < event.results.length;
+              index += 1
+            ) {
+              const part = event.results[index][0]?.transcript || "";
               if (part.trim()) {
-                fullLive += (fullLive ? " " : "") + part.trim();
+                latestText += (latestText ? " " : "") + part.trim();
               }
             }
 
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-              const part = event.results[i][0]?.transcript || "";
-              if (part.trim()) {
-                latestWord += (latestWord ? " " : "") + part.trim();
-              }
-            }
-
-            const currentWord = latestWord.trim() || fullLive.trim();
-            if (currentWord && mountedRef.current) {
-              setLatestTranscript(currentWord);
-              verifySpokenWord(currentWord);
-              recordSpokenText(currentWord);
+            const currentText = latestText.trim();
+            if (currentText && mountedRef.current) {
+              setLatestTranscript(currentText);
+              verifySpokenWord(currentText);
             }
           };
 
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
-            // If browser speech API fails (e.g. network / Google blocked), MediaRecorder is already running
-            // and ElevenLabs STT will transcribe the full audio upon pause/finish.
             console.warn("Browser SpeechRecognition notice:", event?.error);
           };
 
           rec.onend = () => {
+            browserTranscriptCollectorRef.current.completeRecognitionCycle();
+
             if (mountedRef.current && isListeningActiveRef.current) {
-              setTimeout(() => {
+              window.setTimeout(() => {
                 if (mountedRef.current && isListeningActiveRef.current) {
                   try {
                     rec.start();
                   } catch {
-                    // Safe ignore
+                    // Previously collected final speech remains available.
                   }
                 }
               }, 200);
+              return;
             }
+
+            const resolveStop = browserStopResolveRef.current;
+            if (resolveStop) resolveStop();
           };
 
           try {
             rec.start();
             recognitionRef.current = rec;
+            browserRecognitionStarted = true;
           } catch {
-            // Safe ignore if browser blocks concurrent audio capture
+            // MediaRecorder remains the primary source when available.
           }
         }
-      } catch (e) {
-        console.warn("SpeechRecognition initialization skipped:", e);
+      } catch (error) {
+        console.warn("SpeechRecognition initialization skipped:", error);
       }
     }
 
+    if (!recorderStarted && !browserRecognitionStarted) {
+      isListeningActiveRef.current = false;
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("stt-error");
+      }
+      return false;
+    }
+
     return true;
+  }
+
+  async function stopBrowserRecognition(): Promise<void> {
+    const recognition = recognitionRef.current;
+    if (!recognition) {
+      browserTranscriptCollectorRef.current.completeRecognitionCycle();
+      return;
+    }
+
+    isListeningActiveRef.current = false;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        browserStopResolveRef.current = null;
+        resolve();
+      };
+
+      browserStopResolveRef.current = finish;
+      try {
+        recognition.stop();
+      } catch {
+        browserTranscriptCollectorRef.current.completeRecognitionCycle();
+        finish();
+      }
+
+      // Do not block session completion if a browser fails to dispatch onend.
+      window.setTimeout(() => {
+        if (settled) return;
+        browserTranscriptCollectorRef.current.completeRecognitionCycle();
+        finish();
+      }, 1500);
+    });
+
+    if (recognitionRef.current === recognition) {
+      recognitionRef.current = null;
+    }
   }
 
   useEffect(() => {
     startListeningRef.current = startListening;
   });
 
-  async function transcribeRecording(recording: Blob) {
+  async function transcribeRecording(
+    recording: Blob,
+  ): Promise<{ text: string; words: readonly WordTimestamp[] | null } | null> {
     transcriptionAbortRef.current?.abort();
 
     const controller = new AbortController();
@@ -622,89 +708,76 @@ export function ReadingScreen({
         languageCode: "vi",
         signal: controller.signal,
       });
-      if (!mountedRef.current || controller.signal.aborted) return;
-      if (transcript.text) {
-        setLatestTranscript(transcript.text);
-        verifySpokenWord(transcript.text);
-        recordSpokenText(transcript.text);
-      }
+
+      if (!mountedRef.current || controller.signal.aborted) return null;
 
       const text = transcript.text?.trim() ?? "";
+      if (!text) return null;
 
-      if (!text) {
-        return "";
-      }
-
-      // Hiển thị văn bản đã nhận diện
       setLatestTranscript(text);
       setComparisonError(null);
+      verifySpokenWord(text);
 
-      // Giữ chức năng cũ
-
-      recordSpokenText(text);
-
-      // So sánh với nội dung sách
-      try {
-        setIsComparing(true);
-
-        const result = await compareTranscript(
-          sessionId,
-          text,
-          transcript.words ?? undefined,
-        );
-
-        if (!mountedRef.current || controller.signal.aborted) {
-          return text;
-        }
-
-        setComparisonResult(result);
-        setComparisonError(null);
-
-        console.log("Transcript:", text);
-        console.log("Book text:", page?.words.map((w) => w.text).join(" "));
-        console.log("Kết quả so sánh:", result);
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          console.error("Lỗi so sánh transcript:", err);
-          setComparisonError("Chưa thể so sánh bài đọc. Vui lòng thử lại sau.");
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsComparing(false);
-        }
-      }
-
-      return text;
-    } catch (err) {
+      return {
+        text,
+        words: transcript.words?.length ? transcript.words : null,
+      };
+    } catch (error) {
       if (!controller.signal.aborted) {
-        console.error("Lỗi chuyển ghi âm thành văn bản:", err);
+        console.error("Lỗi chuyển ghi âm thành văn bản:", error);
       }
-
-      return "";
+      return null;
     }
   }
 
-  async function stopListeningAndTranscribe() {
+  async function stopListeningAndTranscribe(): Promise<string> {
+    // Snapshot the page before waiting for asynchronous recorder/provider work.
+    const targetPage = page;
     isListeningActiveRef.current = false;
-    if (recognitionRef.current) {
+    await stopBrowserRecognition();
+
+    let recording: Blob | null = null;
+    if (isUsingRecorderRef.current) {
       try {
-        recognitionRef.current.stop();
-      } catch {
-        // Safe ignore
+        recording = await speechRecorder.stop();
+      } catch (error) {
+        speechRecorder.cancel();
+        console.error("Lỗi khi dừng ghi âm:", error);
+      } finally {
+        isUsingRecorderRef.current = false;
       }
-      recognitionRef.current = null;
     }
-    try {
-      const recording = await speechRecorder.stop();
-      if (recording && recording.size > 200) {
-        const text = await transcribeRecording(recording);
-        if (text) {
-          console.log("Đoạn văn đã nhận diện:", text);
-        }
-      }
-    } catch {
-      speechRecorder.cancel();
+
+    let elevenLabsResult: {
+      text: string;
+      words: readonly WordTimestamp[] | null;
+    } | null = null;
+
+    if (recording && recording.size > 200) {
+      elevenLabsResult = await transcribeRecording(recording);
     }
+
+    const browserText = browserTranscriptCollectorRef.current
+      .getTranscript()
+      .trim();
+
+    // Use exactly one source for this capture segment: ElevenLabs first,
+    // browser final recognition only when provider STT did not return text.
+    const resolvedText = resolveTranscriptForSegment(
+      elevenLabsResult?.text,
+      browserText,
+    );
+    if (resolvedText && targetPage) {
+      recordSpokenText(
+        resolvedText,
+        targetPage,
+        elevenLabsResult?.words ?? null,
+      );
+      setLatestTranscript(resolvedText);
+      setComparisonError(null);
+    }
+
+    return resolvedText ?? "";
   }
 
   async function handleReadSample() {
@@ -858,6 +931,16 @@ export function ReadingScreen({
     setConnectionState("connected");
     setUiState("reading");
     setIsMicRecording(false);
+    // Reset transcript evidence only when a new reading session starts.
+    transcriptsListRef.current = [];
+    pageTranscriptsRef.current.clear();
+    browserTranscriptCollectorRef.current.reset();
+
+    setLatestTranscript("");
+    setFinalTranscript("");
+    setComparisonResult(null);
+    setComparisonError(null);
+    setIsComparing(false);
     setIsBusy(false);
     setCountdown(3);
     if (page && page.words.length > 0) {
@@ -1105,62 +1188,149 @@ export function ReadingScreen({
 
   async function finishReading() {
     if (finishStartedRef.current) return;
+
     finishStartedRef.current = true;
     setIsBusy(true);
     speechPlayer.stop();
-    if (isMicRecording) {
-      try {
-        await stopListeningAndTranscribe();
-      } catch {
-        speechRecorder.cancel();
+
+    try {
+      // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
+      if (isMicRecording) {
+        try {
+          await stopListeningAndTranscribe();
+        } catch (error) {
+          console.error("Lỗi khi dừng ghi âm:", error);
+          speechRecorder.cancel();
+        }
+
+        if (mountedRef.current) {
+          setIsMicRecording(false);
+        }
       }
-      if (mountedRef.current) setIsMicRecording(false);
+
+      if (!mountedRef.current) return;
+
+      // 2. Resolve actual recognized transcript evidence page by page.
+      const combinedTranscript = transcriptsListRef.current.join(" ").trim();
+      setFinalTranscript(combinedTranscript);
+
+      const pageBuckets = [...pageTranscriptsRef.current.values()]
+        .filter((bucket) => bucket.segments.some((segment) => segment.trim()))
+        .sort((left, right) => left.page_number - right.page_number);
+
+      // Compare each transcript against the exact page revision read by the child.
+      setComparisonResult(null);
+      if (pageBuckets.length > 0) {
+        setIsComparing(true);
+        setComparisonError(null);
+        let latestResult: ComparisonResult | null = null;
+        let firstComparisonError: string | null = null;
+
+        for (const bucket of pageBuckets) {
+          const transcript = bucket.segments.join(" ").trim();
+          if (!transcript) continue;
+
+          try {
+            latestResult = await compareTranscript(
+              sessionId,
+              transcript,
+              bucket.words,
+              {
+                page_id: bucket.page_id,
+                page_revision_id: bucket.page_revision_id,
+              },
+            );
+          } catch (error) {
+            console.error("Lỗi so sánh bài đọc:", {
+              sessionId,
+              pageId: bucket.page_id,
+              pageRevisionId: bucket.page_revision_id,
+              error,
+            });
+            firstComparisonError ??=
+              error instanceof Error
+                ? error.message
+                : "Không thể tạo một hoặc nhiều báo cáo đọc.";
+          }
+        }
+
+        if (!mountedRef.current) return;
+        setComparisonResult(latestResult);
+        setComparisonError(firstComparisonError);
+        setIsComparing(false);
+      } else {
+        setComparisonError(
+          "Chưa nhận diện được lời đọc thực tế nên chưa thể tạo báo cáo đối chiếu.",
+        );
+      }
+
+      if (!mountedRef.current) return;
+
+      // 4. Kết thúc session
+      const [finishedSession] = await Promise.all([
+        services.readingService.finish(sessionId),
+        services.readingSocketAdapter.sendControl(sessionId, "finish"),
+      ]);
+
+      if (!mountedRef.current) return;
+
+      // 5. Lấy thống kê buổi đọc
+      const wordsList = Array.from(spokenWordsSetRef.current);
+
+      const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
+
+      const persistedCompletion = await services.readingService
+        .getCompletionSummary(sessionId)
+        .catch(() => null);
+
+      const correctWordsList = Array.from(correctWordIdsRef.current)
+        .map((wordId) => wordTextByIdRef.current.get(wordId))
+        .filter((word): word is string => Boolean(word));
+
+      const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
+
+      const totalTracked =
+        correctWordsList.length + mispronouncedWordsList.length;
+
+      const score =
+        totalTracked > 0
+          ? Math.round((correctWordsList.length / totalTracked) * 100)
+          : null;
+
+      // 6. Tạo thống kê hoàn thành
+      const updatedSummary: ReadingCompletionSummaryUI = {
+        correct_words: correctWordsList,
+        duration_minutes: durationMinutes,
+        mispronounced_words: mispronouncedWordsList,
+        pages_explored:
+          persistedCompletion?.pages_explored ??
+          (pageProgress?.persisted ? pageProgress.completed_pages : null),
+        selected_range_pages:
+          persistedCompletion?.selected_range_pages ??
+          (pageProgress?.persisted ? pageProgress.total_pages : null),
+        practiced_words: wordsList.length,
+        score,
+        spoken_words: wordsList,
+        transcripts: [...transcriptsListRef.current],
+      };
+
+      // 7. Hiển thị màn hình hoàn thành
+      setSessionSummary(updatedSummary);
+      setCanonicalState("FINISHED");
+      setConfirmFinish(false);
+      setUiState("complete");
+    } catch (error) {
+      console.error("Lỗi khi kết thúc buổi đọc:", error);
+
+      // Cho phép thử kết thúc lại nếu có lỗi
+      finishStartedRef.current = false;
+    } finally {
+      if (mountedRef.current) {
+        setIsComparing(false);
+        setIsBusy(false);
+      }
     }
-    const [finishedSession] = await Promise.all([
-      services.readingService.finish(sessionId),
-      services.readingSocketAdapter.sendControl(sessionId, "finish"),
-    ]);
-    if (!mountedRef.current) return;
-    const wordsList = Array.from(spokenWordsSetRef.current);
-    const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
-    const persistedCompletion = await services.readingService
-      .getCompletionSummary(sessionId)
-      .catch(() => null);
-
-    const correctWordsList = Array.from(correctWordIdsRef.current)
-      .map((wordId) => wordTextByIdRef.current.get(wordId))
-      .filter((word): word is string => Boolean(word));
-    const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
-
-    const totalTracked =
-      correctWordsList.length + mispronouncedWordsList.length;
-    const score =
-      totalTracked > 0
-        ? Math.round((correctWordsList.length / totalTracked) * 100)
-        : null;
-
-    const updatedSummary: ReadingCompletionSummaryUI = {
-      correct_words: correctWordsList,
-      duration_minutes: durationMinutes,
-      mispronounced_words: mispronouncedWordsList,
-      pages_explored:
-        persistedCompletion?.pages_explored ??
-        (pageProgress?.persisted ? pageProgress.completed_pages : null),
-      selected_range_pages:
-        persistedCompletion?.selected_range_pages ??
-        (pageProgress?.persisted ? pageProgress.total_pages : null),
-      practiced_words: wordsList.length,
-      score,
-      spoken_words: wordsList,
-      transcripts: transcriptsListRef.current,
-    };
-    setSessionSummary(updatedSummary);
-    setCanonicalState("FINISHED");
-    setConfirmFinish(false);
-    setUiState("complete");
-    setIsBusy(false);
   }
-
   if (loadState.status === "error" || loadState.status === "not-found") {
     const notFound = loadState.status === "not-found";
     const title = notFound
@@ -1253,6 +1423,7 @@ export function ReadingScreen({
         child={child}
         sessionId={sessionId}
         summary={sessionSummary ?? completion}
+        reportError={comparisonError}
       />
     );
   }
@@ -1368,7 +1539,6 @@ export function ReadingScreen({
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
-        comparisonResult={comparisonResult}
         spokenWords={spokenWords}
       >
         {uiState === "page-turn" ? (
@@ -1377,18 +1547,6 @@ export function ReadingScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
-      {/* Hiển thị kết quả so sánh bài đọc */}
-      <div className="mx-auto w-full max-w-[720px] space-y-3 p-4">
-        {isComparing && <p role="status">Đang so sánh bài đọc...</p>}
-
-        {comparisonError && (
-          <StatusMessage tone="error">{comparisonError}</StatusMessage>
-        )}
-
-        {comparisonResult && (
-          <ReadingReport result={comparisonResult} bookWords={page.words} />
-        )}
-      </div>
       {confirmFinish ? (
         <ReadingStatusDialog
           body="Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."

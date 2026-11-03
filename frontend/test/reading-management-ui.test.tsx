@@ -8,6 +8,7 @@ import { AppServicesProvider } from "@/components/providers/app-services-provide
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
+      initialize: async () => ({ error: null }),
       getSession: async () => ({
         data: { session: { access_token: "test-token" } },
         error: null,

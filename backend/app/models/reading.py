@@ -34,7 +34,7 @@ class ReadingEvent(Base):
     PageRevisionId = Column("pagerevisionid", UUID(as_uuid=True), ForeignKey("pagerevisions.id", ondelete="CASCADE"), nullable=False)
     WordId = Column("wordid", UUID(as_uuid=True), ForeignKey("pagerevisionwords.id", ondelete="SET NULL"))
     Type = Column("type", String, nullable=False)
-    StartMs = Column("startms", SmallInteger, nullable=False)
+    StartMs = Column("startms", SmallInteger, nullable=False)   
     EndMs = Column("endms", SmallInteger)
     Confidence = Column("confidence", Float)
     Status = Column("status", String, nullable=False)

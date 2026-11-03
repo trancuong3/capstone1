@@ -141,7 +141,10 @@ export interface RequestApiOptions {
   readonly body?: unknown;
 }
 
-/** Existing GET callers keep their signature; mutations pass RequestApiOptions as argument four. */
+/**
+ * Existing GET callers keep their signature; mutations pass RequestApiOptions as
+ * argument four.
+ */
 export async function requestApi<T>(
   path: string,
   schema: ZodType<T>,
@@ -154,8 +157,13 @@ export async function requestApi<T>(
 
   let token: string;
   try {
-    const { data, error } =
-      await createBrowserSupabaseClient().auth.getSession();
+    const supabase = createBrowserSupabaseClient();
+    // Automatic initialization is disabled to let AuthServiceProvider subscribe
+    // before initialization. Every API caller must therefore await restoration.
+    const { error: initializationError } = await supabase.auth.initialize();
+    if (initializationError) throw failure(401);
+
+    const { data, error } = await supabase.auth.getSession();
     if (error || !data.session?.access_token) throw failure(401);
     token = data.session.access_token;
   } catch (error) {
@@ -221,7 +229,7 @@ export async function requestApi<T>(
       {
         issues: parsed.error.issues,
         response: payload,
-      }
+      },
     );
 
     throw failure(response.status, requestId);
@@ -240,7 +248,9 @@ export function apiQuery(
   return query.size ? `?${query.toString()}` : "";
 }
 
-/** Out-of-scope writes preserve their interface but never report fake success. */
+/**
+ * Out-of-scope writes preserve their interface but never report fake success.
+ */
 export function unavailableOperation(): Promise<never> {
   return Promise.reject(
     new ServiceError({

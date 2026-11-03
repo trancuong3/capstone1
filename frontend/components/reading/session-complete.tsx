@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  FileText,
   Home,
   Mic,
   Star,
@@ -19,6 +20,7 @@ import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { ButtonLink } from "@/components/common/button";
+import { StatusMessage } from "@/components/common/status-message";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingCompletionSummaryUI } from "@/types/reading";
@@ -28,6 +30,7 @@ interface SessionCompleteProps {
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
+  reportError?: string | null;
 }
 
 export function SessionComplete({
@@ -35,6 +38,7 @@ export function SessionComplete({
   child,
   sessionId,
   summary,
+  reportError = null,
 }: SessionCompleteProps) {
   const [showWordList, setShowWordList] = useState(false);
   const rangeWasPartial =
@@ -130,6 +134,12 @@ export function SessionComplete({
             </div>
           </div>
         )}
+
+        {reportError ? (
+          <StatusMessage title="Báo cáo đọc chưa sẵn sàng" tone="warning">
+            {reportError}
+          </StatusMessage>
+        ) : null}
 
         <div
           className={`grid gap-4 ${summary.selected_range_pages !== undefined && summary.selected_range_pages !== null ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}
@@ -328,6 +338,14 @@ export function SessionComplete({
         >
           <Users aria-hidden="true" className="size-5" />
           Xem cùng ba mẹ
+        </ButtonLink>
+        <ButtonLink
+          className="mx-auto max-w-[360px]"
+          href={`/sessions/${sessionId}/report`}
+          variant="secondary"
+        >
+          <FileText aria-hidden="true" className="size-5" />
+          Xem báo cáo
         </ButtonLink>
       </div>
     </section>

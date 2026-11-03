@@ -3,24 +3,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
-
 from app.api.deps import get_db, get_current_parent_id
-from app.models import ReadingSession, ReadingEvent, FluencyAssessment, ReadingSessionPage
+from app.models import (
+    ReadingSession,
+    ReadingEvent,
+    FluencyAssessment,
+    ReadingSessionPage,
+)
 from app.schemas import (
     ReadingSessionResponse, ReadingSessionCreate,
     ReadingEventResponse, ReadingEventCreate,
     FluencyAssessmentResponse, FluencyAssessmentCreate
 )
-from app.schemas.reading import CompareReadingRequest
-from app.services.text_alignment import (
-    align_text,
-    detect_hesitations,
-    summarize_alignment,
-    detect_hesitations,
+from app.schemas.reading import (
+    CompareReadingRequest,
+    ReadingComparisonReportRead,
+    ReadingSessionReportsRead,
 )
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.reading_content_service import ReadingContentService
+from app.services.reading_comparison_service import ReadingComparisonService
 from app.schemas.reading import (
     ReadingPageDTO, ReadingCompletionSummaryDTO,
     SessionSummaryRead, ReadingPageNavigationCreate,
@@ -118,11 +121,12 @@ async def navigate_session_page(
 async def get_reading_page(
     page_id: UUID,
     session_id: UUID = Query(...),
+    revision_id: UUID | None = Query(None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
-        page_id, session_id, actor_id
+        page_id, session_id, actor_id, revision_id=revision_id
     )
 
 
@@ -430,57 +434,43 @@ async def get_owned_session_book(
 
 
 
-@router.post("/sessions/{session_id}/compare")
+@router.post(
+    "/sessions/{session_id}/compare",
+    response_model=ReadingComparisonReportRead,
+)
 async def compare_reading(
     session_id: UUID,
     request: CompareReadingRequest,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Get the current reading page
-    page = await ReadingContentService(
-        ReadingContentRepository(db)
-    ).get_session_page(session_id, actor_id)
-
-    # 2. Get verified book text
-    reference_text = (
-        page.text or " ".join(word.text for word in page.words)
+    return await ReadingComparisonService(db).compare(
+        session_id, actor_id, request
     )
 
-    if not reference_text.strip():
-        raise HTTPException(
-            status_code=422,
-            detail="Book text is empty",
-        )
 
-    # 3. Align book text with transcript
-    result = align_text(reference_text, request.transcript)
-
-    # 4. Convert timestamps to dictionaries
-    words = (
-        [word.model_dump() for word in request.words]
-        if request.words is not None
-        else None
-    )
-    print("Request words:", request.words)
-    print("Words count:", len(words) if words else 0)
-    print("Detected hesitations:", detect_hesitations(words or []))
-
-    # 5. Summarize reading results
-    summary = summarize_alignment(
-        result["alignment"],
-        words=words,
-        threshold=1.0,
+@router.get(
+    "/sessions/{session_id}/reports",
+    response_model=ReadingSessionReportsRead,
+)
+async def get_session_reports(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingComparisonService(db).list_for_session(
+        session_id, actor_id
     )
 
-    return {
-        "session_id": str(session_id),
-        "page_id": str(page.page_id),
-        "page_revision_id": str(page.page_revision_id),
-        "distance": result["distance"],
-        "alignment": result["alignment"],
-        "summary": summary,
-    }
+
+@router.delete("/reports/{report_id}")
+async def delete_reading_report(
+    report_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingComparisonService(db).delete(report_id, actor_id)
+
 
 #Kadepham
 import os
