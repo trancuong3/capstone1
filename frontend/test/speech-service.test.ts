@@ -156,7 +156,7 @@ describe("speech service", () => {
     ["STT_TEMPORARILY_UNAVAILABLE", true],
     ["STT_TIMEOUT", true],
     ["STT_NETWORK_ERROR", true],
-  ])("preserves STT provider code %s with retryable=%s", async (providerCode, retryable) => {
+  ] as const)("preserves STT provider code %s with retryable=%s", async (providerCode, retryable) => {
     fetchMock.mockResolvedValue(
       Response.json(
         { detail: { code: providerCode } },
