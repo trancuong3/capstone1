@@ -34,43 +34,43 @@ describe("real API client", () => {
   it(
     "sends the session Bearer token, disables cache and validates JSON",
     async () => {
-    fetchMock.mockResolvedValue(Response.json({ title: "Tên sách từ API" }));
-    expect(await requestApi("/books/", schema)).toEqual({
-      title: "Tên sách từ API",
-    });
-    expect(initialize).toHaveBeenCalledOnce();
-    expect(getSession).toHaveBeenCalledOnce();
-    expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
-      getSession.mock.invocationCallOrder[0],
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/books/",
-      expect.objectContaining({
-        method: "GET",
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        headers: {
-          Accept: "application/json",
-          Authorization: "Bearer isolated-test-token",
-        },
-      }),
-    );
+      fetchMock.mockResolvedValue(Response.json({ title: "Tên sách từ API" }));
+      expect(await requestApi("/books/", schema)).toEqual({
+        title: "Tên sách từ API",
+      });
+      expect(initialize).toHaveBeenCalledOnce();
+      expect(getSession).toHaveBeenCalledOnce();
+      expect(initialize.mock.invocationCallOrder[0]).toBeLessThan(
+        getSession.mock.invocationCallOrder[0],
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8000/books/",
+        expect.objectContaining({
+          method: "GET",
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          headers: {
+            Accept: "application/json",
+            Authorization: "Bearer isolated-test-token",
+          },
+        }),
+      );
     },
   );
 
   it(
     "waits for session restoration and does not call FastAPI when initialization fails",
     async () => {
-    initialize.mockResolvedValue({
-      error: new Error("private initialization error"),
-    });
-    await expect(requestApi("/books/", schema)).rejects.toMatchObject({
-      code: "AUTH_REQUIRED",
-      status: 401,
-    });
-    expect(getSession).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+      initialize.mockResolvedValue({
+        error: new Error("private initialization error"),
+      });
+      await expect(requestApi("/books/", schema)).rejects.toMatchObject({
+        code: "AUTH_REQUIRED",
+        status: 401,
+      });
+      expect(getSession).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
     },
   );
 
@@ -122,10 +122,10 @@ describe("real API client", () => {
   it(
     "rejects invalid DTO rather than casting or returning mock fallback",
     async () => {
-    fetchMock.mockResolvedValue(Response.json({ title: 12 }));
-    await expect(requestApi("/books/", schema)).rejects.toBeInstanceOf(
-      ServiceError,
-    );
+      fetchMock.mockResolvedValue(Response.json({ title: 12 }));
+      await expect(requestApi("/books/", schema)).rejects.toBeInstanceOf(
+        ServiceError,
+      );
     },
   );
 
@@ -224,5 +224,4 @@ describe("real API client", () => {
       }),
     );
   });
-
 });
