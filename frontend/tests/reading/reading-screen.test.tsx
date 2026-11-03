@@ -501,7 +501,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           results: [{ isFinal: true, 0: { transcript: "Con mèo" } }],
         });
       });
-      await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+      await user.click(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      );
       await user.click(
         await screen.findByRole("button", { name: "Lưu và dừng" }),
       );
@@ -515,7 +517,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         services.readingSocketAdapter.sendControl,
       ).toHaveBeenCalledWith(TEST_SESSION_ID, "finish");
     },
-  );;
+  );
 
   it("finishes the session without inventing a report when neither STT source has final text", async () => {
     class EmptySpeechRecognition {
