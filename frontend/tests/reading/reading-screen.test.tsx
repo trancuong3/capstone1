@@ -408,7 +408,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
-    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await user.click(
+      screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+    );
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
@@ -433,7 +435,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).not.toBeInTheDocument();
   });
 
-  it("finishes once when comparison and the websocket finish notification fail", async () => {
+  it("finishes once when comparison and websocket notification fail", async () => {
     class FakeSpeechRecognition {
       static instances: FakeSpeechRecognition[] = [];
       onresult:
