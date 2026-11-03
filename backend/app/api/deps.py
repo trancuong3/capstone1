@@ -61,7 +61,7 @@ def get_current_parent_id(
         response = supabase.auth.get_user(token)
     except Exception as error:
         provider_status = _auth_provider_status(error)
-        if provider_status in (400, 401, 403):
+        if provider_status in (400, 401):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials",

@@ -87,6 +87,17 @@ class AuthenticationDependencyTests(unittest.TestCase):
         self.assertNotIn("private transport diagnostic", diagnostic)
         self.assertNotIn(CREDENTIALS.credentials, diagnostic)
 
+    def test_provider_forbidden_is_not_misreported_as_invalid_user_jwt(self):
+        supabase = SimpleNamespace(
+            auth=SimpleNamespace(
+                get_user=Mock(side_effect=ProviderError("provider access denied", 403))
+            )
+        )
+        with patch("app.api.deps.get_supabase_client", return_value=supabase):
+            with self.assertRaises(HTTPException) as caught:
+                get_current_parent_id(CREDENTIALS)
+        self.assertEqual(caught.exception.status_code, 503)
+
     def test_provider_server_error_returns_503(self):
         supabase = SimpleNamespace(
             auth=SimpleNamespace(
