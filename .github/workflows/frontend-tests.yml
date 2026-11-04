@@ -55,13 +55,14 @@ jobs:
           npm test --
           tests/reading/device-permission-service.test.ts
           tests/reading/device-permission-screen.test.tsx
+          tests/reading/reading-preparation-screen.test.tsx
           tests/dashboard/dashboard-screen.test.tsx
           tests/books/book-detail-screen.test.tsx
 
       - name: ESLint for realtime device permission changes
         run: >-
           npx eslint
-          components/reading/device-permission-screen.tsx
+          components/reading/reading-preparation-screen.tsx
           components/reading/book-scanner-screen.tsx
           components/reading/camera-preview.tsx
           components/reading/reading-ready.tsx
@@ -71,6 +72,7 @@ jobs:
           types/reading.ts
           tests/reading/device-permission-service.test.ts
           tests/reading/device-permission-screen.test.tsx
+          tests/reading/reading-preparation-screen.test.tsx
           tests/dashboard/dashboard-screen.test.tsx
           tests/books/book-detail-screen.test.tsx
 
