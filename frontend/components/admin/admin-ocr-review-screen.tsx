@@ -42,9 +42,10 @@ function describeWordConfidence(word: AdminRevisionWordDTO): string {
   }
   if (
     word.calibration_status === "CALIBRATED" &&
-    typeof word.calibrated_confidence === "number"
+    typeof word.calibrated_confidence === "number" &&
+    word.calibration_version
   ) {
-    return `Xác suất đã hiệu chuẩn: ${(word.calibrated_confidence * 100).toFixed(1)}%`;
+    return `Xác suất đã hiệu chuẩn: ${(word.calibrated_confidence * 100).toFixed(1)}% · ${word.calibration_version}`;
   }
   if (
     word.confidence_scope === "word" &&
