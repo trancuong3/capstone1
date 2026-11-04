@@ -111,6 +111,7 @@ export interface AdminRevisionWordDTO {
   readonly confidence_scope?: "word" | "line" | "unavailable" | "unknown";
   readonly calibrated_confidence?: number | null;
   readonly calibration_status?: "CALIBRATED" | "NOT_CALIBRATED" | "UNKNOWN";
+  readonly calibration_version?: string | null;
   readonly confidence_applicability?:
     | "APPLIES_TO_CURRENT_TEXT"
     | "ORIGINAL_OCR_TEXT_ONLY"
