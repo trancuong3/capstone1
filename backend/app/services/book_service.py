@@ -356,6 +356,19 @@ class AdminCatalogService:
                 if is_calibrated and isinstance(confidence_contract, dict)
                 else None
             )
+            bbox_quality = (
+                finite_score(evidence.get("bbox_quality"), 1.0)
+                if evidence and evidence_applies
+                else None
+            )
+            bbox_quality_status = (
+                "EVALUATED"
+                if bbox_quality is not None
+                else "NOT_EVALUATED"
+                if evidence and evidence_applies
+                and evidence.get("bbox_quality_status") == "NOT_EVALUATED"
+                else "UNKNOWN"
+            )
             words.append({
                 "word_index": word.WordIndex,
                 "line_index": word.LineIndex,
