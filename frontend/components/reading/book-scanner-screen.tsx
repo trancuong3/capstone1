@@ -111,10 +111,12 @@ export function BookScannerScreen({
         </StatusMessage>
       ) : null}
 
-      <StatusMessage title="Quyền thiết bị đã được xác minh" tone="success">
-        Camera đã được kiểm tra ở bước trước. Microphone cũng đã sẵn sàng cho
-        buổi đọc sau khi ba mẹ xác nhận đúng sách và trang.
-      </StatusMessage>
+      {!cameraUnavailable ? (
+        <StatusMessage title="Quyền thiết bị đã được xác minh" tone="success">
+          Camera đã được kiểm tra ở bước trước. Microphone cũng đã sẵn sàng cho
+          buổi đọc sau khi ba mẹ xác nhận đúng sách và trang.
+        </StatusMessage>
+      ) : null}
 
       <CameraPreview
         bookId={bookId}
