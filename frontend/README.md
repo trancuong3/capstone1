@@ -133,7 +133,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 
 ### Luồng xác minh thiết bị và quét trang sách
 
-1. Tại Dashboard, chọn **Quét sách trước Camera (ViRead)**. Ứng dụng chuyển đến `/device-permissions` và giữ `childId` cùng ngữ cảnh quét.
+1. Tại Dashboard, chọn hồ sơ bé trong mục **Chọn hồ sơ bé trước khi quét**, sau đó bấm **Quét sách trước Camera (ViRead)**. Nút quét bị khóa khi chưa chọn bé; ứng dụng giữ đúng `childId` qua các bước tiếp theo.
 2. Trang xác minh chỉ đọc trạng thái trình duyệt khi vừa mở; không tự bật camera hoặc microphone. Khi phụ huynh bấm **Kiểm tra và cấp quyền**, service lần lượt gọi `getUserMedia` riêng cho camera và microphone, xác nhận có track đang hoạt động rồi dừng các track tạm. Bước này không ghi âm, không lưu và không tải ảnh lên.
 3. Chỉ khi cả hai thiết bị đều được truy cập thành công (và trình duyệt hỗ trợ `MediaRecorder` cho microphone), nút **Tiếp tục quét trang sách** mới được bật. Trạng thái xác minh chỉ lưu trong bộ nhớ của tab, có thời hạn ngắn và dùng một lần; mở trực tiếp hoặc tải lại `/book-scanner` sẽ quay lại trang xác minh.
 4. `/book-scanner` mở camera và tái sử dụng `scanCameraFrameGlobal()` hoặc `scanCameraFrameForBook()`. Chỉ một kết quả có đủ `bookId` và `pageId` mới được điều hướng đến `/books/[bookId]?pageId=...`.
