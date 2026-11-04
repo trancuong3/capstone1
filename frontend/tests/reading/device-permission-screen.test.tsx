@@ -163,13 +163,20 @@ describe("Device permission gate", () => {
 
     render(<DevicePermissionScreen childId={childId} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Thử lại quyền Camera" }),
-    );
-
-    await waitFor(() => {
-      expect(requestAccessMock).toHaveBeenCalledWith("camera");
+    const retryButton = screen.getByRole("button", {
+      name: "Thử lại quyền Camera",
     });
+    await user.click(retryButton);
+    await screen.findByText(/Camera permission denied/);
+    expect(
+      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
+    ).toBeDisabled();
+
+    await user.click(retryButton);
+    await waitFor(() => {
+      expect(requestAccessMock).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
     ).toBeDisabled();
