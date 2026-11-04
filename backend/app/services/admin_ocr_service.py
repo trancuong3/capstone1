@@ -303,7 +303,10 @@ class AdminOcrService:
             await self._discard_processing_page(page_id)
             raise
         except Exception:
+            # A connection failure during COMMIT can have an uncertain outcome.
+            # Remove the row only if it is still the unexposed PROCESSING reservation.
             await self.db.rollback()
+            await self._discard_processing_page(page_id)
             raise
 
         storage_uploaded = False
