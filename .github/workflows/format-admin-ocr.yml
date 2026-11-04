@@ -48,39 +48,24 @@ jobs:
       - name: Format only the feature files
         run: |
           if [ "$GITHUB_REF_NAME" = "fix/ocr-confidence-calibration-20261104" ]; then
-            npx prettier --write \\
-              components/admin/admin-ocr-review-screen.tsx \\
-              components/reading/ReadingReport.tsx \\
-              components/reading/book-page-content.tsx \\
-              components/reading/book-page-viewer.tsx \\
-              components/reading/reading-layout.tsx \\
-              components/reading/reading-screen.tsx \\
-              components/reading/word-highlight-overlay.tsx \\
-              lib/api/comparison-service.ts \\
-              lib/api/ocr-review-service.ts \\
-              lib/reading/realtime-alignment.ts \\
-              tests/admin/admin-ocr-review-screen.test.tsx \\
-              tests/reading/book-page-viewer.test.tsx \\
-              tests/reading/reading-report-ambiguity.test.tsx \\
-              tests/reading/realtime-alignment-vietnamese.test.ts \\
-              types/admin.ts
+            npx prettier --write components/admin/admin-ocr-review-screen.tsx components/reading/ReadingReport.tsx components/reading/book-page-content.tsx components/reading/book-page-viewer.tsx components/reading/reading-layout.tsx components/reading/reading-screen.tsx components/reading/word-highlight-overlay.tsx lib/api/comparison-service.ts lib/api/ocr-review-service.ts lib/reading/realtime-alignment.ts tests/admin/admin-ocr-review-screen.test.tsx tests/reading/book-page-viewer.test.tsx tests/reading/reading-report-ambiguity.test.tsx tests/reading/realtime-alignment-vietnamese.test.ts types/admin.ts
           else
-            npx prettier --write \\
-            components/admin/admin-book-detail-screen.tsx \\
-            components/admin/admin-books-screen.tsx \\
-            components/admin/admin-new-book-screen.tsx \\
-            components/admin/admin-ocr-review-screen.tsx \\
-            components/admin/admin-page-uploader.tsx \\
-            lib/api/admin-book-service.ts \\
-            lib/api/admin-page-service.ts \\
-            lib/api/api-client.ts \\
-            lib/api/ocr-review-service.ts \\
-            lib/api/revision-service.ts \\
-            test/real-admin-services.test.ts \\
-            test/real-admin-ui.test.tsx \\
-            test/real-data-runtime-cleanup.test.tsx \\
-            tests/admin/admin-ocr-review-screen.test.tsx \\
-            tests/services/mock-admin-services.test.ts \\
+            npx prettier --write \
+            components/admin/admin-book-detail-screen.tsx \
+            components/admin/admin-books-screen.tsx \
+            components/admin/admin-new-book-screen.tsx \
+            components/admin/admin-ocr-review-screen.tsx \
+            components/admin/admin-page-uploader.tsx \
+            lib/api/admin-book-service.ts \
+            lib/api/admin-page-service.ts \
+            lib/api/api-client.ts \
+            lib/api/ocr-review-service.ts \
+            lib/api/revision-service.ts \
+            test/real-admin-services.test.ts \
+            test/real-admin-ui.test.tsx \
+            test/real-data-runtime-cleanup.test.tsx \
+            tests/admin/admin-ocr-review-screen.test.tsx \
+            tests/services/mock-admin-services.test.ts \
             types/admin.ts
           fi
       - name: Commit formatting when needed
