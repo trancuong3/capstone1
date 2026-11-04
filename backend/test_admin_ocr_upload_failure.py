@@ -223,7 +223,10 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
             ProcessingMeta={},
         )
         service = self.make_service(existing_page=page)
-        current_verified = SimpleNamespace(ProcessingMeta={})
+        current_verified = SimpleNamespace(
+            ProcessingMeta={},
+            VerificationStatus="VERIFIED",
+        )
         latest_revision = SimpleNamespace(Id=REVISION_ID, ProcessingMeta={})
         service.repo.revisions = AsyncMock(return_value=[latest_revision])
         service.repo.revision = AsyncMock(return_value=current_verified)
@@ -314,7 +317,12 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service = self.make_service(existing_page=page)
         latest_revision = SimpleNamespace(Id=REVISION_ID, ProcessingMeta={})
         service.repo.revisions = AsyncMock(return_value=[latest_revision])
-        service.repo.revision = AsyncMock(return_value=SimpleNamespace(ProcessingMeta={}))
+        service.repo.revision = AsyncMock(
+            return_value=SimpleNamespace(
+                ProcessingMeta={},
+                VerificationStatus="VERIFIED",
+            )
+        )
         service.repo.next_revision_number = AsyncMock(return_value=3)
         service.revision_detail = AsyncMock(
             side_effect=HTTPException(status_code=409, detail="Invalid response contract")
