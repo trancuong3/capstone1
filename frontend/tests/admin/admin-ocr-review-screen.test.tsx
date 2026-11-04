@@ -385,7 +385,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       );
       await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
       await user.click(
-        screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
+        screen.getByRole("button", { name: /Đi tới từ chưa có xác suất hiệu chuẩn/ }),
       );
 
       expect(scrollSpy).toHaveBeenCalledWith({
