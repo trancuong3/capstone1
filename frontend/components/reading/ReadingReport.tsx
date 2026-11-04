@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -10,6 +9,10 @@ import {
 } from "@/lib/api/comparison-service";
 
 import { BookPageContent } from "@/components/reading/book-page-content";
+import {
+  normalizeRealtimeForAmbiguity,
+  normalizeRealtimeWord,
+} from "@/lib/reading/realtime-alignment";
 
 type Props = {
   result: Pick<
@@ -31,6 +34,7 @@ const COLORS = {
   wrong: "border-orange-500 bg-orange-100",
   hesitation: "border-blue-500 bg-blue-100",
   repeated: "border-purple-500 bg-purple-100",
+  ambiguous: "border-slate-500 bg-slate-100",
 };
 
 function isHesitation(value: unknown): value is Hesitation {
@@ -45,13 +49,9 @@ function isHesitation(value: unknown): value is Hesitation {
   );
 }
 
-
-
 export function ReadingReport({ result, sessionId }: Props) {
   const [page, setPage] = useState<ReadingPage | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
-
-  
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +94,41 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   const missingCount = result.summary.missing_words.length;
   const extraCount = result.summary.extra_words.length;
-  const wrongCount = result.summary.substitutions.length;
+
+  // Older saved reports may still store orthographic-only differences as
+  // SUBSTITUTE. Reinterpret only these narrow Vietnamese STT ambiguities;
+  // keep every other substitution as a candidate reading error.
+  const isOrthographicAmbiguity = (item: (typeof result.alignment)[number]) =>
+    item.status === "AMBIGUOUS" ||
+    (item.status === "SUBSTITUTE" &&
+      typeof item.book_word === "string" &&
+      typeof item.spoken_word === "string" &&
+      normalizeRealtimeWord(item.book_word) !==
+        normalizeRealtimeWord(item.spoken_word) &&
+      normalizeRealtimeForAmbiguity(item.book_word) ===
+        normalizeRealtimeForAmbiguity(item.spoken_word));
+
+  const ambiguousAlignment = result.alignment.filter(isOrthographicAmbiguity);
+  const ambiguousPairs = new Set(
+    ambiguousAlignment.map((item) =>
+      JSON.stringify([
+        item.book_index,
+        item.book_word ?? "",
+        item.spoken_word ?? "",
+      ]),
+    ),
+  );
+  const wrongCount = result.summary.substitutions.filter(
+    (item) =>
+      !ambiguousPairs.has(
+        JSON.stringify([
+          item.book_index ?? null,
+          item.book_word,
+          item.spoken_word,
+        ]),
+      ),
+  ).length;
+  const ambiguousCount = ambiguousAlignment.length;
 
   const repeatedWordCounts = result.summary.repeated_words.reduce<
     Record<string, number>
@@ -120,9 +154,7 @@ export function ReadingReport({ result, sessionId }: Props) {
         {pageError ? (
           <p className="text-sm text-red-600">{pageError}</p>
         ) : !page ? (
-          <p className="text-sm text-muted">
-            Đang tải nội dung bài đọc...
-          </p>
+          <p className="text-sm text-muted">Đang tải nội dung bài đọc...</p>
         ) : (
           <article
             className="relative min-h-[552px] w-full overflow-hidden rounded-[8px] bg-cream p-4 shadow-[0_8px_24px_rgba(33,61,66,0.06)] sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-8"
@@ -141,11 +173,7 @@ export function ReadingReport({ result, sessionId }: Props) {
                 </span>
               </header>
 
-              <BookPageContent
-                page={page}
-                comparisonResult={result}
-                readOnly
-              />
+              <BookPageContent page={page} comparisonResult={result} readOnly />
 
               <p className="mt-2 text-right text-label text-muted">
                 {page.page_number}
@@ -156,7 +184,11 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Thống kê */}
-      <div className="grid grid-cols-2 gap-4">
+      <div
+        aria-label="Thống kê kết quả đọc"
+        className="grid grid-cols-2 gap-4"
+        role="group"
+      >
         <div>
           <p className="text-green-700">Từ đọc đúng</p>
           <p className="text-2xl font-bold">{correctCount}</p>
@@ -170,6 +202,11 @@ export function ReadingReport({ result, sessionId }: Props) {
         <div>
           <p className="text-orange-600">Từ đọc nhầm</p>
           <p className="text-2xl font-bold">{wrongCount}</p>
+        </div>
+
+        <div>
+          <p className="text-slate-700">Chưa đủ bằng chứng</p>
+          <p className="text-2xl font-bold">{ambiguousCount}</p>
         </div>
 
         <div>
@@ -196,11 +233,9 @@ export function ReadingReport({ result, sessionId }: Props) {
           ["Đọc nhầm", COLORS.wrong],
           ["Ngập ngừng", COLORS.hesitation],
           ["Lặp từ", COLORS.repeated],
+          ["Chưa đủ bằng chứng", COLORS.ambiguous],
         ].map(([label, color]) => (
-          <span
-            key={label}
-            className={`rounded border px-2 py-1 ${color}`}
-          >
+          <span key={label} className={`rounded border px-2 py-1 ${color}`}>
             {label}
           </span>
         ))}
@@ -220,8 +255,8 @@ export function ReadingReport({ result, sessionId }: Props) {
               <li key={word}>
                 <span className="rounded border border-purple-500 bg-purple-100 px-1">
                   {word}
-                </span>
-                {" "}được ghi nhận {count} lần trong danh sách lặp.
+                </span>{" "}
+                được ghi nhận {count} lần trong danh sách lặp.
               </li>
             ))}
           </ul>
@@ -261,9 +296,11 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       <p>
-        {missingCount === 0 && wrongCount === 0
-          ? "Bé đã đọc đúng nội dung bài."
-          : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
+        {ambiguousCount > 0 && missingCount === 0 && wrongCount === 0
+          ? "Một số từ chưa đủ bằng chứng do khác biệt nhận dạng tiếng Việt. Hệ thống không tự kết luận bé đọc sai."
+          : missingCount === 0 && wrongCount === 0 && ambiguousCount === 0
+            ? "Bé đã đọc đúng nội dung bài."
+            : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
       </p>
     </div>
   );

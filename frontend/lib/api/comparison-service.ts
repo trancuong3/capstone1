@@ -8,7 +8,7 @@ const alignmentSchema = z.object({
   spoken_word: z.string().nullable(),
   book_index: z.number().nullable(),
   spoken_index: z.number().nullable(),
-  status: z.enum(["MATCH", "DELETE", "INSERT", "SUBSTITUTE"]),
+  status: z.enum(["MATCH", "DELETE", "INSERT", "SUBSTITUTE", "AMBIGUOUS"]),
 });
 
 const summarySchema = z.object({
@@ -28,24 +28,28 @@ const summarySchema = z.object({
 
   repeated_book_indices: z.array(z.number()).optional(),
 
-  repeated_items: z.array(
-    z.object({
-      word: z.string(),
-      spoken_index: z.number(),
-      book_index: z.number(),
-    }),
-  ).optional(),
+  repeated_items: z
+    .array(
+      z.object({
+        word: z.string(),
+        spoken_index: z.number(),
+        book_index: z.number(),
+      }),
+    )
+    .optional(),
 
   hesitations: z.array(
-    z.object({
-      after_word: z.string(),
-      before_word: z.string(),
-      after_spoken_index: z.number().optional(),
-      before_spoken_index: z.number().optional(),
-      after_book_index: z.number().nullable().optional(),
-      before_book_index: z.number().nullable().optional(),
-      pause: z.number(),
-    }).passthrough(),
+    z
+      .object({
+        after_word: z.string(),
+        before_word: z.string(),
+        after_spoken_index: z.number().optional(),
+        before_spoken_index: z.number().optional(),
+        after_book_index: z.number().nullable().optional(),
+        before_book_index: z.number().nullable().optional(),
+        pause: z.number(),
+      })
+      .passthrough(),
   ),
 
   hesitation_seconds: z.number().nonnegative().nullable(),

@@ -14,6 +14,7 @@ interface BookPageViewerProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  ambiguousWordIds?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
@@ -29,6 +30,7 @@ export function BookPageViewer({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  ambiguousWordIds,
   onWordClick,
   page,
   comparisonResult,
@@ -64,6 +66,7 @@ export function BookPageViewer({
         skippedWordIds={skippedWordIds}
         repeatedWordIds={repeatedWordIds}
         hesitationWordIds={hesitationWordIds}
+        ambiguousWordIds={ambiguousWordIds}
         previewSnapshot={previewSnapshot}
       />
 
@@ -87,6 +90,7 @@ export function BookPageViewer({
           skippedWordIds={skippedWordIds}
           repeatedWordIds={repeatedWordIds}
           hesitationWordIds={hesitationWordIds}
+          ambiguousWordIds={ambiguousWordIds}
           spokenWords={spokenWords}
           onWordClick={onWordClick}
           previewSnapshot={previewSnapshot}

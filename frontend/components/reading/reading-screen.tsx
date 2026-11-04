@@ -156,7 +156,7 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [previewSnapshot, setPreviewSnapshot] =
-  useState<RealtimeAlignmentSnapshot | null>(null);
+    useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
@@ -173,6 +173,9 @@ export function ReadingScreen({
   const [hesitationWordIds, setHesitationWordIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [ambiguousWordIds, setAmbiguousWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [sessionSummary, setSessionSummary] =
     useState<ReadingCompletionSummaryUI | null>(null);
@@ -186,7 +189,7 @@ export function ReadingScreen({
   const skippedWordIdsRef = useRef<Set<string>>(new Set());
   const repeatedWordIdsRef = useRef<Set<string>>(new Set());
   const hesitationWordIdsRef = useRef<Set<string>>(new Set());
-
+  const ambiguousWordIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!page?.words?.length) {
@@ -195,11 +198,7 @@ export function ReadingScreen({
     }
 
     lastPreviewWordIndexRef.current = -1;
-    alignmentEngineRef.current = new RealtimeAlignmentEngine(
-      page.words,
-      3,
-      2,
-    );
+    alignmentEngineRef.current = new RealtimeAlignmentEngine(page.words, 3, 2);
 
     return () => {
       alignmentEngineRef.current = null;
@@ -483,7 +482,6 @@ export function ReadingScreen({
       .trim();
   }
 
-  
   function applyRealtimeSnapshot(snapshot: RealtimeAlignmentSnapshot) {
     // Đây là kết quả đã xác nhận, không phải preview.
     const nextCorrectIds = new Set(correctWordIdsRef.current);
@@ -491,6 +489,7 @@ export function ReadingScreen({
     const nextSkippedIds = new Set(skippedWordIdsRef.current);
     const nextRepeatedIds = new Set(repeatedWordIdsRef.current);
     const nextHesitationIds = new Set(hesitationWordIdsRef.current);
+    const nextAmbiguousIds = new Set(ambiguousWordIdsRef.current);
 
     for (const word of snapshot.statusByWordId.values()) {
       switch (word.status) {
@@ -499,6 +498,7 @@ export function ReadingScreen({
           nextMispronouncedIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+          nextAmbiguousIds.delete(word.wordId);
           break;
 
         case "SUBSTITUTE":
@@ -506,6 +506,7 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+          nextAmbiguousIds.delete(word.wordId);
           break;
 
         case "DELETE":
@@ -513,6 +514,7 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+          nextAmbiguousIds.delete(word.wordId);
           break;
 
         case "REPEATED":
@@ -520,6 +522,15 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
+          nextAmbiguousIds.delete(word.wordId);
+          break;
+
+        case "AMBIGUOUS":
+          nextAmbiguousIds.add(word.wordId);
+          nextCorrectIds.delete(word.wordId);
+          nextMispronouncedIds.delete(word.wordId);
+          nextSkippedIds.delete(word.wordId);
+          nextRepeatedIds.delete(word.wordId);
           break;
       }
     }
@@ -537,6 +548,7 @@ export function ReadingScreen({
     skippedWordIdsRef.current = nextSkippedIds;
     repeatedWordIdsRef.current = nextRepeatedIds;
     hesitationWordIdsRef.current = nextHesitationIds;
+    ambiguousWordIdsRef.current = nextAmbiguousIds;
 
     const nextFailedWords = new Set<string>();
 
@@ -552,6 +564,7 @@ export function ReadingScreen({
     setSkippedWordIds(nextSkippedIds);
     setRepeatedWordIds(nextRepeatedIds);
     setHesitationWordIds(nextHesitationIds);
+    setAmbiguousWordIds(nextAmbiguousIds);
 
     setCurrentWordId(snapshot.currentWordId);
 
@@ -582,6 +595,7 @@ export function ReadingScreen({
     skippedWordIdsRef.current.clear();
     repeatedWordIdsRef.current.clear();
     hesitationWordIdsRef.current.clear();
+    ambiguousWordIdsRef.current.clear();
     failedWordsSetRef.current.clear();
 
     setSpokenWords(new Set());
@@ -590,6 +604,7 @@ export function ReadingScreen({
     setSkippedWordIds(new Set());
     setRepeatedWordIds(new Set());
     setHesitationWordIds(new Set());
+    setAmbiguousWordIds(new Set());
     setLatestTranscript(null);
     setComparisonResult(null);
     setCurrentWordId(null);
@@ -634,7 +649,6 @@ export function ReadingScreen({
           rec.lang = "vi-VN";
           rec.maxAlternatives = 1;
 
-          
           rec.onresult = (event: BrowserSpeechEvent) => {
             browserTranscriptCollectorRef.current.addResults(event);
 
@@ -656,8 +670,7 @@ export function ReadingScreen({
 
               if (!part || !result.isFinal) continue;
 
-              latestFinalText +=
-                (latestFinalText ? " " : "") + part;
+              latestFinalText += (latestFinalText ? " " : "") + part;
 
               const snapshot = engine.addFinalTranscript(part);
 
@@ -673,8 +686,7 @@ export function ReadingScreen({
               const part = result[0]?.transcript?.trim() || "";
 
               if (part) {
-                interimText +=
-                  (interimText ? " " : "") + part;
+                interimText += (interimText ? " " : "") + part;
               }
             }
 
@@ -694,13 +706,10 @@ export function ReadingScreen({
               setLatestTranscript(interimText.trim());
             } else if (latestFinalText.trim()) {
               setLatestTranscript((previous) =>
-                [previous, latestFinalText.trim()]
-                  .filter(Boolean)
-                  .join(" "),
+                [previous, latestFinalText.trim()].filter(Boolean).join(" "),
               );
             }
           };
-
 
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
             console.error("[REALTIME STT ERROR]", {
@@ -891,9 +900,7 @@ export function ReadingScreen({
         const engine = alignmentEngineRef.current;
 
         if (engine) {
-          const snapshot = engine.addFinalTranscript(
-            elevenLabsResult.text,
-          );
+          const snapshot = engine.addFinalTranscript(elevenLabsResult.text);
 
           applyRealtimeSnapshot(snapshot);
         }
@@ -1745,6 +1752,7 @@ export function ReadingScreen({
         skippedWordIds={skippedWordIds}
         repeatedWordIds={repeatedWordIds}
         hesitationWordIds={hesitationWordIds}
+        ambiguousWordIds={ambiguousWordIds}
         comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
+import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 const page: ReadingPageDTO = {
@@ -81,6 +82,61 @@ describe("BookPageViewer", () => {
     ).toHaveAttribute("data-line-index", "2");
     expect(container.querySelectorAll('span[aria-hidden="true"]')).toHaveLength(
       1,
+    );
+  });
+
+  it("does not color a Vietnamese diacritic-only STT substitution as a confirmed error", () => {
+    const wordPage: ReadingPageDTO = {
+      ...page,
+      words: [
+        {
+          word_id: "77777777-7777-4777-8777-777777777777",
+          word_index: 0,
+          line_index: 0,
+          text: "má",
+          bbox: [0.1, 0.1, 0.05, 0.02],
+        },
+      ],
+    };
+    const comparisonResult = {
+      session_id: "88888888-8888-4888-8888-888888888888",
+      page_id: wordPage.page_id,
+      page_revision_id: wordPage.page_revision_id,
+      distance: 1,
+      alignment: [
+        {
+          book_word: "má",
+          spoken_word: "ma",
+          book_index: 0,
+          spoken_index: 0,
+          status: "SUBSTITUTE" as const,
+        },
+      ],
+      summary: {
+        missing_words: [],
+        extra_words: [],
+        substitutions: [{ book_word: "má", spoken_word: "ma", book_index: 0 }],
+        repeated_count: 0,
+        repeated_words: [],
+        hesitations: [],
+        hesitation_seconds: null,
+      },
+    } satisfies ComparisonResult;
+
+    render(
+      <BookPageViewer
+        comparisonResult={comparisonResult}
+        currentWordId={null}
+        page={wordPage}
+      />,
+    );
+
+    const ambiguousWord = screen.getByRole("button", { name: "má" });
+    expect(ambiguousWord).toHaveClass("bg-slate-100");
+    expect(ambiguousWord).not.toHaveClass("bg-orange-200");
+    expect(ambiguousWord).toHaveAttribute(
+      "title",
+      'Hệ thống chưa đủ bằng chứng để kết luận từ "má" đã được đọc đúng hay sai.',
     );
   });
 

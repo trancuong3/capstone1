@@ -132,7 +132,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
-  it("classifies confidence levels and synchronizes word-list and image selection", async () => {
+  it("shows raw engine evidence without converting it to confidence colors", async () => {
     const services = createAdminServiceFixture();
     const reviewDetail = {
       ...adminR2Fixture,
@@ -144,14 +144,26 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
           normalized_text: "cao",
           bbox: [0.05, 0.1, 0.1, 0.04] as [number, number, number, number],
           ocr_confidence: 0.95,
+          raw_engine_score: 95.2,
+          confidence_source: "tesseract",
+          confidence_scope: "word" as const,
+          calibration_status: "NOT_CALIBRATED" as const,
+          confidence_applicability: "APPLIES_TO_CURRENT_TEXT" as const,
+          bbox_quality: null,
+          bbox_quality_status: "NOT_EVALUATED" as const,
         },
         {
           ...adminR1Fixture.words[0],
           word_index: 1,
-          text: "Vừa",
-          normalized_text: "vừa",
+          text: "Dòng",
+          normalized_text: "dòng",
           bbox: [0.2, 0.1, 0.1, 0.04] as [number, number, number, number],
-          ocr_confidence: 0.8,
+          ocr_confidence: null,
+          line_engine_score: 0.95,
+          confidence_source: "paddleocr",
+          confidence_scope: "line" as const,
+          calibration_status: "NOT_CALIBRATED" as const,
+          confidence_applicability: "APPLIES_TO_CURRENT_TEXT" as const,
         },
         {
           ...adminR1Fixture.words[0],
@@ -160,6 +172,11 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
           normalized_text: "thấp",
           bbox: [0.35, 0.1, 0.1, 0.04] as [number, number, number, number],
           ocr_confidence: 0.5,
+          raw_engine_score: 45,
+          confidence_source: "tesseract",
+          confidence_scope: "word" as const,
+          calibration_status: "NOT_CALIBRATED" as const,
+          confidence_applicability: "APPLIES_TO_CURRENT_TEXT" as const,
         },
         {
           ...adminR1Fixture.words[0],
@@ -168,6 +185,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
           normalized_text: "chưa rõ",
           bbox: [0.5, 0.1, 0.1, 0.04] as [number, number, number, number],
           ocr_confidence: null,
+          calibration_status: "UNKNOWN" as const,
+          confidence_applicability: "UNAVAILABLE" as const,
         },
       ],
     };
@@ -180,37 +199,51 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
 
-    const high = await screen.findByRole("button", {
-      name: /Từ 1: Cao.*Mức Cao/,
+    const wordScore = await screen.findByRole("button", {
+      name: /Từ 1: Cao.*Điểm thô tesseract cấp từ: 95\.2\/100 · chưa hiệu chuẩn/,
     });
-    const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa.*Mức Trung bình/,
+    const lineScore = screen.getByRole("button", {
+      name: /Từ 2: Dòng.*Điểm paddleocr cấp dòng: 0\.950 · không phải điểm từ/,
     });
-    const low = screen.getByRole("button", {
-      name: /Từ 3: Thấp.*Mức Thấp/,
+    const secondWordScore = screen.getByRole("button", {
+      name: /Từ 3: Thấp.*Điểm thô tesseract cấp từ: 45\.0\/100 · chưa hiệu chuẩn/,
     });
     const unknown = screen.getByRole("button", {
-      name: /Từ 4: Chưa rõ.*Mức Chưa xác định/,
+      name: /Từ 4: Chưa rõ.*Chưa có confidence cấp từ đã hiệu chuẩn/,
     });
 
-    expect(high).toHaveClass("border-green-600");
-    expect(medium).toHaveClass("border-yellow-500");
-    expect(low).toHaveClass("border-red-600");
-    expect(unknown).toHaveClass("border-orange-600");
+    for (const box of [wordScore, lineScore, secondWordScore, unknown]) {
+      expect(box).toHaveClass("border-slate-500");
+    }
     const stats = screen.getByRole("group", {
       name: "Thống kê confidence OCR",
     });
-    expect(stats).toHaveTextContent(/1\s*Cao/);
-    expect(stats).toHaveTextContent(/1\s*Trung bình/);
-    expect(stats).toHaveTextContent(/1\s*Thấp/);
-    expect(stats).toHaveTextContent(/1\s*Chưa xác định/);
+    expect(stats).toHaveTextContent(/4\s*Tổng số từ/);
+    expect(stats).toHaveTextContent(/2\s*Điểm thô cấp từ/);
+    expect(stats).toHaveTextContent(/1\s*Chỉ có điểm cấp dòng/);
+    expect(stats).toHaveTextContent(/0\s*Xác suất đã hiệu chuẩn/);
+    expect(stats).toHaveTextContent(/4\s*Chưa có xác suất hiệu chuẩn/);
     expect(
-      screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
+      screen.getByText(/Tesseract: 2 từ có điểm thô cấp từ/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/PaddleOCR: 1 dòng có điểm cấp dòng/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/VietOCR: 0 từ nhận dạng/)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("button", {
+        name: /Đi tới từ chưa có xác suất hiệu chuẩn/,
+      }),
     ).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
-    expect(medium).toHaveAttribute("aria-pressed", "true");
-    expect(high).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "Từ #0 · Dòng 0" }));
+    expect(wordScore).toHaveAttribute("aria-pressed", "true");
+    expect(lineScore).toHaveAttribute("aria-pressed", "false");
 
     await user.click(unknown);
     expect(unknown).toHaveAttribute("aria-pressed", "true");
@@ -219,7 +252,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows confidence-coded boxes and selects a word", async () => {
+  it("shows uncalibrated evidence neutrally and selects a word", async () => {
     const services = createAdminServiceFixture();
     const user = userEvent.setup();
     render(
@@ -233,18 +266,20 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Bounding box từ OCR: 1 từ/,
     });
     const wordBox = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Confidence OCR: 0\.95\. Mức Cao/,
+      name: /Từ 1: Nội\. Chưa có confidence cấp từ đã hiệu chuẩn/,
     });
     expect(overlay).toContainElement(wordBox);
-    expect(wordBox.getAttribute("title")).toContain("Cao");
+    expect(wordBox.getAttribute("title")).toMatch(/chưa có confidence/i);
 
     await user.click(wordBox);
     expect(wordBox).toHaveClass("ring-2");
     expect(
       screen.getByRole("group", { name: "Thống kê confidence OCR" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Confidence OCR:/)).toBeInTheDocument();
-    expect(screen.getByText(/0\.95/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Chưa có confidence cấp từ đã hiệu chuẩn/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0\.95/)).not.toBeInTheDocument();
   });
 
   it("synchronizes one-to-one text edits with words without changing bbox and blocks unsafe token-count changes", async () => {
@@ -366,7 +401,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       );
       await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
       await user.click(
-        screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
+        screen.getByRole("button", {
+          name: /Đi tới từ chưa có xác suất hiệu chuẩn/,
+        }),
       );
 
       expect(scrollSpy).toHaveBeenCalledWith({

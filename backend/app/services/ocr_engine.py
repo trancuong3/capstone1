@@ -1004,6 +1004,17 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     return max(-1.0, base_score - 0.10 * artifact_ratio - 0.10 * symbol_ratio)
 
 
+def _normalize_tesseract_raw_confidence(value: object) -> float | None:
+    """Return a valid native Tesseract word score (0..100), never a probability."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(score) or not 0.0 <= score <= 100.0:
+        return None
+    return score
+
+
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Run Vietnamese Tesseract OCR against preprocessing candidates and select the best."""
     if pytesseract is None:
@@ -1147,6 +1158,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     line_paragraph_map: dict[int, int] = {}
     line_left_pixels: dict[int, int] = {}
     words: list[dict[str, object]] = []
+    word_confidence_evidence: list[dict[str, object]] = []
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
         if not token or not any(character.isalnum() for character in token):
@@ -1156,15 +1168,21 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             top = int(result["top"][index])
             box_width = int(result["width"][index])
             box_height = int(result["height"][index])
-            raw_confidence = float(result["conf"][index])
             block = int(result["block_num"][index])
             paragraph = int(result["par_num"][index])
             line = int(result["line_num"][index])
         except (KeyError, TypeError, ValueError, IndexError):
+            # Geometry/layout is required to retain a word. Confidence is not:
+            # a missing or malformed score must not discard recognized text.
             continue
 
-        if not np.isfinite(raw_confidence):
-            raw_confidence = -1.0
+        confidence_values = result.get("conf")
+        raw_confidence = (
+            _normalize_tesseract_raw_confidence(confidence_values[index])
+            if isinstance(confidence_values, (list, tuple))
+            and index < len(confidence_values)
+            else None
+        )
 
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
@@ -1186,12 +1204,13 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             line_left_pixels.get(line_index, left), left
         )
 
-        confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
+        confidence = raw_confidence / 100.0 if raw_confidence is not None else None
         normalized = normalize_word(token)
         if not normalized:
             continue
+        word_index = len(words)
         words.append({
-            "word_index": len(words),
+            "word_index": word_index,
             "line_index": line_index,
             "text": token,
             "normalized_text": normalized,
@@ -1201,7 +1220,24 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
                 box_width / scaled_w,
                 box_height / scaled_h,
             ],
+            # Legacy storage contract: preserve Tesseract's 0..100 raw score
+            # as a 0..1 scalar. This is NOT a calibrated probability.
             "ocr_confidence": confidence,
+        })
+        word_confidence_evidence.append({
+            "word_index": word_index,
+            "line_index": line_index,
+            "recognized_text": token,
+            "confidence_source": "tesseract",
+            "confidence_scope": "word",
+            "raw_engine_score": (
+                round(raw_confidence, 4) if raw_confidence is not None else None
+            ),
+            "line_engine_score": None,
+            "calibrated_confidence": None,
+            "calibration_status": "NOT_CALIBRATED",
+            "bbox_quality": None,
+            "bbox_quality_status": "NOT_EVALUATED",
         })
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
@@ -1273,6 +1309,13 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "candidate_count": len(candidate_results),
             "candidate_scores": score_metadata,
             "selected_candidate_score": round(selected_score, 4),
+            "confidence_contract": {
+                "version": 1,
+                "calibration_status": "NOT_CALIBRATED",
+                "calibrated_confidence_available": False,
+                "raw_score_semantics": "engine_score_not_probability",
+            },
+            "word_confidence_evidence": word_confidence_evidence,
             "coordinate_space": "normalized_original_dimensions",
             "source_width": orig_width,
             "source_height": orig_height,
@@ -1325,6 +1368,7 @@ def _extract_text_and_boxes_dual_engine(
 
     words_output: list[dict[str, object]] = []
     lines_output: list[str] = []
+    word_confidence_evidence: list[dict[str, object]] = []
 
     for line_idx, item in enumerate(ordered_items):
         paddle_text = item["paddle_text"]
@@ -1339,7 +1383,16 @@ def _extract_text_and_boxes_dual_engine(
             cv2.cvtColor(dewarped_img, cv2.COLOR_BGR2RGB)
         )
         chosen_text = paddle_text
-        chosen_conf = paddle_conf
+        chosen_engine = "paddleocr"
+        try:
+            paddle_line_score = float(paddle_conf)
+        except (TypeError, ValueError):
+            paddle_line_score = float("nan")
+        chosen_line_score = (
+            paddle_line_score
+            if np.isfinite(paddle_line_score) and 0.0 <= paddle_line_score <= 1.0
+            else None
+        )
 
         try:
             viet_text = vietocr_engine.predict(line_img_pil)
@@ -1347,7 +1400,9 @@ def _extract_text_and_boxes_dual_engine(
                 viet_text, paddle_text, paddle_conf=paddle_conf, max_cer=0.35
             ):
                 chosen_text = viet_text.strip()
-                chosen_conf = 0.95
+                chosen_engine = "vietocr"
+                # VietOCR predict() returns text only in this integration. Do not
+                # manufacture a confidence score from a reliability heuristic.
         except Exception:
             pass
 
@@ -1368,18 +1423,37 @@ def _extract_text_and_boxes_dual_engine(
 
         for w_idx, raw_token in enumerate(valid_words):
             norm_token = normalize_word(raw_token)
+            word_index = len(words_output)
+            line_index = len(lines_output)
             words_output.append(
                 {
-                    "word_index": len(words_output),
-                    "line_index": len(lines_output),
+                    "word_index": word_index,
+                    "line_index": line_index,
                     "text": raw_token,
                     "normalized_text": norm_token,
                     "bbox": line_boxes[w_idx],
-                    "ocr_confidence": round(chosen_conf, 4)
-                    if chosen_conf is not None
-                    else 0.90,
+                    # Neither PaddleOCR's line score nor VietOCR's text-only
+                    # prediction is a genuine word-level score.
+                    "ocr_confidence": None,
                 }
             )
+            word_confidence_evidence.append({
+                "word_index": word_index,
+                "line_index": line_index,
+                "recognized_text": raw_token,
+                "confidence_source": chosen_engine,
+                "confidence_scope": (
+                    "line" if chosen_engine == "paddleocr" else "unavailable"
+                ),
+                "raw_engine_score": None,
+                "line_engine_score": (
+                    chosen_line_score if chosen_engine == "paddleocr" else None
+                ),
+                "calibrated_confidence": None,
+                "calibration_status": "NOT_CALIBRATED",
+                "bbox_quality": None,
+                "bbox_quality_status": "NOT_EVALUATED",
+            })
 
         lines_output.append(" ".join(valid_words))
 
@@ -1405,6 +1479,13 @@ def _extract_text_and_boxes_dual_engine(
             "scale_factor": 1.0,
             "word_count": len(words_output),
             "line_count": len(lines_output),
+            "confidence_contract": {
+                "version": 1,
+                "calibration_status": "NOT_CALIBRATED",
+                "calibrated_confidence_available": False,
+                "raw_score_semantics": "line_score_is_not_word_probability",
+            },
+            "word_confidence_evidence": word_confidence_evidence,
             "reading_layout": layout_type,
         },
     }

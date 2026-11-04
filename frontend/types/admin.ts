@@ -103,7 +103,19 @@ export interface AdminRevisionWordDTO {
   readonly text: string;
   readonly normalized_text: string;
   readonly bbox: readonly [number, number, number, number];
+  /** Legacy raw scalar retained for compatibility; never interpret as probability. */
   readonly ocr_confidence: number | null;
+  readonly raw_engine_score?: number | null;
+  readonly line_engine_score?: number | null;
+  readonly confidence_source?: string | null;
+  readonly confidence_scope?: "word" | "line" | "unavailable" | "unknown";
+  readonly calibrated_confidence?: number | null;
+  readonly calibration_status?: "CALIBRATED" | "NOT_CALIBRATED" | "UNKNOWN";
+  readonly calibration_version?: string | null;
+  readonly confidence_applicability?:
+    "APPLIES_TO_CURRENT_TEXT" | "ORIGINAL_OCR_TEXT_ONLY" | "UNAVAILABLE";
+  readonly bbox_quality?: number | null;
+  readonly bbox_quality_status?: "EVALUATED" | "NOT_EVALUATED" | "UNKNOWN";
 }
 
 export interface AdminPageRevisionDetailDTO {

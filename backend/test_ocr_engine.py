@@ -36,6 +36,14 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine.normalize_word("-"), "-")   # Giữ lại bullet gạch đầu dòng
         self.assertEqual(ocr_engine.normalize_word("Việt-Nam"), "việt-nam")
 
+    def test_normalize_tesseract_raw_confidence(self):
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence("87.5"), 87.5)
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence(0), 0.0)
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence(100), 100.0)
+        for value in (-1, 100.01, float("nan"), float("inf"), None, "invalid"):
+            with self.subTest(value=value):
+                self.assertIsNone(ocr_engine._normalize_tesseract_raw_confidence(value))
+
     def test_clean_ocr_punctuation(self):
         """Kiểm tra làm sạch dấu câu tất định."""
         self.assertEqual(ocr_engine.clean_ocr_punctuation("?Có phải không"), '"Có phải không')
@@ -80,7 +88,19 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(first_word["text"], "Chú")
         self.assertEqual(first_word["normalized_text"], "chú")
         self.assertEqual(first_word["line_index"], 0)
-        self.assertAlmostEqual(first_word["ocr_confidence"], 0.95, places=2)
+        # VietOCR predict() supplies text only. The Paddle score is line-level,
+        # so neither value may be exposed as an individual word confidence.
+        self.assertIsNone(first_word["ocr_confidence"])
+        evidence = result["metadata"]["word_confidence_evidence"]
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0]["confidence_source"], "vietocr")
+        self.assertEqual(evidence[0]["confidence_scope"], "unavailable")
+        self.assertIsNone(evidence[0]["raw_engine_score"])
+        self.assertIsNone(evidence[0]["calibrated_confidence"])
+        self.assertEqual(evidence[0]["calibration_status"], "NOT_CALIBRATED")
+        self.assertFalse(
+            result["metadata"]["confidence_contract"]["calibrated_confidence_available"]
+        )
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
@@ -97,6 +117,81 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["coordinate_space"], "normalized_original_dimensions")
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
+
+    def test_tesseract_keeps_word_when_native_confidence_is_missing(self):
+        mock_result = {
+            "text": ["Con", "mèo"],
+            "left": [10, 40],
+            "top": [10, 10],
+            "width": [20, 20],
+            "height": [20, 20],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+            # Some Tesseract wrappers/results may omit or fail to return conf.
+        }
+        image_to_data = MagicMock(return_value=mock_result)
+        fake_pytesseract = MagicMock()
+        fake_pytesseract.pytesseract.tesseract_cmd = "/fake/tesseract"
+        fake_pytesseract.get_tesseract_version.return_value = "5.0.0"
+        fake_pytesseract.get_languages.return_value = ["vie"]
+        fake_pytesseract.image_to_data = image_to_data
+
+        with patch.dict(os.environ, {
+            "TESSERACT_CMD": "/fake/tesseract",
+            "TESSERACT_LANG": "vie",
+        }):
+            with patch.object(ocr_engine, "pytesseract", fake_pytesseract):
+                with patch.object(ocr_engine.shutil, "which", return_value="/fake/tesseract"):
+                    result = ocr_engine._extract_text_and_boxes_tesseract(
+                        sample_png_bytes()
+                    )
+
+        self.assertEqual([word["text"] for word in result["words"]], ["Con", "mèo"])
+        self.assertEqual(
+            [word["ocr_confidence"] for word in result["words"]],
+            [None, None],
+        )
+        self.assertEqual(
+            [item["raw_engine_score"] for item in result["metadata"]["word_confidence_evidence"]],
+            [None, None],
+        )
+        self.assertTrue(
+            all(
+                item["calibration_status"] == "NOT_CALIBRATED"
+                for item in result["metadata"]["word_confidence_evidence"]
+            )
+        )
+
+    def test_paddle_line_score_is_not_promoted_to_word_confidence(self):
+        quad = [[40.0, 30.0], [220.0, 30.0], [220.0, 70.0], [40.0, 70.0]]
+        paddle_raw = [[quad, ("Chao ban", 0.94)]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [paddle_raw]
+
+        mock_viet = MagicMock()
+        # Force the current integration to retain PaddleOCR's line text.
+        mock_viet.predict.return_value = "xyz"
+
+        with patch.object(
+            ocr_engine,
+            "_get_ocr_engines",
+            return_value=(mock_paddle, mock_viet),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual(result["metadata"]["engine"], "paddleocr_vietocr_dual")
+        self.assertGreaterEqual(len(result["words"]), 2)
+        for word, evidence in zip(
+            result["words"],
+            result["metadata"]["word_confidence_evidence"],
+        ):
+            self.assertIsNone(word["ocr_confidence"])
+            self.assertEqual(evidence["confidence_source"], "paddleocr")
+            self.assertEqual(evidence["confidence_scope"], "line")
+            self.assertIsNone(evidence["raw_engine_score"])
+            self.assertAlmostEqual(evidence["line_engine_score"], 0.94, places=2)
+            self.assertIsNone(evidence["calibrated_confidence"])
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""

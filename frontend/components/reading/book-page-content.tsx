@@ -3,7 +3,11 @@ import { Fragment } from "react";
 import { cn } from "@/lib/utils/cn";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
-import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import {
+  normalizeRealtimeForAmbiguity,
+  normalizeRealtimeWord,
+  type RealtimeAlignmentSnapshot,
+} from "@/lib/reading/realtime-alignment";
 
 interface BookPageContentProps {
   page: ReadingPageDTO;
@@ -17,8 +21,8 @@ interface BookPageContentProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  ambiguousWordIds?: Set<string>;
   previewSnapshot?: RealtimeAlignmentSnapshot | null;
-
 }
 
 export function BookPageContent({
@@ -33,6 +37,7 @@ export function BookPageContent({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  ambiguousWordIds,
   previewSnapshot,
 }: BookPageContentProps) {
   const hasWords = page.words.length > 0;
@@ -48,8 +53,8 @@ export function BookPageContent({
               (item) => item.book_index === wordIndex,
             );
 
-            const isPreviewActive = previewSnapshot !== null &&
-              previewSnapshot !== undefined;
+            const isPreviewActive =
+              previewSnapshot !== null && previewSnapshot !== undefined;
 
             const isPreviewCurrent =
               word.word_id === previewSnapshot?.currentWordId;
@@ -60,7 +65,9 @@ export function BookPageContent({
               ? isPreviewCurrent
               : word.word_id === currentWordId;
 
-            const previewStatus = previewSnapshot?.statusByWordId.get(word.word_id);
+            const previewStatus = previewSnapshot?.statusByWordId.get(
+              word.word_id,
+            );
 
             const isPreviewMatched =
               previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
@@ -73,7 +80,9 @@ export function BookPageContent({
 
             const isRepeated = Boolean(
               repeatedWordIds?.has(word.word_id) ||
-              comparisonResult?.summary.repeated_book_indices?.includes(wordIndex) ||
+              comparisonResult?.summary.repeated_book_indices?.includes(
+                wordIndex,
+              ) ||
               previewStatus?.status === "REPEATED",
             );
 
@@ -89,17 +98,36 @@ export function BookPageContent({
               ),
             );
 
+            const alignmentIsOrthographicallyAmbiguous = Boolean(
+              alignment?.status === "AMBIGUOUS" ||
+              (alignment?.status === "SUBSTITUTE" &&
+                typeof alignment.book_word === "string" &&
+                typeof alignment.spoken_word === "string" &&
+                normalizeRealtimeWord(alignment.book_word) !==
+                  normalizeRealtimeWord(alignment.spoken_word) &&
+                normalizeRealtimeForAmbiguity(alignment.book_word) ===
+                  normalizeRealtimeForAmbiguity(alignment.spoken_word)),
+            );
+
+            const isAmbiguous = Boolean(
+              ambiguousWordIds?.has(word.word_id) ||
+              previewStatus?.status === "AMBIGUOUS" ||
+              alignmentIsOrthographicallyAmbiguous,
+            );
+
             const isMispronounced = Boolean(
-              mispronouncedWordIds?.has(word.word_id) ||
-              alignment?.status === "SUBSTITUTE" ||
-              previewStatus?.status === "SUBSTITUTE",
+              !isAmbiguous &&
+              (mispronouncedWordIds?.has(word.word_id) ||
+                alignment?.status === "SUBSTITUTE" ||
+                previewStatus?.status === "SUBSTITUTE"),
             );
 
             const isCorrect = Boolean(
-              correctWordIds?.has(word.word_id) ||
-              alignment?.status === "MATCH" ||
-              previewStatus?.status === "MATCH" ||
-              isPreviewMatched,
+              !isAmbiguous &&
+              (correctWordIds?.has(word.word_id) ||
+                alignment?.status === "MATCH" ||
+                previewStatus?.status === "MATCH" ||
+                isPreviewMatched),
             );
 
             const previousWord = page.words[index - 1];
@@ -107,25 +135,20 @@ export function BookPageContent({
             const previousLineIndex = previousWord?.line_index ?? 0;
 
             const startsLine =
-              previousWord !== undefined &&
-              lineIndex !== previousLineIndex;
+              previousWord !== undefined && lineIndex !== previousLineIndex;
 
             const verticalGap = previousWord
-              ? word.bbox[1] -
-                (previousWord.bbox[1] + previousWord.bbox[3])
+              ? word.bbox[1] - (previousWord.bbox[1] + previousWord.bbox[3])
               : 0;
 
             const inferredParagraphBreak =
               startsLine &&
               previousWord !== undefined &&
-              verticalGap >
-                Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
+              verticalGap > Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
 
             const startsParagraph =
               startsLine &&
-              ((page.paragraph_start_line_indices ?? []).includes(
-                lineIndex,
-              ) ||
+              ((page.paragraph_start_line_indices ?? []).includes(lineIndex) ||
                 inferredParagraphBreak);
 
             const isIndented =
@@ -140,24 +163,27 @@ export function BookPageContent({
                   ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
                   : isHesitation
                     ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                    : isCorrect
-                      ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                      : "";
+                    : isAmbiguous
+                      ? "bg-slate-100 text-slate-700 ring-1 ring-slate-400 border-b border-dashed border-slate-500"
+                      : isCorrect
+                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                        : "";
 
             const hasConfirmedStatus =
               isSkipped ||
               isMispronounced ||
               isRepeated ||
               isHesitation ||
+              isAmbiguous ||
               isCorrect;
-
-            
 
             const currentClass = isCurrent
               ? cn(
                   "scale-105 font-black shadow-sm",
                   hasConfirmedStatus
-                    ? "ring-2 ring-current"
+                    ? isAmbiguous
+                      ? "bg-yellow-100 text-primary ring-2 ring-yellow-500"
+                      : "ring-2 ring-current"
                     : "bg-yellow-300 text-primary ring-2 ring-yellow-500",
                 )
               : "";
@@ -203,7 +229,9 @@ export function BookPageContent({
                       ? undefined
                       : isCurrent && isMispronounced
                         ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
-                        : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
+                        : isAmbiguous
+                          ? `Hệ thống chưa đủ bằng chứng để kết luận từ "${word.text}" đã được đọc đúng hay sai.`
+                          : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }
                   onKeyDown={
                     readOnly

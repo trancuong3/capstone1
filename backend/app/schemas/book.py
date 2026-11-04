@@ -208,7 +208,20 @@ class AdminRevisionWordRead(BaseModel):
     text: str
     normalized_text: str
     bbox: tuple[float, float, float, float]
-    ocr_confidence: float | None = Field(ge=0, le=1)
+    # Legacy raw scalar retained for backwards compatibility; it is not a probability.
+    ocr_confidence: float | None = Field(default=None, ge=0, le=1)
+    raw_engine_score: float | None = Field(default=None, ge=0, le=100)
+    line_engine_score: float | None = Field(default=None, ge=0, le=1)
+    confidence_source: str | None = None
+    confidence_scope: Literal["word", "line", "unavailable", "unknown"] = "unknown"
+    calibrated_confidence: float | None = Field(default=None, ge=0, le=1)
+    calibration_status: Literal["CALIBRATED", "NOT_CALIBRATED", "UNKNOWN"] = "UNKNOWN"
+    calibration_version: str | None = None
+    confidence_applicability: Literal[
+        "APPLIES_TO_CURRENT_TEXT", "ORIGINAL_OCR_TEXT_ONLY", "UNAVAILABLE"
+    ] = "UNAVAILABLE"
+    bbox_quality: float | None = Field(default=None, ge=0, le=1)
+    bbox_quality_status: Literal["EVALUATED", "NOT_EVALUATED", "UNKNOWN"] = "UNKNOWN"
 
 
 class AdminRevisionDetailRead(BaseModel):

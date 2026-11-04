@@ -36,25 +36,33 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 
-const OCR_CONFIDENCE_HIGH = 0.9;
-const OCR_CONFIDENCE_MEDIUM = 0.7;
-
-type OcrConfidenceLevel = "high" | "medium" | "low" | "unknown";
-
-function getOcrConfidenceLevel(confidence: number | null): OcrConfidenceLevel {
-  if (confidence === null || !Number.isFinite(confidence)) return "unknown";
-  if (confidence >= OCR_CONFIDENCE_HIGH) return "high";
-  if (confidence >= OCR_CONFIDENCE_MEDIUM) return "medium";
-  return "low";
-}
-
-function getOcrConfidenceLabel(level: OcrConfidenceLevel): string {
-  return {
-    high: "Cao",
-    medium: "Trung bình",
-    low: "Thấp · cần kiểm tra",
-    unknown: "Chưa xác định · cần kiểm tra",
-  }[level];
+function describeWordConfidence(word: AdminRevisionWordDTO): string {
+  if (word.confidence_applicability === "ORIGINAL_OCR_TEXT_ONLY") {
+    return "Điểm OCR gốc chỉ áp dụng cho văn bản trước khi chỉnh sửa";
+  }
+  if (
+    word.calibration_status === "CALIBRATED" &&
+    typeof word.calibrated_confidence === "number" &&
+    word.calibration_version
+  ) {
+    return `Xác suất đã hiệu chuẩn: ${(word.calibrated_confidence * 100).toFixed(1)}% · ${word.calibration_version}`;
+  }
+  if (
+    word.confidence_scope === "word" &&
+    typeof word.raw_engine_score === "number"
+  ) {
+    return `Điểm thô ${word.confidence_source ?? "OCR"} cấp từ: ${word.raw_engine_score.toFixed(1)}/100 · chưa hiệu chuẩn`;
+  }
+  if (
+    word.confidence_scope === "line" &&
+    typeof word.line_engine_score === "number"
+  ) {
+    return `Điểm ${word.confidence_source ?? "OCR"} cấp dòng: ${word.line_engine_score.toFixed(3)} · không phải điểm từ`;
+  }
+  if (word.confidence_source) {
+    return `${word.confidence_source}: không có confidence độc lập cấp từ`;
+  }
+  return "Chưa có confidence cấp từ đã hiệu chuẩn";
 }
 
 export function AdminOcrReviewScreen({
@@ -399,22 +407,53 @@ export function AdminOcrReviewScreen({
   }
 
   const verified = detail?.verification_status === "VERIFIED";
-  const confidenceCounts = words.reduce(
-    (counts, word) => {
-      counts[getOcrConfidenceLevel(word.ocr_confidence)] += 1;
-      return counts;
-    },
-    {
-      high: 0,
-      medium: 0,
-      low: 0,
-      unknown: 0,
-    } as Record<OcrConfidenceLevel, number>,
+  const calibratedWordCount = words.filter(
+    (word) =>
+      word.calibration_status === "CALIBRATED" &&
+      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT" &&
+      typeof word.calibrated_confidence === "number",
+  ).length;
+  const rawWordScoreCount = words.filter(
+    (word) =>
+      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT" &&
+      word.confidence_scope === "word" &&
+      typeof word.raw_engine_score === "number",
+  ).length;
+  const applicableEvidence = words.filter(
+    (word) => word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT",
   );
+  const lineEvidenceByIndex = new Map(
+    applicableEvidence
+      .filter(
+        (word) =>
+          word.confidence_scope === "line" &&
+          typeof word.line_engine_score === "number",
+      )
+      .map((word) => [word.line_index, word.line_engine_score]),
+  );
+  const lineScoreCount = lineEvidenceByIndex.size;
+  const engineEvidenceCounts = {
+    tesseract: applicableEvidence.filter(
+      (word) =>
+        word.confidence_source === "tesseract" &&
+        typeof word.raw_engine_score === "number",
+    ).length,
+    paddleocr: lineEvidenceByIndex.size,
+    vietocr: applicableEvidence.filter(
+      (word) => word.confidence_source === "vietocr",
+    ).length,
+    other: applicableEvidence.filter(
+      (word) =>
+        !["tesseract", "paddleocr", "vietocr"].includes(
+          word.confidence_source ?? "",
+        ),
+    ).length,
+  };
+  const unknownConfidenceCount = words.length - calibratedWordCount;
   const firstWordToReview = words.find(
     (word) =>
-      getOcrConfidenceLevel(word.ocr_confidence) === "low" ||
-      getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
+      word.calibration_status !== "CALIBRATED" ||
+      word.confidence_applicability !== "APPLIES_TO_CURRENT_TEXT",
   );
   if (error) {
     return (
@@ -501,13 +540,9 @@ export function AdminOcrReviewScreen({
               role="group"
             >
               {words.map((word) => {
-                const level = getOcrConfidenceLevel(word.ocr_confidence);
-                const colorClass = {
-                  high: "border-green-600 bg-green-400/20",
-                  medium: "border-yellow-500 bg-yellow-300/25",
-                  low: "border-red-600 bg-red-400/30",
-                  unknown: "border-orange-600 bg-orange-300/30",
-                }[level];
+                // Bounding boxes show word location, not recognition correctness.
+                // Until calibrated evidence exists, use neutral styling.
+                const colorClass = "border-slate-500 bg-slate-400/10";
                 const selectedClass =
                   word.word_index === selectedWord
                     ? [
@@ -519,23 +554,12 @@ export function AdminOcrReviewScreen({
                         "ring-white",
                       ].join(" ")
                     : "border";
-                const confidenceText =
-                  word.ocr_confidence === null
-                    ? "chưa xác định"
-                    : word.ocr_confidence.toFixed(2);
-                const confidenceLabel = getOcrConfidenceLabel(level);
+                const confidenceDescription = describeWordConfidence(word);
                 const boxLabel = [
                   `Từ ${word.word_index + 1}: ${word.text}.`,
-                  `Confidence OCR: ${confidenceText}.`,
-                  `Mức ${confidenceLabel}`,
+                  confidenceDescription,
                 ].join(" ");
-                const boxTitle = [
-                  word.text,
-                  confidenceLabel,
-                  word.ocr_confidence === null
-                    ? "confidence không có"
-                    : word.ocr_confidence.toFixed(2),
-                ].join(" · ");
+                const boxTitle = [word.text, confidenceDescription].join(" · ");
                 return (
                   <button
                     aria-label={boxLabel}
@@ -561,52 +585,64 @@ export function AdminOcrReviewScreen({
             </div>
           </div>
           <p className="mt-3 text-sm text-muted">
-            Ảnh được cấp URL có thời hạn từ Supabase Storage; tọa độ bbox dùng
-            hệ quy chiếu chuẩn hóa 0–1. Confidence là điểm ước lượng của OCR,
-            không phải xác suất chắc chắn nhận diện đúng.
+            Bounding box chỉ biểu thị vị trí từ trên ảnh. Điểm engine thô không
+            phải xác suất đúng; hiện tại dự án chưa có tập ground truth độc lập
+            đủ để hiệu chuẩn confidence. Vì vậy các ô dùng màu trung tính.
           </p>
           <div
-            aria-label="Chú giải confidence OCR"
+            aria-label="Chú giải vùng OCR"
             className="mt-3 flex flex-wrap gap-3 text-xs"
           >
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />
-              Cao
+              <span className="size-3 rounded-sm border border-slate-500 bg-slate-400/20" />
+              Vùng từ OCR
             </span>
             <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />
-              Trung bình
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />
-              Thấp
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />
-              Chưa xác định
+              <span className="size-3 rounded-sm border-2 border-orange-700 bg-orange-300/40" />
+              Từ đang chọn
             </span>
           </div>
           <div
             aria-label="Thống kê confidence OCR"
-            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
             role="group"
           >
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm">
-              <strong>{confidenceCounts.high}</strong>
-              <div>Cao</div>
+            <div className="rounded-control border border-border bg-canvas p-2 text-sm">
+              <strong>{words.length}</strong>
+              <div>Tổng số từ</div>
             </div>
-            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm">
-              <strong>{confidenceCounts.medium}</strong>
-              <div>Trung bình</div>
+            <div className="rounded-control border border-border bg-canvas p-2 text-sm">
+              <strong>{rawWordScoreCount}</strong>
+              <div>Điểm thô cấp từ</div>
             </div>
-            <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm">
-              <strong>{confidenceCounts.low}</strong>
-              <div>Thấp</div>
+            <div className="rounded-control border border-border bg-canvas p-2 text-sm">
+              <strong>{lineScoreCount}</strong>
+              <div>Chỉ có điểm cấp dòng</div>
             </div>
-            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2 text-sm">
-              <strong>{confidenceCounts.unknown}</strong>
-              <div>Chưa xác định</div>
+            <div className="rounded-control border border-border bg-canvas p-2 text-sm">
+              <strong>{calibratedWordCount}</strong>
+              <div>Xác suất đã hiệu chuẩn</div>
             </div>
+            <div className="rounded-control border border-border bg-canvas p-2 text-sm">
+              <strong>{unknownConfidenceCount}</strong>
+              <div>Chưa có xác suất hiệu chuẩn</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded-control border border-border bg-canvas p-3 text-xs text-muted">
+            <p className="font-bold text-ink">Nguồn evidence theo engine</p>
+            <p className="mt-1">
+              Tesseract: {engineEvidenceCounts.tesseract} từ có điểm thô cấp từ
+            </p>
+            <p>
+              PaddleOCR: {engineEvidenceCounts.paddleocr} dòng có điểm cấp dòng
+            </p>
+            <p>
+              VietOCR: {engineEvidenceCounts.vietocr} từ nhận dạng, không có
+              điểm confidence riêng
+            </p>
+            {engineEvidenceCounts.other > 0 ? (
+              <p>Engine khác/chưa rõ: {engineEvidenceCounts.other} từ</p>
+            ) : null}
           </div>
           <button
             className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
@@ -618,7 +654,7 @@ export function AdminOcrReviewScreen({
             }}
             type="button"
           >
-            Đi tới từ cần kiểm tra
+            Đi tới từ chưa có xác suất hiệu chuẩn
           </button>
         </Card>
 
@@ -641,8 +677,9 @@ export function AdminOcrReviewScreen({
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi sửa nội dung, danh sách Words tự đồng bộ nếu số lượng từ không
-              đổi. Tọa độ bounding box và confidence OCR được giữ nguyên. Thêm,
-              xóa, tách hoặc gộp từ cần đối chiếu tọa độ mới.
+              đổi. Bằng chứng OCR gốc được giữ để kiểm toán nhưng không còn được
+              trình bày như confidence của token đã chỉnh sửa. Thêm, xóa, tách
+              hoặc gộp từ cần đối chiếu tọa độ mới.
             </p>
             {wordSyncError ? (
               <p
@@ -788,14 +825,15 @@ export function AdminOcrReviewScreen({
                     )}
                   </div>
                   <p className="mt-2 text-xs text-muted">
-                    Confidence OCR:{" "}
-                    {word.ocr_confidence === null
-                      ? "chưa xác định"
-                      : word.ocr_confidence.toFixed(2)}
-                    {" · "}
-                    {getOcrConfidenceLabel(
-                      getOcrConfidenceLevel(word.ocr_confidence),
-                    )}
+                    {describeWordConfidence(word)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {word.bbox_quality_status === "EVALUATED" &&
+                    typeof word.bbox_quality === "number"
+                      ? `Chất lượng bounding box đã đánh giá: ${(word.bbox_quality * 100).toFixed(1)}%`
+                      : word.bbox_quality_status === "NOT_EVALUATED"
+                        ? "Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn"
+                        : "Bounding box: chưa có dữ liệu đánh giá"}
                   </p>
                 </div>
               ))}
