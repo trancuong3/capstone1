@@ -259,6 +259,18 @@ limited to differences attributable to Vietnamese diacritics; other uncertain
 provider outputs still require further evidence and should not be represented
 as a calibrated pronunciation probability.
 
+### Saved transcript report presentation
+
+The backend's existing `text_alignment.py` intentionally preserves Vietnamese
+marks during exact token comparison. Therefore older saved comparison reports
+may contain `SUBSTITUTE` for a token pair that differs only by tone/vowel marks
+or the `d`/`đ` distinction. The immutable stored alignment is not rewritten.
+On this branch, `ReadingReport` detects only these narrow orthographic-only
+pairs and shows them under "Chưa đủ bằng chứng" instead of counting them as
+confirmed wrong words. Other substitutions remain in the wrong-word count.
+This compatibility presentation is covered by
+`frontend/tests/reading/reading-report-ambiguity.test.tsx`.
+
 ## 9. Calibration data and evaluation status
 
 At the baseline HEAD, no dedicated, versioned Vietnamese OCR confidence
