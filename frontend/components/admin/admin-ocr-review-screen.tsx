@@ -434,7 +434,9 @@ export function AdminOcrReviewScreen({
   const lineScoreCount = lineEvidenceByIndex.size;
   const engineEvidenceCounts = {
     tesseract: applicableEvidence.filter(
-      (word) => word.confidence_source === "tesseract",
+      (word) =>
+        word.confidence_source === "tesseract" &&
+        typeof word.raw_engine_score === "number",
     ).length,
     paddleocr: lineEvidenceByIndex.size,
     vietocr: applicableEvidence.filter(
