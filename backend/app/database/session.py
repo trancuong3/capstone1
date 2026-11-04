@@ -6,7 +6,7 @@ import ssl
 from typing import Any
 
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 
@@ -209,9 +209,7 @@ engine = create_async_engine(
     connect_args=asyncpg_connect_args,
 )
 
-AsyncSessionLocal = __import__(
-    "sqlalchemy.ext.asyncio", fromlist=["async_sessionmaker"]
-).async_sessionmaker(
+AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=ConcurrencyLimitedAsyncSession,
     expire_on_commit=False,
