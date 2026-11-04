@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  AlertCircle,
   ArrowRight,
   Camera,
   CheckCircle2,
@@ -9,8 +8,8 @@ import {
   RefreshCw,
   Settings2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
