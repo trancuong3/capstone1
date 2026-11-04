@@ -118,6 +118,51 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
 
+    def test_tesseract_keeps_word_when_native_confidence_is_missing(self):
+        mock_result = {
+            "text": ["Con", "mèo"],
+            "left": [10, 40],
+            "top": [10, 10],
+            "width": [20, 20],
+            "height": [20, 20],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+            # Some Tesseract wrappers/results may omit or fail to return conf.
+        }
+        image_to_data = MagicMock(return_value=mock_result)
+        fake_pytesseract = MagicMock()
+        fake_pytesseract.pytesseract.tesseract_cmd = "/fake/tesseract"
+        fake_pytesseract.get_tesseract_version.return_value = "5.0.0"
+        fake_pytesseract.get_languages.return_value = ["vie"]
+        fake_pytesseract.image_to_data = image_to_data
+
+        with patch.dict(os.environ, {
+            "TESSERACT_CMD": "/fake/tesseract",
+            "TESSERACT_LANG": "vie",
+        }):
+            with patch.object(ocr_engine, "pytesseract", fake_pytesseract):
+                with patch.object(ocr_engine.shutil, "which", return_value="/fake/tesseract"):
+                    result = ocr_engine._extract_text_and_boxes_tesseract(
+                        sample_png_bytes()
+                    )
+
+        self.assertEqual([word["text"] for word in result["words"]], ["Con", "mèo"])
+        self.assertEqual(
+            [word["ocr_confidence"] for word in result["words"]],
+            [None, None],
+        )
+        self.assertEqual(
+            [item["raw_engine_score"] for item in result["metadata"]["word_confidence_evidence"]],
+            [None, None],
+        )
+        self.assertTrue(
+            all(
+                item["calibration_status"] == "NOT_CALIBRATED"
+                for item in result["metadata"]["word_confidence_evidence"]
+            )
+        )
+
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
         mock_tesseract_result = {
