@@ -156,7 +156,7 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [previewSnapshot, setPreviewSnapshot] =
-    useState<RealtimeAlignmentSnapshot | null>(null);
+  useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
@@ -1335,7 +1335,6 @@ export function ReadingScreen({
         // Audio assistance remains available while the separate tutor-event API
         // is being connected by the reading-session owner.
       }
-      if (!mountedRef.current) return;
       await speechPlayer.play(action?.tts_text ?? word);
       if (mountedRef.current) setTutorAction(action);
     } catch {
@@ -1364,7 +1363,6 @@ export function ReadingScreen({
       } catch {
         // A retry must still replay the word even if tutor-event persistence is unavailable.
       }
-      if (!mountedRef.current) return;
       await speechPlayer.play(nextAction?.tts_text ?? word);
       if (mountedRef.current) {
         setTutorAction(nextAction);

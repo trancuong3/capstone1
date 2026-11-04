@@ -14,19 +14,18 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook, speechPlayerMock } = vi.hoisted(() => ({
+const { servicesHook, speechSynthesizeMock } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
-  speechPlayerMock: {
-    isPlaying: false,
-    play: vi.fn(),
-    stop: vi.fn(),
-  },
+  speechSynthesizeMock: vi.fn(),
 }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
 }));
-vi.mock("@/hooks/use-speech-player", () => ({
-  useSpeechPlayer: () => speechPlayerMock,
+vi.mock("@/lib/api/speech-service", () => ({
+  createSpeechService: () => ({
+    synthesize: speechSynthesizeMock,
+    transcribe: vi.fn(),
+  }),
 }));
 
 // Typed, test-local responses only. The application provider still uses
@@ -252,8 +251,7 @@ function createReadingFixtures() {
 
 describe("Reading action cleanup with a typed service boundary", () => {
   it("does not continue a delayed tutor retry after unmount", async () => {
-    speechPlayerMock.play.mockReset().mockResolvedValue(undefined);
-    speechPlayerMock.stop.mockReset();
+    speechSynthesizeMock.mockReset();
 
     const services = createReadingFixtures();
     servicesHook.mockReset().mockReturnValue(services);
@@ -283,7 +281,7 @@ describe("Reading action cleanup with a typed service boundary", () => {
     await act(async () => {
       settle(tutorAction);
     });
-    expect(speechPlayerMock.play).not.toHaveBeenCalled();
+    expect(speechSynthesizeMock).not.toHaveBeenCalled();
     expect(services.tutorService.retryReadExample).not.toHaveBeenCalled();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(view.container).toBeEmptyDOMElement();
