@@ -113,6 +113,65 @@ describe("Device permission gate", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("keeps navigation blocked when the microphone check fails", async () => {
+    const user = userEvent.setup();
+    requestAccessMock
+      .mockResolvedValueOnce({
+        status: "granted",
+        verified: true,
+        message: "Camera verified",
+        mediaRecorderSupported: true,
+      })
+      .mockResolvedValueOnce({
+        status: "denied",
+        verified: false,
+        message: "Microphone permission denied",
+        mediaRecorderSupported: true,
+      });
+
+    render(<DevicePermissionScreen childId={childId} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Kiểm tra và cấp quyền" }),
+    );
+
+    await screen.findByText(/Microphone permission denied/);
+    expect(
+      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
+    ).toBeDisabled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("supports retrying one device after the first verification failed", async () => {
+    const user = userEvent.setup();
+    requestAccessMock
+      .mockResolvedValueOnce({
+        status: "denied",
+        verified: false,
+        message: "Camera permission denied",
+        mediaRecorderSupported: true,
+      })
+      .mockResolvedValueOnce({
+        status: "granted",
+        verified: true,
+        message: "Camera verified",
+        mediaRecorderSupported: true,
+      });
+
+    render(<DevicePermissionScreen childId={childId} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Thử lại quyền Camera" }),
+    );
+
+    await waitFor(() => {
+      expect(requestAccessMock).toHaveBeenCalledWith("camera");
+    });
+    expect(
+      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
+    ).toBeDisabled();
+  });
+
   it("redirects direct scanner visits back to permission verification", async () => {
     render(<BookScannerScreen childId={childId} />);
 
