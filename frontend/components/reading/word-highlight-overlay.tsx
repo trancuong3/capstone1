@@ -10,6 +10,7 @@ interface WordHighlightOverlayProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  ambiguousWordIds?: Set<string>;
   previewSnapshot?: RealtimeAlignmentSnapshot | null;
 }
 
@@ -28,6 +29,7 @@ function getWordStatus(
   skippedWordIds?: Set<string>,
   repeatedWordIds?: Set<string>,
   hesitationWordIds?: Set<string>,
+  ambiguousWordIds?: Set<string>,
   previewSnapshot?: RealtimeAlignmentSnapshot | null,
 ): string {
   const previewStatus = previewSnapshot?.statusByWordId.get(wordId);
@@ -55,6 +57,13 @@ function getWordStatus(
     previewSnapshot?.hesitationWordIds.has(wordId)
   ) {
     return "hesitation";
+  }
+
+  if (
+    ambiguousWordIds?.has(wordId) ||
+    previewStatus?.status === "AMBIGUOUS"
+  ) {
+    return "ambiguous";
   }
 
   if (
@@ -94,6 +103,9 @@ function getWordColor(status: string): string {
     case "repeated":
       return "border-purple-500 bg-purple-100";
 
+    case "ambiguous":
+      return "border-slate-400 bg-slate-100";
+
     default:
       return "";
   }
@@ -107,6 +119,7 @@ export function WordHighlightOverlay({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  ambiguousWordIds,
   previewSnapshot,
 }: WordHighlightOverlayProps) {
   const word = page.words.find(
@@ -125,6 +138,7 @@ export function WordHighlightOverlay({
           skippedWordIds,
           repeatedWordIds,
           hesitationWordIds,
+          ambiguousWordIds,
           previewSnapshot,
         );
 
