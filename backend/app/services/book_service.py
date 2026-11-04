@@ -1,6 +1,8 @@
 """Business services for book catalog and admin page-read endpoints."""
 from __future__ import annotations
 
+import math
+import unicodedata
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -271,6 +273,28 @@ class AdminCatalogService:
         revision = await self.repository.revision(page_id, revision_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        metadata = getattr(revision, "ProcessingMeta", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        raw_evidence = metadata.get("word_confidence_evidence")
+        evidence_by_index: dict[int, dict[str, object]] = {}
+        if isinstance(raw_evidence, list):
+            for evidence in raw_evidence:
+                if not isinstance(evidence, dict):
+                    continue
+                index = evidence.get("word_index")
+                if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+                    evidence_by_index[index] = evidence
+
+        def finite_score(value: object, maximum: float) -> float | None:
+            try:
+                score = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(score) or not 0.0 <= score <= maximum:
+                return None
+            return score
+
         words = []
         for word in await self.repository.words(revision_id):
             box = word.BoundingBox
@@ -285,13 +309,52 @@ class AdminCatalogService:
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
                 raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
+            evidence = evidence_by_index.get(int(word.WordIndex))
+            recognized_text = evidence.get("recognized_text") if evidence else None
+            evidence_applies = (
+                isinstance(recognized_text, str)
+                and unicodedata.normalize("NFC", recognized_text).strip().lower()
+                == unicodedata.normalize("NFC", str(word.Text)).strip().lower()
+            )
+            scope = (
+                str(evidence.get("confidence_scope"))
+                if evidence and evidence.get("confidence_scope") in {"word", "line", "unavailable"}
+                else "unknown"
+            )
             words.append({
                 "word_index": word.WordIndex,
                 "line_index": word.LineIndex,
                 "text": word.Text,
                 "normalized_text": word.NormalizedText,
                 "bbox": (x, y, width, height),
+                # Preserve the legacy field unchanged for compatibility. New
+                # consumers must use the explicitly scoped evidence fields.
                 "ocr_confidence": word.OCRConfidence,
+                "raw_engine_score": (
+                    finite_score(evidence.get("raw_engine_score"), 100.0)
+                    if evidence and evidence_applies and scope == "word"
+                    else None
+                ),
+                "line_engine_score": (
+                    finite_score(evidence.get("line_engine_score"), 1.0)
+                    if evidence and evidence_applies and scope == "line"
+                    else None
+                ),
+                "confidence_source": (
+                    str(evidence.get("confidence_source"))
+                    if evidence and isinstance(evidence.get("confidence_source"), str)
+                    else None
+                ),
+                "confidence_scope": scope,
+                "calibrated_confidence": None,
+                "calibration_status": "NOT_CALIBRATED" if evidence else "UNKNOWN",
+                "confidence_applicability": (
+                    "APPLIES_TO_CURRENT_TEXT"
+                    if evidence and evidence_applies
+                    else "ORIGINAL_OCR_TEXT_ONLY"
+                    if evidence
+                    else "UNAVAILABLE"
+                ),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
