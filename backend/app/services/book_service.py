@@ -91,11 +91,8 @@ class CatalogService:
         await self.repository.db.rollback()
         previews = []
         for page in snapshots:
-            try:
-                preview_url = create_signed_image_url(page["image_path"])
-            except Exception:
-                # Keep the rest of the catalog available when Storage is temporarily unavailable.
-                preview_url = None
+            # Preserve the existing Storage error contract after releasing the DB transaction.
+            preview_url = create_signed_image_url(page["image_path"])
             previews.append(CatalogPagePreviewResponse(
                 page_id=page["page_id"],
                 page_number=page["page_number"],
