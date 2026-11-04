@@ -111,6 +111,16 @@ The baseline response included `ocr_confidence` for each word and revision-wide
 `ocr_metadata`. It did not expose explicit per-word score provenance or
 calibration status.
 
+The Admin revision detail endpoint in `backend/app/api/routes/book.py` reads
+through `AdminCatalogService.revision`; upload, reprocess, draft and verify
+responses use `AdminOcrService`. Both read paths now project the same
+per-word evidence fields from the revision's `ProcessingMeta`. The legacy
+Admin read path is covered by
+`backend/test_admin_data.py::test_legacy_revision_route_exposes_word_confidence_provenance`.
+The UI also reports evidence counts by engine, deduplicating PaddleOCR's
+line-scoped evidence by line index rather than counting every token as a
+separate line score.
+
 ## 3. Baseline Admin UI behavior
 
 File: `frontend/components/admin/admin-ocr-review-screen.tsx`.
