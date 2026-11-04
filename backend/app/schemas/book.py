@@ -216,6 +216,7 @@ class AdminRevisionWordRead(BaseModel):
     confidence_scope: Literal["word", "line", "unavailable", "unknown"] = "unknown"
     calibrated_confidence: float | None = Field(default=None, ge=0, le=1)
     calibration_status: Literal["CALIBRATED", "NOT_CALIBRATED", "UNKNOWN"] = "UNKNOWN"
+    calibration_version: str | None = None
     confidence_applicability: Literal[
         "APPLIES_TO_CURRENT_TEXT", "ORIGINAL_OCR_TEXT_ONLY", "UNAVAILABLE"
     ] = "UNAVAILABLE"
