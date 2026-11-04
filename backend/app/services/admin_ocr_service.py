@@ -288,7 +288,11 @@ class AdminOcrService:
                 Height=height,
                 LifecycleStatus="PROCESSING",
                 FeaturePath=None,
-                ProcessingMeta={"storage": "supabase", "ocr_state": "PROCESSING"},
+                ProcessingMeta={
+                    "storage": "supabase",
+                    "ocr_state": "PROCESSING",
+                    "processing_started_at": datetime.now(timezone.utc).isoformat(),
+                },
             )
             self.repo.stage_page_reservation(page)
             await self.repo.flush()
