@@ -116,6 +116,67 @@ class AdminOcrConfidenceProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word.confidence_scope, "line")
         self.assertIsNone(word.calibrated_confidence)
 
+    async def test_calibrated_probability_requires_versioned_revision_and_word_evidence(self):
+        row = self.make_word("Mèo", 0.88)
+        service, page, revision = self.make_service(
+            row,
+            {
+                "confidence_contract": {
+                    "calibration_status": "CALIBRATED",
+                    "calibration_version": "viword-platt-v1",
+                },
+                "word_confidence_evidence": [
+                    {
+                        "word_index": 0,
+                        "recognized_text": "Mèo",
+                        "confidence_source": "tesseract",
+                        "confidence_scope": "word",
+                        "raw_engine_score": 88.0,
+                        "calibrated_confidence": 0.91,
+                        "calibration_status": "CALIBRATED",
+                        "bbox_quality": None,
+                        "bbox_quality_status": "NOT_EVALUATED",
+                    }
+                ],
+            },
+        )
+
+        detail = await service.revision_detail(page, revision)
+        word = detail.words[0]
+
+        self.assertEqual(word.calibrated_confidence, 0.91)
+        self.assertEqual(word.calibration_status, "CALIBRATED")
+        self.assertEqual(word.calibration_version, "viword-platt-v1")
+
+    async def test_word_score_cannot_claim_calibration_without_revision_contract(self):
+        row = self.make_word("Mèo", 0.88)
+        service, page, revision = self.make_service(
+            row,
+            {
+                "confidence_contract": {
+                    "calibration_status": "NOT_CALIBRATED",
+                },
+                "word_confidence_evidence": [
+                    {
+                        "word_index": 0,
+                        "recognized_text": "Mèo",
+                        "confidence_source": "tesseract",
+                        "confidence_scope": "word",
+                        "raw_engine_score": 88.0,
+                        "calibrated_confidence": 0.99,
+                        "calibration_status": "CALIBRATED",
+                    }
+                ],
+            },
+        )
+
+        detail = await service.revision_detail(page, revision)
+        word = detail.words[0]
+
+        self.assertIsNone(word.calibrated_confidence)
+        self.assertEqual(word.calibration_status, "NOT_CALIBRATED")
+        self.assertIsNone(word.calibration_version)
+
     async def test_original_score_is_not_applied_to_a_manually_corrected_token(self):
         row = self.make_word("Mẹo", 0.88)
         service, page, revision = self.make_service(
