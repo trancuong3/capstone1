@@ -28,7 +28,7 @@ Do not use Supabase Direct Connection as the default from Render. Render's outbo
 
 Do not guess the pooler hostname or username. The Shared Pooler endpoint and username are project-specific.
 
-The backend enforces DATABASE_POOLER_MODE=transaction with port 6543. It adds prepared_statement_cache_size=0 using SQLAlchemy URL utilities and passes statement_cache_size=0 to asyncpg.
+Set APP_ENVIRONMENT=production and DATABASE_POOLER_MODE=transaction. The backend rejects a production configuration that omits transaction mode or uses a different port. It adds prepared_statement_cache_size=0 using SQLAlchemy URL utilities and passes statement_cache_size=0 to asyncpg.
 
 ## 2. Render environment variables
 
@@ -36,6 +36,7 @@ Configure these under the Render Web Service's Environment section:
 
 | Variable | Production value |
 |---|---|
+| APP_ENVIRONMENT | production |
 | DATABASE_URL | The SQLAlchemy asyncpg URL from Supabase Transaction Pooler, port 6543 |
 | DATABASE_POOLER_MODE | transaction |
 | DATABASE_SSL_REQUIRED | true |
@@ -68,7 +69,7 @@ Do not disable certificate verification to work around a bad certificate path or
 Recommended initial Render Web Service start command, with the service root at the repository root:
 
 ~~~bash
-cd backend && uvicorn app.sever:app --host 0.0.0.0 --port \${PORT:-8000} --workers 1
+cd backend && uvicorn app.sever:app --host 0.0.0.0 --port "$PORT" --workers 1
 ~~~
 
 Start with:
