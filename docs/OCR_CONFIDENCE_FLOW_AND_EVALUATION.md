@@ -78,7 +78,9 @@ Status by component:
 | Unified source/scope and calibration metadata | Implemented |
 | Word bounding-box ground-truth quality evaluation | Not implemented; requires labeled boxes |
 | Calibrated word probability | Not implemented; requires verified paired dataset |
+| Both Admin revision read paths expose provenance | Implemented |
 | Admin confidence display without false thresholds | Implemented |
+| Admin evidence counts by engine and score scope | Implemented |
 | Page probability from mean word scores | Removed; page confidence remains null |
 | Human Admin verification | Existing and preserved |
 
