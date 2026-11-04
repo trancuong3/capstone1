@@ -230,7 +230,7 @@ class AdminOcrService:
         return normalized
 
     async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
-        """Normalize ACTIVE pages to 1..N in their existing page order."""
+        """Normalize ACTIVE pages and PROCESSING reservations to 1..N in page order."""
         active_pages = await self.repo.active_pages_for_renumber(book_id, lock=lock)
         changed = False
         for expected_number, page in enumerate(active_pages, start=1):
