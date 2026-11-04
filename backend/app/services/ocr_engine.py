@@ -1236,6 +1236,8 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "line_engine_score": None,
             "calibrated_confidence": None,
             "calibration_status": "NOT_CALIBRATED",
+            "bbox_quality": None,
+            "bbox_quality_status": "NOT_EVALUATED",
         })
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
@@ -1449,6 +1451,8 @@ def _extract_text_and_boxes_dual_engine(
                 ),
                 "calibrated_confidence": None,
                 "calibration_status": "NOT_CALIBRATED",
+                "bbox_quality": None,
+                "bbox_quality_status": "NOT_EVALUATED",
             })
 
         lines_output.append(" ".join(valid_words))
