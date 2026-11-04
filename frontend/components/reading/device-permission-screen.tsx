@@ -166,6 +166,7 @@ export function DevicePermissionScreen({
   const router = useRouter();
   const { devicePermissionService } = useReadingServices();
   const mountedRef = useRef(false);
+  const snapshotRequestIdRef = useRef(0);
   const [snapshot, setSnapshot] =
     useState<DevicePermissionSnapshotUI>(initialSnapshot);
   const [verified, setVerified] = useState<VerificationState>({
@@ -178,9 +179,13 @@ export function DevicePermissionScreen({
   const scanFlow = flow === "book-scan" ? "book-scan" : "global-book-scan";
 
   const refreshSnapshot = useCallback(async () => {
+    const requestId = ++snapshotRequestIdRef.current;
     try {
       const next = await devicePermissionService.getSnapshot();
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        requestId !== snapshotRequestIdRef.current
+      ) return;
       setSnapshot(next);
 
       setVerified((current) => {
@@ -195,7 +200,10 @@ export function DevicePermissionScreen({
         return nextVerified;
       });
     } catch {
-      if (mountedRef.current) {
+      if (
+        mountedRef.current &&
+        requestId === snapshotRequestIdRef.current
+      ) {
         setSnapshot((current) => ({
           ...current,
           camera: "unknown",
@@ -262,6 +270,7 @@ export function DevicePermissionScreen({
   const handleVerifyAll = useCallback(async () => {
     if (isChecking) return;
     setIsChecking(true);
+    snapshotRequestIdRef.current += 1;
     setErrorMessage(null);
     clearDevicePermissionVerification();
     setVerified({ camera: false, microphone: false });
@@ -325,6 +334,7 @@ export function DevicePermissionScreen({
     async (kind: DeviceKind) => {
       if (isChecking) return;
       setIsChecking(true);
+      snapshotRequestIdRef.current += 1;
       setErrorMessage(null);
 
       try {
