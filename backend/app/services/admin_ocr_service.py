@@ -952,39 +952,51 @@ class AdminOcrService:
         return await self.revision_detail(page, revision)
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
+        """Download and OCR the existing source without holding a PostgreSQL transaction."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
+            await self.db.rollback()
             raise HTTPException(status_code=404, detail="Page not found")
         if page.LifecycleStatus != "ACTIVE":
+            await self.db.rollback()
             raise HTTPException(status_code=409, detail="Cannot reprocess a retired page")
+
+        expected_verified_revision_id = page.CurrentVerifiedRevisionId
+        page_book_id = page.BookId
         latest_revisions = await self.repo.revisions(page.Id)
+        expected_latest_revision_id = latest_revisions[0].Id if latest_revisions else None
         latest_metadata = dict(latest_revisions[0].ProcessingMeta or {}) if latest_revisions else {}
         candidate_path = latest_metadata.get("source_image_path")
-        source_image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
+        source_image_path = (
+            candidate_path
+            if isinstance(candidate_path, str) and candidate_path
+            else page.ImagePath
+        )
+        await self.db.rollback()
+
+        # Storage download and OCR execute outside the database transaction.
         try:
             image_bytes = await run_in_threadpool(download_object, source_image_path)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
-            await self.db.rollback()
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except OcrNoTextDetected as exc:
-            await self.db.rollback()
-            raise HTTPException(status_code=422, detail="No usable text was detected during reprocessing") from exc
+            raise HTTPException(
+                status_code=422,
+                detail="No usable text was detected during reprocessing",
+            ) from exc
         except ValueError as exc:
-            await self.db.rollback()
-            raise HTTPException(status_code=422, detail="Stored image could not be decoded") from exc
+            raise HTTPException(
+                status_code=422,
+                detail="Stored image could not be decoded",
+            ) from exc
+
         words = self._word_data(ocr["words"])
         text_value = str(ocr["text"]).strip()
-        try:
-            next_number = await self.repo.next_revision_number(page.Id)
-        except ValueError as exc:
-            await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
-        revision_id = uuid4()
-        content_hash = hashlib.sha256(
-            json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        if not text_value:
+            raise HTTPException(status_code=422, detail="OCR produced empty text")
+
         processing_meta = dict(ocr["metadata"])
         if isinstance(candidate_path, str) and candidate_path:
             for key in (
@@ -997,23 +1009,75 @@ class AdminOcrService:
             ):
                 if key in latest_metadata:
                     processing_meta[key] = latest_metadata[key]
-        revision = PageRevision(
-            Id=revision_id, PageId=page.Id, RevisionNo=str(next_number), VerificationStatus="NEEDS_REVIEW",
-            VerifiedText=None, DraftText=text_value, ContentHash=content_hash, ProcessingMeta=processing_meta,
-        )
-        self.repo.stage_revision_bundle(revision, words)
+
+        revision_id = uuid4()
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {"text": text_value, "words": words},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
         try:
-            await self.db.commit()
+            # Revalidate the page snapshot after the external work. A concurrent
+            # verification, replacement, retirement or new revision must not be overwritten.
+            await self.require_admin(actor_id)
+            current_page = await self.repo.page(page_id, lock=True)
+            if current_page is None or current_page.BookId != page_book_id:
+                raise HTTPException(status_code=409, detail="Page is no longer available; reload and retry")
+            if current_page.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+            if current_page.CurrentVerifiedRevisionId != expected_verified_revision_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The verified page changed while reprocessing was running; reload and retry",
+                )
+
+            current_revisions = await self.repo.revisions(page_id)
+            current_latest_id = current_revisions[0].Id if current_revisions else None
+            if current_latest_id != expected_latest_revision_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another OCR revision was created while reprocessing was running; reload and retry",
+                )
+
+            try:
+                next_number = await self.repo.next_revision_number(current_page.Id)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Existing revision numbering requires manual review",
+                ) from exc
+
+            revision = PageRevision(
+                Id=revision_id,
+                PageId=current_page.Id,
+                RevisionNo=str(next_number),
+                VerificationStatus="NEEDS_REVIEW",
+                VerifiedText=None,
+                DraftText=text_value,
+                ContentHash=content_hash,
+                ProcessingMeta=processing_meta,
+            )
+            self.repo.stage_revision_bundle(revision, words)
+            await self.repo.flush()
             await self.db.refresh(revision)
-            await self.db.refresh(page)
+            await self.db.refresh(current_page)
+            result = await self.revision_detail(current_page, revision)
+            await self.db.commit()
+            # The current verified pointer and historical session/event references
+            # remain untouched until an Admin explicitly verifies the new revision.
+            return result
         except IntegrityError as exc:
             await self.db.rollback()
-            raise HTTPException(status_code=409, detail="A concurrent reprocess created this revision number; retry") from exc
+            raise HTTPException(
+                status_code=409,
+                detail="A concurrent reprocess created this revision number; reload and retry",
+            ) from exc
         except Exception:
             await self.db.rollback()
             raise
-        # The current verified pointer and all historical session/event references remain untouched.
-        return await self.revision_detail(page, revision)
 
     async def retire_page(self, actor_id: UUID, page_id: UUID) -> AdminPageLifecycleRead:
         """Soft-retire a page and reindex ACTIVE pages without deleting historical data."""
