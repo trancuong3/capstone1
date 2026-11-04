@@ -221,6 +221,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(stats).toHaveTextContent(/1\s*Chỉ có điểm cấp dòng/);
     expect(stats).toHaveTextContent(/0\s*Xác suất đã hiệu chuẩn/);
     expect(stats).toHaveTextContent(/4\s*Chưa có xác suất hiệu chuẩn/);
+    expect(screen.getByText(/Tesseract: 2 từ có điểm thô cấp từ/)).toBeInTheDocument();
+    expect(screen.getByText(/PaddleOCR: 1 dòng có điểm cấp dòng/)).toBeInTheDocument();
+    expect(screen.getByText(/VietOCR: 0 từ nhận dạng/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: /Đi tới từ chưa có xác suất hiệu chuẩn/,
