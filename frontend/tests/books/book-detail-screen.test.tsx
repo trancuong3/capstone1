@@ -15,10 +15,13 @@ import {
   TEST_CHILD_ID,
 } from "@/test/fixtures/report-data-fixture";
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+const { pushMock, searchParamsMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  searchParamsMock: vi.fn(() => new URLSearchParams()),
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsMock(),
 }));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -62,7 +65,10 @@ function renderDetail() {
     </AppServicesProvider>,
   );
 }
-beforeEach(() => pushMock.mockReset());
+beforeEach(() => {
+  pushMock.mockReset();
+  searchParamsMock.mockReset().mockReturnValue(new URLSearchParams());
+});
 describe("BookDetailScreen with real API adapters", () => {
   it("selects stored verified previews but does not invent a session when Reading is unavailable", async () => {
     apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
@@ -92,6 +98,49 @@ describe("BookDetailScreen with real API adapters", () => {
         ([input]) => !String(input).includes("/reading/"),
       ),
     ).toBe(true);
+  });
+
+  it("selects the exact OCR-matched page when pageId is valid", async () => {
+    searchParamsMock.mockReturnValue(
+      new URLSearchParams({ pageId: secondPage.page_id }),
+    );
+    apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("heading", { name: bookFixture.title }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Chọn trang 2" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /Bắt đầu đọc/ }),
+    ).toBeEnabled();
+  });
+
+  it("does not silently fall back to page one when OCR pageId is invalid", async () => {
+    searchParamsMock.mockReturnValue(
+      new URLSearchParams({
+        pageId: "15000000-0000-4000-8000-000000000099",
+      }),
+    );
+    apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("heading", { name: bookFixture.title }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Trang OCR trả về không nằm trong danh sách trang/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Chọn trang 1" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", { name: /Bắt đầu đọc/ }),
+    ).toBeDisabled();
   });
 
   it.each([
