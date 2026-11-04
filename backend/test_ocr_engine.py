@@ -36,6 +36,14 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine.normalize_word("-"), "-")   # Giữ lại bullet gạch đầu dòng
         self.assertEqual(ocr_engine.normalize_word("Việt-Nam"), "việt-nam")
 
+    def test_normalize_tesseract_raw_confidence(self):
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence("87.5"), 87.5)
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence(0), 0.0)
+        self.assertEqual(ocr_engine._normalize_tesseract_raw_confidence(100), 100.0)
+        for value in (-1, 100.01, float("nan"), float("inf"), None, "invalid"):
+            with self.subTest(value=value):
+                self.assertIsNone(ocr_engine._normalize_tesseract_raw_confidence(value))
+
     def test_clean_ocr_punctuation(self):
         """Kiểm tra làm sạch dấu câu tất định."""
         self.assertEqual(ocr_engine.clean_ocr_punctuation("?Có phải không"), '"Có phải không')
