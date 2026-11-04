@@ -142,6 +142,13 @@ A PaddleOCR line score of 0.90 is not automatically a 90% probability for
 each word in that line. A VietOCR output with no score must not be assigned a
 made-up value.
 
+The API exposes calibrated probability only when the revision-level
+`confidence_contract` declares `CALIBRATED` with a non-empty
+`calibration_version`, and individual word evidence declares
+`CALIBRATED` with a finite 0..1 value that applies to the unchanged OCR text.
+This is tested for both Admin revision read paths. A raw engine score alone
+cannot satisfy the calibration contract.
+
 ### Page-level confidence
 
 Page confidence requires its own validated definition and evaluation. It must
