@@ -56,6 +56,23 @@ jobs:
           tests/reading/device-permission-service.test.ts
           tests/reading/device-permission-screen.test.tsx
           tests/dashboard/dashboard-screen.test.tsx
+          tests/books/book-detail-screen.test.tsx
+
+      - name: ESLint for realtime device permission changes
+        run: >-
+          npx eslint
+          components/reading/device-permission-screen.tsx
+          components/reading/book-scanner-screen.tsx
+          components/reading/camera-preview.tsx
+          components/reading/reading-ready.tsx
+          components/books/book-detail-screen.tsx
+          components/dashboard/dashboard-screen.tsx
+          lib/api/device-permission-service.ts
+          types/reading.ts
+          tests/reading/device-permission-service.test.ts
+          tests/reading/device-permission-screen.test.tsx
+          tests/dashboard/dashboard-screen.test.tsx
+          tests/books/book-detail-screen.test.tsx
 
       - name: TypeScript check for Parent CRUD source
         run: npx tsc --noEmit -p tsconfig.admin-parent-crud.json
