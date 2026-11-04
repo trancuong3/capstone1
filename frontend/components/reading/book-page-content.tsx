@@ -167,7 +167,9 @@ export function BookPageContent({
               ? cn(
                   "scale-105 font-black shadow-sm",
                   hasConfirmedStatus
-                    ? "ring-2 ring-current"
+                    ? isAmbiguous
+                      ? "bg-yellow-100 text-primary ring-2 ring-yellow-500"
+                      : "ring-2 ring-current"
                     : "bg-yellow-300 text-primary ring-2 ring-yellow-500",
                 )
               : "";
