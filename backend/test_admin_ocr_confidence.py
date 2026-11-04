@@ -67,6 +67,8 @@ class AdminOcrConfidenceProvenanceTests(unittest.IsolatedAsyncioTestCase):
                         "line_engine_score": None,
                         "calibrated_confidence": None,
                         "calibration_status": "NOT_CALIBRATED",
+                        "bbox_quality": None,
+                        "bbox_quality_status": "NOT_EVALUATED",
                     }
                 ],
             },
@@ -81,6 +83,8 @@ class AdminOcrConfidenceProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(word.calibrated_confidence)
         self.assertEqual(word.calibration_status, "NOT_CALIBRATED")
         self.assertEqual(word.confidence_applicability, "APPLIES_TO_CURRENT_TEXT")
+        self.assertIsNone(word.bbox_quality)
+        self.assertEqual(word.bbox_quality_status, "NOT_EVALUATED")
         self.assertNotIn("word_confidence_evidence", detail.ocr_metadata)
 
     async def test_paddle_line_score_is_not_exposed_as_a_word_score(self):
