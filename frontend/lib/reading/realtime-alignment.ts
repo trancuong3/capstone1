@@ -225,6 +225,9 @@ export class RealtimeAlignmentEngine {
       if (isDiacriticOnlyDifference(currentWord.normalizedText, token)) {
         setPreviewStatus(cursor, "AMBIGUOUS");
         targetIndex = cursor;
+        // Keep the preview cursor moving so the next exact spoken token can
+        // align with the next book word without painting it as a substitution.
+        cursor += 1;
         continue;
       }
 
