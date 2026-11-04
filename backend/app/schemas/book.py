@@ -219,6 +219,8 @@ class AdminRevisionWordRead(BaseModel):
     confidence_applicability: Literal[
         "APPLIES_TO_CURRENT_TEXT", "ORIGINAL_OCR_TEXT_ONLY", "UNAVAILABLE"
     ] = "UNAVAILABLE"
+    bbox_quality: float | None = Field(default=None, ge=0, le=1)
+    bbox_quality_status: Literal["EVALUATED", "NOT_EVALUATED", "UNKNOWN"] = "UNKNOWN"
 
 
 class AdminRevisionDetailRead(BaseModel):
