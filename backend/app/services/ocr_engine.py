@@ -1004,6 +1004,17 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
     return max(-1.0, base_score - 0.10 * artifact_ratio - 0.10 * symbol_ratio)
 
 
+def _normalize_tesseract_raw_confidence(value: object) -> float | None:
+    """Return a valid native Tesseract word score (0..100), never a probability."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(score) or not 0.0 <= score <= 100.0:
+        return None
+    return score
+
+
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Run Vietnamese Tesseract OCR against preprocessing candidates and select the best."""
     if pytesseract is None:
@@ -1157,15 +1168,19 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             top = int(result["top"][index])
             box_width = int(result["width"][index])
             box_height = int(result["height"][index])
-            raw_confidence = float(result["conf"][index])
             block = int(result["block_num"][index])
             paragraph = int(result["par_num"][index])
             line = int(result["line_num"][index])
         except (KeyError, TypeError, ValueError, IndexError):
+            # Geometry/layout is required to retain a word. Confidence is not:
+            # a missing or malformed score must not discard recognized text.
             continue
 
-        if not np.isfinite(raw_confidence):
-            raw_confidence = -1.0
+        raw_confidence = (
+            _normalize_tesseract_raw_confidence(result["conf"][index])
+            if index < len(result.get("conf", []))
+            else None
+        )
 
         left = min(max(left, 0), scaled_w - 1)
         top = min(max(top, 0), scaled_h - 1)
@@ -1187,7 +1202,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             line_left_pixels.get(line_index, left), left
         )
 
-        confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
+        confidence = raw_confidence / 100.0 if raw_confidence is not None else None
         normalized = normalize_word(token)
         if not normalized:
             continue
@@ -1214,7 +1229,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "confidence_source": "tesseract",
             "confidence_scope": "word",
             "raw_engine_score": (
-                round(raw_confidence, 4) if confidence is not None else None
+                round(raw_confidence, 4) if raw_confidence is not None else None
             ),
             "line_engine_score": None,
             "calibrated_confidence": None,
