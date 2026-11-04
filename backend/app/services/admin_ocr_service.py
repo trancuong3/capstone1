@@ -445,6 +445,16 @@ class AdminOcrService:
                 result = await self.revision_detail(page, revision)
                 await self.db.commit()
             except IntegrityError as exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="admin_ocr_upload_failed",
+                    stage=stage,
+                    exception=exc,
+                    book_id=str(book_id),
+                    page_id=str(page_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 await self.db.rollback()
                 await self._abort_page_upload(
                     page_id, object_path, object_may_exist=storage_uploaded,
@@ -454,7 +464,18 @@ class AdminOcrService:
                     status_code=409,
                     detail="Page number conflicts with an existing page",
                 ) from exc
-            except Exception:
+            except Exception as exc:
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="admin_ocr_upload_failed",
+                    stage=stage,
+                    exception=exc,
+                    include_traceback=True,
+                    book_id=str(book_id),
+                    page_id=str(page_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 await self.db.rollback()
                 await self._abort_page_upload(
                     page_id, object_path, object_may_exist=storage_uploaded,
