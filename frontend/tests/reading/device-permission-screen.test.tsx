@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookScannerScreen } from "@/components/reading/book-scanner-screen";
 import { DevicePermissionScreen } from "@/components/reading/device-permission-screen";
-import { clearDevicePermissionVerification } from "@/lib/api/device-permission-service";
+import {
+  clearDevicePermissionVerification,
+  markDevicePermissionVerified,
+} from "@/lib/api/device-permission-service";
 
 const { getSnapshotMock, requestAccessMock, retryMock, pushMock, replaceMock } =
   vi.hoisted(() => ({
@@ -170,6 +173,20 @@ describe("Device permission gate", () => {
     expect(
       screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
     ).toBeDisabled();
+  });
+
+  it("opens the scanner only when a current verification ticket exists", async () => {
+    markDevicePermissionVerified();
+
+    render(<BookScannerScreen childId={childId} />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Đưa trang sách vào khung camera",
+      }),
+    ).toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("redirects direct scanner visits back to permission verification", async () => {
