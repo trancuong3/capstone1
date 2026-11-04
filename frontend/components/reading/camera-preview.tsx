@@ -30,6 +30,7 @@ interface CameraPreviewProps {
   enableScanner?: boolean;
   onPageDetected?: (page: ReadingPageDTO) => void;
   onBookPageDetected?: (bookId: string, page: ReadingPageDTO) => void;
+  onCameraUnavailable?: () => void;
 }
 
 export function CameraPreview({
@@ -38,6 +39,7 @@ export function CameraPreview({
   enableScanner = false,
   onPageDetected,
   onBookPageDetected,
+  onCameraUnavailable,
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -55,17 +57,39 @@ export function CameraPreview({
 
     async function initCamera() {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const acquiredStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "environment",
+            facingMode: { ideal: "environment" },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
           audio: false,
         });
-        if (!mounted) return;
+
+        // A permission request can resolve after the component has unmounted.
+        // Stop that late stream immediately; the effect cleanup has already run.
+        if (!mounted) {
+          acquiredStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        stream = acquiredStream;
+        const videoTrack = acquiredStream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.addEventListener(
+            "ended",
+            () => {
+              if (!mounted) return;
+              setCameraReady(false);
+              setCameraDenied(true);
+              onCameraUnavailable?.();
+            },
+            { once: true },
+          );
+        }
+
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = acquiredStream;
         }
         setCameraReady(true);
         setCameraDenied(false);
@@ -73,6 +97,7 @@ export function CameraPreview({
         if (!mounted) return;
         setCameraReady(false);
         setCameraDenied(true);
+        onCameraUnavailable?.();
       }
     }
 
@@ -80,11 +105,14 @@ export function CameraPreview({
 
     return () => {
       mounted = false;
+      if (videoRef.current?.srcObject === stream) {
+        videoRef.current.srcObject = null;
+      }
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [enableScanner]);
+  }, [enableScanner, onCameraUnavailable]);
 
   const captureAndScan = useCallback(async () => {
     if (
