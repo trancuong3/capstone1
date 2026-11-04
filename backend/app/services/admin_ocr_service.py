@@ -480,6 +480,260 @@ class AdminOcrService:
             # unexpected read-only transaction started during response building.
             await self.db.rollback()
 
+    async def replace_page_image(
+        self, actor_id: UUID, page_id: UUID, file: UploadFile
+    ) -> AdminRevisionDetailRead:
+        """Create a candidate OCR revision without holding a DB transaction during Storage/OCR."""
+        started_at = time.perf_counter()
+        await self.require_admin(actor_id)
+        probe = await self.repo.page(page_id)
+        if probe is None:
+            await self.db.rollback()
+            raise HTTPException(status_code=404, detail="Page not found")
+        book_id = probe.BookId
+        await self.db.rollback()
+
+        # Snapshot the page and its revision history under short Book -> Page locks.
+        book = await self.repo.book(book_id, lock=True)
+        if book is None:
+            await self.db.rollback()
+            raise HTTPException(status_code=404, detail="Book not found")
+        if book.LifecycleStatus != "ACTIVE":
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Cannot replace a page in a retired book")
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            await self.db.rollback()
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.BookId != book_id or page.LifecycleStatus != "ACTIVE":
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+
+        expected_verified_revision_id = page.CurrentVerifiedRevisionId
+        previous_image_path = page.ImagePath
+        previous_width = page.Width
+        previous_height = page.Height
+        existing_revisions = await self.repo.revisions(page_id)
+        expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
+        await self.db.rollback()
+
+        data, content_type, extension, width, height = await self._read_validate_image(file)
+        object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
+        storage_uploaded = False
+
+        # External Storage and Tesseract work runs with no active DB transaction.
+        try:
+            await run_in_threadpool(upload_object, object_path, data, content_type)
+            storage_uploaded = True
+        except Exception as exc:
+            if bool(getattr(exc, "cleanup_may_be_needed", False)):
+                await self._cleanup_uploaded_object(
+                    object_path,
+                    object_may_exist=True,
+                    book_id=book_id,
+                    page_id=page_id,
+                    started_at=started_at,
+                )
+            raise
+
+        try:
+            ocr = await run_in_threadpool(extract_text_and_boxes, data)
+            words = self._word_data(ocr["words"])
+            text_value = str(ocr["text"]).strip()
+            if not text_value:
+                raise HTTPException(status_code=422, detail="OCR produced empty text")
+        except OcrEngineUnavailable as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except OcrNoTextDetected as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail="No usable text was detected; check the replacement image",
+            ) from exc
+        except HTTPException:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise
+        except ValueError as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail="Replacement image could not be decoded by OCR",
+            ) from exc
+        except Exception as exc:
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_reupload_failed",
+                stage="ocr_processing",
+                exception=exc,
+                include_traceback=True,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Replacement OCR processing failed; check local OCR configuration",
+            ) from exc
+
+        processing_meta = dict(ocr["metadata"])
+        processing_meta.update({
+            "source_image_path": object_path,
+            "source_image_width": width,
+            "source_image_height": height,
+            "previous_image_path": previous_image_path,
+            "previous_image_width": previous_width,
+            "previous_image_height": previous_height,
+        })
+        revision_id = uuid4()
+        commit_started = False
+
+        try:
+            # Revalidate the exact snapshot after external work. Concurrent page
+            # edits or verification must win rather than be silently overwritten.
+            await self.require_admin(actor_id)
+            current_book = await self.repo.book(book_id, lock=True)
+            if current_book is None or current_book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Book is no longer active; reload and retry")
+            current_page = await self.repo.page(page_id, lock=True)
+            if current_page is None or current_page.BookId != book_id:
+                raise HTTPException(status_code=409, detail="Page is no longer available; reload and retry")
+            if current_page.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+            if current_page.CurrentVerifiedRevisionId != expected_verified_revision_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The verified page changed while OCR was running; reload and retry",
+                )
+
+            latest_revisions = await self.repo.revisions(page_id)
+            latest_revision_id = latest_revisions[0].Id if latest_revisions else None
+            if latest_revision_id != expected_latest_revision_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another OCR revision was created while OCR was running; reload and retry",
+                )
+
+            try:
+                next_number = await self.repo.next_revision_number(page_id)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Existing revision numbering requires manual review",
+                ) from exc
+
+            if current_page.CurrentVerifiedRevisionId is not None:
+                current_verified = await self.repo.revision(
+                    current_page.Id, current_page.CurrentVerifiedRevisionId, lock=True
+                )
+                if current_verified is None or current_verified.VerificationStatus != "VERIFIED":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Current verified revision is no longer available",
+                    )
+                current_metadata = dict(current_verified.ProcessingMeta or {})
+                current_metadata.setdefault("source_image_path", previous_image_path)
+                current_metadata.setdefault("source_image_width", previous_width)
+                current_metadata.setdefault("source_image_height", previous_height)
+                current_verified.ProcessingMeta = current_metadata
+
+            content_hash = hashlib.sha256(
+                json.dumps(
+                    {"text": text_value, "words": words},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            revision = PageRevision(
+                Id=revision_id,
+                PageId=current_page.Id,
+                RevisionNo=str(next_number),
+                VerificationStatus="NEEDS_REVIEW",
+                VerifiedText=None,
+                DraftText=text_value,
+                ContentHash=content_hash,
+                ProcessingMeta=processing_meta,
+            )
+            self.repo.stage_revision_bundle(revision, words)
+            await self.repo.flush()
+            await self.db.refresh(revision)
+            await self.db.refresh(current_page)
+            result = await self.revision_detail(current_page, revision)
+
+            commit_started = True
+            await self.db.commit()
+            return result
+        except IntegrityError as exc:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="A concurrent OCR revision was created; reload and retry",
+            ) from exc
+        except HTTPException:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise
+        except Exception as exc:
+            await self.db.rollback()
+            if commit_started:
+                # The network may have failed after PostgreSQL committed. Confirm
+                # the revision before deleting the image it could now reference.
+                try:
+                    persisted_page = await self.repo.page(page_id)
+                    persisted_revision = await self.repo.revision(page_id, revision_id)
+                    if (
+                        persisted_page is not None
+                        and persisted_revision is not None
+                        and persisted_page.LifecycleStatus == "ACTIVE"
+                    ):
+                        result = await self.revision_detail(persisted_page, persisted_revision)
+                        await self.db.rollback()
+                        return result
+                except Exception:
+                    await self.db.rollback()
+                    log_diagnostic(
+                        logger,
+                        logging.ERROR,
+                        event="admin_ocr_commit_outcome_unconfirmed",
+                        stage="database_commit",
+                        exception=exc,
+                        book_id=str(book_id),
+                        page_id=str(page_id),
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail="OCR revision commit outcome is unknown; reload before retrying",
+                    ) from exc
+            await self._cleanup_uploaded_object(
+                object_path, object_may_exist=storage_uploaded,
+                book_id=book_id, page_id=page_id, started_at=started_at,
+            )
+            raise
+
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
         words = []
