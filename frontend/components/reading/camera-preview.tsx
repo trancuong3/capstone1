@@ -75,7 +75,7 @@ export function CameraPreview({
       cameraStreamRef.current ?? (video?.srcObject as MediaStream | null);
     ignoreCameraEndedRef.current = true;
     cameraStreamRef.current = null;
-    if (video?.srcObject === stream) {
+    if (video && video.srcObject === stream) {
       video.pause();
       video.srcObject = null;
     }
