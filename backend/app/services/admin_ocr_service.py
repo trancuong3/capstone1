@@ -856,7 +856,7 @@ class AdminOcrService:
                     "APPLIES_TO_CURRENT_TEXT"
                     if evidence and evidence_applies
                     else "ORIGINAL_OCR_TEXT_ONLY"
-                    if evidence
+                    if evidence and isinstance(recognized_text, str)
                     else "UNAVAILABLE"
                 ),
             })
