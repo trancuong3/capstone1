@@ -70,7 +70,9 @@ describe("RealtimeAlignmentEngine Vietnamese token identity", () => {
 
     expect(snapshot.statusByWordId.get("word-1")?.status).toBe("AMBIGUOUS");
     expect(snapshot.statusByWordId.get("word-2")?.status).toBe("MATCH");
-    expect(snapshot.currentWordId).toBeNull();
+    // Preview points at the last token recognized in this interim transcript;
+    // the authoritative cursor advances after a final transcript is committed.
+    expect(snapshot.currentWordId).toBe("word-2");
     expect(snapshot.previewMatchedWordIds.has("word-1")).toBe(false);
     expect(snapshot.previewMatchedWordIds.has("word-2")).toBe(true);
   });
