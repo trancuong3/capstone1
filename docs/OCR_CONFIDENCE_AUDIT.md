@@ -230,6 +230,32 @@ No database migration was needed for these metadata additions because
 backward compatibility; consumers must not interpret that legacy scalar as a
 calibrated probability.
 
+## 8A. Child Reading accent-safety changes on this branch
+
+The branch also updates `frontend/lib/reading/realtime-alignment.ts`:
+
+- Exact real-time token normalization now preserves Vietnamese tone marks,
+  vowel marks and the distinction between `d` and `đ`.
+- A separate accent-insensitive helper is used only to detect a possible
+  diacritic-only transcript ambiguity. It is never used to declare an exact
+  match.
+- A diacritic-only mismatch receives `AMBIGUOUS` rather than `MATCH` or
+  `SUBSTITUTE`. The presentation uses a neutral style and explicitly says the
+  evidence is insufficient to judge correct/incorrect.
+- The word cursor remains based on stable word IDs and sequential book indices.
+  A following exact word can continue the alignment after an ambiguous token.
+- The final report alignment service was separately inspected:
+  `backend/app/services/text_alignment.py::normalize_text` uses NFC and
+  lowercase without removing Vietnamese diacritics, so it already preserves
+  tone marks for final transcript comparison.
+
+This does not make all STT output reliable. The browser STT adapter does not
+currently provide a verified, consistently available word-level confidence
+signal to this alignment engine. Therefore, the new neutral ambiguity rule is
+limited to differences attributable to Vietnamese diacritics; other uncertain
+provider outputs still require further evidence and should not be represented
+as a calibrated pronunciation probability.
+
 ## 9. Calibration data and evaluation status
 
 At the baseline HEAD, no dedicated, versioned Vietnamese OCR confidence
