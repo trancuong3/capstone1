@@ -181,20 +181,23 @@ export function CameraPreview({
           if (!mountedRef.current || controller.signal.aborted) return;
 
           const resolvedBookId = response.book_id || bookId;
-          if (response.matched && response.matched_page && resolvedBookId) {
-            setScanResult(response);
-            setAutoScan(false);
-            onPageDetected?.(response.matched_page);
-            onBookPageDetected?.(resolvedBookId, response.matched_page);
-          } else if (response.matched && response.matched_page) {
-            // A global match without a book id cannot be routed safely.
-            setScanResult({
-              ...response,
-              matched: false,
-              status_code: "LOW_CONFIDENCE",
-              message:
-                "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé.",
-            });
+          if (response.matched) {
+            if (response.matched_page && resolvedBookId) {
+              setScanResult(response);
+              setAutoScan(false);
+              onPageDetected?.(response.matched_page);
+              onBookPageDetected?.(resolvedBookId, response.matched_page);
+            } else {
+              // A successful match requires both a concrete page and its book.
+              setScanResult({
+                ...response,
+                matched: false,
+                status_code: "LOW_CONFIDENCE",
+                message: response.matched_page
+                  ? "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé."
+                  : "ViRead chưa nhận được thông tin trang sách hợp lệ. Ba mẹ hãy căn chỉnh và quét lại nhé.",
+              });
+            }
           } else {
             setScanResult(response);
           }
