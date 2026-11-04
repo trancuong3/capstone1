@@ -80,6 +80,19 @@ def _bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean value")
 
 
+SMTP_HOST = (os.getenv("SMTP_HOST") or "smtp.gmail.com").strip()
+SMTP_PORT = _int_env("SMTP_PORT", 587, minimum=1, maximum=65535)
+SMTP_USERNAME = (os.getenv("SMTP_USERNAME") or "").strip() or None
+SMTP_APP_PASSWORD = (os.getenv("SMTP_APP_PASSWORD") or "").strip().replace(" ", "") or None
+SMTP_FROM_EMAIL = (os.getenv("SMTP_FROM_EMAIL") or "vireadforyou@gmail.com").strip() or None
+SMTP_SEND_TIMEOUT_SECONDS = _float_env("SMTP_SEND_TIMEOUT_SECONDS", 15.0, minimum=1.0, maximum=120.0)
+READING_REMINDER_POLL_SECONDS = _int_env("READING_REMINDER_POLL_SECONDS", 30, minimum=5, maximum=300)
+READING_REMINDER_MAX_ATTEMPTS = _int_env("READING_REMINDER_MAX_ATTEMPTS", 5, minimum=1, maximum=10)
+READING_REMINDER_APP_URL = (
+    os.getenv("READING_REMINDER_APP_URL") or "http://localhost:3000/reading-management"
+).strip()
+
+
 APP_ENVIRONMENT = (
     os.getenv("APP_ENVIRONMENT") or "development"
 ).strip().lower()

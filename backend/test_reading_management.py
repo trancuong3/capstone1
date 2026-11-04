@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from app.schemas.reading_management import (
     ReadingGoalCreate,
     ReadingGoalUpdate,
+    ReadingPlanCreate,
     ReadingReminderCreate,
     ReadingReminderUpdate,
 )
@@ -23,6 +24,7 @@ from app.services.reading_management_service import (
     ReadingManagementService,
     completed_metric,
     goal_cycle_window,
+    plan_week_window,
 )
 
 
@@ -88,7 +90,16 @@ class ReadingManagementTests(unittest.TestCase):
             session("FINISHED", start, now + timedelta(minutes=1)),
         ]
         self.assertEqual(completed_metric(rows, "SESSIONS", now), 2)
-        self.assertEqual(completed_metric(rows, "MINUTES", now), 23)
+        self.assertEqual(completed_metric(rows, "MINUTES", now), 11)
+
+    def test_minutes_do_not_double_count_overlapping_sessions(self):
+        start = datetime(2026, 10, 19, 10, tzinfo=timezone.utc)
+        now = start + timedelta(minutes=20)
+        rows = [
+            session("COMPLETED", start, start + timedelta(minutes=10)),
+            session("FINISHED", start + timedelta(minutes=5), start + timedelta(minutes=15)),
+        ]
+        self.assertEqual(completed_metric(rows, "MINUTES", now), 15)
 
     def test_weekly_goal_window_respects_vietnam_timezone(self):
         goal = SimpleNamespace(
@@ -145,3 +156,31 @@ class ReadingManagementTests(unittest.TestCase):
             ReadingReminderUpdate(timezone=None)
         with self.assertRaises(ValidationError):
             ReadingGoalUpdate(target_value=None)
+
+    def test_plan_create_rejects_invalid_weekdays_and_date_range(self):
+        values = dict(
+            child_id="00000000-0000-4000-8000-000000000001",
+            title="Đọc sách cùng bé",
+            target_minutes=20,
+            starts_on=date(2026, 11, 1),
+        )
+        with self.assertRaises(ValidationError):
+            ReadingPlanCreate(**values, weekdays=[0, 0])
+        with self.assertRaises(ValidationError):
+            ReadingPlanCreate(**values, weekdays=[7])
+        with self.assertRaises(ValidationError):
+            ReadingPlanCreate(**values, weekdays=[0], ends_on=date(2026, 10, 31))
+
+    def test_plan_week_window_uses_plan_timezone_and_schedule_days(self):
+        plan = SimpleNamespace(
+            Timezone="Asia/Ho_Chi_Minh",
+            StartsOn=date(2026, 11, 1),
+            EndsOn=None,
+            Weekdays=[0, 2, 4],
+        )
+        starts_at, ends_at, scheduled_dates = plan_week_window(
+            plan, datetime(2026, 11, 4, 8, tzinfo=timezone.utc)
+        )
+        self.assertEqual(starts_at, datetime(2026, 11, 1, 17, tzinfo=timezone.utc))
+        self.assertEqual(ends_at, datetime(2026, 11, 8, 17, tzinfo=timezone.utc))
+        self.assertEqual(scheduled_dates, [date(2026, 11, 2), date(2026, 11, 4), date(2026, 11, 6)])
