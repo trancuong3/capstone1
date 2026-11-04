@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft, BookOpen, Camera, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, ButtonLink } from "@/components/common/button";
@@ -24,6 +24,7 @@ export function BookScannerScreen({
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
+  const permissionCheckStartedRef = useRef(false);
 
   const permissionHref = (() => {
     const params = new URLSearchParams();
@@ -34,6 +35,11 @@ export function BookScannerScreen({
   })();
 
   useEffect(() => {
+    // React Strict Mode replays effects in development while preserving refs.
+    // Do not consume the one-time in-memory ticket twice for the same mount.
+    if (permissionCheckStartedRef.current) return;
+    permissionCheckStartedRef.current = true;
+
     if (consumeDevicePermissionVerification()) {
       setIsAuthorized(true);
       return;
