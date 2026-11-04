@@ -2,7 +2,7 @@ name: Format Admin Books OCR changed files
 
 on:
   push:
-    branches: [feature/admin-book-ocr-integration, fix/ocr-confidence-calibration-20261104]
+    branches: [feature/admin-book-ocr-integration]
     paths:
       - "frontend/components/admin/admin-book-detail-screen.tsx"
       - "frontend/components/admin/admin-books-screen.tsx"
@@ -20,7 +20,6 @@ on:
       - "frontend/tests/admin/admin-ocr-review-screen.test.tsx"
       - "frontend/tests/services/mock-admin-services.test.ts"
       - "frontend/types/admin.ts"
-      - ".github/workflows/format-admin-ocr.yml"
 
 permissions:
   contents: write
@@ -35,7 +34,7 @@ jobs:
       - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: feature/admin-book-ocr-integration
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,10 +46,7 @@ jobs:
         run: npm ci
       - name: Format only the feature files
         run: |
-          if [ "$GITHUB_REF_NAME" = "fix/ocr-confidence-calibration-20261104" ]; then
-            npx prettier --write components/admin/admin-ocr-review-screen.tsx
-          else
-            npx prettier --write \
+          npx prettier --write \
             components/admin/admin-book-detail-screen.tsx \
             components/admin/admin-books-screen.tsx \
             components/admin/admin-new-book-screen.tsx \
@@ -67,7 +63,6 @@ jobs:
             tests/admin/admin-ocr-review-screen.test.tsx \
             tests/services/mock-admin-services.test.ts \
             types/admin.ts
-          fi
       - name: Commit formatting when needed
         shell: bash
         run: |
@@ -79,4 +74,4 @@ jobs:
           git -C .. config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C .. add -u
           git -C .. commit -m "style(admin-ocr): format OCR feature files"
-          git -C .. push origin "HEAD:$GITHUB_REF_NAME"
+          git -C .. push origin HEAD:feature/admin-book-ocr-integration
