@@ -418,12 +418,35 @@ export function AdminOcrReviewScreen({
       word.confidence_scope === "word" &&
       typeof word.raw_engine_score === "number",
   ).length;
-  const lineScoreCount = words.filter(
+  const applicableEvidence = words.filter(
     (word) =>
-      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT" &&
-      word.confidence_scope === "line" &&
-      typeof word.line_engine_score === "number",
-  ).length;
+      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT",
+  );
+  const lineEvidenceByIndex = new Map(
+    applicableEvidence
+      .filter(
+        (word) =>
+          word.confidence_scope === "line" &&
+          typeof word.line_engine_score === "number",
+      )
+      .map((word) => [word.line_index, word.line_engine_score]),
+  );
+  const lineScoreCount = lineEvidenceByIndex.size;
+  const engineEvidenceCounts = {
+    tesseract: applicableEvidence.filter(
+      (word) => word.confidence_source === "tesseract",
+    ).length,
+    paddleocr: lineEvidenceByIndex.size,
+    vietocr: applicableEvidence.filter(
+      (word) => word.confidence_source === "vietocr",
+    ).length,
+    other: applicableEvidence.filter(
+      (word) =>
+        !["tesseract", "paddleocr", "vietocr"].includes(
+          word.confidence_source ?? "",
+        ),
+    ).length,
+  };
   const unknownConfidenceCount = words.length - calibratedWordCount;
   const firstWordToReview = words.find(
     (word) =>
@@ -602,6 +625,22 @@ export function AdminOcrReviewScreen({
               <strong>{unknownConfidenceCount}</strong>
               <div>Chưa có xác suất hiệu chuẩn</div>
             </div>
+          </div>
+          <div className="mt-3 rounded-control border border-border bg-canvas p-3 text-xs text-muted">
+            <p className="font-bold text-ink">Nguồn evidence theo engine</p>
+            <p className="mt-1">
+              Tesseract: {engineEvidenceCounts.tesseract} từ có điểm thô cấp từ
+            </p>
+            <p>
+              PaddleOCR: {engineEvidenceCounts.paddleocr} dòng có điểm cấp dòng
+            </p>
+            <p>
+              VietOCR: {engineEvidenceCounts.vietocr} từ nhận dạng, không có điểm
+              confidence riêng
+            </p>
+            {engineEvidenceCounts.other > 0 ? (
+              <p>Engine khác/chưa rõ: {engineEvidenceCounts.other} từ</p>
+            ) : null}
           </div>
           <button
             className="mt-3 min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
