@@ -41,17 +41,25 @@ export const adminRevisionDetailSchema = z.object({
       raw_engine_score: z.number().min(0).max(100).nullable().optional(),
       line_engine_score: z.number().min(0).max(1).nullable().optional(),
       confidence_source: z.string().nullable().optional(),
-      confidence_scope: z.enum(["word", "line", "unavailable", "unknown"]).optional(),
+      confidence_scope: z
+        .enum(["word", "line", "unavailable", "unknown"])
+        .optional(),
       calibrated_confidence: z.number().min(0).max(1).nullable().optional(),
-      calibration_status: z.enum(["CALIBRATED", "NOT_CALIBRATED", "UNKNOWN"]).optional(),
+      calibration_status: z
+        .enum(["CALIBRATED", "NOT_CALIBRATED", "UNKNOWN"])
+        .optional(),
       calibration_version: z.string().nullable().optional(),
-      confidence_applicability: z.enum([
-        "APPLIES_TO_CURRENT_TEXT",
-        "ORIGINAL_OCR_TEXT_ONLY",
-        "UNAVAILABLE",
-      ]).optional(),
+      confidence_applicability: z
+        .enum([
+          "APPLIES_TO_CURRENT_TEXT",
+          "ORIGINAL_OCR_TEXT_ONLY",
+          "UNAVAILABLE",
+        ])
+        .optional(),
       bbox_quality: z.number().min(0).max(1).nullable().optional(),
-      bbox_quality_status: z.enum(["EVALUATED", "NOT_EVALUATED", "UNKNOWN"]).optional(),
+      bbox_quality_status: z
+        .enum(["EVALUATED", "NOT_EVALUATED", "UNKNOWN"])
+        .optional(),
     }),
   ),
   ocr_metadata: z.record(z.string(), z.unknown()),

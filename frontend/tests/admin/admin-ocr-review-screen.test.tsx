@@ -223,11 +223,17 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(stats).toHaveTextContent(/1\s*Chỉ có điểm cấp dòng/);
     expect(stats).toHaveTextContent(/0\s*Xác suất đã hiệu chuẩn/);
     expect(stats).toHaveTextContent(/4\s*Chưa có xác suất hiệu chuẩn/);
-    expect(screen.getByText(/Tesseract: 2 từ có điểm thô cấp từ/)).toBeInTheDocument();
-    expect(screen.getByText(/PaddleOCR: 1 dòng có điểm cấp dòng/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Tesseract: 2 từ có điểm thô cấp từ/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/PaddleOCR: 1 dòng có điểm cấp dòng/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/VietOCR: 0 từ nhận dạng/)).toBeInTheDocument();
     expect(
-      screen.getAllByText("Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn").length,
+      screen.getAllByText(
+        "Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn",
+      ).length,
     ).toBeGreaterThan(0);
     expect(
       screen.getByRole("button", {
@@ -270,7 +276,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(
       screen.getByRole("group", { name: "Thống kê confidence OCR" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Chưa có confidence cấp từ đã hiệu chuẩn/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Chưa có confidence cấp từ đã hiệu chuẩn/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/0\.95/)).not.toBeInTheDocument();
   });
 
@@ -393,7 +401,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       );
       await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
       await user.click(
-        screen.getByRole("button", { name: /Đi tới từ chưa có xác suất hiệu chuẩn/ }),
+        screen.getByRole("button", {
+          name: /Đi tới từ chưa có xác suất hiệu chuẩn/,
+        }),
       );
 
       expect(scrollSpy).toHaveBeenCalledWith({

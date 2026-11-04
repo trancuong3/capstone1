@@ -59,16 +59,11 @@ function getWordStatus(
     return "hesitation";
   }
 
-  if (
-    ambiguousWordIds?.has(wordId) ||
-    previewStatus?.status === "AMBIGUOUS"
-  ) {
+  if (ambiguousWordIds?.has(wordId) || previewStatus?.status === "AMBIGUOUS") {
     return "ambiguous";
   }
 
-  if (
-    wordId === currentWordId
-  ) {
+  if (wordId === currentWordId) {
     return "current";
   }
 
@@ -122,9 +117,7 @@ export function WordHighlightOverlay({
   ambiguousWordIds,
   previewSnapshot,
 }: WordHighlightOverlayProps) {
-  const word = page.words.find(
-    (item) => item.word_id === currentWordId,
-  );
+  const word = page.words.find((item) => item.word_id === currentWordId);
 
   return (
     <>

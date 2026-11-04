@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -50,13 +49,9 @@ function isHesitation(value: unknown): value is Hesitation {
   );
 }
 
-
-
 export function ReadingReport({ result, sessionId }: Props) {
   const [page, setPage] = useState<ReadingPage | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
-
-  
 
   useEffect(() => {
     let cancelled = false;
@@ -159,9 +154,7 @@ export function ReadingReport({ result, sessionId }: Props) {
         {pageError ? (
           <p className="text-sm text-red-600">{pageError}</p>
         ) : !page ? (
-          <p className="text-sm text-muted">
-            Đang tải nội dung bài đọc...
-          </p>
+          <p className="text-sm text-muted">Đang tải nội dung bài đọc...</p>
         ) : (
           <article
             className="relative min-h-[552px] w-full overflow-hidden rounded-[8px] bg-cream p-4 shadow-[0_8px_24px_rgba(33,61,66,0.06)] sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-8"
@@ -180,11 +173,7 @@ export function ReadingReport({ result, sessionId }: Props) {
                 </span>
               </header>
 
-              <BookPageContent
-                page={page}
-                comparisonResult={result}
-                readOnly
-              />
+              <BookPageContent page={page} comparisonResult={result} readOnly />
 
               <p className="mt-2 text-right text-label text-muted">
                 {page.page_number}
@@ -246,10 +235,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           ["Lặp từ", COLORS.repeated],
           ["Chưa đủ bằng chứng", COLORS.ambiguous],
         ].map(([label, color]) => (
-          <span
-            key={label}
-            className={`rounded border px-2 py-1 ${color}`}
-          >
+          <span key={label} className={`rounded border px-2 py-1 ${color}`}>
             {label}
           </span>
         ))}
@@ -269,8 +255,8 @@ export function ReadingReport({ result, sessionId }: Props) {
               <li key={word}>
                 <span className="rounded border border-purple-500 bg-purple-100 px-1">
                   {word}
-                </span>
-                {" "}được ghi nhận {count} lần trong danh sách lặp.
+                </span>{" "}
+                được ghi nhận {count} lần trong danh sách lặp.
               </li>
             ))}
           </ul>

@@ -113,9 +113,7 @@ export interface AdminRevisionWordDTO {
   readonly calibration_status?: "CALIBRATED" | "NOT_CALIBRATED" | "UNKNOWN";
   readonly calibration_version?: string | null;
   readonly confidence_applicability?:
-    | "APPLIES_TO_CURRENT_TEXT"
-    | "ORIGINAL_OCR_TEXT_ONLY"
-    | "UNAVAILABLE";
+    "APPLIES_TO_CURRENT_TEXT" | "ORIGINAL_OCR_TEXT_ONLY" | "UNAVAILABLE";
   readonly bbox_quality?: number | null;
   readonly bbox_quality_status?: "EVALUATED" | "NOT_EVALUATED" | "UNKNOWN";
 }

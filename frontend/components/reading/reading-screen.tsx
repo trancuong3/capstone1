@@ -156,7 +156,7 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [previewSnapshot, setPreviewSnapshot] =
-  useState<RealtimeAlignmentSnapshot | null>(null);
+    useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
@@ -191,7 +191,6 @@ export function ReadingScreen({
   const hesitationWordIdsRef = useRef<Set<string>>(new Set());
   const ambiguousWordIdsRef = useRef<Set<string>>(new Set());
 
-
   useEffect(() => {
     if (!page?.words?.length) {
       alignmentEngineRef.current = null;
@@ -199,11 +198,7 @@ export function ReadingScreen({
     }
 
     lastPreviewWordIndexRef.current = -1;
-    alignmentEngineRef.current = new RealtimeAlignmentEngine(
-      page.words,
-      3,
-      2,
-    );
+    alignmentEngineRef.current = new RealtimeAlignmentEngine(page.words, 3, 2);
 
     return () => {
       alignmentEngineRef.current = null;
@@ -487,7 +482,6 @@ export function ReadingScreen({
       .trim();
   }
 
-  
   function applyRealtimeSnapshot(snapshot: RealtimeAlignmentSnapshot) {
     // Đây là kết quả đã xác nhận, không phải preview.
     const nextCorrectIds = new Set(correctWordIdsRef.current);
@@ -655,7 +649,6 @@ export function ReadingScreen({
           rec.lang = "vi-VN";
           rec.maxAlternatives = 1;
 
-          
           rec.onresult = (event: BrowserSpeechEvent) => {
             browserTranscriptCollectorRef.current.addResults(event);
 
@@ -677,8 +670,7 @@ export function ReadingScreen({
 
               if (!part || !result.isFinal) continue;
 
-              latestFinalText +=
-                (latestFinalText ? " " : "") + part;
+              latestFinalText += (latestFinalText ? " " : "") + part;
 
               const snapshot = engine.addFinalTranscript(part);
 
@@ -694,8 +686,7 @@ export function ReadingScreen({
               const part = result[0]?.transcript?.trim() || "";
 
               if (part) {
-                interimText +=
-                  (interimText ? " " : "") + part;
+                interimText += (interimText ? " " : "") + part;
               }
             }
 
@@ -715,13 +706,10 @@ export function ReadingScreen({
               setLatestTranscript(interimText.trim());
             } else if (latestFinalText.trim()) {
               setLatestTranscript((previous) =>
-                [previous, latestFinalText.trim()]
-                  .filter(Boolean)
-                  .join(" "),
+                [previous, latestFinalText.trim()].filter(Boolean).join(" "),
               );
             }
           };
-
 
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
             console.error("[REALTIME STT ERROR]", {
@@ -912,9 +900,7 @@ export function ReadingScreen({
         const engine = alignmentEngineRef.current;
 
         if (engine) {
-          const snapshot = engine.addFinalTranscript(
-            elevenLabsResult.text,
-          );
+          const snapshot = engine.addFinalTranscript(elevenLabsResult.text);
 
           applyRealtimeSnapshot(snapshot);
         }

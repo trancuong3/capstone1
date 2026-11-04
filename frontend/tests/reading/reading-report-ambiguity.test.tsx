@@ -33,12 +33,7 @@ const page = {
       word_id: WORD_ID,
       word_index: 0,
       text: "má",
-      bbox: [0.1, 0.1, 0.08, 0.03] as [
-        number,
-        number,
-        number,
-        number,
-      ],
+      bbox: [0.1, 0.1, 0.08, 0.03] as [number, number, number, number],
       line_index: 0,
     },
   ],
@@ -95,18 +90,16 @@ describe("ReadingReport Vietnamese ambiguity", () => {
       name: "Thống kê kết quả đọc",
     });
     await waitFor(() => {
-      const ambiguousMetric = within(statistics).getByText(
-        "Chưa đủ bằng chứng",
-      ).parentElement;
-      const wrongMetric = within(statistics).getByText("Từ đọc nhầm").parentElement;
+      const ambiguousMetric =
+        within(statistics).getByText("Chưa đủ bằng chứng").parentElement;
+      const wrongMetric =
+        within(statistics).getByText("Từ đọc nhầm").parentElement;
 
       expect(ambiguousMetric).toHaveTextContent("1");
       expect(wrongMetric).toHaveTextContent("0");
     });
 
-    const displayedWord = document.querySelector(
-      `[data-word-id="${WORD_ID}"]`,
-    );
+    const displayedWord = document.querySelector(`[data-word-id="${WORD_ID}"]`);
     expect(displayedWord).toHaveClass("bg-slate-100");
     expect(displayedWord).not.toHaveClass("bg-orange-200");
   });

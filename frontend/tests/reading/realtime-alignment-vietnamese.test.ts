@@ -29,9 +29,9 @@ describe("RealtimeAlignmentEngine Vietnamese token identity", () => {
     );
     expect(normalizeRealtimeWord("cá")).not.toBe(normalizeRealtimeWord("ca"));
     expect(normalizeRealtimeWord("d")).not.toBe(normalizeRealtimeWord("đ"));
-    expect(
-      normalizeRealtimeForAmbiguity("d"),
-    ).toBe(normalizeRealtimeForAmbiguity("đ"));
+    expect(normalizeRealtimeForAmbiguity("d")).toBe(
+      normalizeRealtimeForAmbiguity("đ"),
+    );
   });
 
   it("does not mark a diacritic-only transcript variant as an exact match", () => {

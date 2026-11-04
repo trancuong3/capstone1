@@ -23,7 +23,6 @@ interface BookPageContentProps {
   hesitationWordIds?: Set<string>;
   ambiguousWordIds?: Set<string>;
   previewSnapshot?: RealtimeAlignmentSnapshot | null;
-
 }
 
 export function BookPageContent({
@@ -54,8 +53,8 @@ export function BookPageContent({
               (item) => item.book_index === wordIndex,
             );
 
-            const isPreviewActive = previewSnapshot !== null &&
-              previewSnapshot !== undefined;
+            const isPreviewActive =
+              previewSnapshot !== null && previewSnapshot !== undefined;
 
             const isPreviewCurrent =
               word.word_id === previewSnapshot?.currentWordId;
@@ -66,7 +65,9 @@ export function BookPageContent({
               ? isPreviewCurrent
               : word.word_id === currentWordId;
 
-            const previewStatus = previewSnapshot?.statusByWordId.get(word.word_id);
+            const previewStatus = previewSnapshot?.statusByWordId.get(
+              word.word_id,
+            );
 
             const isPreviewMatched =
               previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
@@ -79,7 +80,9 @@ export function BookPageContent({
 
             const isRepeated = Boolean(
               repeatedWordIds?.has(word.word_id) ||
-              comparisonResult?.summary.repeated_book_indices?.includes(wordIndex) ||
+              comparisonResult?.summary.repeated_book_indices?.includes(
+                wordIndex,
+              ) ||
               previewStatus?.status === "REPEATED",
             );
 
@@ -132,25 +135,20 @@ export function BookPageContent({
             const previousLineIndex = previousWord?.line_index ?? 0;
 
             const startsLine =
-              previousWord !== undefined &&
-              lineIndex !== previousLineIndex;
+              previousWord !== undefined && lineIndex !== previousLineIndex;
 
             const verticalGap = previousWord
-              ? word.bbox[1] -
-                (previousWord.bbox[1] + previousWord.bbox[3])
+              ? word.bbox[1] - (previousWord.bbox[1] + previousWord.bbox[3])
               : 0;
 
             const inferredParagraphBreak =
               startsLine &&
               previousWord !== undefined &&
-              verticalGap >
-                Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
+              verticalGap > Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
 
             const startsParagraph =
               startsLine &&
-              ((page.paragraph_start_line_indices ?? []).includes(
-                lineIndex,
-              ) ||
+              ((page.paragraph_start_line_indices ?? []).includes(lineIndex) ||
                 inferredParagraphBreak);
 
             const isIndented =
@@ -178,8 +176,6 @@ export function BookPageContent({
               isHesitation ||
               isAmbiguous ||
               isCorrect;
-
-            
 
             const currentClass = isCurrent
               ? cn(
