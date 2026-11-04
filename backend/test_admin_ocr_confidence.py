@@ -81,6 +81,7 @@ class AdminOcrConfidenceProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(word.calibrated_confidence)
         self.assertEqual(word.calibration_status, "NOT_CALIBRATED")
         self.assertEqual(word.confidence_applicability, "APPLIES_TO_CURRENT_TEXT")
+        self.assertNotIn("word_confidence_evidence", detail.ocr_metadata)
 
     async def test_paddle_line_score_is_not_exposed_as_a_word_score(self):
         row = self.make_word("Chú", None)
