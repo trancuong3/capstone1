@@ -80,6 +80,12 @@ def _bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean value")
 
 
+APP_ENVIRONMENT = (
+    os.getenv("APP_ENVIRONMENT") or "development"
+).strip().lower()
+if APP_ENVIRONMENT not in {"development", "test", "production"}:
+    raise ValueError("APP_ENVIRONMENT must be development, test or production")
+
 DATABASE_POOLER_MODE = (
     os.getenv("DATABASE_POOLER_MODE") or "local"
 ).strip().lower()
@@ -120,6 +126,11 @@ except Exception as error:
 
 if _database_url.drivername != "postgresql+asyncpg":
     raise ValueError("DATABASE_URL must use the postgresql+asyncpg driver")
+
+if APP_ENVIRONMENT == "production" and DATABASE_POOLER_MODE != "transaction":
+    raise ValueError(
+        "Production deployments must explicitly use DATABASE_POOLER_MODE=transaction"
+    )
 
 if DATABASE_POOLER_MODE == "transaction":
     if _database_url.port != 6543:
