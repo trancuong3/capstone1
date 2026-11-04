@@ -177,6 +177,14 @@ prove that the box tightly encloses the corresponding printed word. There is no
 ground-truth box IoU or per-word localization metric in the baseline code.
 Recognition confidence must not be increased because a box is valid.
 
+The response contract now carries a separate `bbox_quality` and
+`bbox_quality_status`. Because no manually labeled word-box dataset is
+available, new OCR evidence records `bbox_quality=null` with
+`NOT_EVALUATED`. The Admin UI states this separately from recognition
+confidence. A future localization score must be evaluated against manually
+labeled word boxes (for example IoU); normalized in-range geometry is not an
+accuracy score.
+
 ## 6. Reading feedback is a different subsystem
 
 Child Reading colors are not OCR-confidence colors.
