@@ -68,9 +68,9 @@ export function normalizeRealtimeWord(text: string): string {
 }
 
 /**
- * Used only to flag a possible diacritic/STT ambiguity.
- * It is never used to declare two words an exact match.
- * The đ character is intentionally preserved and remains distinct from d.
+ * Used only to flag possible Vietnamese orthographic/STT ambiguity.
+ * It is never used to declare two words an exact match. Tone/vowel marks and
+ * d/đ may be relaxed here only to avoid an unsupported pronunciation judgment.
  */
 export function normalizeRealtimeForAmbiguity(text: string): string {
   // This relaxed form is used only to flag uncertainty. It is never used for
@@ -227,8 +227,8 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // Diacritics-only mismatch is ambiguous STT evidence, not an exact match
-      // and not sufficient evidence to label a pronunciation error.
+      // Vietnamese orthographic-only mismatch is ambiguous STT evidence,
+      // not an exact match and not sufficient to label a pronunciation error.
       if (isVietnameseOrthographicAmbiguity(currentWord.normalizedText, token)) {
         setPreviewStatus(cursor, "AMBIGUOUS");
         targetIndex = cursor;
