@@ -88,6 +88,10 @@ class AdminOcrRepository:
             query = query.with_for_update()
         return await self.db.scalar(query)
 
+    def stage_page_reservation(self, page: BookPage) -> None:
+        """Stage a hidden PROCESSING page row that reserves a page number."""
+        self.db.add(page)
+
     async def delete_page(self, page: BookPage) -> None:
         """Delete only an unexposed PROCESSING placeholder created by this Service."""
         await self.db.delete(page)
