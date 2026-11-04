@@ -248,6 +248,14 @@ No database migration was needed for these metadata additions because
 backward compatibility; consumers must not interpret that legacy scalar as a
 calibrated probability.
 
+The new calibrated probability projection is deliberately gated: the revision
+must declare `confidence_contract.calibration_status=CALIBRATED` and a
+non-empty `calibration_version`, while individual word evidence must also
+declare `CALIBRATED`, contain a finite 0..1 score, and still apply to the
+current recognized text. Otherwise the API returns a null calibrated score.
+The serializer does not promote a native engine score or a frontend value into
+calibrated confidence.
+
 ## 8A. Child Reading accent-safety changes on this branch
 
 The branch also updates `frontend/lib/reading/realtime-alignment.ts`:
