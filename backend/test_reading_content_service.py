@@ -139,6 +139,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             Id=session_id,
             ChildId=CHILD_ID,
             BookId=BOOK_ID,
+            State="IN_PROGRESS",
         )
         payload = ReadingEventCreate(
             SessionId=session_id,
@@ -167,6 +168,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             Id=session_id,
             ChildId=CHILD_ID,
             BookId=BOOK_ID,
+            State="IN_PROGRESS",
         )
         repo.verified_page.return_value = None
         payload = ReadingEventCreate(
@@ -357,6 +359,68 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["code"], "READING_RANGE_NOT_CONTIGUOUS")
         repo.create_session.assert_not_awaited()
+
+    async def test_word_retry_event_is_saved_for_active_session(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        word_id = UUID("66666666-6666-4666-8666-666666666666")
+
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="IN_PROGRESS",
+        )
+
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            WordId=word_id,
+            Type="WORD_RETRY",
+            StartMs=100,
+            EndMs=1500,
+            Confidence=0.95,
+            Status="CONFIRMED",
+            Metadata={
+                "attempt": 1,
+                "original_status": "MISPRONUNCIATION",
+            },
+        )
+
+        event = await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(event.Type, "WORD_RETRY")
+        self.assertEqual(event.Status, "CONFIRMED")
+        self.assertEqual(event.WordId, word_id)
+        repo.create_reading_event.assert_awaited_once_with(event)
+
+    async def test_word_retry_event_is_rejected_for_completed_session(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id,
+            ChildId=CHILD_ID,
+            BookId=BOOK_ID,
+            State="COMPLETED",
+        )
+
+        payload = ReadingEventCreate(
+            SessionId=session_id,
+            PageId=PAGE_ID,
+            PageRevisionId=REVISION_ID,
+            Type="WORD_RETRY",
+            StartMs=100,
+            Status="FAILED",
+            Metadata={"attempt": 1},
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
 
     async def test_create_session_rejects_stale_verified_revision(self):
         service, repo = self.make_service()

@@ -66,9 +66,12 @@ export function BookPageContent({
               previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
 
             const isSkipped = Boolean(
-              skippedWordIds?.has(word.word_id) ||
-              alignment?.status === "DELETE" ||
-              previewStatus?.status === "DELETE",
+              !correctWordIds?.has(word.word_id) &&
+              (
+                skippedWordIds?.has(word.word_id) ||
+                alignment?.status === "DELETE" ||
+                previewStatus?.status === "DELETE"
+              ),
             );
 
             const isRepeated = Boolean(
@@ -90,9 +93,12 @@ export function BookPageContent({
             );
 
             const isMispronounced = Boolean(
-              mispronouncedWordIds?.has(word.word_id) ||
-              alignment?.status === "SUBSTITUTE" ||
-              previewStatus?.status === "SUBSTITUTE",
+              !correctWordIds?.has(word.word_id) &&
+              (
+                mispronouncedWordIds?.has(word.word_id) ||
+                alignment?.status === "SUBSTITUTE" ||
+                previewStatus?.status === "SUBSTITUTE"
+              ),
             );
 
             const isCorrect = Boolean(

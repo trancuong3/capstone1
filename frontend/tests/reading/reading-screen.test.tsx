@@ -240,9 +240,10 @@ function createReadingFixtures() {
           pages_explored: 2,
           practiced_words: 0,
         }),
-      finish: vi
-        .fn<ReadingServices["readingService"]["finish"]>()
-        .mockResolvedValue(sessionSummaryFixture),
+      finish: vi.fn().mockResolvedValue({
+    // Giữ nguyên dữ liệu hiện tại
+      }),
+      createRetryEvent: vi.fn().mockResolvedValue(undefined),
     },
     readingSocketAdapter: {
       subscribe: vi

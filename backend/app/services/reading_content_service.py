@@ -115,7 +115,11 @@ class ReadingContentService:
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
-
+        if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot create reading events for a finished session",
+            )
         session_rows = await self.repository.session_page_rows(session.Id)
         if session_rows:
             snapshot = await self.repository.session_page(session.Id, payload.PageId)

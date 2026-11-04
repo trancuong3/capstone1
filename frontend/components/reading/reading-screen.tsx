@@ -74,6 +74,7 @@ interface BrowserSpeechEvent {
     length: number;
     [index: number]: {
       isFinal: boolean;
+      length: number;
       [index: number]: {
         transcript: string;
       };
@@ -102,13 +103,33 @@ interface WindowWithSpeech {
   SpeechRecognition?: new () => BrowserSpeechRecognition;
   webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
 }
-
+interface RetryWordCandidate {
+  wordId: string;
+  text: string;
+  contextPhrase: string;
+  pageId: string;
+  pageRevisionId: string;
+  pageNumber: number;
+  wordIndex: number;
+  originalStatus: "OMISSION" | "MISPRONUNCIATION";
+}
 interface PageTranscriptBucket {
   readonly page_id: string;
   readonly page_revision_id: string;
   readonly page_number: number;
   readonly segments: string[];
   readonly words: WordTimestamp[];
+}
+type RetryOriginalStatus = "OMISSION" | "MISPRONUNCIATION";
+
+interface RetryWordItem {
+  word_id: string;
+  page_id: string;
+  page_revision_id: string;
+  page_number: number;
+  word_index: number;
+  text: string;
+  original_status: RetryOriginalStatus;
 }
 
 export function ReadingScreen({
@@ -186,7 +207,21 @@ export function ReadingScreen({
   const skippedWordIdsRef = useRef<Set<string>>(new Set());
   const repeatedWordIdsRef = useRef<Set<string>>(new Set());
   const hesitationWordIdsRef = useRef<Set<string>>(new Set());
-
+  const [retryPrompt, setRetryPrompt] = useState(false);
+  const [retryMode, setRetryMode] = useState(false);
+  const [retryCandidates, setRetryCandidates] = useState<RetryWordCandidate[]>([]);
+  const [retryConfirmedWordIds, setRetryConfirmedWordIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [retryWordPosition, setRetryWordPosition] = useState(0);
+  const [retryFeedback, setRetryFeedback] = useState<
+    "waiting" | "incorrect" | "success"
+  >("waiting");
+  const retryModeRef = useRef(false);
+  const retryProcessingRef = useRef(false);
+  const retryShouldRestartRef = useRef(false);
+  const retryListeningWantedRef = useRef(false);
+  const retryPositionRef = useRef(0);
 
   useEffect(() => {
     if (!page?.words?.length) {
@@ -213,6 +248,7 @@ export function ReadingScreen({
   );
   const browserStopResolveRef = useRef<(() => void) | null>(null);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
+  const retryWordsByIdRef = useRef<Map<string, RetryWordItem>>(new Map());
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -223,7 +259,21 @@ export function ReadingScreen({
     Promise.resolve(false),
   );
   const isUsingRecorderRef = useRef(false);
+  const prepareFinishStartedRef = useRef(false);
+  const initialAssessmentPreparedRef = useRef(false);
 
+  const pageWordContextRef = useRef(
+    new Map<
+      string,
+      {
+        pageId: string;
+        pageRevisionId: string;
+        pageNumber: number;
+        wordIndex: number;
+        text: string;
+      }
+    >(),
+  );
   const recordSpokenText = useCallback(
     (
       text: string,
@@ -263,7 +313,7 @@ export function ReadingScreen({
       }
 
       const spokenTokens = trimmed
-        .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?'\"“”—]/g, "" )
         .split(/\s+/)
         .map((word) => word.trim())
         .filter((word) => word.length > 0);
@@ -312,6 +362,7 @@ export function ReadingScreen({
     return () => {
       mountedRef.current = false;
       isListeningActiveRef.current = false;
+      retryModeRef.current = false;
       transcriptionAbortRef.current?.abort();
       try {
         recognitionRef.current?.abort?.();
@@ -346,9 +397,18 @@ export function ReadingScreen({
 
   useEffect(() => {
     if (!page) return;
-    for (const word of page.words) {
+
+    page.words.forEach((word, index) => {
       wordTextByIdRef.current.set(word.word_id, word.text);
-    }
+
+      pageWordContextRef.current.set(word.word_id, {
+        pageId: page.page_id,
+        pageRevisionId: page.page_revision_id,
+        pageNumber: page.page_number,
+        wordIndex: word.word_index ?? index,
+        text: word.text,
+      });
+    });
   }, [page]);
 
   useEffect(() => {
@@ -479,7 +539,7 @@ export function ReadingScreen({
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[đĐ]/g, "d")
-      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?'\"“”—]/g, "" )
       .trim();
   }
 
@@ -493,12 +553,17 @@ export function ReadingScreen({
     const nextHesitationIds = new Set(hesitationWordIdsRef.current);
 
     for (const word of snapshot.statusByWordId.values()) {
+      const retryItem = retryWordsByIdRef.current.get(word.wordId);
+
       switch (word.status) {
         case "MATCH":
           nextCorrectIds.add(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+
+          // Đọc đúng trong lượt đầu thì không cần retry.
+          retryWordsByIdRef.current.delete(word.wordId);
           break;
 
         case "SUBSTITUTE":
@@ -506,6 +571,13 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+
+          if (retryItem) {
+            retryWordsByIdRef.current.set(word.wordId, {
+              ...retryItem,
+              original_status: "MISPRONUNCIATION",
+            });
+          }
           break;
 
         case "DELETE":
@@ -513,6 +585,13 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
+
+          if (retryItem) {
+            retryWordsByIdRef.current.set(word.wordId, {
+              ...retryItem,
+              original_status: "OMISSION",
+            });
+          }
           break;
 
         case "REPEATED":
@@ -520,12 +599,16 @@ export function ReadingScreen({
           nextCorrectIds.delete(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
+
+          // Không retry từ đọc lặp.
+          retryWordsByIdRef.current.delete(word.wordId);
           break;
       }
     }
 
     for (const id of snapshot.repeatedWordIds) {
       nextRepeatedIds.add(id);
+      retryWordsByIdRef.current.delete(id);
     }
 
     for (const id of snapshot.hesitationWordIds) {
@@ -915,6 +998,20 @@ export function ReadingScreen({
   }
 
   async function handleReadSample() {
+    if (retryModeRef.current) {
+      stopRetryRecognition();
+      if (speechPlayer.isPlaying) speechPlayer.stop();
+      const candidate = retryCandidates[retryWordPosition];
+      if (candidate) {
+        setIsReadingWord(true);
+        try {
+          await speechPlayer.play(candidate.text);
+        } finally {
+          if (mountedRef.current) setIsReadingWord(false);
+        }
+      }
+      return;
+    }
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
@@ -1042,6 +1139,16 @@ export function ReadingScreen({
   }
 
   async function handleToggleListening() {
+    if (retryModeRef.current) {
+      const candidate = retryCandidates[retryWordPosition];
+      if (!candidate) return;
+      if (isMicRecording) {
+        stopRetryRecognition();
+      } else {
+        startRetryRecognition(candidate);
+      }
+      return;
+    }
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
@@ -1095,6 +1202,15 @@ export function ReadingScreen({
       transcriptsListRef.current = [];
       pageTranscriptsRef.current.clear();
       browserTranscriptCollectorRef.current.reset();
+      retryWordsByIdRef.current.clear();
+      retryModeRef.current = false;
+      retryListeningWantedRef.current = false;
+      retryProcessingRef.current = false;
+      setRetryMode(false);
+      setRetryCandidates([]);
+      setRetryConfirmedWordIds(new Set());
+      setRetryWordPosition(0);
+      setRetryFeedback("waiting");
 
       // Reset toàn bộ trạng thái nhận diện.
       correctWordIdsRef.current.clear();
@@ -1374,16 +1490,467 @@ export function ReadingScreen({
       if (mountedRef.current) setIsBusy(false);
     }
   }
+  function buildRetryContextPhrase(
+    words: readonly ReadingPageWordDTO[],
+    targetIndex: number,
+  ): string {
+    const target = words[targetIndex];
+    if (!target) return "";
 
-  async function finishReading() {
+    const targetLine = target.line_index;
+
+    let start = targetIndex;
+    let end = targetIndex;
+
+    // Lấy tối đa 2 từ trước và 2 từ sau.
+    for (let i = targetIndex - 1; i >= Math.max(0, targetIndex - 2); i--) {
+      const word = words[i];
+
+      if (
+        targetLine !== undefined &&
+        word.line_index !== undefined &&
+        word.line_index !== targetLine
+      ) {
+        break;
+      }
+
+      // Không lấy qua ranh giới câu.
+      if (/[.!?…]["”']?$/.test(words[i].text)) break;
+
+      start = i;
+    }
+
+    for (
+      let i = targetIndex + 1;
+      i <= Math.min(words.length - 1, targetIndex + 2);
+      i++
+    ) {
+      const word = words[i];
+
+      if (
+        targetLine !== undefined &&
+        word.line_index !== undefined &&
+        word.line_index !== targetLine
+      ) {
+        break;
+      }
+
+      end = i;
+
+      // Không lấy tiếp sang câu kế tiếp.
+      if (/[.!?…]["”']?$/.test(word.text)) break;
+    }
+
+    return words
+      .slice(start, end + 1)
+      .map((word) => word.text)
+      .join(" ");
+  }
+  function buildRetryCandidates(): RetryWordCandidate[] {
+    if (!page) return [];
+
+    return page.words
+      .map((word, index) => ({
+        word,
+        index,
+      }))
+      .filter(
+        ({ word }) =>
+          skippedWordIdsRef.current.has(word.word_id) ||
+          mispronouncedWordIdsRef.current.has(word.word_id),
+      )
+      .map(({ word, index }) => ({
+        wordId: word.word_id,
+        text: word.text,
+        contextPhrase: buildRetryContextPhrase(page.words, index),
+        pageId: page.page_id,
+        pageRevisionId: page.page_revision_id,
+        pageNumber: page.page_number,
+        wordIndex: word.word_index ?? index,
+        originalStatus: skippedWordIdsRef.current.has(word.word_id)
+          ? "OMISSION"
+          : "MISPRONUNCIATION",
+      }));
+  }
+
+  function normalizeRetryText(value: string): string {
+    return value
+      .normalize("NFC")
+      .toLocaleLowerCase("vi-VN")
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()?'\"“”—]/g, "" )
+      .trim()
+      .replace(/\s+/g, " ");
+  }
+
+  function stopRetryRecognition(): void {
+    // Tắt cờ trước khi gọi stop để onend không tự bật microphone lại.
+    retryListeningWantedRef.current = false;
+    retryShouldRestartRef.current = false;
+    isListeningActiveRef.current = false;
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+
+    if (recognition) {
+      try {
+        // stop() kết thúc phiên nhận diện bình thường; abort() gây lỗi "aborted"
+        // dù người dùng chỉ đang chủ động tắt microphone.
+        recognition.stop();
+      } catch {
+        // Recognition có thể đã tự kết thúc.
+      }
+    }
+
+    if (mountedRef.current) setIsMicRecording(false);
+  }
+
+  function startRetryRecognition(candidate: RetryWordCandidate): boolean {
+    if (typeof window === "undefined") return false;
+
+    const win = window as unknown as WindowWithSpeech;
+    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      retryListeningWantedRef.current = false;
+      isListeningActiveRef.current = false;
+      setIsMicRecording(false);
+      setRetryFeedback("incorrect");
+      setLatestTranscript(
+        "Trình duyệt chưa hỗ trợ nhận diện giọng nói. Bé hãy thử dùng Chrome nhé.",
+      );
+      return false;
+    }
+
+    // Tránh mở hai phiên SpeechRecognition cùng lúc.
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // Bỏ qua phiên cũ đã kết thúc.
+      }
+      recognitionRef.current = null;
+    }
+
+    const recognition = new SpeechRec();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "vi-VN";
+    recognition.maxAlternatives = 3;
+
+    retryListeningWantedRef.current = true;
+    retryShouldRestartRef.current = false;
+    isListeningActiveRef.current = true;
+
+    
+    recognition.onresult = (event: BrowserSpeechEvent) => {
+      if (!mountedRef.current || !retryModeRef.current) return;
+
+      let interim = "";
+      let finalText = "";
+
+      for (
+        let index = event.resultIndex;
+        index < event.results.length;
+        index += 1
+      ) {
+        const result = event.results[index];
+
+        if (result.isFinal) {
+          // Chỉ lấy kết quả STT đầu tiên.
+          const transcript = result[0]?.transcript?.trim() ?? "";
+
+          if (transcript) {
+            finalText = transcript;
+          }
+        } else {
+          interim = result[0]?.transcript?.trim() ?? "";
+        }
+      }
+
+      if (interim) {
+        setLatestTranscript(interim);
+      }
+
+      if (!finalText || retryProcessingRef.current) return;
+
+      retryProcessingRef.current = true;
+      setLatestTranscript(finalText);
+
+      const expected = normalizeRetryText(candidate.text);
+      const recognized = normalizeRetryText(finalText);
+
+      console.log("[RETRY STT DEBUG]", {
+        expected,
+        recognized,
+        finalText,
+      });
+
+      const isCorrect = recognized
+        .split(" ")
+        .includes(expected);
+      if (isCorrect) {
+        retryListeningWantedRef.current = false;
+        retryShouldRestartRef.current = false;
+        isListeningActiveRef.current = false;
+        setIsMicRecording(false);
+        setRetryFeedback("success");
+
+        setRetryConfirmedWordIds((previous) => {
+          const next = new Set(previous);
+          next.add(candidate.wordId);
+          return next;
+        });
+
+        // Chỉ cập nhật màu giao diện, không thay đổi kết quả lượt đọc gốc.
+        setCorrectWordIds((previous) => {
+          const next = new Set(previous);
+          next.add(candidate.wordId);
+          return next;
+        });
+
+        window.setTimeout(() => {
+          retryProcessingRef.current = false;
+
+          const nextPosition = retryPositionRef.current + 1;
+
+          if (nextPosition >= retryCandidates.length) {
+            retryModeRef.current = false;
+            retryListeningWantedRef.current = false;
+            setRetryMode(false);
+            stopRetryRecognition();
+            void completeReadingSession();
+            return;
+          }
+
+          setRetryWordPosition(nextPosition);
+          void beginRetryWord(nextPosition);
+        }, 450);
+      } else {
+        setRetryFeedback("incorrect");
+
+        // Giữ cơ chế tự nghe lại hiện tại.
+        retryShouldRestartRef.current = true;
+        retryProcessingRef.current = false;
+      }
+    };
+
+
+    recognition.onerror = (event: BrowserSpeechErrorEvent) => {
+      // "aborted" thường xuất hiện khi chủ động dừng phiên nhận diện.
+      // Không xem đây là lỗi và không in log gây nhiễu.
+      if (event.error === "aborted") return;
+
+      if (event.error === "no-speech") {
+        // Bé chưa nói trong khoảng thời gian của trình duyệt.
+        // Tự mở lại phiên nghe nếu microphone vẫn đang được bật.
+        retryShouldRestartRef.current = retryListeningWantedRef.current;
+        return;
+      }
+
+      console.warn("[RETRY SPEECH RECOGNITION ERROR]", event.error);
+
+      if (
+        event.error === "not-allowed" ||
+        event.error === "service-not-allowed" ||
+        event.error === "language-not-supported" ||
+        event.error === "audio-capture" ||
+        event.error === "network"
+      ) {
+        retryListeningWantedRef.current = false;
+        retryShouldRestartRef.current = false;
+        isListeningActiveRef.current = false;
+        setIsMicRecording(false);
+        setRetryFeedback("incorrect");
+
+        const message =
+          event.error === "not-allowed" || event.error === "service-not-allowed"
+            ? "Microphone chưa được cấp quyền. Hãy cho phép trình duyệt sử dụng microphone."
+            : event.error === "audio-capture"
+              ? "Không tìm thấy microphone. Hãy kiểm tra thiết bị ghi âm."
+              : event.error === "network"
+                ? "Kết nối nhận diện giọng nói bị gián đoạn. Hãy kiểm tra Internet."
+                : "Trình duyệt không hỗ trợ nhận diện tiếng Việt.";
+        setLatestTranscript(message);
+      }
+    };
+
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+
+      if (!mountedRef.current || !retryModeRef.current) return;
+
+      if (retryListeningWantedRef.current) {
+        // Chrome thường kết thúc một lượt nhận diện sau câu nói hoặc no-speech.
+        // Tạo phiên mới để tiếp tục nghe từ hiện tại.
+        window.setTimeout(() => {
+          if (
+            mountedRef.current &&
+            retryModeRef.current &&
+            retryListeningWantedRef.current &&
+            !recognitionRef.current
+          ) {
+            retryProcessingRef.current = false;
+            startRetryRecognition(candidate);
+          }
+        }, 250);
+        return;
+      }
+
+      isListeningActiveRef.current = false;
+      setIsMicRecording(false);
+    };
+
+    try {
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsMicRecording(true);
+      return true;
+    } catch (error) {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+      retryListeningWantedRef.current = false;
+      isListeningActiveRef.current = false;
+      setIsMicRecording(false);
+      console.error("Không thể bắt đầu nhận diện từ cần đọc lại:", error);
+      return false;
+    }
+  }
+
+  async function beginRetryWord(position: number): Promise<void> {
+    const candidate = retryCandidates[position];
+    if (!candidate || !mountedRef.current) return;
+
+    stopRetryRecognition();
+    retryListeningWantedRef.current = false;
+    retryProcessingRef.current = false;
+    retryPositionRef.current = position;
+    setRetryWordPosition(position);
+    setRetryFeedback("waiting");
+    setCurrentWordId(candidate.wordId);
+    setLatestTranscript("");
+    setIsReadingWord(false);
+    setRetryFeedback("waiting");
+    // Không tự phát âm mẫu và không tự bật microphone.
+    // Bé chủ động bấm "Nghe mẫu" hoặc "Bật mic" khi đã sẵn sàng.
+  }
+
+  function startRetrySession(): void {
+    if (retryCandidates.length === 0) {
+      void completeReadingSession();
+      return;
+    }
+
+    retryModeRef.current = true;
+    retryProcessingRef.current = false;
+    setRetryConfirmedWordIds(new Set());
+    retryPositionRef.current = 0;
+    setRetryWordPosition(0);
+    setRetryFeedback("waiting");
+    setRetryMode(true);
+    void beginRetryWord(0);
+  }
+
+  async function completeReadingSession() {
     if (finishStartedRef.current) return;
 
     finishStartedRef.current = true;
     setIsBusy(true);
-    speechPlayer.stop();
 
     try {
-      // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản
+      // REST là nguồn dữ liệu chính thức để kết thúc session.
+      const finishedSession =
+        await services.readingService.finish(sessionId);
+
+      // WebSocket chỉ là thông báo phụ, không ảnh hưởng kết quả REST.
+      void services.readingSocketAdapter
+        .sendControl(sessionId, "finish")
+        .catch((error: unknown) => {
+          console.warn(
+            "Không gửi được tín hiệu kết thúc buổi đọc:",
+            error,
+          );
+        });
+
+      if (!mountedRef.current) return;
+
+      const wordsList = Array.from(spokenWordsSetRef.current);
+      const durationMinutes = getDurationMinutes(
+        finishedSession.duration_ms,
+      );
+
+      const persistedCompletion = await services.readingService
+        .getCompletionSummary(sessionId)
+        .catch(() => null);
+
+      const correctWordsList = Array.from(correctWordIdsRef.current)
+        .map((wordId) => wordTextByIdRef.current.get(wordId))
+        .filter((word): word is string => Boolean(word));
+
+      const mispronouncedWordsList = Array.from(
+        failedWordsSetRef.current,
+      );
+
+      const totalTracked =
+        correctWordsList.length + mispronouncedWordsList.length;
+
+      const score =
+        totalTracked > 0
+          ? Math.round(
+              (correctWordsList.length / totalTracked) * 100,
+            )
+          : null;
+
+      const updatedSummary: ReadingCompletionSummaryUI = {
+        correct_words: correctWordsList,
+        duration_minutes: durationMinutes,
+        mispronounced_words: mispronouncedWordsList,
+        pages_explored:
+          persistedCompletion?.pages_explored ??
+          (pageProgress?.persisted
+            ? pageProgress.completed_pages
+            : null),
+        selected_range_pages:
+          persistedCompletion?.selected_range_pages ??
+          (pageProgress?.persisted
+            ? pageProgress.total_pages
+            : null),
+        practiced_words: wordsList.length,
+        score,
+        spoken_words: wordsList,
+        transcripts: [...transcriptsListRef.current],
+      };
+
+      setSessionSummary(updatedSummary);
+      setCanonicalState("FINISHED");
+      setConfirmFinish(false);
+      setRetryPrompt(false);
+      setRetryMode(false);
+      setUiState("complete");
+    } catch (error) {
+      console.error("Lỗi khi kết thúc buổi đọc:", error);
+      finishStartedRef.current = false;
+    } finally {
+      if (mountedRef.current) {
+        setIsComparing(false);
+        setIsBusy(false);
+      }
+    }
+  }
+  async function prepareInitialReading() {
+    if (initialAssessmentPreparedRef.current) return;
+    if (prepareFinishStartedRef.current) return;
+    if (finishStartedRef.current) return;
+
+    prepareFinishStartedRef.current = true;
+    setIsBusy(true);
+    speechPlayer.stop();
+
+    let isCompletingSession = false;
+
+    try {
+      // 1. Dừng microphone và chờ chuyển ghi âm thành văn bản.
       if (isMicRecording) {
         try {
           await stopListeningAndTranscribe();
@@ -1398,32 +1965,47 @@ export function ReadingScreen({
       }
 
       if (!mountedRef.current) return;
-      // Hoàn tất alignment khi bé kết thúc buổi đọc.
-      // Các từ còn lại trong sách sẽ được đánh dấu DELETE.
+
+      // 2. Hoàn tất alignment của lượt đọc đầu tiên.
       const engine = alignmentEngineRef.current;
 
       if (engine) {
         const finalSnapshot = engine.finish();
         applyRealtimeSnapshot(finalSnapshot);
       }
-      // 2. Resolve actual recognized transcript evidence page by page.
-      const combinedTranscript = transcriptsListRef.current.join(" ").trim();
+
+      // 3. Tổng hợp transcript của lượt đọc đầu tiên.
+      const combinedTranscript = transcriptsListRef.current
+        .join(" ")
+        .trim();
+
       setFinalTranscript(combinedTranscript);
 
-      const pageBuckets = [...pageTranscriptsRef.current.values()]
-        .filter((bucket) => bucket.segments.some((segment) => segment.trim()))
-        .sort((left, right) => left.page_number - right.page_number);
+      // 4. Lấy transcript theo từng trang.
+      const pageBuckets = [
+        ...pageTranscriptsRef.current.values(),
+      ]
+        .filter((bucket) =>
+          bucket.segments.some((segment) => segment.trim()),
+        )
+        .sort(
+          (left, right) =>
+            left.page_number - right.page_number,
+        );
 
-      // Compare each transcript against the exact page revision read by the child.
+      // 5. So sánh transcript với nội dung từng trang.
       setComparisonResult(null);
+
       if (pageBuckets.length > 0) {
         setIsComparing(true);
         setComparisonError(null);
+
         let latestResult: ComparisonResult | null = null;
         let firstComparisonError: string | null = null;
 
         for (const bucket of pageBuckets) {
           const transcript = bucket.segments.join(" ").trim();
+
           if (!transcript) continue;
 
           try {
@@ -1443,6 +2025,7 @@ export function ReadingScreen({
               pageRevisionId: bucket.page_revision_id,
               error,
             });
+
             firstComparisonError ??=
               error instanceof Error
                 ? error.message
@@ -1451,9 +2034,9 @@ export function ReadingScreen({
         }
 
         if (!mountedRef.current) return;
+
         setComparisonResult(latestResult);
         setComparisonError(firstComparisonError);
-        setIsComparing(false);
       } else {
         setComparisonError(
           "Chưa nhận diện được lời đọc thực tế nên chưa thể tạo báo cáo đối chiếu.",
@@ -1462,75 +2045,66 @@ export function ReadingScreen({
 
       if (!mountedRef.current) return;
 
-      // 4. Kết thúc session
-      // The REST finish call is the durable source of truth. A failed
-      // WebSocket notification must not make the UI retry an already-finished
-      // session or submit the finish operation a second time.
-      const finishedSession = await services.readingService.finish(sessionId);
-      void services.readingSocketAdapter
-        .sendControl(sessionId, "finish")
-        .catch((error: unknown) => {
-          console.warn("Không gửi được tín hiệu kết thúc buổi đọc:", error);
-        });
+      // 6. Đánh dấu lượt đánh giá đầu tiên đã hoàn tất.
+      initialAssessmentPreparedRef.current = true;
 
-      if (!mountedRef.current) return;
+      // 7. Tạo danh sách từ cần đọc lại.
+      const candidates = buildRetryCandidates();
 
-      // 5. Lấy thống kê buổi đọc
-      const wordsList = Array.from(spokenWordsSetRef.current);
-
-      const durationMinutes = getDurationMinutes(finishedSession.duration_ms);
-
-      const persistedCompletion = await services.readingService
-        .getCompletionSummary(sessionId)
-        .catch(() => null);
-
-      const correctWordsList = Array.from(correctWordIdsRef.current)
-        .map((wordId) => wordTextByIdRef.current.get(wordId))
-        .filter((word): word is string => Boolean(word));
-
-      const mispronouncedWordsList = Array.from(failedWordsSetRef.current);
-
-      const totalTracked =
-        correctWordsList.length + mispronouncedWordsList.length;
-
-      const score =
-        totalTracked > 0
-          ? Math.round((correctWordsList.length / totalTracked) * 100)
-          : null;
-
-      // 6. Tạo thống kê hoàn thành
-      const updatedSummary: ReadingCompletionSummaryUI = {
-        correct_words: correctWordsList,
-        duration_minutes: durationMinutes,
-        mispronounced_words: mispronouncedWordsList,
-        pages_explored:
-          persistedCompletion?.pages_explored ??
-          (pageProgress?.persisted ? pageProgress.completed_pages : null),
-        selected_range_pages:
-          persistedCompletion?.selected_range_pages ??
-          (pageProgress?.persisted ? pageProgress.total_pages : null),
-        practiced_words: wordsList.length,
-        score,
-        spoken_words: wordsList,
-        transcripts: [...transcriptsListRef.current],
-      };
-
-      // 7. Hiển thị màn hình hoàn thành
-      setSessionSummary(updatedSummary);
-      setCanonicalState("FINISHED");
+      setRetryCandidates(candidates);
       setConfirmFinish(false);
-      setUiState("complete");
-    } catch (error) {
-      console.error("Lỗi khi kết thúc buổi đọc:", error);
 
-      // Cho phép thử kết thúc lại nếu có lỗi
-      finishStartedRef.current = false;
+      // 8. Nếu có từ sai hoặc bị bỏ qua, hỏi bé có muốn đọc lại không.
+      if (candidates.length > 0) {
+        setRetryPrompt(true);
+        return;
+      }
+
+      // 9. Không có từ cần retry thì kết thúc session.
+      isCompletingSession = true;
+      await completeReadingSession();
+    } catch (error) {
+      console.error(
+        "Lỗi khi chuẩn bị kết thúc lượt đọc:",
+        error,
+      );
+
+      // Chỉ cho phép chuẩn bị lại nếu quá trình chuẩn bị thất bại.
+      initialAssessmentPreparedRef.current = false;
     } finally {
+      prepareFinishStartedRef.current = false;
+
       if (mountedRef.current) {
         setIsComparing(false);
-        setIsBusy(false);
+
+        // Không ghi đè trạng thái busy của completeReadingSession().
+        if (!isCompletingSession) {
+          setIsBusy(false);
+        }
       }
     }
+  }
+  async function finishReading() {
+    if (finishStartedRef.current) return;
+
+    // Nếu đang ở chế độ đọc lại:
+    // Dừng nhận diện và kết thúc session ngay.
+    if (retryModeRef.current || retryMode) {
+      stopRetryRecognition();
+
+      await completeReadingSession();
+      return;
+    }
+
+    // Nếu lượt đọc đầu tiên đã được đánh giá,
+    // không chạy alignment và compare lần nữa.
+    if (initialAssessmentPreparedRef.current) {
+      setConfirmFinish(false);
+      setRetryPrompt(true);
+      return;
+    }
+
+    await prepareInitialReading();
   }
   if (loadState.status === "error" || loadState.status === "not-found") {
     const notFound = loadState.status === "not-found";
@@ -1712,9 +2286,14 @@ export function ReadingScreen({
         bookTitle={book.title}
         previewSnapshot={previewSnapshot}
         controlsDisabled={
-          uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
+          uiState !== "reading" ||
+          (isBusy && !speechPlayer.isPlaying)
         }
-        correctWordIds={correctWordIds}
+        correctWordIds={
+          retryConfirmedWordIds.size > 0
+            ? new Set([...correctWordIds, ...retryConfirmedWordIds])
+            : correctWordIds
+        }
         countdown={countdown}
         currentWordId={currentWordId}
         currentWordText={
@@ -1726,23 +2305,52 @@ export function ReadingScreen({
         )}
         isListening={uiState === "reading"}
         isMicRecording={isMicRecording}
+        retryContextPhrase={
+          retryMode
+            ? retryCandidates[retryWordPosition]?.contextPhrase ?? null
+            : null
+        }
+        retryMode={retryMode}
+        retryWordPosition={retryWordPosition + 1}
+        retryWordCount={retryCandidates.length}
+        retryFeedback={retryFeedback}
         isPageTransitioning={uiState === "page-turn"}
         isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
         isReadingWord={isReadingWord}
         isSpeaking={speechRecorder.isSpeaking}
         latestTranscript={latestTranscript}
-        mispronouncedWordIds={mispronouncedWordIds}
+        mispronouncedWordIds={
+          retryConfirmedWordIds.size > 0
+            ? new Set(
+                [...mispronouncedWordIds].filter(
+                  (wordId) => !retryConfirmedWordIds.has(wordId),
+                ),
+              )
+            : mispronouncedWordIds
+        }
         onFinish={() => setConfirmFinish(true)}
         onHelp={() => void requestTutor()}
         onManualPage={() => setUiState("manual-page")}
         onPause={() => void pauseReading()}
         onReadSample={() => void handleReadSample()}
-        onReadWord={handleReadCurrentWord}
+        onReadWord={
+          retryMode
+            ? () => void handleReadSample()
+            : handleReadCurrentWord
+        }
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
         spokenWords={spokenWords}
-        skippedWordIds={skippedWordIds}
+        skippedWordIds={
+          retryConfirmedWordIds.size > 0
+            ? new Set(
+                [...skippedWordIds].filter(
+                  (wordId) => !retryConfirmedWordIds.has(wordId),
+                ),
+              )
+            : skippedWordIds
+        }
         repeatedWordIds={repeatedWordIds}
         hesitationWordIds={hesitationWordIds}
         comparisonResult={comparisonResult}
@@ -1753,7 +2361,29 @@ export function ReadingScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
-      {confirmFinish ? (
+      {retryPrompt ? (
+        <ReadingStatusDialog
+          body={`Bé còn ${retryCandidates.length} từ cần đọc lại. Mình cùng luyện thêm một lần nhé!`}
+          onClose={() => undefined}
+          primaryAction={{
+            isLoading: isBusy,
+            label: "Đồng ý, đọc lại",
+            onClick: () => {
+              setRetryPrompt(false);
+              startRetrySession();
+            },
+          }}
+          secondaryAction={{
+            label: "Bỏ qua",
+            onClick: () => {
+              retryModeRef.current = false;
+              setRetryPrompt(false);
+              void completeReadingSession();
+            },
+          }}
+          title="Mình đọc lại những từ này nhé?"
+        />
+      ) : confirmFinish ? (
         <ReadingStatusDialog
           body="Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."
           closeOnEscape
