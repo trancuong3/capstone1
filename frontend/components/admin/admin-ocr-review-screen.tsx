@@ -827,6 +827,14 @@ export function AdminOcrReviewScreen({
                   <p className="mt-2 text-xs text-muted">
                     {describeWordConfidence(word)}
                   </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {word.bbox_quality_status === "EVALUATED" &&
+                    typeof word.bbox_quality === "number"
+                      ? `Chất lượng bounding box đã đánh giá: ${(word.bbox_quality * 100).toFixed(1)}%`
+                      : word.bbox_quality_status === "NOT_EVALUATED"
+                        ? "Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn"
+                        : "Bounding box: chưa có dữ liệu đánh giá"}
+                  </p>
                 </div>
               ))}
             </div>
