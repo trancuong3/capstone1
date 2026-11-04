@@ -188,6 +188,14 @@ function createReadingFixtures() {
       getSnapshot: vi
         .fn<ReadingServices["devicePermissionService"]["getSnapshot"]>()
         .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      requestAccess: vi
+        .fn<ReadingServices["devicePermissionService"]["requestAccess"]>()
+        .mockResolvedValue({
+          status: "granted",
+          verified: true,
+          message: "Device is available",
+          mediaRecorderSupported: true,
+        }),
       retry: vi
         .fn<ReadingServices["devicePermissionService"]["retry"]>()
         .mockResolvedValue("ready"),
