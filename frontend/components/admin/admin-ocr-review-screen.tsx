@@ -409,6 +409,7 @@ export function AdminOcrReviewScreen({
   const calibratedWordCount = words.filter(
     (word) =>
       word.calibration_status === "CALIBRATED" &&
+      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT" &&
       typeof word.calibrated_confidence === "number",
   ).length;
   const rawWordScoreCount = words.filter(
