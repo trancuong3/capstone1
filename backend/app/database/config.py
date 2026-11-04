@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import dotenv_values
+from sqlalchemy.engine import make_url
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
@@ -12,7 +13,11 @@ WORKSPACE_ROOT = REPOSITORY_ROOT.parent
 
 def _load_missing_dotenv_values() -> None:
     """Load known dotenv paths without replacing non-empty process settings."""
-    for dotenv_path in (BACKEND_ROOT / ".env", REPOSITORY_ROOT / ".env", WORKSPACE_ROOT / ".env"):
+    for dotenv_path in (
+        BACKEND_ROOT / ".env",
+        REPOSITORY_ROOT / ".env",
+        WORKSPACE_ROOT / ".env",
+    ):
         if not dotenv_path.is_file():
             continue
         for key, value in dotenv_values(dotenv_path).items():
@@ -63,24 +68,74 @@ def _float_env(name: str, default: float, *, minimum: float, maximum: float) -> 
     return value
 
 
-# Keep each process deliberately below the observed 15-client Supabase
-# session-pool limit. Multiply (pool size + overflow) by every app worker and
-# instance when setting production values.
-DATABASE_POOL_SIZE = _int_env("DATABASE_POOL_SIZE", 3, minimum=1, maximum=15)
-DATABASE_MAX_OVERFLOW = _int_env("DATABASE_MAX_OVERFLOW", 0, minimum=0, maximum=14)
-DATABASE_POOL_TIMEOUT = _float_env(
-    "DATABASE_POOL_TIMEOUT", 10.0, minimum=1.0, maximum=120.0
-)
-DATABASE_POOL_RECYCLE = _int_env(
-    "DATABASE_POOL_RECYCLE", 900, minimum=60, maximum=7200
-)
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
-if DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW > 15:
-    raise ValueError(
-        "DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW must not exceed 15 per worker"
-    )
+
+DATABASE_POOLER_MODE = (
+    os.getenv("DATABASE_POOLER_MODE") or "local"
+).strip().lower()
+if DATABASE_POOLER_MODE not in {"local", "transaction"}:
+    raise ValueError("DATABASE_POOLER_MODE must be 'local' or 'transaction'")
+
+DATABASE_SSL_REQUIRED = _bool_env(
+    "DATABASE_SSL_REQUIRED",
+    default=DATABASE_POOLER_MODE == "transaction",
+)
+DATABASE_SSL_ROOT_CERT = (
+    os.getenv("DATABASE_SSL_ROOT_CERT") or ""
+).strip() or None
+
+DATABASE_CONCURRENCY_LIMIT = _int_env(
+    "DATABASE_CONCURRENCY_LIMIT", 8, minimum=1, maximum=256
+)
+DATABASE_CONCURRENCY_WAIT_TIMEOUT = _float_env(
+    "DATABASE_CONCURRENCY_WAIT_TIMEOUT", 5.0, minimum=0.1, maximum=120.0
+)
+DATABASE_CONNECT_TIMEOUT = _float_env(
+    "DATABASE_CONNECT_TIMEOUT", 10.0, minimum=1.0, maximum=120.0
+)
+DATABASE_COMMAND_TIMEOUT = _float_env(
+    "DATABASE_COMMAND_TIMEOUT", 30.0, minimum=1.0, maximum=600.0
+)
 
 if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
-        "Missing required backend environment variables: DATABASE_URL, SUPABASE_URL, SUPABASE_KEY"
+        "Missing required backend environment variables: "
+        "DATABASE_URL, SUPABASE_URL, SUPABASE_KEY"
     )
+
+try:
+    _database_url = make_url(DATABASE_URL)
+except Exception as error:
+    raise ValueError("DATABASE_URL is not a valid SQLAlchemy URL") from error
+
+if _database_url.drivername != "postgresql+asyncpg":
+    raise ValueError("DATABASE_URL must use the postgresql+asyncpg driver")
+
+if DATABASE_POOLER_MODE == "transaction":
+    if _database_url.port != 6543:
+        raise ValueError(
+            "DATABASE_POOLER_MODE=transaction requires the Supabase Transaction "
+            "Pooler port 6543"
+        )
+    if not DATABASE_SSL_REQUIRED:
+        raise ValueError(
+            "DATABASE_SSL_REQUIRED must be true for the production transaction pooler"
+        )
+    if not DATABASE_SSL_ROOT_CERT:
+        raise ValueError(
+            "DATABASE_SSL_ROOT_CERT is required for production transaction-pooler connections"
+        )
+    if not Path(DATABASE_SSL_ROOT_CERT).is_file():
+        raise ValueError(
+            "DATABASE_SSL_ROOT_CERT must point to an available CA certificate file"
+        )
