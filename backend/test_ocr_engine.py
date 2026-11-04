@@ -171,7 +171,7 @@ class DualEngineOcrTests(unittest.TestCase):
 
         mock_viet = MagicMock()
         # Force the current integration to retain PaddleOCR's line text.
-        mock_viet.predict.return_value = "totally different recognition"
+        mock_viet.predict.return_value = "xyz"
 
         with patch.object(
             ocr_engine,
