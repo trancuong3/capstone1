@@ -107,7 +107,10 @@ export function BookDetailScreen({
           const matchedPage = targetPageId
             ? pages.find((p) => p.page_id === targetPageId)
             : null;
-          const startPage = matchedPage ?? pages[0] ?? null;
+          // Never silently substitute page 1 when OCR supplied an invalid pageId.
+          const startPage = targetPageId
+            ? matchedPage ?? null
+            : pages[0] ?? null;
           setSelectedPage(startPage);
           setSelectedEndPageId(
             pages[pages.length - 1]?.page_id ?? startPage?.page_id ?? null,
@@ -146,14 +149,19 @@ export function BookDetailScreen({
   ]);
 
   useEffect(() => {
-    if (state.status === "ready" && targetPageId) {
-      const btn = document.getElementById("start-reading-button");
-      if (btn) {
-        btn.scrollIntoView({ behavior: "smooth", block: "center" });
-        btn.focus();
-      }
+    if (
+      state.status !== "ready" ||
+      !targetPageId ||
+      !state.pages.some((candidate) => candidate.page_id === targetPageId)
+    ) {
+      return;
     }
-  }, [state.status, targetPageId]);
+    const btn = document.getElementById("start-reading-button");
+    if (btn) {
+      btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      btn.focus();
+    }
+  }, [state, targetPageId]);
 
   async function handleStartReading() {
     if (
@@ -330,6 +338,14 @@ export function BookDetailScreen({
           <p className="text-[26px] font-bold leading-[1.4] text-ink">
             {invitationFor(book)}
           </p>
+
+          {targetPageId && !selectedPage ? (
+            <StatusMessage title="Không tìm thấy trang được nhận diện" tone="warning">
+              Trang OCR trả về không nằm trong danh sách trang có thể đọc của
+              cuốn sách này. Ba mẹ hãy chọn đúng trang trong danh sách bên dưới;
+              ViRead sẽ không tự chọn một trang khác thay thế.
+            </StatusMessage>
+          ) : null}
 
           <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
