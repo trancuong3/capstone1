@@ -821,6 +821,41 @@ class AdminOcrService:
                 if evidence and evidence.get("confidence_scope") in {"word", "line", "unavailable"}
                 else "unknown"
             )
+            confidence_contract = metadata.get("confidence_contract")
+            contract_calibration_status = (
+                confidence_contract.get("calibration_status")
+                if isinstance(confidence_contract, dict)
+                else None
+            )
+            word_calibrated_score = (
+                finite_score(evidence.get("calibrated_confidence"), 1.0)
+                if evidence and evidence_applies
+                else None
+            )
+            is_calibrated = (
+                evidence is not None
+                and evidence_applies
+                and contract_calibration_status == "CALIBRATED"
+                and evidence.get("calibration_status") == "CALIBRATED"
+                and word_calibrated_score is not None
+                and isinstance(confidence_contract.get("calibration_version"), str)
+                and bool(confidence_contract.get("calibration_version").strip())
+            )
+            calibration_status = (
+                "CALIBRATED"
+                if is_calibrated
+                else "NOT_CALIBRATED"
+                if evidence and (
+                    contract_calibration_status == "NOT_CALIBRATED"
+                    or evidence.get("calibration_status") == "NOT_CALIBRATED"
+                )
+                else "UNKNOWN"
+            )
+            calibration_version = (
+                confidence_contract.get("calibration_version")
+                if is_calibrated and isinstance(confidence_contract, dict)
+                else None
+            )
             raw_engine_score = (
                 finite_score(evidence.get("raw_engine_score"), 100.0)
                 if evidence and evidence_applies and confidence_scope == "word"
@@ -848,10 +883,11 @@ class AdminOcrService:
                     else None
                 ),
                 "confidence_scope": confidence_scope,
-                "calibrated_confidence": None,
-                "calibration_status": (
-                    "NOT_CALIBRATED" if evidence else "UNKNOWN"
+                "calibrated_confidence": (
+                    word_calibrated_score if is_calibrated else None
                 ),
+                "calibration_status": calibration_status,
+                "calibration_version": calibration_version,
                 "confidence_applicability": (
                     "APPLIES_TO_CURRENT_TEXT"
                     if evidence and evidence_applies
