@@ -80,7 +80,19 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(first_word["text"], "Chú")
         self.assertEqual(first_word["normalized_text"], "chú")
         self.assertEqual(first_word["line_index"], 0)
-        self.assertAlmostEqual(first_word["ocr_confidence"], 0.95, places=2)
+        # VietOCR predict() supplies text only. The Paddle score is line-level,
+        # so neither value may be exposed as an individual word confidence.
+        self.assertIsNone(first_word["ocr_confidence"])
+        evidence = result["metadata"]["word_confidence_evidence"]
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0]["confidence_source"], "vietocr")
+        self.assertEqual(evidence[0]["confidence_scope"], "unavailable")
+        self.assertIsNone(evidence[0]["raw_engine_score"])
+        self.assertIsNone(evidence[0]["calibrated_confidence"])
+        self.assertEqual(evidence[0]["calibration_status"], "NOT_CALIBRATED")
+        self.assertFalse(
+            result["metadata"]["confidence_contract"]["calibrated_confidence_available"]
+        )
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
