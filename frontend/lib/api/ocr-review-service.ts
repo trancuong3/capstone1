@@ -49,6 +49,8 @@ export const adminRevisionDetailSchema = z.object({
         "ORIGINAL_OCR_TEXT_ONLY",
         "UNAVAILABLE",
       ]).optional(),
+      bbox_quality: z.number().min(0).max(1).nullable().optional(),
+      bbox_quality_status: z.enum(["EVALUATED", "NOT_EVALUATED", "UNKNOWN"]).optional(),
     }),
   ),
   ocr_metadata: z.record(z.string(), z.unknown()),
