@@ -79,6 +79,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         repository.get = AsyncMock(return_value=book_row())
         repository.is_eligible = AsyncMock(return_value=True)
         repository.previews = AsyncMock(return_value=[SimpleNamespace(ImagePath="bucket/page.png")])
+        repository.db.rollback = AsyncMock()
         with self.assertRaises(HTTPException) as caught:
             await CatalogService(repository=repository).previews(BOOK)
         self.assertEqual(caught.exception.status_code, 503)
@@ -91,6 +92,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
             Id=PAGE, PageNumber=2, ImagePath="https://example.test/page.png",
             LifecycleStatus="ACTIVE", CurrentVerifiedRevisionId=REVISION,
         )])
+        repository.db.rollback = AsyncMock()
         rows = await CatalogService(repository=repository).previews(BOOK)
         self.assertEqual(rows[0].current_verified_revision_id, REVISION)
         self.assertEqual(rows[0].page_number, 2)
@@ -102,6 +104,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
                 repository.get = AsyncMock(return_value=book_row())
                 repository.is_eligible = AsyncMock(return_value=True)
                 repository.previews = AsyncMock(return_value=[SimpleNamespace(ImagePath=image_path)])
+                repository.db.rollback = AsyncMock()
                 with self.assertRaises(HTTPException) as caught:
                     await CatalogService(repository=repository).previews(BOOK)
                 self.assertEqual(caught.exception.status_code, 503)
