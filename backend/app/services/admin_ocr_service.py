@@ -1121,4 +1121,6 @@ class AdminOcrService:
         )
 
     async def image_url(self, page: BookPage) -> str:
-        return create_signed_image_url(page.ImagePath)
+        image_path = page.ImagePath
+        await self.db.rollback()
+        return create_signed_image_url(image_path)
