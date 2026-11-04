@@ -45,6 +45,7 @@ interface ReadingLayoutProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  ambiguousWordIds?: Set<string>;
 }
 
 export function ReadingLayout({
@@ -79,6 +80,7 @@ export function ReadingLayout({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  ambiguousWordIds,
   previewSnapshot,
 }: ReadingLayoutProps) {
   return (
@@ -121,6 +123,7 @@ export function ReadingLayout({
           skippedWordIds={skippedWordIds}
           repeatedWordIds={repeatedWordIds}
           hesitationWordIds={hesitationWordIds}
+          ambiguousWordIds={ambiguousWordIds}
           comparisonResult={comparisonResult}
         />
       </CameraPreview>
