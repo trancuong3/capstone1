@@ -158,7 +158,7 @@ export function BookDetailScreen({
     }
     const btn = document.getElementById("start-reading-button");
     if (btn) {
-      btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      btn.scrollIntoView?.({ behavior: "smooth", block: "center" });
       btn.focus();
     }
   }, [state, targetPageId]);
