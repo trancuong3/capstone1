@@ -88,6 +88,10 @@ class AdminOcrRepository:
             query = query.with_for_update()
         return await self.db.scalar(query)
 
+    async def delete_page(self, page: BookPage) -> None:
+        """Delete only an unexposed PROCESSING placeholder created by this Service."""
+        await self.db.delete(page)
+
     @staticmethod
     def set_page_lifecycle_status(page: BookPage, status: str) -> BookPage:
         """Change page availability without deleting revisions or reading history."""
@@ -105,14 +109,16 @@ class AdminOcrRepository:
         return value is not None
 
     async def next_active_page_number(self, book_id: UUID) -> int:
-        """Return the next page number from ACTIVE rows only.
+        """Return the next number after ACTIVE pages and committed upload placeholders.
 
         Callers serialize allocation by locking the owning Book row first.
+        PROCESSING rows reserve their position while Storage/OCR work happens
+        outside a database transaction.
         """
         value = await self.db.scalar(
             select(func.max(BookPage.PageNumber)).where(
                 BookPage.BookId == book_id,
-                BookPage.LifecycleStatus == "ACTIVE",
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
             )
         )
         return int(value or 0) + 1
@@ -124,7 +130,7 @@ class AdminOcrRepository:
             select(BookPage)
             .where(
                 BookPage.BookId == book_id,
-                BookPage.LifecycleStatus == "ACTIVE",
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
             )
             .order_by(BookPage.PageNumber, BookPage.Id)
         )
