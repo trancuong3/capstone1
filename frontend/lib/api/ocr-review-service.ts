@@ -44,6 +44,7 @@ export const adminRevisionDetailSchema = z.object({
       confidence_scope: z.enum(["word", "line", "unavailable", "unknown"]).optional(),
       calibrated_confidence: z.number().min(0).max(1).nullable().optional(),
       calibration_status: z.enum(["CALIBRATED", "NOT_CALIBRATED", "UNKNOWN"]).optional(),
+      calibration_version: z.string().nullable().optional(),
       confidence_applicability: z.enum([
         "APPLIES_TO_CURRENT_TEXT",
         "ORIGINAL_OCR_TEXT_ONLY",
