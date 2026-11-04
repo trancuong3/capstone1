@@ -8,7 +8,7 @@ const alignmentSchema = z.object({
   spoken_word: z.string().nullable(),
   book_index: z.number().nullable(),
   spoken_index: z.number().nullable(),
-  status: z.enum(["MATCH", "DELETE", "INSERT", "SUBSTITUTE"]),
+  status: z.enum(["MATCH", "DELETE", "INSERT", "SUBSTITUTE", "AMBIGUOUS"]),
 });
 
 const summarySchema = z.object({
