@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeRealtimeWord,
-  normalizeRealtimeWithoutDiacritics,
+  normalizeRealtimeForAmbiguity,
   RealtimeAlignmentEngine,
 } from "@/lib/reading/realtime-alignment";
 import type { ReadingPageWordDTO } from "@/types/reading";
@@ -30,8 +30,8 @@ describe("RealtimeAlignmentEngine Vietnamese token identity", () => {
     expect(normalizeRealtimeWord("cá")).not.toBe(normalizeRealtimeWord("ca"));
     expect(normalizeRealtimeWord("d")).not.toBe(normalizeRealtimeWord("đ"));
     expect(
-      normalizeRealtimeWithoutDiacritics("d"),
-    ).not.toBe(normalizeRealtimeWithoutDiacritics("đ"));
+      normalizeRealtimeForAmbiguity("d"),
+    ).toBe(normalizeRealtimeForAmbiguity("đ"));
   });
 
   it("does not mark a diacritic-only transcript variant as an exact match", () => {
@@ -83,14 +83,15 @@ describe("RealtimeAlignmentEngine Vietnamese token identity", () => {
     expect(snapshot.statusByWordId.get("word-2")?.status).toBe("MATCH");
   });
 
-  it("does not collapse d and đ into an ambiguity that looks like an exact match", () => {
+  it("keeps d and đ distinct for exact matching but treats a one-letter STT difference as ambiguous", () => {
     const engine = new RealtimeAlignmentEngine(words("đi"));
     const snapshot = engine.addFinalTranscript("di");
     const finalSnapshot = engine.finish();
 
+    expect(normalizeRealtimeWord("đi")).not.toBe(normalizeRealtimeWord("di"));
     expect(snapshot.statusByWordId.get("word-1")?.status).toBeUndefined();
     expect(finalSnapshot.statusByWordId.get("word-1")?.status).toBe(
-      "SUBSTITUTE",
+      "AMBIGUOUS",
     );
   });
 });
