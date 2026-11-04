@@ -782,6 +782,26 @@ class AdminOcrService:
 
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
+        metadata = dict(revision.ProcessingMeta or {})
+        raw_evidence = metadata.get("word_confidence_evidence")
+        evidence_by_index: dict[int, dict[str, object]] = {}
+        if isinstance(raw_evidence, list):
+            for evidence in raw_evidence:
+                if not isinstance(evidence, dict):
+                    continue
+                raw_index = evidence.get("word_index")
+                if isinstance(raw_index, int) and not isinstance(raw_index, bool) and raw_index >= 0:
+                    evidence_by_index[raw_index] = evidence
+
+        def finite_score(value: object, maximum: float) -> float | None:
+            try:
+                score = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(score) or not 0.0 <= score <= maximum:
+                return None
+            return score
+
         words = []
         for row in rows:
             box = row.BoundingBox
@@ -789,11 +809,56 @@ class AdminOcrService:
                 box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
             if not isinstance(box, list) or len(box) != 4:
                 raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
+
+            evidence = evidence_by_index.get(int(row.WordIndex))
+            recognized_text = evidence.get("recognized_text") if evidence else None
+            evidence_applies = (
+                isinstance(recognized_text, str)
+                and normalize_word(recognized_text) == normalize_word(str(row.Text))
+            )
+            confidence_scope = (
+                str(evidence.get("confidence_scope"))
+                if evidence and evidence.get("confidence_scope") in {"word", "line", "unavailable"}
+                else "unknown"
+            )
+            raw_engine_score = (
+                finite_score(evidence.get("raw_engine_score"), 100.0)
+                if evidence and evidence_applies and confidence_scope == "word"
+                else None
+            )
+            line_engine_score = (
+                finite_score(evidence.get("line_engine_score"), 1.0)
+                if evidence and evidence_applies and confidence_scope == "line"
+                else None
+            )
             words.append({
-                "word_index": row.WordIndex, "line_index": row.LineIndex, "text": row.Text,
+                "word_index": row.WordIndex,
+                "line_index": row.LineIndex,
+                "text": row.Text,
                 "normalized_text": row.NormalizedText,
                 "bbox": tuple(box),
+                # Backward-compatible legacy scalar. Consumers must use the
+                # explicit provenance fields below and must not call this a probability.
                 "ocr_confidence": self._normalize_confidence(row.OCRConfidence),
+                "raw_engine_score": raw_engine_score,
+                "line_engine_score": line_engine_score,
+                "confidence_source": (
+                    str(evidence.get("confidence_source"))
+                    if evidence and isinstance(evidence.get("confidence_source"), str)
+                    else None
+                ),
+                "confidence_scope": confidence_scope,
+                "calibrated_confidence": None,
+                "calibration_status": (
+                    "NOT_CALIBRATED" if evidence else "UNKNOWN"
+                ),
+                "confidence_applicability": (
+                    "APPLIES_TO_CURRENT_TEXT"
+                    if evidence and evidence_applies
+                    else "ORIGINAL_OCR_TEXT_ONLY"
+                    if evidence
+                    else "UNAVAILABLE"
+                ),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
@@ -869,6 +934,15 @@ class AdminOcrService:
         except ValueError as exc:
             await self.db.rollback()
             raise HTTPException(status_code=409, detail="Existing revision numbering requires manual review") from exc
+        source_metadata = dict(source.ProcessingMeta or {})
+        edit_metadata: dict[str, object] = {
+            "source_revision_id": str(source.Id),
+            "creation_reason": "manual_edit",
+        }
+        for key in ("engine", "confidence_contract", "word_confidence_evidence"):
+            if key in source_metadata:
+                edit_metadata[key] = source_metadata[key]
+
         revision = PageRevision(
             Id=uuid4(),
             PageId=page.Id,
@@ -879,7 +953,7 @@ class AdminOcrService:
             ContentHash=hashlib.sha256(
                 json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest(),
-            ProcessingMeta={"source_revision_id": str(source.Id), "creation_reason": "manual_edit"},
+            ProcessingMeta=edit_metadata,
         )
         self.repo.stage_revision_bundle(revision, words)
         try:
