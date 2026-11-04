@@ -96,11 +96,19 @@ describe("DashboardScreen with real API adapters", () => {
     renderDashboard();
 
     await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i });
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Quét sách trước Camera (ViRead)",
+    const scanButton = screen.getByRole("button", {
+      name: "Quét sách trước Camera (ViRead)",
+    });
+    expect(scanButton).toBeDisabled();
+
+    fireEvent.change(
+      screen.getByRole("combobox", {
+        name: "Chọn hồ sơ bé trước khi quét",
       }),
+      { target: { value: TEST_CHILD_ID } },
     );
+    expect(scanButton).toBeEnabled();
+    fireEvent.click(scanButton);
 
     expect(routerPushMock).toHaveBeenCalledWith(
       `/device-permissions?flow=global-book-scan&childId=${TEST_CHILD_ID}`,
