@@ -11,7 +11,7 @@ Các khu vực giao diện đã có:
 - Đăng nhập, đăng ký và khôi phục mật khẩu.
 - Hồ sơ ba mẹ và hồ sơ bé.
 - Thư viện, tìm kiếm, lọc và chi tiết sách.
-- Luồng đọc mô phỏng cùng các trạng thái camera, microphone, kết nối, câu hỏi và hoàn thành.
+- Luồng xác minh quyền camera/microphone và quét trang sách bằng thiết bị thật; luồng đọc hiện hữu vẫn giữ các trạng thái UI tương ứng.
 - Lịch sử đọc, báo cáo tiến bộ và danh sách từ cần luyện.
 - Khu vực Admin quản lý sách, trang sách, OCR/revision, audit log và health.
 
@@ -109,6 +109,8 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Auth     | `/forgot-password`                     | Yêu cầu khôi phục mật khẩu                                 |
 | Auth     | `/reset-password`                      | Đặt mật khẩu mới và trạng thái token                       |
 | Parent   | `/dashboard`                           | Tổng quan gia đình và lối tắt đọc sách/báo cáo             |
+| Parent   | `/device-permissions`                  | Xác minh quyền truy cập camera và microphone trước khi quét |
+| Parent   | `/book-scanner`                        | Quét trang sách bằng camera sau khi xác minh thiết bị       |
 | Parent   | `/profile`                             | Xem, chỉnh sửa hồ sơ phụ huynh                             |
 | Parent   | `/children`                            | Danh sách hồ sơ bé                                         |
 | Parent   | `/children/new`                        | Tạo hồ sơ bé; nhận `from=register` cho onboarding          |
@@ -258,8 +260,8 @@ Các viewport nghiệm thu mục tiêu: `1440`, `1024`, `768` và `390` px.
 - FastAPI, PostgreSQL/Storage persistence cho các module nghiệp vụ
 - Di chuyển profile legacy để validate khóa ngoại Auth
 - HTTP API, WebSocket, reading-session token và realtime server
-- Camera, microphone, MediaDevices, ghi/stream audio/video
-- OpenCV, OCR/Tesseract, page matching thực, STT, TTS hoặc provider AI
+- Microphone recording/STT, WebSocket, OpenCV/Tesseract OCR, STT, TTS, alignment/scoring và AI thật
+- Camera permission preflight và camera capture/page-match chỉ hoạt động ở luồng scanner khi API backend tương ứng sẵn sàng
 - Alignment/scoring, reading-event inference, Tutor/comprehension engine thật
 - Upload/storage, operational health và audit backend thật
 
