@@ -283,7 +283,6 @@ export function DevicePermissionScreen({
       setSnapshot((previous) => ({
         ...previous,
         camera: cameraResult.status,
-        mediaDevicesSupported: true,
       }));
       setVerified({
         camera: cameraResult.verified,
