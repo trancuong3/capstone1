@@ -43,12 +43,23 @@ export function CameraPreview({
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mountedRef = useRef(false);
+  const scanAbortRef = useRef<AbortController | null>(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(true);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      scanAbortRef.current?.abort();
+      scanAbortRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!enableScanner) return;
@@ -80,6 +91,9 @@ export function CameraPreview({
             "ended",
             () => {
               if (!mounted) return;
+              scanAbortRef.current?.abort();
+              scanAbortRef.current = null;
+              setIsScanning(false);
               setCameraReady(false);
               setCameraDenied(true);
               onCameraUnavailable?.();
@@ -105,6 +119,8 @@ export function CameraPreview({
 
     return () => {
       mounted = false;
+      scanAbortRef.current?.abort();
+      scanAbortRef.current = null;
       if (videoRef.current?.srcObject === stream) {
         videoRef.current.srcObject = null;
       }
@@ -120,7 +136,8 @@ export function CameraPreview({
       !videoRef.current ||
       !canvasRef.current ||
       isScanning ||
-      !cameraReady
+      !cameraReady ||
+      !mountedRef.current
     ) {
       return;
     }
@@ -141,30 +158,48 @@ export function CameraPreview({
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+    scanAbortRef.current?.abort();
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+
     canvas.toBlob(
       async (blob) => {
+        if (!mountedRef.current || controller.signal.aborted) return;
         if (!blob) {
-          setIsScanning(false);
+          if (scanAbortRef.current === controller) {
+            scanAbortRef.current = null;
+            setIsScanning(false);
+          }
           return;
         }
+
         try {
-          // Nếu có bookId thì quét theo sách, nếu không thì quét tổng quát toàn hệ thống
           const response = bookId
-            ? await scanCameraFrameForBook(bookId, blob)
-            : await scanCameraFrameGlobal(blob);
+            ? await scanCameraFrameForBook(bookId, blob, controller.signal)
+            : await scanCameraFrameGlobal(blob, controller.signal);
 
-          setScanResult(response);
+          if (!mountedRef.current || controller.signal.aborted) return;
 
-          if (response.matched && response.matched_page) {
+          const resolvedBookId = response.book_id || bookId;
+          if (response.matched && response.matched_page && resolvedBookId) {
+            setScanResult(response);
             setAutoScan(false);
             onPageDetected?.(response.matched_page);
-
-            const resolvedBookId = response.book_id || bookId;
-            if (resolvedBookId) {
-              onBookPageDetected?.(resolvedBookId, response.matched_page);
-            }
+            onBookPageDetected?.(resolvedBookId, response.matched_page);
+          } else if (response.matched && response.matched_page) {
+            // A global match without a book id cannot be routed safely.
+            setScanResult({
+              ...response,
+              matched: false,
+              status_code: "LOW_CONFIDENCE",
+              message:
+                "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé.",
+            });
+          } else {
+            setScanResult(response);
           }
         } catch {
+          if (!mountedRef.current || controller.signal.aborted) return;
           setScanResult({
             framing_valid: false,
             matched: false,
@@ -174,7 +209,10 @@ export function CameraPreview({
             matched_page: null,
           });
         } finally {
-          setIsScanning(false);
+          if (mountedRef.current && scanAbortRef.current === controller) {
+            scanAbortRef.current = null;
+            setIsScanning(false);
+          }
         }
       },
       "image/jpeg",
