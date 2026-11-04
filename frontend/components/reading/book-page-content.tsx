@@ -96,13 +96,14 @@ export function BookPageContent({
             );
 
             const alignmentIsOrthographicallyAmbiguous = Boolean(
-              alignment?.status === "SUBSTITUTE" &&
-              typeof alignment.book_word === "string" &&
-              typeof alignment.spoken_word === "string" &&
-              normalizeRealtimeWord(alignment.book_word) !==
-                normalizeRealtimeWord(alignment.spoken_word) &&
-              normalizeRealtimeForAmbiguity(alignment.book_word) ===
-                normalizeRealtimeForAmbiguity(alignment.spoken_word),
+              alignment?.status === "AMBIGUOUS" ||
+              (alignment?.status === "SUBSTITUTE" &&
+                typeof alignment.book_word === "string" &&
+                typeof alignment.spoken_word === "string" &&
+                normalizeRealtimeWord(alignment.book_word) !==
+                  normalizeRealtimeWord(alignment.spoken_word) &&
+                normalizeRealtimeForAmbiguity(alignment.book_word) ===
+                  normalizeRealtimeForAmbiguity(alignment.spoken_word)),
             );
 
             const isAmbiguous = Boolean(
