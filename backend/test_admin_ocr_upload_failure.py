@@ -79,7 +79,11 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         service.repo.stage_page_reservation = MagicMock()
         service.repo.stage_page_revision_bundle = MagicMock()
         service.repo.stage_revision_bundle = MagicMock()
-        service.repo.delete_page = AsyncMock()
+        reserved_pages = []
+        async def delete_page(page):
+            reserved_pages.remove(page)
+
+        service.repo.delete_page = AsyncMock(side_effect=delete_page)
         service.repo.set_page_lifecycle_status = MagicMock(
             side_effect=lambda page, state: setattr(page, "LifecycleStatus", state)
         )
@@ -90,7 +94,6 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
         )
         service.repo.words = AsyncMock(return_value=[])
 
-        reserved_pages = []
         service._test_reserved_pages = reserved_pages
         service.repo.stage_page_reservation.side_effect = reserved_pages.append
 
@@ -195,7 +198,7 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(response, expected_response)
         uploaded.assert_called_once()
-        service.db.commit.assert_awaited_once()  # The second await is the final commit in the actual call.
+        service.db.commit.assert_awaited()
         self.assertEqual(service.db.commit.await_count, 2)
         service.repo.stage_page_reservation.assert_called_once()
         page = service._test_reserved_pages[0]
