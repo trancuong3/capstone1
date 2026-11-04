@@ -859,6 +859,18 @@ class AdminOcrService:
                     if evidence and isinstance(recognized_text, str)
                     else "UNAVAILABLE"
                 ),
+                "bbox_quality": (
+                    finite_score(evidence.get("bbox_quality"), 1.0)
+                    if evidence and evidence_applies
+                    and evidence.get("bbox_quality_status") == "EVALUATED"
+                    else None
+                ),
+                "bbox_quality_status": (
+                    str(evidence.get("bbox_quality_status"))
+                    if evidence and evidence_applies
+                    and evidence.get("bbox_quality_status") in {"EVALUATED", "NOT_EVALUATED", "UNKNOWN"}
+                    else "UNKNOWN"
+                ),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
