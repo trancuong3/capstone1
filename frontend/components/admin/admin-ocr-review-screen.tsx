@@ -420,8 +420,7 @@ export function AdminOcrReviewScreen({
       typeof word.raw_engine_score === "number",
   ).length;
   const applicableEvidence = words.filter(
-    (word) =>
-      word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT",
+    (word) => word.confidence_applicability === "APPLIES_TO_CURRENT_TEXT",
   );
   const lineEvidenceByIndex = new Map(
     applicableEvidence

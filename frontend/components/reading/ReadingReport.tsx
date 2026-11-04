@@ -195,7 +195,11 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Thống kê */}
-      <div className="grid grid-cols-2 gap-4">
+      <div
+        aria-label="Thống kê kết quả đọc"
+        className="grid grid-cols-2 gap-4"
+        role="group"
+      >
         <div>
           <p className="text-green-700">Từ đọc đúng</p>
           <p className="text-2xl font-bold">{correctCount}</p>

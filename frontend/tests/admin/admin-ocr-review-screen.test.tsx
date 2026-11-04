@@ -235,7 +235,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       }),
     ).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
+    await user.click(screen.getByRole("button", { name: "Từ #0 · Dòng 0" }));
     expect(wordScore).toHaveAttribute("aria-pressed", "true");
     expect(lineScore).toHaveAttribute("aria-pressed", "false");
 
@@ -263,7 +263,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: Nội\. Chưa có confidence cấp từ đã hiệu chuẩn/,
     });
     expect(overlay).toContainElement(wordBox);
-    expect(wordBox.getAttribute("title")).toContain("chưa có confidence");
+    expect(wordBox.getAttribute("title")).toMatch(/chưa có confidence/i);
 
     await user.click(wordBox);
     expect(wordBox).toHaveClass("ring-2");

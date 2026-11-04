@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getReadingPage,
@@ -91,11 +91,14 @@ describe("ReadingReport Vietnamese ambiguity", () => {
     );
 
     expect(await screen.findByText("má")).toBeInTheDocument();
+    const statistics = screen.getByRole("group", {
+      name: "Thống kê kết quả đọc",
+    });
     await waitFor(() => {
-      const ambiguousMetric = screen
-        .getByText("Chưa đủ bằng chứng")
-        .parentElement;
-      const wrongMetric = screen.getByText("Từ đọc nhầm").parentElement;
+      const ambiguousMetric = within(statistics).getByText(
+        "Chưa đủ bằng chứng",
+      ).parentElement;
+      const wrongMetric = within(statistics).getByText("Từ đọc nhầm").parentElement;
 
       expect(ambiguousMetric).toHaveTextContent("1");
       expect(wrongMetric).toHaveTextContent("0");
@@ -116,12 +119,15 @@ describe("ReadingReport Vietnamese ambiguity", () => {
       />,
     );
 
+    const statistics = screen.getByRole("group", {
+      name: "Thống kê kết quả đọc",
+    });
     await waitFor(() => {
-      expect(screen.getByText("Từ đọc nhầm").parentElement).toHaveTextContent(
-        "1",
-      );
       expect(
-        screen.getByText("Chưa đủ bằng chứng").parentElement,
+        within(statistics).getByText("Từ đọc nhầm").parentElement,
+      ).toHaveTextContent("1");
+      expect(
+        within(statistics).getByText("Chưa đủ bằng chứng").parentElement,
       ).toHaveTextContent("0");
     });
   });
