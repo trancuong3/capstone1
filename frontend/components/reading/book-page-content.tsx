@@ -17,6 +17,7 @@ interface BookPageContentProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  ambiguousWordIds?: Set<string>;
   previewSnapshot?: RealtimeAlignmentSnapshot | null;
 
 }
@@ -33,6 +34,7 @@ export function BookPageContent({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  ambiguousWordIds,
   previewSnapshot,
 }: BookPageContentProps) {
   const hasWords = page.words.length > 0;
@@ -95,6 +97,11 @@ export function BookPageContent({
               previewStatus?.status === "SUBSTITUTE",
             );
 
+            const isAmbiguous = Boolean(
+              ambiguousWordIds?.has(word.word_id) ||
+              previewStatus?.status === "AMBIGUOUS",
+            );
+
             const isCorrect = Boolean(
               correctWordIds?.has(word.word_id) ||
               alignment?.status === "MATCH" ||
@@ -140,15 +147,18 @@ export function BookPageContent({
                   ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
                   : isHesitation
                     ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                    : isCorrect
-                      ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                      : "";
+                    : isAmbiguous
+                      ? "bg-slate-100 text-slate-700 ring-1 ring-slate-400 border-b border-dashed border-slate-500"
+                      : isCorrect
+                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                        : "";
 
             const hasConfirmedStatus =
               isSkipped ||
               isMispronounced ||
               isRepeated ||
               isHesitation ||
+              isAmbiguous ||
               isCorrect;
 
             
@@ -203,7 +213,9 @@ export function BookPageContent({
                       ? undefined
                       : isCurrent && isMispronounced
                         ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
-                        : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
+                        : isAmbiguous
+                          ? `Hệ thống chưa đủ bằng chứng để kết luận từ "${word.text}" đã được đọc đúng hay sai.`
+                          : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }
                   onKeyDown={
                     readOnly
