@@ -10,6 +10,10 @@ import {
 } from "@/lib/api/comparison-service";
 
 import { BookPageContent } from "@/components/reading/book-page-content";
+import {
+  normalizeRealtimeForAmbiguity,
+  normalizeRealtimeWord,
+} from "@/lib/reading/realtime-alignment";
 
 type Props = {
   result: Pick<
@@ -31,6 +35,7 @@ const COLORS = {
   wrong: "border-orange-500 bg-orange-100",
   hesitation: "border-blue-500 bg-blue-100",
   repeated: "border-purple-500 bg-purple-100",
+  ambiguous: "border-slate-500 bg-slate-100",
 };
 
 function isHesitation(value: unknown): value is Hesitation {
@@ -94,7 +99,30 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   const missingCount = result.summary.missing_words.length;
   const extraCount = result.summary.extra_words.length;
-  const wrongCount = result.summary.substitutions.length;
+
+  // Older saved reports may still store orthographic-only differences as
+  // SUBSTITUTE. Reinterpret only these narrow Vietnamese STT ambiguities;
+  // keep every other substitution as a candidate reading error.
+  const isOrthographicAmbiguity = (item: (typeof result.alignment)[number]) =>
+    item.status === "AMBIGUOUS" ||
+    (item.status === "SUBSTITUTE" &&
+      typeof item.book_word === "string" &&
+      typeof item.spoken_word === "string" &&
+      normalizeRealtimeWord(item.book_word) !==
+        normalizeRealtimeWord(item.spoken_word) &&
+      normalizeRealtimeForAmbiguity(item.book_word) ===
+        normalizeRealtimeForAmbiguity(item.spoken_word));
+
+  const ambiguousAlignment = result.alignment.filter(isOrthographicAmbiguity);
+  const ambiguousPairs = new Set(
+    ambiguousAlignment.map(
+      (item) => `${item.book_word ?? ""}\\u0000${item.spoken_word ?? ""}`,
+    ),
+  );
+  const wrongCount = result.summary.substitutions.filter(
+    (item) => !ambiguousPairs.has(`${item.book_word}\\u0000${item.spoken_word}`),
+  ).length;
+  const ambiguousCount = ambiguousAlignment.length;
 
   const repeatedWordCounts = result.summary.repeated_words.reduce<
     Record<string, number>
@@ -173,6 +201,11 @@ export function ReadingReport({ result, sessionId }: Props) {
         </div>
 
         <div>
+          <p className="text-slate-700">Chưa đủ bằng chứng</p>
+          <p className="text-2xl font-bold">{ambiguousCount}</p>
+        </div>
+
+        <div>
           <p className="text-purple-700">Từ đọc thêm</p>
           <p className="text-2xl font-bold">{extraCount}</p>
         </div>
@@ -196,6 +229,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           ["Đọc nhầm", COLORS.wrong],
           ["Ngập ngừng", COLORS.hesitation],
           ["Lặp từ", COLORS.repeated],
+          ["Chưa đủ bằng chứng", COLORS.ambiguous],
         ].map(([label, color]) => (
           <span
             key={label}
@@ -261,9 +295,11 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       <p>
-        {missingCount === 0 && wrongCount === 0
-          ? "Bé đã đọc đúng nội dung bài."
-          : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
+        {ambiguousCount > 0 && missingCount === 0 && wrongCount === 0
+          ? "Một số từ chưa đủ bằng chứng do khác biệt nhận dạng tiếng Việt. Hệ thống không tự kết luận bé đọc sai."
+          : missingCount === 0 && wrongCount === 0 && ambiguousCount === 0
+            ? "Bé đã đọc đúng nội dung bài."
+            : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
       </p>
     </div>
   );
