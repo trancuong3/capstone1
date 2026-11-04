@@ -239,8 +239,11 @@ The branch also updates `frontend/lib/reading/realtime-alignment.ts`:
 - A separate accent-insensitive helper is used only to detect a possible
   diacritic-only transcript ambiguity. It is never used to declare an exact
   match.
-- A diacritic-only mismatch receives `AMBIGUOUS` rather than `MATCH` or
-  `SUBSTITUTE`. The presentation uses a neutral style and explicitly says the
+- A Vietnamese orthographic-only mismatch (tone/vowel marks or a `d`/`đ`
+  transcript distinction) receives `AMBIGUOUS` rather than `MATCH` or
+  `SUBSTITUTE`. Exact token normalization still preserves all marks and keeps
+  `d` separate from `đ`; relaxed normalization is used only to flag
+  uncertainty. The presentation uses a neutral style and explicitly says the
   evidence is insufficient to judge correct/incorrect.
 - The word cursor remains based on stable word IDs and sequential book indices.
   A following exact word can continue the alignment after an ambiguous token.
