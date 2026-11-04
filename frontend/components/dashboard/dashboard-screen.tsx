@@ -62,6 +62,7 @@ export function DashboardScreen() {
   const childService = useChildService();
   const profileService = useProfileService();
   const [requestKey, setRequestKey] = useState(0);
+  const [scannerChildId, setScannerChildId] = useState("");
   const [state, setState] = useState<DashboardState>({ status: "loading" });
 
   useEffect(() => {
@@ -199,15 +200,41 @@ export function DashboardScreen() {
             </ButtonLink>
           </div>
 
-          <div className="mx-auto flex w-full flex-col items-center gap-4 sm:max-w-[744px]">
+          <div className="mx-auto flex w-full flex-col gap-3 sm:max-w-[600px]">
+            <div className="flex flex-col gap-2">
+              <label
+                className="text-sm font-bold text-ink"
+                htmlFor="scanner-child"
+              >
+                Chọn hồ sơ bé trước khi quét
+              </label>
+              <select
+                className="min-h-11 w-full rounded-control border border-line bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                id="scanner-child"
+                onChange={(event) => setScannerChildId(event.target.value)}
+                value={scannerChildId}
+              >
+                <option value="">Chọn hồ sơ bé</option>
+                {state.children.map((child) => (
+                  <option key={child.id} value={child.id}>
+                    {child.alias}
+                  </option>
+                ))}
+              </select>
+            </div>
             <Button
               className="w-full sm:max-w-[400px]"
+              disabled={!state.children.some((child) => child.id === scannerChildId)}
               onClick={() => {
-                const childId = state.children[0]?.id;
+                const selectedChild = state.children.find(
+                  (child) => child.id === scannerChildId,
+                );
+                if (!selectedChild) return;
+
                 const params = new URLSearchParams({
                   flow: "global-book-scan",
+                  childId: selectedChild.id,
                 });
-                if (childId) params.set("childId", childId);
                 router.push(`/device-permissions?${params.toString()}`);
               }}
               variant="secondary"
