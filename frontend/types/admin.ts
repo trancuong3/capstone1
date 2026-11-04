@@ -115,6 +115,8 @@ export interface AdminRevisionWordDTO {
     | "APPLIES_TO_CURRENT_TEXT"
     | "ORIGINAL_OCR_TEXT_ONLY"
     | "UNAVAILABLE";
+  readonly bbox_quality?: number | null;
+  readonly bbox_quality_status?: "EVALUATED" | "NOT_EVALUATED" | "UNKNOWN";
 }
 
 export interface AdminPageRevisionDetailDTO {
