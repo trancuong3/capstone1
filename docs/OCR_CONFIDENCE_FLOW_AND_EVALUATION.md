@@ -76,6 +76,7 @@ Status by component:
 | PaddleOCR line score preserved as line-scoped evidence | Implemented |
 | VietOCR fabricated fixed score removed | Implemented |
 | Unified source/scope and calibration metadata | Implemented |
+| Separate bbox quality API/status | Implemented; score remains null |
 | Word bounding-box ground-truth quality evaluation | Not implemented; requires labeled boxes |
 | Calibrated word probability | Not implemented; requires verified paired dataset |
 | Both Admin revision read paths expose provenance | Implemented |
@@ -112,6 +113,17 @@ printed token. The current normalized bbox validation checks range and shape,
 not localization accuracy. A future localization evaluation should compare
 predicted boxes with manually labeled word boxes (for example using
 intersection-over-union) and report those results separately.
+
+### Bounding-box quality
+
+Bounding-box quality is a separate localization metric, not a recognition
+confidence value. The current API exposes `bbox_quality` and
+`bbox_quality_status` independently. Until manually labeled word boxes are
+available for evaluation, the score is null and the status is
+`NOT_EVALUATED`. A future score must be compared with independently labeled
+word boxes and a defined metric such as IoU. A normalized box that falls inside
+the image is only structurally valid; it is not proof that it encloses the
+correct word.
 
 ### Calibrated word confidence
 
