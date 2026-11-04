@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardScreen } from "@/components/dashboard/dashboard-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
@@ -22,9 +22,13 @@ vi.mock("@/lib/supabase/client", () => ({
     },
   }),
 }));
+const { routerPushMock } = vi.hoisted(() => ({
+  routerPushMock: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
-    push: vi.fn(),
+    push: routerPushMock,
     replace: vi.fn(),
     prefetch: vi.fn(),
   }),
@@ -33,7 +37,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
-beforeEach(() => installApiFetchFixture());
+beforeEach(() => {
+  installApiFetchFixture();
+  routerPushMock.mockReset();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 const profile: ParentProfileDTO = {
@@ -83,6 +90,22 @@ describe("DashboardScreen with real API adapters", () => {
       "/children/new",
     );
     expect(apiFetchFixture).toHaveBeenCalledTimes(2);
+  });
+  it("routes realtime OCR through real device permission verification", async () => {
+    apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
+    renderDashboard();
+
+    await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Quét sách trước Camera (ViRead)",
+      }),
+    );
+
+    expect(routerPushMock).toHaveBeenCalledWith(
+      `/device-permissions?flow=global-book-scan&childId=${TEST_CHILD_ID}`,
+    );
+    expect(screen.queryByLabelText("Khung camera nhận diện trang sách ViRead")).not.toBeInTheDocument();
   });
   it("shows the first-child action for a real empty account", async () => {
     apiFetchFixture.mockImplementation(async (input) =>
