@@ -871,6 +871,9 @@ class AdminOcrService:
             "previous_image_path",
             "previous_image_width",
             "previous_image_height",
+            # Per-word evidence is projected into words[] above. Avoid sending
+            # the full evidence array a second time in ocr_metadata.
+            "word_confidence_evidence",
         ):
             metadata.pop(internal_key, None)
         return AdminRevisionDetailRead(
