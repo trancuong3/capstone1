@@ -7,22 +7,10 @@ export const metadata: Metadata = {
   title: "Thư viện sách",
 };
 
-interface BooksPageProps {
-  searchParams: Promise<{
-    childId?: string | string[];
-  }>;
-}
-
-function firstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function BooksPage({ searchParams }: BooksPageProps) {
-  const query = await searchParams;
-
+export default function BooksPage() {
   return (
     <AppServicesProvider>
-      <BookLibraryScreen requestedChildId={firstValue(query.childId)} />
+      <BookLibraryScreen />
     </AppServicesProvider>
   );
 }

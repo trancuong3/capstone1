@@ -66,7 +66,10 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
       await screen.findByRole("heading", { name: "Quản lý đọc sách" }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { name: "Kế hoạch và mục tiêu đọc" }),
+      await screen.findByRole("heading", { name: "Mục tiêu đọc" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Kế hoạch đọc trong tuần" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Bé chưa có mục tiêu đọc nào."),
@@ -77,6 +80,7 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
         ([url]) => new URL(String(url)).pathname,
       );
       expect(requests).toContain("/reading-management/goals");
+      expect(requests).toContain("/reading-management/plans");
       expect(requests).toContain("/reading-management/collections");
       expect(requests).toContain("/reading-management/reminders");
     });
@@ -85,7 +89,7 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
   it("does not show success when the backend rejects goal creation", async () => {
     const user = userEvent.setup();
     renderScreen();
-    await screen.findByRole("heading", { name: "Kế hoạch và mục tiêu đọc" });
+    await screen.findByRole("heading", { name: "Mục tiêu đọc" });
     await user.click(screen.getByRole("button", { name: "Tạo mục tiêu" }));
     expect(
       await screen.findByText(/Không thực hiện được thao tác/),
