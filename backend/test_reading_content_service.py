@@ -550,7 +550,8 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dto.width, 600)
         self.assertEqual(dto.height, 800)
-        self.assertEqual(dto.confidence, 0.93)
+        # Raw engine word scores cannot be averaged into a calibrated page probability.
+        self.assertIsNone(dto.confidence)
         self.assertEqual(dto.words[0].bbox, (0.1, 0.2, 0.12, 0.04))
         self.assertEqual(dto.words[0].line_index, 3)
         self.assertEqual(dto.paragraph_start_line_indices, [2])
