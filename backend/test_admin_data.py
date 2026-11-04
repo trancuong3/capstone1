@@ -187,6 +187,8 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
                         "line_engine_score": None,
                         "calibrated_confidence": None,
                         "calibration_status": "NOT_CALIBRATED",
+                        "bbox_quality": None,
+                        "bbox_quality_status": "NOT_EVALUATED",
                     }
                 ],
             }
@@ -211,6 +213,8 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(word.calibration_status, "NOT_CALIBRATED")
         self.assertIsNone(word.calibrated_confidence)
         self.assertEqual(word.confidence_applicability, "APPLIES_TO_CURRENT_TEXT")
+        self.assertIsNone(word.bbox_quality)
+        self.assertEqual(word.bbox_quality_status, "NOT_EVALUATED")
 
     async def test_pixel_bbox_is_not_guessed_as_normalized(self):
         repo = catalog_repo()
