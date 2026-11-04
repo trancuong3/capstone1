@@ -18,7 +18,7 @@ from sqlalchemy.exc import InterfaceError, TimeoutError as SQLAlchemyTimeoutErro
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
-from app.database.session import engine
+from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 
@@ -172,6 +172,7 @@ async def http_exception_diagnostic_handler(
     return await default_http_exception_handler(request, exc)
 
 
+@app.exception_handler(DatabaseConcurrencyLimitExceeded)
 @app.exception_handler(InterfaceError)
 @app.exception_handler(SQLAlchemyTimeoutError)
 async def database_connection_exception_handler(
