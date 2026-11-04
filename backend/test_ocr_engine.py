@@ -163,6 +163,36 @@ class DualEngineOcrTests(unittest.TestCase):
             )
         )
 
+    def test_paddle_line_score_is_not_promoted_to_word_confidence(self):
+        quad = [[40.0, 30.0], [220.0, 30.0], [220.0, 70.0], [40.0, 70.0]]
+        paddle_raw = [[quad, ("Chao ban", 0.94)]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [paddle_raw]
+
+        mock_viet = MagicMock()
+        # Force the current integration to retain PaddleOCR's line text.
+        mock_viet.predict.return_value = "totally different recognition"
+
+        with patch.object(
+            ocr_engine,
+            "_get_ocr_engines",
+            return_value=(mock_paddle, mock_viet),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual(result["metadata"]["engine"], "paddleocr_vietocr_dual")
+        self.assertGreaterEqual(len(result["words"]), 2)
+        for word, evidence in zip(
+            result["words"],
+            result["metadata"]["word_confidence_evidence"],
+        ):
+            self.assertIsNone(word["ocr_confidence"])
+            self.assertEqual(evidence["confidence_source"], "paddleocr")
+            self.assertEqual(evidence["confidence_scope"], "line")
+            self.assertIsNone(evidence["raw_engine_score"])
+            self.assertAlmostEqual(evidence["line_engine_score"], 0.94, places=2)
+            self.assertIsNone(evidence["calibrated_confidence"])
+
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
         mock_tesseract_result = {
