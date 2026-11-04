@@ -149,6 +149,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
           confidence_scope: "word" as const,
           calibration_status: "NOT_CALIBRATED" as const,
           confidence_applicability: "APPLIES_TO_CURRENT_TEXT" as const,
+          bbox_quality: null,
+          bbox_quality_status: "NOT_EVALUATED" as const,
         },
         {
           ...adminR1Fixture.words[0],
@@ -224,6 +226,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getByText(/Tesseract: 2 từ có điểm thô cấp từ/)).toBeInTheDocument();
     expect(screen.getByText(/PaddleOCR: 1 dòng có điểm cấp dòng/)).toBeInTheDocument();
     expect(screen.getByText(/VietOCR: 0 từ nhận dạng/)).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Bounding box: chưa được đánh giá định lượng bằng hộp chuẩn").length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getByRole("button", {
         name: /Đi tới từ chưa có xác suất hiệu chuẩn/,
