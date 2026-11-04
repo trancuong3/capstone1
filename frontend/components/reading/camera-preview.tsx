@@ -29,7 +29,11 @@ interface CameraPreviewProps {
   bookId?: string;
   enableScanner?: boolean;
   onPageDetected?: (page: ReadingPageDTO) => void;
-  onBookPageDetected?: (bookId: string, page: ReadingPageDTO) => void;
+  onBookPageDetected?: (
+    bookId: string,
+    page: ReadingPageDTO,
+    confidence: number,
+  ) => void;
   onCameraUnavailable?: () => void;
 }
 
@@ -45,6 +49,10 @@ export function CameraPreview({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(false);
   const scanAbortRef = useRef<AbortController | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef<Promise<MediaStream> | null>(null);
+  const cameraEffectCountRef = useRef(0);
+  const ignoreCameraEndedRef = useRef(false);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
@@ -61,74 +69,97 @@ export function CameraPreview({
     };
   }, []);
 
+  const stopCamera = useCallback(() => {
+    const video = videoRef.current;
+    const stream =
+      cameraStreamRef.current ?? (video?.srcObject as MediaStream | null);
+    ignoreCameraEndedRef.current = true;
+    cameraStreamRef.current = null;
+    if (video?.srcObject === stream) {
+      video.pause();
+      video.srcObject = null;
+    }
+    stream?.getTracks().forEach((track) => track.stop());
+    if (canvasRef.current) {
+      canvasRef.current.width = 0;
+      canvasRef.current.height = 0;
+    }
+    if (mountedRef.current) setCameraReady(false);
+  }, []);
+
   useEffect(() => {
     if (!enableScanner) return;
-    let stream: MediaStream | null = null;
-    let mounted = true;
+    let active = true;
+    cameraEffectCountRef.current += 1;
 
-    async function initCamera() {
-      try {
-        const acquiredStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
+    let request = cameraRequestRef.current;
+    if (!request) {
+      request = navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      cameraRequestRef.current = request;
+    }
 
-        // A permission request can resolve after the component has unmounted.
-        // Stop that late stream immediately; the effect cleanup has already run.
-        if (!mounted) {
-          acquiredStream.getTracks().forEach((track) => track.stop());
+    void request.then(
+      (acquiredStream) => {
+        if (cameraRequestRef.current === request) {
+          cameraRequestRef.current = null;
+        }
+        if (!active || !mountedRef.current) {
+          if (cameraEffectCountRef.current === 0) {
+            acquiredStream.getTracks().forEach((track) => track.stop());
+          }
           return;
         }
 
-        stream = acquiredStream;
+        cameraStreamRef.current = acquiredStream;
+        ignoreCameraEndedRef.current = false;
         const videoTrack = acquiredStream.getVideoTracks()[0];
-        if (videoTrack) {
-          videoTrack.addEventListener(
-            "ended",
-            () => {
-              if (!mounted) return;
-              scanAbortRef.current?.abort();
-              scanAbortRef.current = null;
-              setIsScanning(false);
-              setCameraReady(false);
-              setCameraDenied(true);
-              onCameraUnavailable?.();
-            },
-            { once: true },
-          );
-        }
+        videoTrack?.addEventListener(
+          "ended",
+          () => {
+            if (!active || ignoreCameraEndedRef.current) return;
+            scanAbortRef.current?.abort();
+            scanAbortRef.current = null;
+            setIsScanning(false);
+            setCameraDenied(true);
+            stopCamera();
+            onCameraUnavailable?.();
+          },
+          { once: true },
+        );
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = acquiredStream;
-        }
-        setCameraReady(true);
+        if (videoRef.current) videoRef.current.srcObject = acquiredStream;
+        setCameraReady(Boolean(videoTrack && videoTrack.readyState === "live"));
         setCameraDenied(false);
-      } catch {
-        if (!mounted) return;
+      },
+      () => {
+        if (cameraRequestRef.current === request) {
+          cameraRequestRef.current = null;
+        }
+        if (!active || !mountedRef.current) return;
         setCameraReady(false);
         setCameraDenied(true);
         onCameraUnavailable?.();
-      }
-    }
-
-    void initCamera();
+      },
+    );
 
     return () => {
-      mounted = false;
+      active = false;
+      cameraEffectCountRef.current = Math.max(
+        0,
+        cameraEffectCountRef.current - 1,
+      );
       scanAbortRef.current?.abort();
       scanAbortRef.current = null;
-      if (videoRef.current?.srcObject === stream) {
-        videoRef.current.srcObject = null;
-      }
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
+      if (cameraEffectCountRef.current === 0) stopCamera();
     };
-  }, [enableScanner, onCameraUnavailable]);
+  }, [enableScanner, onCameraUnavailable, stopCamera]);
 
   const captureAndScan = useCallback(async () => {
     if (
@@ -185,8 +216,15 @@ export function CameraPreview({
             if (response.matched_page && resolvedBookId) {
               setScanResult(response);
               setAutoScan(false);
+              scanAbortRef.current?.abort();
+              scanAbortRef.current = null;
+              stopCamera();
               onPageDetected?.(response.matched_page);
-              onBookPageDetected?.(resolvedBookId, response.matched_page);
+              onBookPageDetected?.(
+                resolvedBookId,
+                response.matched_page,
+                response.confidence,
+              );
             } else {
               // A successful match requires both a concrete page and its book.
               setScanResult({
@@ -228,6 +266,7 @@ export function CameraPreview({
     isScanning,
     onBookPageDetected,
     onPageDetected,
+    stopCamera,
   ]);
 
   useEffect(() => {

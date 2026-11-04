@@ -9,8 +9,6 @@ export const metadata: Metadata = {
 
 interface BookScannerPageProps {
   searchParams: Promise<{
-    flow?: string | string[];
-    childId?: string | string[];
     bookId?: string | string[];
   }>;
 }
@@ -23,14 +21,9 @@ export default async function BookScannerPage({
   searchParams,
 }: BookScannerPageProps) {
   const query = await searchParams;
-
   return (
     <AppServicesProvider scenario="default">
-      <BookScannerScreen
-        flow={firstValue(query.flow)}
-        childId={firstValue(query.childId)}
-        bookId={firstValue(query.bookId)}
-      />
+      <BookScannerScreen bookId={firstValue(query.bookId)} />
     </AppServicesProvider>
   );
 }

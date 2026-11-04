@@ -188,6 +188,10 @@ function createReadingFixtures() {
       getSnapshot: vi
         .fn<ReadingServices["devicePermissionService"]["getSnapshot"]>()
         .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getMicrophonePermissionState: vi.fn().mockResolvedValue("prompt"),
+      watchMicrophonePermissionState: vi
+        .fn()
+        .mockResolvedValue(() => undefined),
       requestAccess: vi
         .fn<ReadingServices["devicePermissionService"]["requestAccess"]>()
         .mockResolvedValue({
@@ -687,17 +691,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toHaveTextContent("không tạo lỗi đọc");
   });
 
-  it("shows permission recovery and forwards the requested device", async () => {
-    const user = userEvent.setup();
+  it("never requests camera permission from the reading screen", async () => {
     renderReading("camera-denied");
+    expect(await screen.findByText(/Phạm vi đọc: Trang/)).toBeInTheDocument();
     expect(
-      await screen.findByRole("dialog", { name: "Camera chưa sẵn sàng" }),
-    ).toHaveTextContent("camera chưa được mở");
-    await user.click(screen.getByRole("button", { name: "Thử lại" }));
-    expect(
-      await screen.findByText("Mình đang nghe bé đọc"),
-    ).toBeInTheDocument();
-    expect(services.devicePermissionService.retry).toHaveBeenCalledWith(
+      screen.queryByRole("dialog", { name: "Camera chưa sẵn sàng" }),
+    ).not.toBeInTheDocument();
+    expect(services.devicePermissionService.retry).not.toHaveBeenCalledWith(
       "camera",
     );
   });

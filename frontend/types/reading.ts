@@ -194,10 +194,23 @@ export type DevicePermissionUiState =
   | "granted"
   | "denied"
   | "unavailable"
+  | "unsupported"
+  | "no_device"
+  | "device_busy"
   | "error"
   | "unknown"
   /** Backward-compatible state used by the existing reading-ready screen. */
   | "ready";
+
+export type MicrophonePermissionUiState =
+  | "checking"
+  | "granted"
+  | "prompt"
+  | "denied"
+  | "unsupported"
+  | "no_device"
+  | "device_busy"
+  | "error";
 
 export interface DevicePermissionSnapshotUI {
   readonly camera: DevicePermissionUiState;

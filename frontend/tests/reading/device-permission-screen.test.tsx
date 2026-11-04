@@ -1,213 +1,142 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { AppStoreProvider } from "@/components/providers/app-store-provider";
 import { BookScannerScreen } from "@/components/reading/book-scanner-screen";
-import { DevicePermissionScreen } from "@/components/reading/device-permission-screen";
 import {
-  clearDevicePermissionVerification,
-  markDevicePermissionVerified,
-} from "@/lib/api/device-permission-service";
+  apiFetchFixture,
+  installApiFetchFixture,
+} from "@/test/fixtures/api-test-fixture";
+import {
+  childFixture,
+  TEST_CHILD_ID,
+} from "@/test/fixtures/report-data-fixture";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 
-const { getSnapshotMock, requestAccessMock, retryMock, pushMock, replaceMock } =
-  vi.hoisted(() => ({
-    getSnapshotMock: vi.fn(),
-    requestAccessMock: vi.fn(),
-    retryMock: vi.fn(),
-    pushMock: vi.fn(),
-    replaceMock: vi.fn(),
-  }));
-
-vi.mock("@/hooks/use-reading-services", () => ({
-  useReadingServices: () => ({
-    devicePermissionService: {
-      getSnapshot: getSnapshotMock,
-      requestAccess: requestAccessMock,
-      retry: retryMock,
+const { pushMock, replaceMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  replaceMock: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock, replace: replaceMock }),
+}));
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => ({
+    auth: {
+      getSession: async () => ({
+        data: { session: { access_token: "isolated-test-token" } },
+        error: null,
+      }),
     },
   }),
 }));
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: pushMock,
-    replace: replaceMock,
-  }),
+vi.mock("@/lib/supabase/config", () => ({
+  getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
 
-const childId = "41ee0744-5a14-4d2c-bcbc-4cd566e1e4c4";
+const originalMediaDevices = Object.getOwnPropertyDescriptor(
+  navigator,
+  "mediaDevices",
+);
+const track = {
+  readyState: "live",
+  stop: vi.fn(),
+  addEventListener: vi.fn(),
+};
+const stream = {
+  getTracks: () => [track],
+  getVideoTracks: () => [track],
+  getAudioTracks: () => [],
+} as unknown as MediaStream;
+const getUserMedia = vi.fn();
 
-describe("Device permission gate", () => {
-  beforeEach(() => {
-    clearDevicePermissionVerification();
-    getSnapshotMock.mockReset().mockResolvedValue({
-      camera: "prompt",
-      microphone: "prompt",
-      mediaDevicesSupported: true,
-      mediaRecorderSupported: true,
-      secureContext: true,
-    });
-    requestAccessMock.mockReset().mockResolvedValue({
-      status: "granted",
-      verified: true,
-      message: "Device access verified",
-      mediaRecorderSupported: true,
-    });
-    retryMock.mockReset();
-    pushMock.mockReset();
-    replaceMock.mockReset();
+function childResponse(input: RequestInfo | URL) {
+  const path = new URL(String(input)).pathname;
+  if (path === `/profiles/children/${TEST_CHILD_ID}`)
+    return Response.json(childFixture);
+  throw new Error(`Unexpected scanner route: ${path}`);
+}
+
+function renderScanner() {
+  return render(
+    <WithSelectedChild childId={TEST_CHILD_ID}>
+      <AppServicesProvider>
+        <BookScannerScreen />
+      </AppServicesProvider>
+    </WithSelectedChild>,
+  );
+}
+
+beforeEach(() => {
+  installApiFetchFixture();
+  apiFetchFixture.mockImplementation(async (input) => childResponse(input));
+  getUserMedia.mockReset().mockResolvedValue(stream);
+  track.stop.mockReset();
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
   });
+  pushMock.mockReset();
+  replaceMock.mockReset();
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(
+    () => undefined,
+  );
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  if (originalMediaDevices) {
+    Object.defineProperty(navigator, "mediaDevices", originalMediaDevices);
+  } else {
+    Reflect.deleteProperty(navigator, "mediaDevices");
+  }
+});
 
-  it("does not allow scanner navigation until camera and microphone are verified", async () => {
+describe("Book scanner entry", () => {
+  it("validates the selected child and does not ask for camera until the explicit action", async () => {
     const user = userEvent.setup();
-    render(
-      <DevicePermissionScreen
-        flow="global-book-scan"
-        childId={childId}
-      />,
-    );
-
-    const continueButton = screen.getByRole("button", {
-      name: "Tiếp tục quét trang sách",
-    });
-    expect(continueButton).toBeDisabled();
-
-    await user.click(
-      screen.getByRole("button", { name: "Kiểm tra và cấp quyền" }),
-    );
-
-    await screen.findByText("Thiết bị đã sẵn sàng");
-    expect(requestAccessMock).toHaveBeenNthCalledWith(1, "camera");
-    expect(requestAccessMock).toHaveBeenNthCalledWith(2, "microphone");
-    expect(continueButton).toBeEnabled();
-
-    await user.click(continueButton);
-    expect(pushMock).toHaveBeenCalledWith(
-      `/book-scanner?flow=global-book-scan&childId=${childId}`,
-    );
-  });
-
-  it("keeps navigation blocked when either device is denied", async () => {
-    const user = userEvent.setup();
-    requestAccessMock
-      .mockResolvedValueOnce({
-        status: "denied",
-        verified: false,
-        message: "Camera permission denied",
-        mediaRecorderSupported: true,
-      })
-      .mockResolvedValueOnce({
-        status: "granted",
-        verified: true,
-        message: "Microphone verified",
-        mediaRecorderSupported: true,
-      });
-
-    render(<DevicePermissionScreen childId={childId} />);
-
-    await user.click(
-      screen.getByRole("button", { name: "Kiểm tra và cấp quyền" }),
-    );
-
-    await screen.findByText(/Camera permission denied/);
-    expect(
-      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
-    ).toBeDisabled();
-    expect(pushMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps navigation blocked when the microphone check fails", async () => {
-    const user = userEvent.setup();
-    requestAccessMock
-      .mockResolvedValueOnce({
-        status: "granted",
-        verified: true,
-        message: "Camera verified",
-        mediaRecorderSupported: true,
-      })
-      .mockResolvedValueOnce({
-        status: "denied",
-        verified: false,
-        message: "Microphone permission denied",
-        mediaRecorderSupported: true,
-      });
-
-    render(<DevicePermissionScreen childId={childId} />);
-
-    await user.click(
-      screen.getByRole("button", { name: "Kiểm tra và cấp quyền" }),
-    );
-
-    await screen.findByText(/Microphone permission denied/);
-    expect(
-      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
-    ).toBeDisabled();
-    expect(pushMock).not.toHaveBeenCalled();
-  });
-
-  it("supports retrying one device after the first verification failed", async () => {
-    const user = userEvent.setup();
-    requestAccessMock
-      .mockResolvedValueOnce({
-        status: "denied",
-        verified: false,
-        message: "Camera permission denied",
-        mediaRecorderSupported: true,
-      })
-      .mockResolvedValueOnce({
-        status: "granted",
-        verified: true,
-        message: "Camera verified",
-        mediaRecorderSupported: true,
-      });
-
-    render(<DevicePermissionScreen childId={childId} />);
-
-    const retryButton = screen.getByRole("button", {
-      name: "Thử lại quyền Camera",
-    });
-    await user.click(retryButton);
-    await screen.findByText(/Camera permission denied/);
-    expect(
-      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
-    ).toBeDisabled();
-
-    await user.click(retryButton);
-    await waitFor(() => {
-      expect(requestAccessMock).toHaveBeenCalledTimes(2);
-    });
-    expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Tiếp tục quét trang sách" }),
-    ).toBeDisabled();
-  });
-
-  it("opens the scanner only when a current verification ticket exists", async () => {
-    markDevicePermissionVerified();
-
-    render(<BookScannerScreen childId={childId} />);
-
+    const view = renderScanner();
     expect(
       await screen.findByRole("heading", {
         name: "Đưa trang sách vào khung camera",
       }),
     ).toBeInTheDocument();
-    expect(replaceMock).not.toHaveBeenCalled();
-    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByText(`${childFixture.alias}`)).toBeInTheDocument();
+    expect(screen.getByText(`Lớp ${childFixture.grade}`)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Bật camera để quét" }),
+    );
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
+    expect(getUserMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ video: expect.any(Object), audio: false }),
+    );
+    expect(getUserMedia.mock.calls[0]?.[0]).not.toHaveProperty("audio", true);
+
+    view.unmount();
+    expect(track.stop).toHaveBeenCalledOnce();
   });
 
-  it("redirects direct scanner visits back to permission verification", async () => {
-    render(<BookScannerScreen childId={childId} />);
-
+  it("returns to Dashboard when there is no store selection even if a URL childId is supplied", async () => {
+    render(
+      <AppStoreProvider>
+        <AppServicesProvider>
+          <BookScannerScreen />
+        </AppServicesProvider>
+      </AppStoreProvider>,
+    );
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(
-        `/device-permissions?flow=global-book-scan&childId=${childId}`,
+        "/dashboard?focus=child-selection&reason=missing",
       );
     });
+    expect(getUserMedia).not.toHaveBeenCalled();
     expect(
-      screen.queryByRole("heading", {
-        name: "Đưa trang sách vào khung camera",
-      }),
+      screen.queryByRole("button", { name: "Bật camera để quét" }),
     ).not.toBeInTheDocument();
   });
 });

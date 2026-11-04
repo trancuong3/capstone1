@@ -3,35 +3,18 @@ import type {
   DevicePermissionCheckResult,
   DevicePermissionSnapshotUI,
   DevicePermissionUiState,
+  MicrophonePermissionUiState,
 } from "@/types/reading";
 
 export interface DevicePermissionService {
   getSnapshot(): Promise<DevicePermissionSnapshotUI>;
+  getMicrophonePermissionState(): Promise<MicrophonePermissionUiState>;
+  watchMicrophonePermissionState(
+    onChange: (state: MicrophonePermissionUiState) => void,
+  ): Promise<() => void>;
   requestAccess(kind: DeviceKind): Promise<DevicePermissionCheckResult>;
   /** Compatibility adapter for the existing in-session permission recovery UI. */
   retry(kind: DeviceKind): Promise<DevicePermissionUiState>;
-}
-
-const VERIFICATION_TTL_MS = 3 * 60 * 1000;
-let verifiedUntil = 0;
-
-/**
- * This short-lived, tab-memory ticket prevents a direct URL visit from opening
- * the scanner without completing the permission preflight. It is deliberately
- * not persisted to localStorage/sessionStorage and is consumed once.
- */
-export function markDevicePermissionVerified(): void {
-  verifiedUntil = Date.now() + VERIFICATION_TTL_MS;
-}
-
-export function clearDevicePermissionVerification(): void {
-  verifiedUntil = 0;
-}
-
-export function consumeDevicePermissionVerification(): boolean {
-  const isValid = verifiedUntil > Date.now();
-  verifiedUntil = 0;
-  return isValid;
 }
 
 function permissionStateToUiState(
@@ -43,6 +26,13 @@ function permissionStateToUiState(
   return "unknown";
 }
 
+function isUnsupportedPermissionDescriptor(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "TypeError" || error.name === "NotSupportedError")
+  );
+}
+
 async function readBrowserPermission(
   kind: DeviceKind,
 ): Promise<DevicePermissionUiState> {
@@ -51,8 +41,6 @@ async function readBrowserPermission(
   }
 
   try {
-    // Camera/microphone descriptors are not implemented consistently. A
-    // rejected or unsupported descriptor is an unknown state, never a grant.
     const descriptor: PermissionDescriptor = {
       name: kind as PermissionName,
     };
@@ -63,47 +51,91 @@ async function readBrowserPermission(
   }
 }
 
+function mapMicrophonePermissionState(
+  state: PermissionState | undefined,
+): MicrophonePermissionUiState {
+  if (state === "granted" || state === "prompt" || state === "denied") {
+    return state;
+  }
+  return "error";
+}
+
+async function queryMicrophonePermission(): Promise<{
+  permissionStatus: PermissionStatus | null;
+  state: MicrophonePermissionUiState;
+}> {
+  if (typeof navigator === "undefined" || !navigator.permissions?.query) {
+    return { permissionStatus: null, state: "unsupported" };
+  }
+
+  try {
+    const permissionStatus = await navigator.permissions.query({
+      name: "microphone" as PermissionName,
+    });
+    return {
+      permissionStatus,
+      state: mapMicrophonePermissionState(permissionStatus.state),
+    };
+  } catch (error) {
+    return {
+      permissionStatus: null,
+      state: isUnsupportedPermissionDescriptor(error) ? "unsupported" : "error",
+    };
+  }
+}
+
 function stopTracks(stream: MediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
 function classifyMediaError(
   error: unknown,
+  kind: DeviceKind,
 ): Pick<DevicePermissionCheckResult, "status" | "verified" | "message"> {
   const name = error instanceof Error ? error.name : "";
+  const deviceLabel = kind === "camera" ? "camera" : "microphone";
 
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return {
       status: "denied",
       verified: false,
       message:
-        "Quyền truy cập đã bị từ chối. Ba mẹ hãy cho phép thiết bị trong cài đặt website rồi thử lại.",
+        kind === "microphone"
+          ? "Vui lòng cấp quyền microphone trong cài đặt trình duyệt."
+          : "Vui lòng cấp quyền camera trong cài đặt trình duyệt.",
     };
   }
 
   if (name === "NotFoundError" || name === "DevicesNotFoundError") {
     return {
-      status: "unavailable",
+      status: kind === "microphone" ? "no_device" : "unavailable",
       verified: false,
-      message: "Không tìm thấy thiết bị này trên máy tính hoặc điện thoại.",
+      message:
+        kind === "microphone"
+          ? "Không tìm thấy microphone trên thiết bị."
+          : "Không tìm thấy camera trên thiết bị.",
     };
   }
 
   if (name === "NotReadableError" || name === "TrackStartError") {
     return {
-      status: "error",
+      status: kind === "microphone" ? "device_busy" : "error",
       verified: false,
       message:
-        "Thiết bị đang bận hoặc không thể khởi động. Ba mẹ hãy đóng ứng dụng khác đang sử dụng thiết bị rồi thử lại.",
+        kind === "microphone"
+          ? "Microphone đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại."
+          : "Camera đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại.",
     };
   }
 
-  if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+  if (
+    name === "OverconstrainedError" ||
+    name === "ConstraintNotSatisfiedError"
+  ) {
     return {
       status: "error",
       verified: false,
-      message:
-        "Thiết bị không đáp ứng được cấu hình yêu cầu. Hãy thử lại hoặc chọn thiết bị khác.",
+      message: `Thiết bị ${deviceLabel} không đáp ứng cấu hình yêu cầu. Hãy thử lại hoặc chọn thiết bị khác.`,
     };
   }
 
@@ -112,7 +144,9 @@ function classifyMediaError(
       status: "error",
       verified: false,
       message:
-        "Trình duyệt đang chặn quyền truy cập thiết bị vì lý do bảo mật hoặc chính sách website.",
+        kind === "microphone"
+          ? "Hãy sử dụng HTTPS hoặc localhost để truy cập microphone."
+          : "Hãy sử dụng HTTPS hoặc localhost để truy cập camera.",
     };
   }
 
@@ -120,7 +154,9 @@ function classifyMediaError(
     status: "error",
     verified: false,
     message:
-      "Không thể truy cập thiết bị. Ba mẹ hãy kiểm tra kết nối và cài đặt trình duyệt rồi thử lại.",
+      kind === "microphone"
+        ? "Không thể kiểm tra microphone. Hãy kiểm tra thiết bị và cài đặt trình duyệt rồi thử lại."
+        : "Không thể kiểm tra camera. Hãy kiểm tra thiết bị và cài đặt trình duyệt rồi thử lại.",
   };
 }
 
@@ -170,12 +206,45 @@ export function createDevicePermissionService(): DevicePermissionService {
       };
     },
 
+    async getMicrophonePermissionState(): Promise<MicrophonePermissionUiState> {
+      return (await queryMicrophonePermission()).state;
+    },
+
+    async watchMicrophonePermissionState(onChange) {
+      const { permissionStatus, state } = await queryMicrophonePermission();
+      onChange(state);
+      if (!permissionStatus) return () => undefined;
+
+      let active = true;
+      const handleChange = () => {
+        if (active)
+          onChange(mapMicrophonePermissionState(permissionStatus.state));
+      };
+      if (typeof permissionStatus.addEventListener === "function") {
+        permissionStatus.addEventListener("change", handleChange);
+        return () => {
+          active = false;
+          permissionStatus.removeEventListener("change", handleChange);
+        };
+      }
+
+      const previousOnChange = permissionStatus.onchange;
+      permissionStatus.onchange = handleChange;
+      return () => {
+        active = false;
+        if (permissionStatus.onchange === handleChange) {
+          permissionStatus.onchange = previousOnChange;
+        }
+      };
+    },
+
     async requestAccess(
       kind: DeviceKind,
     ): Promise<DevicePermissionCheckResult> {
+      const mediaRecorderSupported = typeof MediaRecorder !== "undefined";
       if (typeof window === "undefined" || typeof navigator === "undefined") {
         return {
-          status: "unknown",
+          status: "unsupported",
           verified: false,
           message: "Quyền thiết bị chỉ có thể được kiểm tra trong trình duyệt.",
           mediaRecorderSupported: false,
@@ -187,18 +256,22 @@ export function createDevicePermissionService(): DevicePermissionService {
           status: "error",
           verified: false,
           message:
-            "Camera và microphone chỉ hoạt động trên HTTPS hoặc localhost. Hãy mở ViRead bằng kết nối bảo mật.",
-          mediaRecorderSupported: typeof MediaRecorder !== "undefined",
+            kind === "microphone"
+              ? "Hãy sử dụng HTTPS hoặc localhost để truy cập microphone."
+              : "Hãy sử dụng HTTPS hoặc localhost để truy cập camera.",
+          mediaRecorderSupported,
         };
       }
 
       if (!navigator.mediaDevices?.getUserMedia) {
         return {
-          status: "unavailable",
+          status: "unsupported",
           verified: false,
           message:
-            "Trình duyệt này không hỗ trợ truy cập camera và microphone. Hãy cập nhật hoặc đổi trình duyệt.",
-          mediaRecorderSupported: typeof MediaRecorder !== "undefined",
+            kind === "microphone"
+              ? "Trình duyệt không hỗ trợ truy cập microphone. Hãy cập nhật hoặc đổi trình duyệt."
+              : "Trình duyệt không hỗ trợ truy cập camera. Hãy cập nhật hoặc đổi trình duyệt.",
+          mediaRecorderSupported,
         };
       }
 
@@ -217,27 +290,29 @@ export function createDevicePermissionService(): DevicePermissionService {
             : { audio: true, video: false };
 
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        const track =
-          kind === "camera"
-            ? stream.getVideoTracks()[0]
-            : stream.getAudioTracks()[0];
-
-        if (!track || track.readyState !== "live") {
+        const tracks =
+          kind === "camera" ? stream.getVideoTracks() : stream.getAudioTracks();
+        const hasLiveTrack = tracks.some(
+          (track) => track.readyState === "live",
+        );
+        if (!hasLiveTrack) {
           return {
-            status: "unavailable",
+            status: kind === "microphone" ? "no_device" : "unavailable",
             verified: false,
-            message: "Không thể khởi động thiết bị. Ba mẹ hãy kiểm tra lại thiết bị.",
-            mediaRecorderSupported: typeof MediaRecorder !== "undefined",
+            message:
+              kind === "microphone"
+                ? "Không tìm thấy microphone đang hoạt động trên thiết bị."
+                : "Không tìm thấy camera đang hoạt động trên thiết bị.",
+            mediaRecorderSupported,
           };
         }
 
-        const mediaRecorderSupported = typeof MediaRecorder !== "undefined";
         if (kind === "microphone" && !mediaRecorderSupported) {
           return {
-            status: "granted",
+            status: "unsupported",
             verified: false,
             message:
-              "Microphone đã được cấp quyền nhưng trình duyệt không hỗ trợ MediaRecorder cần cho buổi đọc. Hãy sử dụng trình duyệt mới hơn.",
+              "Microphone đã được cấp quyền nhưng trình duyệt không hỗ trợ ghi âm cho buổi đọc. Hãy sử dụng trình duyệt mới hơn.",
             mediaRecorderSupported: false,
           };
         }
@@ -248,16 +323,15 @@ export function createDevicePermissionService(): DevicePermissionService {
           message:
             kind === "camera"
               ? "Camera đã được cấp quyền và thiết bị đang hoạt động."
-              : "Microphone đã được cấp quyền và thiết bị ghi âm sẵn sàng.",
+              : "Microphone đã được cấp quyền và thiết bị đang hoạt động.",
           mediaRecorderSupported,
         };
       } catch (error) {
         return {
-          ...classifyMediaError(error),
-          mediaRecorderSupported: typeof MediaRecorder !== "undefined",
+          ...classifyMediaError(error, kind),
+          mediaRecorderSupported,
         };
       } finally {
-        // Permission verification must never leave an unused device active.
         stopTracks(stream);
       }
     },

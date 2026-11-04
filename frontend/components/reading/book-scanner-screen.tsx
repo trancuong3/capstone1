@@ -1,87 +1,82 @@
 "use client";
 
 import { ArrowLeft, BookOpen, Camera, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
-import { consumeDevicePermissionVerification } from "@/lib/api/device-permission-service";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import type { ReadingPageDTO } from "@/types/reading";
 
 interface BookScannerScreenProps {
-  childId?: string;
   bookId?: string;
-  flow?: string;
 }
 
-export function BookScannerScreen({
-  childId,
-  bookId,
-  flow,
-}: BookScannerScreenProps) {
+export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const router = useRouter();
-  const [isAuthorized, setIsAuthorized] = useState(false);
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const [cameraStarted, setCameraStarted] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
-  const permissionCheckStartedRef = useRef(false);
-
-  const permissionHref = (() => {
-    const params = new URLSearchParams();
-    params.set("flow", flow === "book-scan" ? "book-scan" : "global-book-scan");
-    if (childId) params.set("childId", childId);
-    if (bookId) params.set("bookId", bookId);
-    return `/device-permissions?${params.toString()}`;
-  })();
-
-  useEffect(() => {
-    // React Strict Mode replays effects in development while preserving refs.
-    // Do not consume the one-time in-memory ticket twice for the same mount.
-    if (permissionCheckStartedRef.current) return;
-    permissionCheckStartedRef.current = true;
-
-    if (consumeDevicePermissionVerification()) {
-      setIsAuthorized(true);
-      return;
-    }
-    router.replace(permissionHref);
-  }, [permissionHref, router]);
 
   const handleCameraUnavailable = useCallback(() => {
     setCameraUnavailable(true);
+    setCameraStarted(false);
   }, []);
 
   const handleBookPageDetected = useCallback(
-    (matchedBookId: string, matchedPage: ReadingPageDTO) => {
+    (
+      matchedBookId: string,
+      matchedPage: ReadingPageDTO,
+      confidence: number,
+    ) => {
       if (!matchedBookId || !matchedPage.page_id) return;
-
-      const params = new URLSearchParams({
-        pageId: matchedPage.page_id,
-      });
-      if (childId) params.set("childId", childId);
-
+      setCameraStarted(false);
+      const params = new URLSearchParams({ pageId: matchedPage.page_id });
+      if (Number.isFinite(confidence))
+        params.set("confidence", String(confidence));
       router.push(
         `/books/${encodeURIComponent(matchedBookId)}?${params.toString()}`,
       );
     },
-    [childId, router],
+    [router],
   );
 
-  if (!isAuthorized) {
+  if (childState.status === "loading" || childState.status === "redirecting") {
     return (
       <section
         aria-busy="true"
-        className="mx-auto flex min-h-[50vh] w-full max-w-[900px] flex-col items-center justify-center gap-3 px-4"
+        className="mx-auto w-full max-w-[900px] px-4 py-8"
       >
-        <span className="size-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-body text-muted">Đang kiểm tra quyền truy cập...</p>
+        <span className="sr-only" role="status">
+          Đang xác minh hồ sơ trẻ…
+        </span>
       </section>
     );
   }
 
+  if (childState.status === "error") {
+    return (
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  }
+
+  const child = childState.child;
+
   return (
     <section className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-[1100px] flex-col gap-5 px-4 py-6 sm:py-8">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-label font-bold uppercase tracking-wide text-primary">
             ViRead · Quét trang sách
@@ -100,46 +95,61 @@ export function BookScannerScreen({
         </ButtonLink>
       </header>
 
+      <SelectedChildIdentity child={child} />
+
       {cameraUnavailable ? (
         <StatusMessage title="Camera chưa sẵn sàng" tone="error">
-          Không thể mở camera hoặc quyền camera đã bị thay đổi. Hãy xác minh lại
-          camera và microphone trước khi quét tiếp.
-          <ButtonLink className="mt-3 sm:max-w-[300px]" href={permissionHref}>
-            <RefreshCw aria-hidden="true" className="size-5" />
-            Kiểm tra lại quyền thiết bị
-          </ButtonLink>
+          Không thể mở camera hoặc quyền camera đã bị thay đổi. Hãy cho phép
+          camera trong cài đặt trình duyệt rồi thử lại.
         </StatusMessage>
       ) : null}
 
-      {!cameraUnavailable ? (
-        <StatusMessage title="Quyền thiết bị đã được xác minh" tone="success">
-          Camera đã được kiểm tra ở bước trước. Microphone cũng đã sẵn sàng cho
-          buổi đọc sau khi ba mẹ xác nhận đúng sách và trang.
-        </StatusMessage>
-      ) : null}
-
-      <CameraPreview
-        bookId={bookId}
-        enableScanner
-        onCameraUnavailable={handleCameraUnavailable}
-        onBookPageDetected={handleBookPageDetected}
-      />
+      {cameraStarted ? (
+        <CameraPreview
+          bookId={bookId}
+          enableScanner
+          onCameraUnavailable={handleCameraUnavailable}
+          onBookPageDetected={handleBookPageDetected}
+        />
+      ) : (
+        <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-6 text-center">
+          <span className="flex size-16 items-center justify-center rounded-full bg-white text-primary">
+            <Camera aria-hidden="true" className="size-8" />
+          </span>
+          <div>
+            <h2 className="text-xl font-extrabold text-ink">Camera đang tắt</h2>
+            <p className="mt-2 max-w-[520px] text-body text-muted">
+              ViRead chỉ yêu cầu camera sau khi ba mẹ bấm nút bên dưới. Trang
+              quét này không yêu cầu quyền microphone.
+            </p>
+          </div>
+          <Button
+            className="sm:max-w-[320px]"
+            onClick={() => {
+              setCameraUnavailable(false);
+              setCameraStarted(true);
+            }}
+          >
+            {cameraUnavailable ? (
+              <RefreshCw aria-hidden="true" className="size-5" />
+            ) : (
+              <Camera aria-hidden="true" className="size-5" />
+            )}
+            {cameraUnavailable ? "Thử bật camera lại" : "Bật camera để quét"}
+          </Button>
+        </div>
+      )}
 
       <div className="flex items-start gap-3 rounded-card border border-border bg-cream p-4">
-        <BookOpen aria-hidden="true" className="mt-1 size-5 shrink-0 text-primary" />
+        <BookOpen
+          aria-hidden="true"
+          className="mt-1 size-5 shrink-0 text-primary"
+        />
         <p className="text-sm leading-6 text-muted">
           Sau khi nhận diện được trang, ViRead sẽ mở thông tin sách để ba mẹ
-          kiểm tra. Buổi đọc chỉ bắt đầu khi ba mẹ bấm <strong>Bắt đầu đọc</strong>.
+          kiểm tra. Buổi đọc chỉ được tạo sau bước xác minh microphone.
         </p>
       </div>
-      <Button
-        className="sm:max-w-[280px]"
-        onClick={() => router.push(permissionHref)}
-        variant="secondary"
-      >
-        <Camera aria-hidden="true" className="size-5" />
-        Kiểm tra lại camera và microphone
-      </Button>
     </section>
   );
 }

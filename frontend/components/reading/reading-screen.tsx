@@ -2,7 +2,6 @@
 
 import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ServiceError } from "@/lib/api/service-error";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -31,8 +30,6 @@ import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
-  DeviceKind,
-  DevicePermissionSnapshotUI,
   ReadingCompletionSummaryUI,
   ReadingConnectionState,
   ReadingPageDTO,
@@ -60,7 +57,6 @@ interface ReadingScreenData {
   child: ChildProfileDTO;
   completion: ReadingCompletionSummaryUI;
   pagePreviews: readonly BookPagePreviewDTO[];
-  permissions: DevicePermissionSnapshotUI;
 }
 
 type LoadState =
@@ -147,8 +143,6 @@ export function ReadingScreen({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const [latestTranscript, setLatestTranscript] = useState<string | null>(null);
-  const [finalTranscript, setFinalTranscript] = useState("");
-  const [isComparing, setIsComparing] = useState(false);
   const [comparisonResult, setComparisonResult] =
     useState<ComparisonResult | null>(null);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
@@ -156,7 +150,7 @@ export function ReadingScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
   const [previewSnapshot, setPreviewSnapshot] =
-  useState<RealtimeAlignmentSnapshot | null>(null);
+    useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
   const [correctWordIds, setCorrectWordIds] = useState<Set<string>>(
     () => new Set(),
@@ -187,7 +181,6 @@ export function ReadingScreen({
   const repeatedWordIdsRef = useRef<Set<string>>(new Set());
   const hesitationWordIdsRef = useRef<Set<string>>(new Set());
 
-
   useEffect(() => {
     if (!page?.words?.length) {
       alignmentEngineRef.current = null;
@@ -195,11 +188,7 @@ export function ReadingScreen({
     }
 
     lastPreviewWordIndexRef.current = -1;
-    alignmentEngineRef.current = new RealtimeAlignmentEngine(
-      page.words,
-      3,
-      2,
-    );
+    alignmentEngineRef.current = new RealtimeAlignmentEngine(page.words, 3, 2);
 
     return () => {
       alignmentEngineRef.current = null;
@@ -361,7 +350,6 @@ export function ReadingScreen({
           child,
           currentPage,
           pagePreviews,
-          permissions,
           completion,
           initialProgress,
         ] = await Promise.all([
@@ -369,7 +357,6 @@ export function ReadingScreen({
           services.childService.get(session.child_id),
           services.readingService.getCurrentPage(sessionId),
           services.bookService.listPages(session.book_id),
-          services.devicePermissionService.getSnapshot(),
           services.readingService.getCompletionSummary(sessionId),
           services.readingService.getPageProgress(sessionId),
         ]);
@@ -394,7 +381,7 @@ export function ReadingScreen({
         setCanonicalState(session.state);
         setLoadState({
           status: "ready",
-          data: { book, child, completion, pagePreviews, permissions },
+          data: { book, child, completion, pagePreviews },
         });
       } catch (error) {
         if (active) {
@@ -473,17 +460,6 @@ export function ReadingScreen({
     uiState,
   ]);
 
-  function normalizeVietnamese(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[đĐ]/g, "d")
-      .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'“”—]/g, "")
-      .trim();
-  }
-
-  
   function applyRealtimeSnapshot(snapshot: RealtimeAlignmentSnapshot) {
     // Đây là kết quả đã xác nhận, không phải preview.
     const nextCorrectIds = new Set(correctWordIdsRef.current);
@@ -599,7 +575,6 @@ export function ReadingScreen({
     setLatestTranscript(null);
     setComparisonResult(null);
     setComparisonError(null);
-    setIsComparing(false);
     browserTranscriptCollectorRef.current.reset();
 
     let recorderStarted = false;
@@ -634,7 +609,6 @@ export function ReadingScreen({
           rec.lang = "vi-VN";
           rec.maxAlternatives = 1;
 
-          
           rec.onresult = (event: BrowserSpeechEvent) => {
             browserTranscriptCollectorRef.current.addResults(event);
 
@@ -656,8 +630,7 @@ export function ReadingScreen({
 
               if (!part || !result.isFinal) continue;
 
-              latestFinalText +=
-                (latestFinalText ? " " : "") + part;
+              latestFinalText += (latestFinalText ? " " : "") + part;
 
               const snapshot = engine.addFinalTranscript(part);
 
@@ -673,8 +646,7 @@ export function ReadingScreen({
               const part = result[0]?.transcript?.trim() || "";
 
               if (part) {
-                interimText +=
-                  (interimText ? " " : "") + part;
+                interimText += (interimText ? " " : "") + part;
               }
             }
 
@@ -694,13 +666,10 @@ export function ReadingScreen({
               setLatestTranscript(interimText.trim());
             } else if (latestFinalText.trim()) {
               setLatestTranscript((previous) =>
-                [previous, latestFinalText.trim()]
-                  .filter(Boolean)
-                  .join(" "),
+                [previous, latestFinalText.trim()].filter(Boolean).join(" "),
               );
             }
           };
-
 
           rec.onerror = (event: BrowserSpeechErrorEvent) => {
             console.error("[REALTIME STT ERROR]", {
@@ -891,9 +860,7 @@ export function ReadingScreen({
         const engine = alignmentEngineRef.current;
 
         if (engine) {
-          const snapshot = engine.addFinalTranscript(
-            elevenLabsResult.text,
-          );
+          const snapshot = engine.addFinalTranscript(elevenLabsResult.text);
 
           applyRealtimeSnapshot(snapshot);
         }
@@ -1124,10 +1091,8 @@ export function ReadingScreen({
       }
 
       setLatestTranscript("");
-      setFinalTranscript("");
       setComparisonResult(null);
       setComparisonError(null);
-      setIsComparing(false);
 
       setCountdown(3);
     } catch (error) {
@@ -1177,12 +1142,12 @@ export function ReadingScreen({
     setIsBusy(false);
   }
 
-  async function retryPermission(kind: DeviceKind) {
+  async function retryMicrophonePermission() {
     if (isBusy) return;
     setIsBusy(true);
-    await services.devicePermissionService.retry(kind);
+    await services.devicePermissionService.retry("microphone");
     if (!mountedRef.current) return;
-    if (kind === "microphone" && !(await startListening())) {
+    if (!(await startListening())) {
       if (mountedRef.current) setIsBusy(false);
       return;
     }
@@ -1407,8 +1372,6 @@ export function ReadingScreen({
         applyRealtimeSnapshot(finalSnapshot);
       }
       // 2. Resolve actual recognized transcript evidence page by page.
-      const combinedTranscript = transcriptsListRef.current.join(" ").trim();
-      setFinalTranscript(combinedTranscript);
 
       const pageBuckets = [...pageTranscriptsRef.current.values()]
         .filter((bucket) => bucket.segments.some((segment) => segment.trim()))
@@ -1417,7 +1380,6 @@ export function ReadingScreen({
       // Compare each transcript against the exact page revision read by the child.
       setComparisonResult(null);
       if (pageBuckets.length > 0) {
-        setIsComparing(true);
         setComparisonError(null);
         let latestResult: ComparisonResult | null = null;
         let firstComparisonError: string | null = null;
@@ -1453,7 +1415,6 @@ export function ReadingScreen({
         if (!mountedRef.current) return;
         setComparisonResult(latestResult);
         setComparisonError(firstComparisonError);
-        setIsComparing(false);
       } else {
         setComparisonError(
           "Chưa nhận diện được lời đọc thực tế nên chưa thể tạo báo cáo đối chiếu.",
@@ -1527,7 +1488,6 @@ export function ReadingScreen({
       finishStartedRef.current = false;
     } finally {
       if (mountedRef.current) {
-        setIsComparing(false);
         setIsBusy(false);
       }
     }
@@ -1583,14 +1543,14 @@ export function ReadingScreen({
     );
   }
 
-  const { book, child, completion, pagePreviews, permissions } = loadState.data;
+  const { book, child, completion, pagePreviews } = loadState.data;
   const rangePagePreviews = pageProgress
     ? pagePreviews.filter((candidate) =>
         pageProgress.pages.some((entry) => entry.page_id === candidate.page_id),
       )
     : pagePreviews;
-  const detailHref = `/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(child.id)}`;
-  const booksHref = `/books?childId=${encodeURIComponent(child.id)}`;
+  const detailHref = `/books/${encodeURIComponent(book.id)}`;
+  const booksHref = "/books";
   const safety = services.readingSocketAdapter.getSafetySnapshot(uiState);
   const currentWord =
     page.words.find((word) => word.word_id === currentWordId)?.text ?? "đang";
@@ -1602,7 +1562,6 @@ export function ReadingScreen({
         child={child}
         isStarting={isBusy}
         onStart={() => void startReading()}
-        permissions={permissions}
       />
     );
   }
@@ -1785,21 +1744,6 @@ export function ReadingScreen({
           }}
           title="Bé đang nghỉ một chút"
         />
-      ) : uiState === "camera-denied" ? (
-        <ReadingStatusDialog
-          body="Bé hãy nhờ ba mẹ bật quyền camera trong trình duyệt. Đây là trạng thái mô phỏng, camera chưa được mở."
-          onClose={() => undefined}
-          primaryAction={{
-            isLoading: isBusy,
-            label: "Thử lại",
-            onClick: () => void retryPermission("camera"),
-          }}
-          secondaryAction={{
-            label: "Chọn trang thủ công",
-            onClick: () => setUiState("manual-page"),
-          }}
-          title="Camera chưa sẵn sàng"
-        />
       ) : uiState === "microphone-denied" ? (
         <ReadingStatusDialog
           body="Nhờ ba mẹ bật quyền micro trong trình duyệt nhé. Hệ thống đang ngừng nghe và không kết luận bé đọc sai."
@@ -1807,7 +1751,7 @@ export function ReadingScreen({
           primaryAction={{
             isLoading: isBusy,
             label: "Thử lại",
-            onClick: () => void retryPermission("microphone"),
+            onClick: () => void retryMicrophonePermission(),
           }}
           secondaryAction={{
             label: "Kết thúc an toàn",
