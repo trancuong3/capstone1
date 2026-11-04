@@ -637,8 +637,8 @@ export function AdminOcrReviewScreen({
               PaddleOCR: {engineEvidenceCounts.paddleocr} dòng có điểm cấp dòng
             </p>
             <p>
-              VietOCR: {engineEvidenceCounts.vietocr} từ nhận dạng, không có điểm
-              confidence riêng
+              VietOCR: {engineEvidenceCounts.vietocr} từ nhận dạng, không có
+              điểm confidence riêng
             </p>
             {engineEvidenceCounts.other > 0 ? (
               <p>Engine khác/chưa rõ: {engineEvidenceCounts.other} từ</p>
