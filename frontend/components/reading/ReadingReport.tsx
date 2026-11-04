@@ -115,12 +115,23 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   const ambiguousAlignment = result.alignment.filter(isOrthographicAmbiguity);
   const ambiguousPairs = new Set(
-    ambiguousAlignment.map(
-      (item) => `${item.book_word ?? ""}\\u0000${item.spoken_word ?? ""}`,
+    ambiguousAlignment.map((item) =>
+      JSON.stringify([
+        item.book_index,
+        item.book_word ?? "",
+        item.spoken_word ?? "",
+      ]),
     ),
   );
   const wrongCount = result.summary.substitutions.filter(
-    (item) => !ambiguousPairs.has(`${item.book_word}\\u0000${item.spoken_word}`),
+    (item) =>
+      !ambiguousPairs.has(
+        JSON.stringify([
+          item.book_index ?? null,
+          item.book_word,
+          item.spoken_word,
+        ]),
+      ),
   ).length;
   const ambiguousCount = ambiguousAlignment.length;
 
