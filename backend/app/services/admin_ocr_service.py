@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -297,6 +298,10 @@ class AdminOcrService:
             self.repo.stage_page_reservation(page)
             await self.repo.flush()
             await self.db.commit()
+        except asyncio.CancelledError:
+            await self.db.rollback()
+            await self._discard_processing_page(page_id)
+            raise
         except Exception:
             await self.db.rollback()
             raise
@@ -499,6 +504,19 @@ class AdminOcrService:
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000),
             )
             return result
+        except asyncio.CancelledError:
+            # The reservation may still be PROCESSING, or the final commit may
+            # already have activated it. The cleanup helper deletes only the
+            # former and protects Storage objects referenced by an ACTIVE page.
+            await self.db.rollback()
+            await self._abort_page_upload(
+                page_id,
+                object_path,
+                object_may_exist=True,
+                book_id=book_id,
+                started_at=started_at,
+            )
+            raise
         finally:
             # The outer request dependency closes the AsyncSession as well; this
             # rollback is a no-op after a successful commit and releases any
