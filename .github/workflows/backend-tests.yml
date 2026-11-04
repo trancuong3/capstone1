@@ -32,6 +32,10 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
+      DATABASE_POOLER_MODE: local
+      DATABASE_SSL_REQUIRED: "false"
+      DATABASE_CONCURRENCY_LIMIT: "8"
+      DATABASE_CONCURRENCY_WAIT_TIMEOUT: "5"
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_KEY: test-publishable-key
       READING_REPORT_TEST_DATABASE_URL: postgresql+asyncpg://test@127.0.0.1:5432/test
