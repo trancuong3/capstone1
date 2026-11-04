@@ -41,6 +41,10 @@ export function BookScannerScreen({
     router.replace(permissionHref);
   }, [permissionHref, router]);
 
+  const handleCameraUnavailable = useCallback(() => {
+    setCameraUnavailable(true);
+  }, []);
+
   const handleBookPageDetected = useCallback(
     (matchedBookId: string, matchedPage: ReadingPageDTO) => {
       if (!matchedBookId || !matchedPage.page_id) return;
@@ -109,7 +113,7 @@ export function BookScannerScreen({
       <CameraPreview
         bookId={bookId}
         enableScanner
-        onCameraUnavailable={() => setCameraUnavailable(true)}
+        onCameraUnavailable={handleCameraUnavailable}
         onBookPageDetected={handleBookPageDetected}
       />
 
