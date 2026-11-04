@@ -77,16 +77,27 @@ class CatalogService:
     async def previews(self, book_id: UUID):
         await self.get(book_id)
         pages = await self.repository.previews(book_id)
+        snapshots = [
+            {
+                "page_id": page.Id,
+                "page_number": page.PageNumber,
+                "lifecycle_status": page.LifecycleStatus,
+                "current_verified_revision_id": page.CurrentVerifiedRevisionId,
+                "image_path": page.ImagePath,
+            }
+            for page in pages
+        ]
+        # Signed URL creation calls Supabase Storage; close the read transaction first.
+        await self.repository.db.rollback()
         previews = []
-        for page in pages:
-            # Validate/create an image URL before projecting the remaining page fields.
-            # This also returns a safe 503 for malformed legacy paths.
-            preview_url = create_signed_image_url(page.ImagePath)
+        for page in snapshots:
+            # Preserve the existing Storage error contract after releasing the DB transaction.
+            preview_url = create_signed_image_url(page["image_path"])
             previews.append(CatalogPagePreviewResponse(
-                page_id=page.Id,
-                page_number=page.PageNumber,
-                lifecycle_status=page.LifecycleStatus,
-                current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                page_id=page["page_id"],
+                page_number=page["page_number"],
+                lifecycle_status=page["lifecycle_status"],
+                current_verified_revision_id=page["current_verified_revision_id"],
                 preview_url=preview_url,
             ))
         return previews
@@ -224,11 +235,14 @@ class AdminCatalogService:
         candidate_height = metadata.get("source_image_height")
         width = candidate_width if type(candidate_width) is int and candidate_width > 0 else page.Width
         height = candidate_height if type(candidate_height) is int and candidate_height > 0 else page.Height
+        page_id = page.Id
+        page_number = page.PageNumber
+        await self.repository.db.rollback()
         preview_url = create_signed_image_url(image_path)
         try:
             return AdminPageImageRead(
-                page_id=page.Id,
-                page_number=page.PageNumber,
+                page_id=page_id,
+                page_number=page_number,
                 preview_url=preview_url,
                 width=width,
                 height=height,

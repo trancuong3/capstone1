@@ -45,6 +45,7 @@ def revision_row(**overrides):
 
 def catalog_repo():
     repo = MagicMock()
+    repo.db.rollback = AsyncMock()
     repo.role = AsyncMock(return_value="admin")
     repo.get = AsyncMock(return_value=book_row())
     repo.books = AsyncMock(return_value=[book_row()])

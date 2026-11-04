@@ -743,17 +743,30 @@ class ReadingContentService:
                 },
             )
 
-        image_url = None
-        if page.ImagePath:
-            try:
-                image_url = create_signed_image_url(page.ImagePath)
-            except Exception:
-                # Keep reading text available if Storage preview URLs are temporarily unavailable.
-                image_url = None
-
+        # Copy all ORM values needed for the response before ending the read
+        # transaction. Supabase Storage signed-URL creation is an external call and
+        # must not retain a PostgreSQL connection or transaction.
+        page_id = page.Id
+        page_revision_id = revision.Id
+        page_number = page.PageNumber
+        page_width = int(page.Width)
+        page_height = int(page.Height)
+        image_path = page.ImagePath
         processing_meta = getattr(revision, "ProcessingMeta", None)
         if not isinstance(processing_meta, dict):
             processing_meta = {}
+        else:
+            processing_meta = dict(processing_meta)
+
+        await self.repository.db.rollback()
+
+        image_url = None
+        if image_path:
+            try:
+                image_url = create_signed_image_url(image_path)
+            except Exception:
+                # Keep reading text available if Storage preview URLs are temporarily unavailable.
+                image_url = None
 
         def safe_line_indices(name: str) -> list[int]:
             value = processing_meta.get(name, [])
@@ -765,16 +778,16 @@ class ReadingContentService:
             })
 
         return ReadingPageDTO(
-            page_id=page.Id,
-            page_revision_id=revision.Id,
-            page_number=page.PageNumber,
+            page_id=page_id,
+            page_revision_id=page_revision_id,
+            page_number=page_number,
             confidence=(
                 sum(confidence_scores) / len(confidence_scores)
                 if confidence_complete and len(confidence_scores) == len(words)
                 else None
             ),
-            width=int(page.Width),
-            height=int(page.Height),
+            width=page_width,
+            height=page_height,
             image_url=image_url,
             text=text_content,
             words=words,
