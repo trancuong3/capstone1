@@ -201,6 +201,15 @@ model. The current adapter does not expose a trusted, consistently available
 word-level confidence input to this aligner. Final transcript comparison
 already uses NFC/lowercase normalization without stripping Vietnamese marks.
 
+### Saved ReadingReport compatibility
+
+The server's final comparison retains Unicode Vietnamese marks in its exact
+text alignment. Older saved reports may consequently contain
+`SUBSTITUTE` for orthographic-only STT differences. The display layer now
+separates tone/vowel/d-đ-only pairs into a neutral "insufficient evidence"
+count without mutating historical report data; unrelated substitutions remain
+wrong-word candidates. Regression tests cover both cases.
+
 ## 7. Suggested future evaluation record
 
 Each labeled example should retain at least:
