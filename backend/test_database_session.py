@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import unittest
 from unittest.mock import patch
@@ -79,10 +80,10 @@ class DatabaseConcurrencyLimiterTests(unittest.IsolatedAsyncioTestCase):
         limiter = DatabaseConcurrencyLimiter(limit=1, wait_timeout=1)
         await limiter.acquire()
 
-        waiter = __import__("asyncio").create_task(limiter.acquire())
-        await __import__("asyncio").sleep(0)
+        waiter = asyncio.create_task(limiter.acquire())
+        await asyncio.sleep(0)
         waiter.cancel()
-        with self.assertRaises(__import__("asyncio").CancelledError):
+        with self.assertRaises(asyncio.CancelledError):
             await waiter
 
         self.assertEqual(limiter.active, 1)
@@ -100,6 +101,26 @@ class DatabaseConcurrencyLimiterTests(unittest.IsolatedAsyncioTestCase):
         await session.close()
 
         self.assertEqual(database_concurrency_limiter.active, before)
+
+    async def test_session_commit_releases_an_acquired_database_permit(self):
+        session = ConcurrencyLimitedAsyncSession(bind=engine)
+        before = database_concurrency_limiter.active
+        await session._ensure_database_permit()
+
+        await session.commit()
+
+        self.assertEqual(database_concurrency_limiter.active, before)
+        await session.close()
+
+    async def test_session_rollback_releases_an_acquired_database_permit(self):
+        session = ConcurrencyLimitedAsyncSession(bind=engine)
+        before = database_concurrency_limiter.active
+        await session._ensure_database_permit()
+
+        await session.rollback()
+
+        self.assertEqual(database_concurrency_limiter.active, before)
+        await session.close()
 
 
 class RequestScopedSessionDependencyTests(unittest.IsolatedAsyncioTestCase):
