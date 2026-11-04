@@ -97,6 +97,26 @@ describe("DevicePermissionService", () => {
     expect(result.message).toContain("từ chối");
   });
 
+  it("verifies a live microphone track when MediaRecorder is supported", async () => {
+    const { stream, track } = fakeStream("audio");
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    installMediaDevices(getUserMedia);
+    vi.stubGlobal("MediaRecorder", class TestMediaRecorder {});
+
+    const result = await createDevicePermissionService().requestAccess("microphone");
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: true,
+      video: false,
+    });
+    expect(result).toMatchObject({
+      status: "granted",
+      verified: true,
+      mediaRecorderSupported: true,
+    });
+    expect(track.stop).toHaveBeenCalledOnce();
+  });
+
   it("does not pass microphone verification when MediaRecorder is unsupported", async () => {
     const { stream, track } = fakeStream("audio");
     const getUserMedia = vi.fn().mockResolvedValue(stream);
@@ -144,14 +164,7 @@ describe("DevicePermissionService", () => {
   });
 
   it("reports unsupported permission descriptors as unknown, not granted", async () => {
-    Object.defineProperty(navigator, "permissions", {
-      configurable: true,
-      value: {
-        query: vi.fn().mockRejectedValue(new TypeError("Unsupported descriptor")),
-      },
-    });
     const getUserMedia = vi.fn();
-
     installMediaDevices(getUserMedia);
     Object.defineProperty(navigator, "permissions", {
       configurable: true,
