@@ -96,12 +96,12 @@ export function ReadingReady({
           <DeviceCard
             icon="camera"
             label="Camera"
-            ready={permissions.camera === "ready"}
+            ready={permissions.camera === "ready" || permissions.camera === "granted"}
           />
           <DeviceCard
             icon="microphone"
             label="Micro"
-            ready={permissions.microphone === "ready"}
+            ready={permissions.microphone === "ready" || permissions.microphone === "granted"}
           />
         </div>
 
