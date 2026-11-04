@@ -216,6 +216,46 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(word.bbox_quality)
         self.assertEqual(word.bbox_quality_status, "NOT_EVALUATED")
 
+    async def test_legacy_revision_route_only_exposes_versioned_calibrated_scores(self):
+        repo = catalog_repo()
+        repo.revision.return_value = revision_row(
+            ProcessingMeta={
+                "confidence_contract": {
+                    "calibration_status": "CALIBRATED",
+                    "calibration_version": "viword-platt-v1",
+                },
+                "word_confidence_evidence": [
+                    {
+                        "word_index": 0,
+                        "recognized_text": "Mèo",
+                        "confidence_source": "tesseract",
+                        "confidence_scope": "word",
+                        "raw_engine_score": 88.0,
+                        "calibrated_confidence": 0.91,
+                        "calibration_status": "CALIBRATED",
+                        "bbox_quality": None,
+                        "bbox_quality_status": "NOT_EVALUATED",
+                    }
+                ],
+            }
+        )
+        repo.words.return_value = [
+            SimpleNamespace(
+                WordIndex=0,
+                LineIndex=0,
+                Text="Mèo",
+                NormalizedText="mèo",
+                BoundingBox={"x": .1, "y": .2, "width": .3, "height": .1},
+                OCRConfidence=.885,
+            )
+        ]
+
+        result = await AdminCatalogService(repository=repo).revision(PAGE, REVISION)
+
+        self.assertEqual(result.words[0].calibrated_confidence, 0.91)
+        self.assertEqual(result.words[0].calibration_status, "CALIBRATED")
+        self.assertEqual(result.words[0].calibration_version, "viword-platt-v1")
+
     async def test_pixel_bbox_is_not_guessed_as_normalized(self):
         repo = catalog_repo()
         repo.words.return_value = [SimpleNamespace(BoundingBox={"x": 120, "y": 20, "width": 40, "height": 20})]
