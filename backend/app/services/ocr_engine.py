@@ -1176,9 +1176,11 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             # a missing or malformed score must not discard recognized text.
             continue
 
+        confidence_values = result.get("conf")
         raw_confidence = (
-            _normalize_tesseract_raw_confidence(result["conf"][index])
-            if index < len(result.get("conf", []))
+            _normalize_tesseract_raw_confidence(confidence_values[index])
+            if isinstance(confidence_values, (list, tuple))
+            and index < len(confidence_values)
             else None
         )
 
