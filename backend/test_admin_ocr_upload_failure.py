@@ -156,10 +156,32 @@ class AdminOcrUploadFailureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_database_finalize_failure_rolls_back_deletes_placeholder_and_cleans_object(self):
         service = self.make_service()
-        # Reservation succeeds, final activation commit fails, placeholder cleanup commits.
-        service.db.commit = AsyncMock(
-            side_effect=[None, RuntimeError("private database details"), None]
-        )
+        # Model the last committed reservation row. A failed finalization commit
+        # must roll the in-memory ORM fixture back to PROCESSING before cleanup
+        # re-reads it, just as SQLAlchemy does after a database rollback.
+        persisted_reservations = {}
+        commit_attempts = 0
+
+        async def commit_with_database_semantics():
+            nonlocal commit_attempts
+            commit_attempts += 1
+            if commit_attempts == 2:
+                raise RuntimeError("private database details")
+            for page in service._test_reserved_pages:
+                persisted_reservations[page.Id] = (
+                    page.LifecycleStatus,
+                    dict(page.ProcessingMeta),
+                )
+
+        async def rollback_with_database_semantics():
+            for page in service._test_reserved_pages:
+                persisted = persisted_reservations.get(page.Id)
+                if persisted is not None:
+                    page.LifecycleStatus = persisted[0]
+                    page.ProcessingMeta = dict(persisted[1])
+
+        service.db.commit = AsyncMock(side_effect=commit_with_database_semantics)
+        service.db.rollback = AsyncMock(side_effect=rollback_with_database_semantics)
         cleanup = AsyncMock()
         with (
             patch("app.services.admin_ocr_service.upload_object"),
