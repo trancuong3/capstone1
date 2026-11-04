@@ -2,6 +2,31 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDevicePermissionService } from "@/lib/api/device-permission-service";
 
+const originalMediaDevicesDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "mediaDevices",
+);
+const originalPermissionsDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "permissions",
+);
+const originalSecureContextDescriptor = Object.getOwnPropertyDescriptor(
+  window,
+  "isSecureContext",
+);
+
+function restoreDescriptor(
+  target: object,
+  property: PropertyKey,
+  descriptor: PropertyDescriptor | undefined,
+) {
+  if (descriptor) {
+    Object.defineProperty(target, property, descriptor);
+  } else {
+    Reflect.deleteProperty(target, property);
+  }
+}
+
 function fakeStream(kind: "audio" | "video") {
   const track = {
     kind,
@@ -32,6 +57,9 @@ describe("DevicePermissionService", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    restoreDescriptor(navigator, "mediaDevices", originalMediaDevicesDescriptor);
+    restoreDescriptor(navigator, "permissions", originalPermissionsDescriptor);
+    restoreDescriptor(window, "isSecureContext", originalSecureContextDescriptor);
   });
 
   it("verifies a live camera track and always stops the temporary stream", async () => {
@@ -82,6 +110,101 @@ describe("DevicePermissionService", () => {
     expect(result.mediaRecorderSupported).toBe(false);
     expect(result.message).toContain("MediaRecorder");
     expect(track.stop).toHaveBeenCalledOnce();
+  });
+
+
+  it("requires a secure context before asking the browser for a device", async () => {
+    const getUserMedia = vi.fn();
+    installMediaDevices(getUserMedia);
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: false,
+    });
+
+    const result = await createDevicePermissionService().requestAccess("camera");
+
+    expect(result.status).toBe("error");
+    expect(result.verified).toBe(false);
+    expect(result.message).toContain("HTTPS");
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("reports MediaDevices as unavailable when getUserMedia is unsupported", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    });
+    Reflect.deleteProperty(navigator, "mediaDevices");
+
+    const result = await createDevicePermissionService().requestAccess("microphone");
+
+    expect(result.status).toBe("unavailable");
+    expect(result.verified).toBe(false);
+    expect(result.message).toContain("không hỗ trợ");
+  });
+
+  it("reports unsupported permission descriptors as unknown, not granted", async () => {
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: {
+        query: vi.fn().mockRejectedValue(new TypeError("Unsupported descriptor")),
+      },
+    });
+    const getUserMedia = vi.fn();
+
+    installMediaDevices(getUserMedia);
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: {
+        query: vi.fn().mockRejectedValue(new TypeError("Unsupported descriptor")),
+      },
+    });
+
+    const snapshot = await createDevicePermissionService().getSnapshot();
+
+    expect(snapshot.camera).toBe("unknown");
+    expect(snapshot.microphone).toBe("unknown");
+  });
+
+  it("queries camera and microphone permission states independently", async () => {
+    const query = vi.fn(async (descriptor: PermissionDescriptor) => ({
+      state: descriptor.name === "camera" ? "denied" : "prompt",
+      onchange: null,
+    }));
+    installMediaDevices(vi.fn());
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: { query },
+    });
+
+    const snapshot = await createDevicePermissionService().getSnapshot();
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(snapshot.camera).toBe("denied");
+    expect(snapshot.microphone).toBe("prompt");
+  });
+
+  it("classifies a hardware busy error separately from a permission denial", async () => {
+    const busyError = new Error("Device is busy");
+    busyError.name = "NotReadableError";
+    installMediaDevices(vi.fn().mockRejectedValue(busyError));
+
+    const result = await createDevicePermissionService().requestAccess("microphone");
+
+    expect(result.status).toBe("error");
+    expect(result.verified).toBe(false);
+    expect(result.message).toContain("đang bận");
+  });
+
+  it("classifies unsatisfied device constraints as an error", async () => {
+    const constraintError = new Error("No matching device mode");
+    constraintError.name = "OverconstrainedError";
+    installMediaDevices(vi.fn().mockRejectedValue(constraintError));
+
+    const result = await createDevicePermissionService().requestAccess("camera");
+
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("cấu hình");
   });
 
   it("classifies a missing physical device as unavailable", async () => {
