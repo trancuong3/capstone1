@@ -3,7 +3,11 @@ import { Fragment } from "react";
 import { cn } from "@/lib/utils/cn";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
-import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import {
+  normalizeRealtimeForAmbiguity,
+  normalizeRealtimeWord,
+  type RealtimeAlignmentSnapshot,
+} from "@/lib/reading/realtime-alignment";
 
 interface BookPageContentProps {
   page: ReadingPageDTO;
@@ -91,22 +95,35 @@ export function BookPageContent({
               ),
             );
 
-            const isMispronounced = Boolean(
-              mispronouncedWordIds?.has(word.word_id) ||
-              alignment?.status === "SUBSTITUTE" ||
-              previewStatus?.status === "SUBSTITUTE",
+            const alignmentIsOrthographicallyAmbiguous = Boolean(
+              alignment?.status === "SUBSTITUTE" &&
+              typeof alignment.book_word === "string" &&
+              typeof alignment.spoken_word === "string" &&
+              normalizeRealtimeWord(alignment.book_word) !==
+                normalizeRealtimeWord(alignment.spoken_word) &&
+              normalizeRealtimeForAmbiguity(alignment.book_word) ===
+                normalizeRealtimeForAmbiguity(alignment.spoken_word),
             );
 
             const isAmbiguous = Boolean(
               ambiguousWordIds?.has(word.word_id) ||
-              previewStatus?.status === "AMBIGUOUS",
+              previewStatus?.status === "AMBIGUOUS" ||
+              alignmentIsOrthographicallyAmbiguous,
+            );
+
+            const isMispronounced = Boolean(
+              !isAmbiguous &&
+              (mispronouncedWordIds?.has(word.word_id) ||
+                alignment?.status === "SUBSTITUTE" ||
+                previewStatus?.status === "SUBSTITUTE"),
             );
 
             const isCorrect = Boolean(
-              correctWordIds?.has(word.word_id) ||
-              alignment?.status === "MATCH" ||
-              previewStatus?.status === "MATCH" ||
-              isPreviewMatched,
+              !isAmbiguous &&
+              (correctWordIds?.has(word.word_id) ||
+                alignment?.status === "MATCH" ||
+                previewStatus?.status === "MATCH" ||
+                isPreviewMatched),
             );
 
             const previousWord = page.words[index - 1];
