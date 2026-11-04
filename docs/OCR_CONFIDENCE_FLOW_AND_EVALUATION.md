@@ -179,6 +179,27 @@ does not claim or display calibrated word probabilities and does not invent
 metric values. The Admin UI reports raw evidence and unknown/un-calibrated
 state instead.
 
+## 6A. Child Reading Vietnamese matching safeguard
+
+The real-time reading alignment path is separate from OCR confidence. On this
+branch, it preserves Unicode NFC Vietnamese marks for exact token matching.
+The helper that removes combining marks is used only to flag a possible
+diacritic-only mismatch as `AMBIGUOUS`; it does not decide that the words are
+equal. The character `đ` remains distinct from `d`.
+
+Examples:
+
+- `ma` versus `má`: not an exact match; potentially ambiguous STT evidence.
+- `cá` versus `ca`: not an exact match; potentially ambiguous STT evidence.
+- `đi` versus `di`: not collapsed to equality.
+- `chú` versus `chú`: exact match.
+
+Ambiguous tokens use a neutral UI style and do not increment the confirmed
+mispronunciation set. This is a limited safeguard, not a general STT confidence
+model. The current adapter does not expose a trusted, consistently available
+word-level confidence input to this aligner. Final transcript comparison
+already uses NFC/lowercase normalization without stripping Vietnamese marks.
+
 ## 7. Suggested future evaluation record
 
 Each labeled example should retain at least:
