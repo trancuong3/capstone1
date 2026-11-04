@@ -72,18 +72,25 @@ export function normalizeRealtimeWord(text: string): string {
  * It is never used to declare two words an exact match.
  * The đ character is intentionally preserved and remains distinct from d.
  */
-export function normalizeRealtimeWithoutDiacritics(text: string): string {
+export function normalizeRealtimeForAmbiguity(text: string): string {
+  // This relaxed form is used only to flag uncertainty. It is never used for
+  // exact matching: d/đ and all Vietnamese tone/vowel marks remain distinct
+  // in normalizeRealtimeWord().
   return normalizeRealtimeWord(text)
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
+    .replace(/đ/g, "d")
     .normalize("NFC");
 }
 
-function isDiacriticOnlyDifference(expected: string, spoken: string): boolean {
+function isVietnameseOrthographicAmbiguity(
+  expected: string,
+  spoken: string,
+): boolean {
   return (
     expected !== spoken &&
-    normalizeRealtimeWithoutDiacritics(expected) ===
-      normalizeRealtimeWithoutDiacritics(spoken)
+    normalizeRealtimeForAmbiguity(expected) ===
+      normalizeRealtimeForAmbiguity(spoken)
   );
 }
 
@@ -222,7 +229,7 @@ export class RealtimeAlignmentEngine {
 
       // Diacritics-only mismatch is ambiguous STT evidence, not an exact match
       // and not sufficient evidence to label a pronunciation error.
-      if (isDiacriticOnlyDifference(currentWord.normalizedText, token)) {
+      if (isVietnameseOrthographicAmbiguity(currentWord.normalizedText, token)) {
         setPreviewStatus(cursor, "AMBIGUOUS");
         targetIndex = cursor;
         // Keep the preview cursor moving so the next exact spoken token can
@@ -450,7 +457,7 @@ export class RealtimeAlignmentEngine {
     if (!expected) return;
     this.setWordStatus(
       bookIndex,
-      isDiacriticOnlyDifference(expected.normalizedText, token)
+      isVietnameseOrthographicAmbiguity(expected.normalizedText, token)
         ? "AMBIGUOUS"
         : "SUBSTITUTE",
     );
