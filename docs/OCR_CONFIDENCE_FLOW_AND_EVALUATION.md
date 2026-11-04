@@ -191,7 +191,8 @@ Examples:
 
 - `ma` versus `má`: not an exact match; potentially ambiguous STT evidence.
 - `cá` versus `ca`: not an exact match; potentially ambiguous STT evidence.
-- `đi` versus `di`: not collapsed to equality.
+- `đi` versus `di`: not an exact match; treated as ambiguous STT evidence,
+  not proof that the child pronounced the word incorrectly.
 - `chú` versus `chú`: exact match.
 
 Ambiguous tokens use a neutral UI style and do not increment the confirmed
