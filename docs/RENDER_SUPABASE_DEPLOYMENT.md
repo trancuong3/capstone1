@@ -143,6 +143,26 @@ Before adding production credentials to Render, use a non-production Supabase pr
 
 Never run destructive smoke tests against production data.
 
+## 7.1. Interrupted page-upload reservations
+
+Admin page upload reserves a `bookpages` row with `lifecyclestatus='PROCESSING'` and stores the UTC start time in `processingmeta.processing_started_at`. Parent catalog, verified reading and normal Admin page-list queries exclude these placeholders. The reservation prevents two concurrent uploads for the same book from allocating the same page number without holding a row lock during Storage/OCR.
+
+A forced process termination or machine loss can occur before application cleanup runs. Monitor for old PROCESSING reservations with a read-only query:
+
+~~~sql
+SELECT
+    id,
+    bookid,
+    pagenumber,
+    processingmeta ->> 'processing_started_at' AS processing_started_at,
+    imagepath
+FROM public.bookpages
+WHERE lifecyclestatus = 'PROCESSING'
+ORDER BY bookid, pagenumber;
+~~~
+
+This query is inspection-only. Do not automatically delete PROCESSING rows based only on age: a slow OCR job or deployment overlap may still be active. Before manual cleanup, verify that no upload request is running for that row, inspect whether its Storage object exists, and use an audited maintenance procedure to remove the orphaned reservation and any unreferenced object. Never remove ACTIVE pages or rows referenced by revisions/history.
+
 ## 8. Monitoring and scaling
 
 Monitor both sides of the pooler:
