@@ -11,7 +11,12 @@ function words(...tokens: string[]): ReadingPageWordDTO[] {
     word_id: `word-${index + 1}`,
     word_index: index,
     text,
-    bbox: [0.1 + index * 0.1, 0.2, 0.08, 0.04],
+    bbox: [0.1 + index * 0.1, 0.2, 0.08, 0.04] as [
+      number,
+      number,
+      number,
+      number,
+    ],
     line_index: 0,
   }));
 }
