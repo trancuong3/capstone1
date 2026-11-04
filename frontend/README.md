@@ -131,6 +131,18 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Admin    | `/admin/audit-logs`                    | Nhật ký kiểm toán an toàn                                  |
 | Admin    | `/admin/health`                        | Trạng thái vận hành mô phỏng                               |
 
+### Luồng xác minh thiết bị và quét trang sách
+
+1. Tại Dashboard, chọn **Quét sách trước Camera (ViRead)**. Ứng dụng chuyển đến `/device-permissions` và giữ `childId` cùng ngữ cảnh quét.
+2. Trang xác minh chỉ đọc trạng thái trình duyệt khi vừa mở; không tự bật camera hoặc microphone. Khi phụ huynh bấm **Kiểm tra và cấp quyền**, service lần lượt gọi `getUserMedia` riêng cho camera và microphone, xác nhận có track đang hoạt động rồi dừng các track tạm. Bước này không ghi âm, không lưu và không tải ảnh lên.
+3. Chỉ khi cả hai thiết bị đều được truy cập thành công (và trình duyệt hỗ trợ `MediaRecorder` cho microphone), nút **Tiếp tục quét trang sách** mới được bật. Trạng thái xác minh chỉ lưu trong bộ nhớ của tab, có thời hạn ngắn và dùng một lần; mở trực tiếp hoặc tải lại `/book-scanner` sẽ quay lại trang xác minh.
+4. `/book-scanner` mở camera và tái sử dụng `scanCameraFrameGlobal()` hoặc `scanCameraFrameForBook()`. Chỉ một kết quả có đủ `bookId` và `pageId` mới được điều hướng đến `/books/[bookId]?pageId=...`.
+5. Trang chi tiết chọn đúng trang OCR để phụ huynh kiểm tra. Không tự tạo Reading Session sau khi nhận diện; buổi đọc chỉ được tạo khi phụ huynh bấm **Bắt đầu đọc**.
+
+Permissions API không được hỗ trợ đồng nhất trên mọi trình duyệt nên trạng thái không truy vấn được hiển thị là chưa xác định, không tự coi là đã cấp quyền. Việc mở scanner vẫn đòi hỏi xác minh thiết bị thực tế bằng `getUserMedia`. Trình duyệt cần HTTPS hoặc localhost; quyền website có thể bị thay đổi và cần xác minh lại.
+
+Vé xác minh ở frontend chỉ kiểm soát thứ tự điều hướng trong tab; nó không thay thế xác thực người dùng, quyền sở hữu tài nguyên hoặc kiểm tra quyền ở backend.
+
 Các route Parent yêu cầu `profiles.role = parent`; các route `/admin/**` (trừ `/admin/login`) yêu cầu `profiles.role = admin`. Người chưa đăng nhập được chuyển đến trang đăng nhập tương ứng, còn tài khoản sai role được đưa về khu vực hợp lệ của mình. Role chỉ được đọc từ bảng `profiles`, không tin `user_metadata.role` hoặc query parameter.
 
 `proxy.ts` dùng `supabase.auth.getClaims()` để xác minh/làm mới session và chuyển cookie mới cho cả Server Components lẫn trình duyệt. Authorization an toàn vẫn được kiểm tra lại phía server gần route bằng `profiles.role`.
