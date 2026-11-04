@@ -5,7 +5,8 @@ export type RealtimeWordStatus =
   | "MATCH"
   | "SUBSTITUTE"
   | "DELETE"
-  | "REPEATED";
+  | "REPEATED"
+  | "AMBIGUOUS";
 
 export interface RealtimeWordState {
   wordId: string;
@@ -58,13 +59,32 @@ interface IndexedBookWord {
  * Ví dụ: "ĐI," và "đi" được xem là cùng một từ.
  */
 export function normalizeRealtimeWord(text: string): string {
+  // Keep Vietnamese tone marks, vowel marks and the đ/d distinction.
   return text
     .normalize("NFC")
     .toLocaleLowerCase("vi-VN")
     .replace(/[^\p{L}\p{N}]/gu, "")
+    .normalize("NFC");
+}
+
+/**
+ * Used only to flag a possible diacritic/STT ambiguity.
+ * It is never used to declare two words an exact match.
+ * The đ character is intentionally preserved and remains distinct from d.
+ */
+export function normalizeRealtimeWithoutDiacritics(text: string): string {
+  return normalizeRealtimeWord(text)
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
+    .replace(/\p{M}/gu, "")
+    .normalize("NFC");
+}
+
+function isDiacriticOnlyDifference(expected: string, spoken: string): boolean {
+  return (
+    expected !== spoken &&
+    normalizeRealtimeWithoutDiacritics(expected) ===
+      normalizeRealtimeWithoutDiacritics(spoken)
+  );
 }
 
 /**
@@ -200,6 +220,14 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
+      // Diacritics-only mismatch is ambiguous STT evidence, not an exact match
+      // and not sufficient evidence to label a pronunciation error.
+      if (isDiacriticOnlyDifference(currentWord.normalizedText, token)) {
+        setPreviewStatus(cursor, "AMBIGUOUS");
+        targetIndex = cursor;
+        continue;
+      }
+
       // 2. Phát hiện đọc lặp từ ngay trước đó.
       const previousIndex = cursor - 1;
 
@@ -320,7 +348,7 @@ export class RealtimeAlignmentEngine {
           return;
         }
 
-        this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
+        this.setPendingWordStatus(pending.token, this.currentBookIndex);
         this.spokenToBookIndex.set(
           pending.spokenIndex,
           this.currentBookIndex,
@@ -332,7 +360,7 @@ export class RealtimeAlignmentEngine {
       }
 
       // Hai từ liên tiếp đều không khớp: xác nhận từ trước là đọc sai.
-      this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
+      this.setPendingWordStatus(pending.token, this.currentBookIndex);
       this.spokenToBookIndex.set(
         pending.spokenIndex,
         this.currentBookIndex,
@@ -414,6 +442,17 @@ export class RealtimeAlignmentEngine {
     this.pendingToken = { token, spokenIndex };
   }
 
+  private setPendingWordStatus(token: string, bookIndex: number): void {
+    const expected = this.bookWords[bookIndex];
+    if (!expected) return;
+    this.setWordStatus(
+      bookIndex,
+      isDiacriticOnlyDifference(expected.normalizedText, token)
+        ? "AMBIGUOUS"
+        : "SUBSTITUTE",
+    );
+  }
+
   private processConfirmedMatch(
     spokenIndex: number,
     bookIndex: number,
@@ -445,7 +484,7 @@ export class RealtimeAlignmentEngine {
       return;
     }
 
-    this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
+    this.setPendingWordStatus(pending.token, this.currentBookIndex);
     this.spokenToBookIndex.set(
       pending.spokenIndex,
       this.currentBookIndex,
