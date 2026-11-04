@@ -64,6 +64,17 @@ describe("RealtimeAlignmentEngine Vietnamese token identity", () => {
     expect(snapshot.previewMatchedWordIds.has("word-1")).toBe(false);
   });
 
+  it("keeps subsequent preview words aligned after a diacritic ambiguity", () => {
+    const engine = new RealtimeAlignmentEngine(words("má", "đi"));
+    const snapshot = engine.previewAlignment("ma đi");
+
+    expect(snapshot.statusByWordId.get("word-1")?.status).toBe("AMBIGUOUS");
+    expect(snapshot.statusByWordId.get("word-2")?.status).toBe("MATCH");
+    expect(snapshot.currentWordId).toBeNull();
+    expect(snapshot.previewMatchedWordIds.has("word-1")).toBe(false);
+    expect(snapshot.previewMatchedWordIds.has("word-2")).toBe(true);
+  });
+
   it("still records exact Vietnamese words as matched", () => {
     const engine = new RealtimeAlignmentEngine(words("chú", "mèo"));
     const snapshot = engine.addFinalTranscript("chú mèo");
