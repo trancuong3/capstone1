@@ -37,7 +37,14 @@ class BookRepository:
         return book
 
     async def list_pages(self, book_id: UUID) -> list[BookPage]:
-        query = select(BookPage).where(BookPage.BookId == book_id).order_by(BookPage.PageNumber)
+        query = (
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus != "PROCESSING",
+            )
+            .order_by(BookPage.PageNumber)
+        )
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
