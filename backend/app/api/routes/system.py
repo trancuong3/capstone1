@@ -509,6 +509,7 @@ class AdminSystemService:
         except Exception:
             stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
 
+        # Giữ lại probe_gemini cho các endpoint nội bộ nhưng không làm lệch danh sách health của hạ tầng cốt lõi
         checked_at = datetime.now(timezone.utc)
         items = [
             AdminHealthItemRead(
@@ -530,13 +531,6 @@ class AdminSystemService:
                 ),
             ),
             AdminHealthItemRead(
-                id="gemini",
-                label="Google AI Studio (Gemini)",
-                status=gemini_status,
-                checked_at=checked_at,
-                safe_message=gemini_message,
-            ),
-            AdminHealthItemRead(
                 id="tts",
                 label="Text-to-Speech (TTS)",
                 status=tts_status,
@@ -553,12 +547,7 @@ class AdminSystemService:
         ]
 
         statuses = [item.status for item in items]
-        if all(s == "HEALTHY" for s in statuses):
-            overall = "HEALTHY"
-        elif not database_ready or any(s == "UNAVAILABLE" for s in statuses):
-            overall = "DEGRADED"
-        else:
-            overall = "DEGRADED"
+        overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"
 
         return AdminHealthRead(
             overall_status=overall,

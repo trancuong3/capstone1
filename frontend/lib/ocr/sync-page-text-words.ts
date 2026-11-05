@@ -71,7 +71,8 @@ export function syncPageTextToWords(
 
   const words = existingWords.map((word, index) => {
     const token = tokens[index];
-    const isMatched = normalizeVietnameseWord(word.text) === normalizeVietnameseWord(token);
+    const isMatched =
+      normalizeVietnameseWord(word.text) === normalizeVietnameseWord(token);
     return {
       ...word,
       text: token,

@@ -237,7 +237,9 @@ export function AdminOcrReviewScreen({
       setSelectedWord(index);
       if (index === null) return;
 
-      const textarea = document.getElementById("ocr-text") as HTMLTextAreaElement | null;
+      const textarea = document.getElementById(
+        "ocr-text",
+      ) as HTMLTextAreaElement | null;
       if (textarea) {
         const range = getWordRangeInText(draftText, index);
         if (range) {
@@ -269,7 +271,10 @@ export function AdminOcrReviewScreen({
         ? {
             ...word,
             ...patch,
-            text: patch.text !== undefined ? patch.text.normalize("NFC") : word.text,
+            text:
+              patch.text !== undefined
+                ? patch.text.normalize("NFC")
+                : word.text,
             ocr_confidence: patch.ocr_confidence ?? 1.0,
             normalized_text:
               patch.text === undefined
@@ -329,20 +334,30 @@ export function AdminOcrReviewScreen({
         })),
       );
       setWordSyncError(null);
-      setNotice("Đã đối chiếu khớp 100% giữa nội dung văn bản và tọa độ bounding box!");
+      setNotice(
+        "Đã đối chiếu khớp 100% giữa nội dung văn bản và tọa độ bounding box!",
+      );
     } else {
-      setWordSyncError("Số lượng từ giữa văn bản và danh sách bounding box chưa khớp để đối chiếu.");
+      setWordSyncError(
+        "Số lượng từ giữa văn bản và danh sách bounding box chưa khớp để đối chiếu.",
+      );
     }
   }
 
   async function correctWithAi() {
-    if (!draftText.trim() || busy !== null || detail?.lifecycle_status !== "ACTIVE") {
+    if (
+      !draftText.trim() ||
+      busy !== null ||
+      detail?.lifecycle_status !== "ACTIVE"
+    ) {
       return;
     }
     setBusy("ai_correct");
     setNotice(null);
     try {
-      const correctedText = (await ocr.aiCorrectText(pageId, draftText)).normalize("NFC");
+      const correctedText = (
+        await ocr.aiCorrectText(pageId, draftText)
+      ).normalize("NFC");
       setDraftText(correctedText);
 
       const result = syncPageTextToWords(correctedText, words);
@@ -355,7 +370,9 @@ export function AdminOcrReviewScreen({
         );
         setWordSyncError(null);
       }
-      setNotice("Gemini AI đã sửa lỗi chính tả và phục hồi dấu thanh thành công!");
+      setNotice(
+        "Gemini AI đã sửa lỗi chính tả và phục hồi dấu thanh thành công!",
+      );
     } catch (cause) {
       setNotice(
         isServiceError(cause)
@@ -398,8 +415,12 @@ export function AdminOcrReviewScreen({
     try {
       const currentDraftTokens = tokenizePageText(draftText);
       const wordsToSave = words.map((w) => {
-        const status = getWordDisplayStatus(w, currentDraftTokens[w.word_index]);
-        const conf = status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.50;
+        const status = getWordDisplayStatus(
+          w,
+          currentDraftTokens[w.word_index],
+        );
+        const conf =
+          status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.5;
         return { ...w, ocr_confidence: conf };
       });
 
@@ -428,8 +449,12 @@ export function AdminOcrReviewScreen({
     try {
       const currentDraftTokens = tokenizePageText(draftText);
       const wordsToVerify = words.map((w) => {
-        const status = getWordDisplayStatus(w, currentDraftTokens[w.word_index]);
-        const conf = status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.50;
+        const status = getWordDisplayStatus(
+          w,
+          currentDraftTokens[w.word_index],
+        );
+        const conf =
+          status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.5;
         return { ...w, ocr_confidence: conf };
       });
 
@@ -596,7 +621,11 @@ export function AdminOcrReviewScreen({
       {notice ? (
         <StatusMessage
           className="mb-6"
-          tone={notice.startsWith("Không thể") || notice.startsWith("Lỗi") ? "error" : "info"}
+          tone={
+            notice.startsWith("Không thể") || notice.startsWith("Lỗi")
+              ? "error"
+              : "info"
+          }
         >
           {notice}
         </StatusMessage>
@@ -628,7 +657,10 @@ export function AdminOcrReviewScreen({
             >
               {words.map((word) => {
                 const currentDraftToken = draftTokens[word.word_index];
-                const matchStatus = getWordDisplayStatus(word, currentDraftToken);
+                const matchStatus = getWordDisplayStatus(
+                  word,
+                  currentDraftToken,
+                );
 
                 const colorClass = {
                   exact: "border-green-600 bg-green-400/35",
@@ -677,7 +709,8 @@ export function AdminOcrReviewScreen({
             </div>
           </div>
           <p className="mt-3 text-sm text-muted">
-            Màu sắc phản ánh đối chiếu thời gian thực giữa từ trên ảnh và văn bản trong ô &ldquo;Nội dung trang&rdquo;.
+            Màu sắc phản ánh đối chiếu thời gian thực giữa từ trên ảnh và văn
+            bản trong ô &ldquo;Nội dung trang&rdquo;.
           </p>
           <div
             aria-label="Chú giải đối chiếu OCR"
@@ -702,15 +735,23 @@ export function AdminOcrReviewScreen({
             role="group"
           >
             <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
-              <strong className="text-lg text-green-700">{matchCounts.exact}</strong>
+              <strong className="text-lg text-green-700">
+                {matchCounts.exact}
+              </strong>
               <div className="text-xs font-bold text-green-900">Chính xác</div>
             </div>
             <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2.5 text-center">
-              <strong className="text-lg text-yellow-700">{matchCounts.partial}</strong>
-              <div className="text-xs font-bold text-yellow-900">Nghi sai dấu</div>
+              <strong className="text-lg text-yellow-700">
+                {matchCounts.partial}
+              </strong>
+              <div className="text-xs font-bold text-yellow-900">
+                Nghi sai dấu
+              </div>
             </div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
-              <strong className="text-lg text-red-700">{matchCounts.mismatch}</strong>
+              <strong className="text-lg text-red-700">
+                {matchCounts.mismatch}
+              </strong>
               <div className="text-xs font-bold text-red-900">Không khớp</div>
             </div>
           </div>
@@ -746,7 +787,9 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu, Vàng: nghi sai dấu, Đỏ: không khớp).
+              Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động
+              cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu,
+              Vàng: nghi sai dấu, Đỏ: không khớp).
             </p>
             {wordSyncError ? (
               <p
@@ -798,7 +841,8 @@ export function AdminOcrReviewScreen({
                     onClick={() => void correctWithAi()}
                     type="button"
                   >
-                    <Sparkles aria-hidden className="size-4" /> AI sửa chính tả &amp; dấu
+                    <Sparkles aria-hidden className="size-4" /> AI sửa chính tả
+                    &amp; dấu
                   </Button>
 
                   <Button
@@ -831,7 +875,8 @@ export function AdminOcrReviewScreen({
                   type="button"
                   variant="secondary"
                 >
-                  <CheckCircle2 aria-hidden className="size-4" /> Đối chiếu khớp (100%)
+                  <CheckCircle2 aria-hidden className="size-4" /> Đối chiếu khớp
+                  (100%)
                 </Button>
                 <Button
                   className="h-11 w-auto"
@@ -850,7 +895,10 @@ export function AdminOcrReviewScreen({
             <div className="grid gap-3">
               {words.map((word) => {
                 const currentDraftToken = draftTokens[word.word_index];
-                const matchStatus = getWordDisplayStatus(word, currentDraftToken);
+                const matchStatus = getWordDisplayStatus(
+                  word,
+                  currentDraftToken,
+                );
                 const matchLabel = getWordMatchLabel(matchStatus);
 
                 const statusBadgeClass = {
@@ -877,7 +925,9 @@ export function AdminOcrReviewScreen({
                       >
                         Từ #{word.word_index} · Dòng {word.line_index}
                       </button>
-                      <span className={`rounded border px-2 py-0.5 text-xs font-bold ${statusBadgeClass}`}>
+                      <span
+                        className={`rounded border px-2 py-0.5 text-xs font-bold ${statusBadgeClass}`}
+                      >
                         {matchLabel}
                       </span>
                     </div>

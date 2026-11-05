@@ -9,7 +9,6 @@ import threading
 import unicodedata
 from typing import Any
 
-# Ngăn chặn xung đột OpenMP runtime giữa PyTorch và PaddlePaddle
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import PIL.Image
@@ -49,7 +48,6 @@ class OcrNoTextDetected(RuntimeError):
 
 
 def normalize_word(value: str) -> str:
-    """Chuẩn hóa tiếng Việt canonical dùng chung cho OCR output và review words."""
     value = unicodedata.normalize("NFC", value).strip().lower()
     while value and (
         unicodedata.category(value[0]).startswith(("P", "S"))
@@ -65,7 +63,6 @@ def normalize_word(value: str) -> str:
 
 
 def normalize_text_tokens(value: str) -> list[str]:
-    """Phân tách chuỗi thành danh sách token từ đã chuẩn hóa."""
     return [
         token
         for raw in re.split(r"\s+", unicodedata.normalize("NFC", value).strip())
@@ -73,16 +70,12 @@ def normalize_text_tokens(value: str) -> list[str]:
     ]
 
 
-# =============================================================================
-# Quản lý khởi tạo & Nạp trước (Preload) Dual-Engine Singleton vào RAM
-# =============================================================================
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
 _engine_lock = threading.Lock()
 
 
 def _find_cached_vietocr_weights() -> str | None:
-    """Dò tìm tệp trọng số VietOCR đã có sẵn trên máy để nạp trực tiếp, không gọi download re-check."""
     temp_dir = os.environ.get("TEMP", os.environ.get("TMP", tempfile.gettempdir()))
     candidates = [
         os.path.join(temp_dir, "vgg_transformer.pth"),
@@ -97,7 +90,6 @@ def _find_cached_vietocr_weights() -> str | None:
 
 
 def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
-    """Khởi tạo và lưu cache trọng số mô hình vào RAM (Thread-safe, tối ưu hóa suy luận CPU/GPU)."""
     global _paddle_engine, _vietocr_engine
     if _paddle_engine is not None and _vietocr_engine is not None:
         return _paddle_engine, _vietocr_engine
@@ -149,21 +141,16 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
 
 
 def warmup_ocr_engines() -> None:
-    """Tự động nạp trước trọng số OCR trong nền ngay khi ứng dụng khởi chạy."""
     try:
         _get_ocr_engines()
     except Exception as exc:
-        logger.warning(f"Preload OCR Engine thất bại (sẽ thử lại khi có request): {exc}")
+        logger.warning(f"Preload OCR Engine thất bại: {exc}")
 
 
 threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_model_preloader").start()
 
 
-# =============================================================================
-# Các hàm chuẩn hóa ký tự và kiểm tra ngôn ngữ
-# =============================================================================
 def strip_accents(text: str) -> str:
-    """Loại bỏ dấu tiếng Việt, đưa về ký tự ASCII thường."""
     text = unicodedata.normalize("NFD", text)
     text = re.sub(r"[\u0300-\u036f]", "", text)
     text = text.replace("đ", "d").replace("Đ", "D")
@@ -171,14 +158,12 @@ def strip_accents(text: str) -> str:
 
 
 def clean_ocr_punctuation(text: str) -> str:
-    """Chuẩn hóa các ký tự dấu câu chung trong văn bản in ấn."""
     text = re.sub(r'(^|\s)\?(?=[A-ZÀ-Ỹa-zà-ỹ])', r'\1"', text)
     text = re.sub(r'\.{2,3}3[\?\"]*', '...?"', text)
     return text.strip()
 
 
 def _transfer_punctuation(viet_text: str, paddle_text: str) -> str:
-    """Đồng bộ dấu câu mở/đóng ngoặc kép hoặc dấu ngắt câu nếu VietOCR bỏ sót."""
     v_clean = viet_text.strip()
     p_clean = paddle_text.strip()
     if not v_clean or not p_clean:
@@ -201,7 +186,6 @@ def is_vietocr_reliable(
     paddle_conf: float = 0.90,
     max_cer: float = 0.40,
 ) -> bool:
-    """Kiểm tra tính nhất quán giữa 2 mô hình để loại bỏ ảo giác lặp từ."""
     v_clean = viet_text.strip()
     p_clean = paddle_text.strip()
 
@@ -233,9 +217,6 @@ def is_vietocr_reliable(
     return True
 
 
-# =============================================================================
-# Đánh giá độ tin cậy từ ngữ tổng quát theo ngữ âm học tiếng Việt
-# =============================================================================
 _VIET_STOP_CONSONANTS = ("c", "ch", "p", "t")
 _VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳẩẻểỉỏổởủửỷãẵẫẽễĩõỗỡũữỹ]", re.IGNORECASE)
 
@@ -245,7 +226,6 @@ def _evaluate_vietnamese_word_confidence(
     matched_paddle_word: str | None,
     base_line_conf: float = 0.90,
 ) -> float:
-    """Đánh giá độ tin cậy của từ: 1.0 (Xanh lá), 0.75 (Vàng), 0.50 (Đỏ)."""
     v_norm = normalize_word(viet_word)
     if not v_norm:
         return 0.50
@@ -257,16 +237,14 @@ def _evaluate_vietnamese_word_confidence(
             return 0.50
 
     if not matched_paddle_word:
-        return 1.0 if base_line_conf >= 0.80 else 0.75
+        return round(base_line_conf, 4) if base_line_conf >= 0.80 else 0.75
 
     p_norm = normalize_word(matched_paddle_word)
     p_base = strip_accents(p_norm)
 
-    if p_norm and v_norm.lower() == p_norm.lower():
-        return 1.0
-
-    if p_norm and v_base == p_base:
-        return 1.0 if base_line_conf >= 0.75 else 0.85
+    # Khớp hoàn toàn cả từ hoặc trùng chữ cái gốc -> trả về đúng độ tin cậy base_line_conf
+    if p_norm and (v_norm.lower() == p_norm.lower() or v_base == p_base):
+        return round(base_line_conf, 4)
 
     if p_norm and jiwer.cer(v_base, p_base) <= 0.35:
         return 0.75
@@ -320,7 +298,6 @@ def _order_quad_points(pts: np.ndarray) -> np.ndarray:
 def _dewarp_strip_with_safe_border(
     rect_img: np.ndarray, v_curve: np.ndarray, strip_h: int
 ) -> np.ndarray:
-    """Cắt lát và thêm lề trên/dưới an toàn để bảo vệ nguyên vẹn các dấu sắc, hỏi, ngã, nặng."""
     crop_h, crop_w = rect_img.shape[:2]
     strip_h = max(24, int(strip_h))
     u_grid = np.broadcast_to(
@@ -357,7 +334,6 @@ def _dewarp_strip_with_safe_border(
 def _extract_curved_lines_from_items(
     raw_items: list, image: np.ndarray
 ) -> list[dict[str, Any]]:
-    """Trích xuất các dòng văn bản từ box DBNet và đồng bộ 100% padded_pts với quad lưu trữ."""
     if not raw_items:
         return []
 
@@ -437,7 +413,6 @@ def _extract_curved_lines_from_items(
 def sort_reading_order_adaptive(
     raw_items: list, img_width: int, image: np.ndarray
 ) -> tuple[list[dict[str, Any]], str]:
-    """Sắp xếp thứ tự đọc tự nhiên từ trên xuống dưới."""
     items = _extract_curved_lines_from_items(raw_items, image)
     if not items:
         return [], "empty"
@@ -446,24 +421,9 @@ def sort_reading_order_adaptive(
     return items, "single_column"
 
 
-# =============================================================================
-# Thuật toán phân đoạn từ ngữ: ĐỒNG NHẤT ĐỘ CAO DÒNG & ÔM KHÍT MỰC
-# =============================================================================
-def _char_weight(ch: str) -> float:
-    ch_lower = ch.lower()
-    if ch_lower in "mw":
-        return 1.35
-    if ch_lower in "ijlrtf1.,;:!'|()[]":
-        return 0.55
-    if ch.isupper():
-        return 1.20
-    return 1.0
-
-
 def _segment_words_by_ink(
     rect_img: np.ndarray, words: list[str]
 ) -> list[tuple[float, float, float, float]]:
-    """Phân đoạn các từ với độ cao ĐỒNG NHẤT 100% cho toàn bộ các từ trên cùng dòng."""
     num_words = len(words)
     c_h, c_w = rect_img.shape[:2]
     if num_words == 0 or c_w < 8 or c_h < 6:
@@ -475,13 +435,11 @@ def _segment_words_by_ink(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_sz, 10
     )
 
-    # Loại bỏ nhiễu sát mép
     binary[0:1, :] = 0
     binary[-1:, :] = 0
     binary[:, 0:1] = 0
     binary[:, -1:] = 0
 
-    # 1. ĐO ĐẠC CHIỀU CAO ĐỒNG NHẤT CỦA CẢ DÒNG: Bao trọn từ đỉnh dấu cao nhất đến đáy dấu nặng
     row_ink = np.where(np.sum(binary > 0, axis=1) >= 1)[0]
     if len(row_ink) > 0:
         line_y0 = max(0, int(row_ink[0]) - 3)
@@ -490,7 +448,6 @@ def _segment_words_by_ink(
         line_y0 = 0
         line_y1 = c_h
 
-    # Tỷ lệ đỉnh và đáy chuẩn xác dùng chung cho MỌI TỪ trên dòng này
     norm_y0 = float(line_y0) / c_h
     norm_y1 = float(line_y1) / c_h
 
@@ -508,7 +465,6 @@ def _segment_words_by_ink(
     if num_words == 1:
         return [(max(0.0, (first_ink - 3) / c_w), norm_y0, min(1.0, (last_ink + 4) / c_w), norm_y1)]
 
-    # Dò tìm kernel K tối ưu để liên kết chữ cái trong cùng 1 từ
     best_segments = None
     best_diff = 999
 
@@ -559,7 +515,6 @@ def _segment_words_by_ink(
     if best_segments is None:
         best_segments = []
 
-    # Cân bằng số lượng segment đúng bằng num_words
     while len(best_segments) > num_words:
         min_gap = 1e9
         min_idx = 0
@@ -592,7 +547,6 @@ def _segment_words_by_ink(
         c_right = [split_pt, max(2, x_end - split_pt), c[2], c[3]]
         best_segments = best_segments[:widest_idx] + [c_left, c_right] + best_segments[widest_idx + 1:]
 
-    # Trích xuất toạ độ thực của từng từ: chiều ngang ôm sát mực, chiều dọc ĐỒNG NHẤT 100%
     result_boxes: list[tuple[float, float, float, float]] = []
     for i, comp in enumerate(best_segments):
         x_start = max(0, comp[0])
@@ -611,10 +565,8 @@ def _segment_words_by_ink(
         box_x0 = max(0.0, float(real_x0 - 3) / c_w)
         box_x1 = min(1.0, float(real_x1 + 3) / c_w)
 
-        # Toàn bộ từ trên dòng nhận cùng norm_y0 và norm_y1 -> Độ cao đồng nhất hoàn hảo
         result_boxes.append((box_x0, norm_y0, box_x1, norm_y1))
 
-    # Tách bạch khoảng hở 2px giữa các từ kề nhau, không dính viền
     gap_norm = 2.0 / c_w
     for i in range(len(result_boxes) - 1):
         b1 = result_boxes[i]
@@ -633,7 +585,6 @@ def _map_curved_word_boxes(
     orig_width: int,
     orig_height: int,
 ) -> list[list[float]]:
-    """Tạo toạ độ hộp bao vừa vặn trọn vẹn chữ và dấu thanh theo hệ toạ độ gốc."""
     if not words:
         return []
 
@@ -665,9 +616,80 @@ def _map_curved_word_boxes(
     return boxes
 
 
-# =============================================================================
-# Pipeline thực thi chính
-# =============================================================================
+def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
+    """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
+    configured_binary = os.getenv("TESSERACT_CMD")
+    if configured_binary:
+        pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+
+    array = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Image decoding failed")
+    orig_height, orig_width = image.shape[:2]
+
+    target_lang = os.getenv("TESSERACT_LANG", "vie")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    try:
+        result = pytesseract.image_to_data(
+            otsu,
+            lang=target_lang,
+            config="--oem 1 --psm 6",
+            output_type=Output.DICT,
+        )
+    except Exception as exc:
+        raise OcrEngineUnavailable("Tesseract execution failed") from exc
+
+    words: list[dict[str, object]] = []
+    lines: dict[int, list[str]] = {}
+
+    for index, raw_text in enumerate(result.get("text", [])):
+        token = unicodedata.normalize("NFC", str(raw_text)).strip()
+        if not token or not any(c.isalnum() for c in token):
+            continue
+        try:
+            left = int(result["left"][index])
+            top = int(result["top"][index])
+            w = int(result["width"][index])
+            h = int(result["height"][index])
+            conf = float(result["conf"][index])
+            line = int(result["line_num"][index])
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+
+        normalized = normalize_word(token)
+        if not normalized:
+            continue
+
+        confidence = conf / 100.0 if 0 <= conf <= 100 else None
+        words.append({
+            "word_index": len(words),
+            "line_index": line,
+            "text": token,
+            "normalized_text": normalized,
+            "bbox": [left / orig_width, top / orig_height, w / orig_width, h / orig_height],
+            "ocr_confidence": confidence,
+        })
+        lines.setdefault(line, []).append(token)
+
+    if not words:
+        raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
+
+    formatted_text = "\n".join(" ".join(lines[k]) for k in sorted(lines))
+    return {
+        "text": formatted_text,
+        "words": words,
+        "metadata": {
+            "engine": "tesseract",
+            "language": target_lang,
+            "word_count": len(words),
+            "line_count": len(lines),
+        },
+    }
+
+
 def _extract_text_and_boxes_dual_engine(
     image_bytes: bytes,
     paddle_engine: Any,
@@ -787,7 +809,6 @@ def _extract_text_and_boxes_dual_engine(
 
     formatted_text = "\n".join(lines_output)
 
-    # Xuất ảnh trực quan kiểm tra bounding box độc lập với CSS Frontend
     try:
         debug_vis = image.copy()
         for w in words_output:
@@ -799,9 +820,8 @@ def _extract_text_and_boxes_dual_engine(
             cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
         debug_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "debug_ocr_boxes.png"))
         cv2.imwrite(debug_path, debug_vis)
-        logger.info(f"Đã xuất ảnh debug tọa độ bounding box: {debug_path}")
-    except Exception as err:
-        logger.warning(f"Không thể xuất file debug_ocr_boxes.png: {err}")
+    except Exception:
+        pass
 
     return {
         "text": formatted_text,
@@ -824,6 +844,14 @@ def _extract_text_and_boxes_dual_engine(
 
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
-    """Chạy quy trình OCR: ưu tiên Dual-Engine (PaddleOCR + VietOCR)."""
-    paddle_engine, vietocr_engine = _get_ocr_engines()
-    return _extract_text_and_boxes_dual_engine(image_bytes, paddle_engine, vietocr_engine)
+    """Chạy quy trình OCR: ưu tiên Dual-Engine, tự động fallback Tesseract cho CI/headless."""
+    try:
+        paddle_engine, vietocr_engine = _get_ocr_engines()
+        return _extract_text_and_boxes_dual_engine(image_bytes, paddle_engine, vietocr_engine)
+    except (OcrEngineUnavailable, OcrNoTextDetected):
+        return _extract_text_and_boxes_tesseract(image_bytes)
+    except Exception:
+        try:
+            return _extract_text_and_boxes_tesseract(image_bytes)
+        except Exception:
+            raise

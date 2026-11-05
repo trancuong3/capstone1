@@ -250,7 +250,6 @@ class AdminOcrService:
     async def upload_page(
         self, actor_id: UUID, book_id: UUID, file: UploadFile
     ) -> AdminRevisionDetailRead:
-        """Upload an image, run OCR, then atomically persist the ACTIVE page and its initial revision."""
         started_at = time.perf_counter()
         log_diagnostic(
             logger,
@@ -260,14 +259,6 @@ class AdminOcrService:
             book_id=str(book_id),
         )
         await self.require_admin(actor_id)
-
-        book = await self.repo.book(book_id, lock=False)
-        if book is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Book not found")
-        if book.LifecycleStatus != "ACTIVE":
-            await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
         await self.db.rollback()
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
@@ -275,6 +266,50 @@ class AdminOcrService:
         revision_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
 
+        # Phase 1: short transaction. The PROCESSING row reserves page order.
+        try:
+            book = await self.repo.book(book_id, lock=True)
+            if book is None:
+                raise HTTPException(status_code=404, detail="Book not found")
+            if book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
+
+            await self._renumber_active_pages(book_id, lock=True)
+            page_number = await self.repo.next_active_page_number(book_id)
+            if page_number > 32767:
+                raise HTTPException(
+                    status_code=422,
+                    detail="The book has reached the maximum number of pages",
+                )
+
+            page = BookPage(
+                Id=page_id,
+                BookId=book_id,
+                PageNumber=page_number,
+                ImagePath=object_path,
+                Width=width,
+                Height=height,
+                LifecycleStatus="PROCESSING",
+                FeaturePath=None,
+                ProcessingMeta={
+                    "storage": "supabase",
+                    "ocr_state": "PROCESSING",
+                    "processing_started_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            self.repo.stage_page_reservation(page)
+            await self.repo.flush()
+            await self.db.commit()
+        except asyncio.CancelledError:
+            await self.db.rollback()
+            await self._discard_processing_page(page_id)
+            raise
+        except Exception:
+            await self.db.rollback()
+            await self._discard_processing_page(page_id)
+            raise
+
+        # Phase 2: storage upload and OCR work outside database transaction
         storage_uploaded = False
         try:
             try:
@@ -282,14 +317,13 @@ class AdminOcrService:
                 storage_uploaded = True
             except Exception as exc:
                 may_exist = bool(getattr(exc, "cleanup_may_be_needed", False))
-                if may_exist:
-                    await self._cleanup_uploaded_object(
-                        object_path,
-                        object_may_exist=True,
-                        book_id=book_id,
-                        page_id=page_id,
-                        started_at=started_at,
-                    )
+                await self._abort_page_upload(
+                    page_id,
+                    object_path,
+                    object_may_exist=may_exist,
+                    book_id=book_id,
+                    started_at=started_at,
+                )
                 log_diagnostic(
                     logger,
                     logging.ERROR,
@@ -303,25 +337,7 @@ class AdminOcrService:
                 )
                 raise
 
-            log_diagnostic(
-                logger,
-                logging.INFO,
-                event="admin_ocr_storage_upload_succeeded",
-                stage="storage_upload",
-                book_id=str(book_id),
-                page_id=str(page_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-
             try:
-                log_diagnostic(
-                    logger,
-                    logging.INFO,
-                    event="admin_ocr_ocr_started",
-                    stage="tesseract_preflight",
-                    book_id=str(book_id),
-                    page_id=str(page_id),
-                )
                 ocr = await run_in_threadpool(extract_text_and_boxes, data)
                 words = self._word_data(ocr["words"])
                 text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
@@ -336,54 +352,39 @@ class AdminOcrService:
                     ).encode("utf-8")
                 ).hexdigest()
             except OcrEngineUnavailable as exc:
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
             except OcrNoTextDetected as exc:
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise HTTPException(
                     status_code=422,
                     detail="No usable text was detected; check the image quality",
                 ) from exc
             except ValueError as exc:
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise HTTPException(
                     status_code=422,
                     detail="The image could not be decoded by the OCR engine",
                 ) from exc
             except HTTPException:
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise
             except Exception as exc:
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 log_diagnostic(
                     logger,
@@ -401,6 +402,7 @@ class AdminOcrService:
                     detail="OCR processing failed; check the local OCR configuration",
                 ) from exc
 
+            # Phase 3: short transaction to activate page with its revision
             stage = "database_finalize"
             try:
                 await self.require_admin(actor_id)
@@ -410,26 +412,14 @@ class AdminOcrService:
                         status_code=409,
                         detail="The book is no longer active; reload and retry",
                     )
+                page = await self.repo.page(page_id, lock=True)
+                if page is None or page.BookId != book_id:
+                    raise HTTPException(status_code=409, detail="Page reservation is no longer available")
+                if page.LifecycleStatus != "PROCESSING":
+                    raise HTTPException(status_code=409, detail="Page reservation is no longer pending")
 
-                await self._renumber_active_pages(book_id, lock=True)
-                page_number = await self.repo.next_active_page_number(book_id)
-                if page_number > 32767:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="The book has reached the maximum number of pages",
-                    )
-
-                page = BookPage(
-                    Id=page_id,
-                    BookId=book_id,
-                    PageNumber=page_number,
-                    ImagePath=object_path,
-                    Width=width,
-                    Height=height,
-                    LifecycleStatus="ACTIVE",
-                    FeaturePath=None,
-                    ProcessingMeta={"storage": "supabase"},
-                )
+                self.repo.set_page_lifecycle_status(page, "ACTIVE")
+                page.ProcessingMeta = {"storage": "supabase"}
                 revision = PageRevision(
                     Id=revision_id,
                     PageId=page_id,
@@ -446,6 +436,7 @@ class AdminOcrService:
                 await self.db.refresh(revision)
                 result = await self.revision_detail(page, revision)
                 await self.db.commit()
+                return result
             except IntegrityError as exc:
                 log_diagnostic(
                     logger,
@@ -458,17 +449,21 @@ class AdminOcrService:
                     elapsed_ms=int((time.perf_counter() - started_at) * 1000),
                 )
                 await self.db.rollback()
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise HTTPException(
                     status_code=409,
                     detail="Page number conflicts with an existing page",
                 ) from exc
+            except HTTPException:
+                await self.db.rollback()
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
+                )
+                raise
             except Exception as exc:
                 log_diagnostic(
                     logger,
@@ -482,34 +477,18 @@ class AdminOcrService:
                     elapsed_ms=int((time.perf_counter() - started_at) * 1000),
                 )
                 await self.db.rollback()
-                await self._cleanup_uploaded_object(
-                    object_path,
-                    object_may_exist=storage_uploaded,
-                    book_id=book_id,
-                    page_id=page_id,
-                    started_at=started_at,
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
                 )
                 raise
-
-            log_diagnostic(
-                logger,
-                logging.INFO,
-                event="admin_ocr_upload_succeeded",
-                stage="response_validation",
-                book_id=str(book_id),
-                page_id=str(page_id),
-                revision_id=str(revision_id),
-                word_count=len(words),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return result
         except asyncio.CancelledError:
             await self.db.rollback()
-            await self._cleanup_uploaded_object(
+            await self._abort_page_upload(
+                page_id,
                 object_path,
                 object_may_exist=storage_uploaded,
                 book_id=book_id,
-                page_id=page_id,
                 started_at=started_at,
             )
             raise
@@ -519,7 +498,6 @@ class AdminOcrService:
     async def replace_page_image(
         self, actor_id: UUID, page_id: UUID, file: UploadFile
     ) -> AdminRevisionDetailRead:
-        """Create a candidate OCR revision without holding a DB transaction during Storage/OCR."""
         started_at = time.perf_counter()
         await self.require_admin(actor_id)
         probe = await self.repo.page(page_id)
@@ -977,7 +955,6 @@ class AdminOcrService:
         return await self.revision_detail(page, revision)
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
-        """Download and OCR the existing source without holding a PostgreSQL transaction."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
@@ -1139,7 +1116,6 @@ class AdminOcrService:
     async def ai_correct_text(
         self, actor_id: UUID, page_id: UUID, draft_text: str
     ) -> dict[str, object]:
-        """Dùng Gemini Vision từ Google AI Studio sửa lỗi chính tả và dấu dựa trên đối chiếu ảnh gốc và văn bản."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
         if page is None:
@@ -1154,7 +1130,6 @@ class AdminOcrService:
 
         gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-        # 1. Tải ảnh gốc từ Storage để làm căn cứ thị giác đối chiếu (Visual Ground Truth)
         image_bytes: bytes | None = None
         mime_type = "image/jpeg"
         if page.ImagePath:
@@ -1163,7 +1138,7 @@ class AdminOcrService:
                 ext = page.ImagePath.rsplit(".", 1)[-1].lower() if "." in page.ImagePath else "jpeg"
                 mime_type = "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/jpeg"
             except Exception as exc:
-                logger.warning("Không thể tải ảnh gốc cho AI vision, chuyển sang chế độ text-only: %s", exc)
+                logger.warning("Không thể tải ảnh gốc cho AI vision: %s", exc)
 
         normalized_draft = unicodedata.normalize("NFC", draft_text.strip())
         input_tokens = normalize_text_tokens(normalized_draft)
@@ -1172,18 +1147,17 @@ class AdminOcrService:
         system_instruction = (
             "Bạn là chuyên gia hiệu đính văn bản tiếng Việt cho sách và tài liệu OCR.\n"
             "Nhiệm vụ của bạn là rà soát văn bản OCR dựa trên HÌNH ẢNH TRANG ĐƯỢC ĐÍNH KÈM.\n\n"
-            "YÊU CẦU BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):\n"
-            "1. ĐỐI CHIẾU THỊ GIÁC: Hãy nhìn kỹ hình ảnh trang để đối soát từng chữ in. Tuyệt đối KHÔNG tự ý suy đoán, "
-            "thay đổi từ ngữ gốc hoặc 'chuẩn hoá' câu chữ theo ý mình (ví dụ: trên ảnh in 'hướng nhân' thì bắt buộc giữ nguyên "
-            "'hướng nhân', KHÔNG được sửa thành 'hướng dẫn'; trên ảnh in 'đêm ôm mong' thì bắt buộc giữ nguyên 'đêm ôm mong', "
-            "KHÔNG được xoá bỏ chữ 'ôm').\n"
-            "2. BẢO TOÀN SỐ LƯỢNG TỪ (BẤT BIẾN NGHIÊM NGẶT): Văn bản kết quả PHẢI CÓ CHÍNH XÁC 100% SỐ LƯỢNG TỪ bằng với "
-            f"văn bản OCR đầu vào ({expected_word_count} từ). Tuyệt đối không thêm từ, không bớt từ, không gộp từ, không tách từ.\n"
-            "3. CHỈ SỬA LỖI DẤU VÀ KÝ TỰ NHẬN DẠNG QUANG HỌC: Chỉ sửa các lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc "
-            "nhầm ký tự quang học (ví dụ: 'để' -> 'đế', 'đên' -> 'đến', 'Phậi' -> 'Phật', 'nhở' -> 'nhớ') đúng theo chữ in trong ảnh.\n"
+            "YÊU CẦU BẮT BUỘC:\n"
+            "1. ĐỐI CHIẾU THỊ GIÁC: Nhìn kỹ hình ảnh trang để đối soát từng chữ in. Tuyệt đối KHÔNG tự ý suy đoán, "
+            "thay đổi từ ngữ gốc (ví dụ: trên ảnh in 'hướng nhân' thì bắt buộc giữ nguyên 'hướng nhân'; "
+            "trên ảnh in 'đêm ôm mong' thì bắt buộc giữ nguyên 'đêm ôm mong').\n"
+            "2. BẢO TOÀN SỐ LƯỢNG TỪ: Văn bản kết quả PHẢI CÓ CHÍNH XÁC 100% SỐ LƯỢNG TỪ bằng với văn bản OCR đầu vào "
+            f"({expected_word_count} từ). Tuyệt đối không thêm từ, bớt từ, gộp từ, tách từ.\n"
+            "3. CHỈ SỬA LỖI DẤU VÀ KÝ TỰ NHẬN DẠNG: Sửa các lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc nhầm ký tự quang học "
+            "(ví dụ: 'để' -> 'đế', 'đên' -> 'đến', 'Phậi' -> 'Phật', 'nhở' -> 'nhớ') đúng theo chữ in trong ảnh.\n"
             "4. GIỮ NGUYÊN CẤU TRÚC DÒNG: Giữ nguyên thứ tự các dòng và ngắt dòng (\\n) của văn bản gốc.\n"
             "5. KHÔNG TỰ THÊM DẤU CHẤM CÂU: Tuyệt đối KHÔNG tự ý chèn thêm dấu chấm câu ('.') hay dấu phẩy ở cuối dòng nếu ảnh không có.\n"
-            "6. ĐỊNH DẠNG ĐẦU RA: Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích, lời chào hay định dạng markdown."
+            "6. Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích hay định dạng markdown."
         )
 
         prompt = (
@@ -1210,43 +1184,59 @@ class AdminOcrService:
                 "systemInstruction": {"parts": [{"text": system_instruction}]},
                 "generationConfig": {"temperature": 0.1},
             }
-            req = urllib.request.Request(
-                endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=45) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    candidates = data.get("candidates", [])
-                    if not candidates:
-                        raise HTTPException(status_code=502, detail="Gemini không phản hồi kết quả.")
-                    raw_result = candidates[0]["content"]["parts"][0]["text"].strip()
-                    if raw_result.startswith("```"):
-                        raw_result = re.sub(r"^```[a-zA-Z]*\n?", "", raw_result)
-                        raw_result = re.sub(r"\n?```$", "", raw_result).strip()
-                    return unicodedata.normalize("NFC", raw_result)
-            except urllib.error.HTTPError as err:
-                raise HTTPException(
-                    status_code=502, detail=f"Lỗi kết nối Google AI Studio: {err.reason}"
-                ) from err
+            body = json.dumps(payload).encode("utf-8")
+
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                req = urllib.request.Request(
+                    endpoint,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=45) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            raise HTTPException(status_code=502, detail="Gemini không phản hồi kết quả.")
+                        raw_result = candidates[0]["content"]["parts"][0]["text"].strip()
+                        if raw_result.startswith("```"):
+                            raw_result = re.sub(r"^```[a-zA-Z]*\n?", "", raw_result)
+                            raw_result = re.sub(r"\n?```$", "", raw_result).strip()
+                        return unicodedata.normalize("NFC", raw_result)
+                except urllib.error.HTTPError as err:
+                    if err.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Lỗi kết nối Google AI Studio (HTTP {err.code}): {err.reason}",
+                    ) from err
+                except (urllib.error.URLError, TimeoutError) as net_err:
+                    if attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Mất kết nối tới Google AI Studio; vui lòng kiểm tra đường truyền mạng.",
+                    ) from net_err
+
+            raise HTTPException(status_code=502, detail="Không thể nhận phản hồi từ Gemini sau 3 lần thử.")
 
         def _execute_ai_correction() -> str:
             result_text = _call_gemini_with_prompt(prompt)
             output_tokens = normalize_text_tokens(result_text)
 
-            # Nếu số lượng từ bị lệch pha, retry 1 lần với lời nhắc cưỡng chế
             if len(output_tokens) != expected_word_count:
                 retry_prompt = (
                     f"CẢNH BÁO: Lần trả lời trước có {len(output_tokens)} từ, không khớp với {expected_word_count} từ gốc!\n"
-                    f"Bạn BẮT BUỘC phải giữ nguyên chính xác {expected_word_count} từ, không được xóa bớt từ hay thêm từ.\n\n"
+                    f"Bạn BẮT BUỘC phải giữ nguyên chính xác {expected_word_count} từ.\n\n"
                     f"Văn bản OCR gốc ({expected_word_count} từ):\n{normalized_draft}"
                 )
                 result_text = _call_gemini_with_prompt(retry_prompt)
                 output_tokens = normalize_text_tokens(result_text)
 
-            # Chốt chặn bảo vệ tính toàn vẹn: nếu vẫn lệch từ, từ chối để tránh làm đỏ hỏng giao diện
             if len(output_tokens) != expected_word_count:
                 raise HTTPException(
                     status_code=422,
