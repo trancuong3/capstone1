@@ -8,6 +8,7 @@ from app.api.routes import (
     reading,
     reading_management,
     system,
+    support,
     voice,
 )
 
@@ -20,4 +21,5 @@ api_router.include_router(reading.router, prefix="/reading", tags=["Reading"])
 api_router.include_router(reading_management.router, prefix="/reading-management", tags=["Reading Management"])
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])
+api_router.include_router(support.router, prefix="/support", tags=["Support"])
 api_router.include_router(voice.router, prefix="/voice", tags=["Voice"])

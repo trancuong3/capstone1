@@ -80,6 +80,22 @@ def _bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean value")
 
 
+# Server-only SMTP settings for ViRead support feedback. Sender and inbox
+# recipient are independent; never expose these settings to the browser.
+SMTP_HOST = (os.getenv("SMTP_HOST") or "smtp.gmail.com").strip() or None
+SMTP_PORT = _int_env("SMTP_PORT", 587, minimum=1, maximum=65535)
+SMTP_USERNAME = (os.getenv("SMTP_USERNAME") or "").strip() or None
+SMTP_APP_PASSWORD = (os.getenv("SMTP_APP_PASSWORD") or "").strip() or None
+SMTP_FROM_EMAIL = (
+    os.getenv("SMTP_FROM_EMAIL") or SMTP_USERNAME or ""
+).strip() or None
+SMTP_SEND_TIMEOUT_SECONDS = _float_env(
+    "SMTP_SEND_TIMEOUT_SECONDS", 10.0, minimum=1.0, maximum=120.0
+)
+SUPPORT_EMAIL = (
+    os.getenv("SUPPORT_EMAIL") or "vireadforyou@gmail.com"
+).strip().lower()
+
 APP_ENVIRONMENT = (
     os.getenv("APP_ENVIRONMENT") or "development"
 ).strip().lower()

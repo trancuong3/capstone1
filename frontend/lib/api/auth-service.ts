@@ -6,6 +6,7 @@ import type {
   LoginRequest,
   ParentRegistrationInput,
   ParentRegistrationResult,
+  PasswordChangeRequest,
   PasswordRecoveryRequest,
   PasswordResetRequest,
 } from "@/types/auth";
@@ -38,6 +39,7 @@ export interface AuthService {
   signInWithOAuth(provider: OAuthProvider): Promise<void>;
   requestPasswordReset(request: PasswordRecoveryRequest): Promise<void>;
   resetPassword(request: PasswordResetRequest): Promise<void>;
+  changePassword(request: PasswordChangeRequest): Promise<void>;
   getSession(): Promise<AuthSessionSnapshot | null>;
   getCurrentUser(): Promise<AuthUserSnapshot | null>;
   getCurrentRole(): Promise<CurrentUserRole>;

@@ -19,10 +19,16 @@ export interface PasswordResetRequest {
   newPassword: string;
 }
 
+export interface PasswordChangeRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export interface AuthUserSnapshot {
   readonly id: UUID;
   readonly email: string | null;
   readonly display_name: string | null;
+  readonly providers?: readonly string[];
 }
 
 export interface AuthSessionSnapshot {

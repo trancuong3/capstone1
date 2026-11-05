@@ -25,7 +25,8 @@ describe("parent logout", () => {
     const service = createAuthServiceFixture();
     const user = userEvent.setup();
     render(withAuthFixture(<AppShell>Dashboard content</AppShell>, service));
-    await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+    await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    await user.click(screen.getByRole("menuitem", { name: "Đăng xuất" }));
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));
     expect(service.signOut).toHaveBeenCalledOnce();
     expect(refreshMock).toHaveBeenCalledOnce();

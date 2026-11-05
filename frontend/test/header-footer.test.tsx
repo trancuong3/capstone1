@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminLayout } from "@/components/admin/admin-layout";
@@ -75,7 +76,8 @@ describe("shared header and footer", () => {
     ["/reports/difficult-words", "Từ cần luyện"],
     ["/children", "Hồ sơ bé"],
     ["/profile", "Ba mẹ"],
-  ])("keeps Parent navigation active on %s", (pathname, label) => {
+  ])("keeps Parent navigation active on %s", async (pathname, label) => {
+    const user = userEvent.setup();
     navigationMock.pathname = pathname;
     render(
       withAuthFixture(
@@ -89,11 +91,11 @@ describe("shared header and footer", () => {
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("ViRead");
     expect(footer).toHaveTextContent("Đại học Duy Tân");
-    expect(footer).toHaveTextContent("viread@gmail.com");
+    expect(footer).toHaveTextContent("vireadforyou@gmail.com");
     expect(footer).toHaveTextContent("0905373633");
     expect(
-      within(footer).getByRole("link", { name: "viread@gmail.com" }),
-    ).toHaveAttribute("href", "mailto:viread@gmail.com");
+      within(footer).getByRole("link", { name: "vireadforyou@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
     expect(
       within(footer).getByRole("link", { name: "0905373633" }),
     ).toHaveAttribute("href", "tel:0905373633");
@@ -120,9 +122,11 @@ describe("shared header and footer", () => {
         name: label,
       }),
     ).toHaveAttribute("aria-current", "page");
-    expect(
-      screen.getByRole("button", { name: "Đăng xuất" }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" })).toHaveAttribute("href", "/help-support");
+    expect(screen.getByRole("menuitem", { name: "Đăng xuất" })).toBeInTheDocument();
   });
 
   it("keeps child onboarding minimal while using the Parent footer", () => {
@@ -191,7 +195,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 
@@ -220,7 +224,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 });

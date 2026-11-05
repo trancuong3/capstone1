@@ -1,5 +1,6 @@
 "use client";
 
+import { createClient } from "@supabase/supabase-js";
 import type {
   AuthError,
   Session,
@@ -7,8 +8,12 @@ import type {
   User,
 } from "@supabase/supabase-js";
 
-import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
+import {
+  AuthServiceError,
+  type AuthService,
+} from "@/lib/api/auth-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import type {
   AuthSessionSnapshot,
   AuthUserSnapshot,
@@ -20,6 +25,7 @@ interface SupabaseAuthServiceOptions {
   getOAuthRedirectUrl?: () => string;
   getEmailConfirmationRedirectUrl?: () => string;
   getPasswordResetRedirectUrl?: () => string;
+  createReauthenticationClient?: () => SupabaseClient;
 }
 
 const registrationValidationCodes = new Set([
@@ -125,6 +131,23 @@ function mapRecoveryError(error: AuthError) {
 
 function mapUser(user: User): AuthUserSnapshot {
   const displayName: unknown = user.user_metadata.display_name;
+  const metadataProviders = user.app_metadata.providers;
+  const identityProviders =
+    user.identities?.map((identity) => identity.provider) ?? [];
+  const providers = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(metadataProviders) ? metadataProviders : []),
+        ...identityProviders,
+        ...(typeof user.app_metadata.provider === "string"
+          ? [user.app_metadata.provider]
+          : []),
+      ].filter(
+        (provider): provider is string =>
+          typeof provider === "string" && provider.trim().length > 0,
+      ),
+    ),
+  );
 
   return {
     id: user.id,
@@ -133,6 +156,7 @@ function mapUser(user: User): AuthUserSnapshot {
       typeof displayName === "string" && displayName.trim()
         ? displayName.trim()
         : null,
+    providers,
   };
 }
 
@@ -182,6 +206,19 @@ function defaultEmailConfirmationRedirectUrl() {
   ).toString();
 }
 
+function createIsolatedReauthenticationClient(): SupabaseClient {
+  const { url, publishableKey } = getSupabasePublicConfig();
+
+  // Reauthenticate without replacing the currently active browser session.
+  return createClient(url, publishableKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
+}
+
 async function runProviderOperation<T>(
   operation: () => PromiseLike<T>,
 ): Promise<T> {
@@ -203,6 +240,9 @@ export function createSupabaseAuthService(
   const getEmailConfirmationRedirectUrl =
     options.getEmailConfirmationRedirectUrl ??
     defaultEmailConfirmationRedirectUrl;
+  const createReauthenticationClient =
+    options.createReauthenticationClient ??
+    createIsolatedReauthenticationClient;
   let recoveryUserId: string | null = null;
 
   const signOutQuietly = async () => {
@@ -252,8 +292,6 @@ export function createSupabaseAuthService(
         throw mapRegistrationError(error);
       }
 
-      // Confirmed accounts can receive an obfuscated user instead of an error.
-      // Do not treat that response or a missing user as a new pending account.
       if (!data.user || data.user.identities?.length === 0) {
         throw unexpectedAuthError();
       }
@@ -294,7 +332,8 @@ export function createSupabaseAuthService(
         throw unexpectedAuthError();
       }
 
-      const scopes = provider === "facebook" ? "email" : "openid email profile";
+      const scopes =
+        provider === "facebook" ? "email" : "openid email profile";
       const { error } = await runProviderOperation(() =>
         supabase.auth.signInWithOAuth({
           provider,
@@ -322,6 +361,75 @@ export function createSupabaseAuthService(
       );
 
       if (error) throw unexpectedAuthError();
+    },
+
+    async changePassword(request) {
+      const { data: activeUserData, error: activeUserError } =
+        await runProviderOperation(() => supabase.auth.getUser());
+
+      if (
+        activeUserError ||
+        !activeUserData.user?.id ||
+        !activeUserData.user.email
+      ) {
+        throw new AuthServiceError(
+          "invalid-credentials",
+          "The supplied credentials were rejected.",
+        );
+      }
+
+      const activeUserId = activeUserData.user.id;
+      const activeEmail = activeUserData.user.email;
+      let isolatedClient: SupabaseClient | null = null;
+
+      try {
+        try {
+          isolatedClient = createReauthenticationClient();
+        } catch {
+          throw unexpectedAuthError();
+        }
+
+        const { data: reauthenticatedData, error: reauthenticationError } =
+          await runProviderOperation(() =>
+            isolatedClient!.auth.signInWithPassword({
+              email: activeEmail,
+              password: request.currentPassword,
+            }),
+          );
+
+        if (reauthenticationError) {
+          throw mapSignInError(reauthenticationError);
+        }
+
+        if (reauthenticatedData.user?.id !== activeUserId) {
+          throw new AuthServiceError(
+            "invalid-credentials",
+            "The supplied credentials were rejected.",
+          );
+        }
+
+        // Verify that the active browser session is still the original account.
+        const { data: currentUserData, error: currentUserError } =
+          await runProviderOperation(() => supabase.auth.getUser());
+
+        if (currentUserError || currentUserData.user?.id !== activeUserId) {
+          throw unexpectedAuthError();
+        }
+
+        const { error: updateError } = await runProviderOperation(() =>
+          supabase.auth.updateUser({ password: request.newPassword }),
+        );
+
+        if (updateError) throw unexpectedAuthError();
+      } finally {
+        if (isolatedClient) {
+          try {
+            await isolatedClient.auth.signOut({ scope: "local" });
+          } catch {
+            // Clean up only the isolated reauthentication session.
+          }
+        }
+      }
     },
 
     async resetPassword(request) {

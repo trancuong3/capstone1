@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
+import { VIREAD_SUPPORT_EMAIL } from "@/lib/config/contact";
 
 interface SiteFooterProps {
   readonly className?: string;
@@ -15,6 +16,7 @@ const parentLinks = [
   { href: "/sessions", label: "Lịch sử đọc" },
   { href: "/children", label: "Hồ sơ bé" },
   { href: "/profile", label: "Hồ sơ phụ huynh" },
+  { href: "/help-support", label: "Trợ giúp & hỗ trợ" },
 ] as const;
 
 /** Keep this in document flow, outside main; the hosting layout sizes the page. */
@@ -78,9 +80,9 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                     <span className="font-bold text-ink">Email: </span>
                     <a
                       className="break-words underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      href="mailto:viread@gmail.com"
+                      href={"mailto:" + VIREAD_SUPPORT_EMAIL}
                     >
-                      viread@gmail.com
+                      {VIREAD_SUPPORT_EMAIL}
                     </a>
                   </span>
                 </p>

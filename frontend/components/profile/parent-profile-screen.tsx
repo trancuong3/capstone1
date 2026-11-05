@@ -148,6 +148,11 @@ export function ParentProfileScreen() {
     message: string,
   ) {
     setState({ status: "ready", profile: updatedProfile });
+    window.dispatchEvent(
+      new CustomEvent("viread:profile-updated", {
+        detail: { displayName: updatedProfile.display_name ?? "" },
+      }),
+    );
     setEditingField(null);
     setFieldNotices((current) => ({ ...current, [field]: message }));
   }
