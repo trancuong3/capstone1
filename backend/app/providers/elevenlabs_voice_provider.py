@@ -9,8 +9,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
+from pathlib import Path
+from dotenv import load_dotenv
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -19,6 +23,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Load backend/.env using this file's location, not the current terminal directory.
+_BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=_BACKEND_ENV_PATH)
 ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io/v1"
 # Public voice used in the current ElevenLabs API reference. Deployments should
 # set ELEVENLABS_VOICE_ID to choose the product's intended voice.
@@ -158,7 +165,52 @@ class ElevenLabsVoiceProvider:
             or os.getenv("ELEVENLABS_VOICE_ID", "").strip()
             or DEFAULT_VOICE_ID
         )
+    @staticmethod
+    def _normalize_keyterms(
+        keyterms: list[str] | None,
+    ) -> list[str]:
+        """
+        Validate Scribe v2 contextual keyterms.
 
+        Preserve Vietnamese tone marks and the letter đ.
+        Invalid values are ignored instead of being sent to the provider.
+        """
+        if not keyterms:
+            return []
+
+        normalized_terms: list[str] = []
+        seen: set[str] = set()
+
+        for value in keyterms:
+            if not isinstance(value, str):
+                continue
+
+            term = unicodedata.normalize("NFC", value).strip()
+
+            if not term:
+                continue
+
+            if len(term) > 50:
+                continue
+
+            if len(term.split()) > 5:
+                continue
+
+            if re.search(r"[<>{}\[\]\\]", term):
+                continue
+
+            identity = term.casefold()
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+            normalized_terms.append(term)
+
+            if len(normalized_terms) >= 1000:
+                break
+
+        return normalized_terms
     @staticmethod
     def _transcription_from_payload(payload: Any) -> Transcription:
         if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
@@ -178,21 +230,52 @@ class ElevenLabsVoiceProvider:
         words = None
 
         if isinstance(raw_words, list):
-            words = [
-                {
-                    "text": item["text"],
-                    "start": item["start"],
-                    "end": item["end"],
+            words = []
+
+            for item in raw_words:
+                if not isinstance(item, dict):
+                    continue
+
+                if item.get("type", "word") != "word":
+                    continue
+
+                text = item.get("text")
+                start = item.get("start")
+                end = item.get("end")
+
+                if not isinstance(text, str):
+                    continue
+
+                if (
+                    isinstance(start, bool)
+                    or not isinstance(start, (int, float))
+                    or not math.isfinite(start)
+                ):
+                    continue
+
+                if (
+                    isinstance(end, bool)
+                    or not isinstance(end, (int, float))
+                    or not math.isfinite(end)
+                ):
+                    continue
+
+                word: dict[str, Any] = {
+                    "text": text,
+                    "start": start,
+                    "end": end,
                 }
-                for item in raw_words
-                if isinstance(item, dict)
-                and item.get("type", "word") == "word"
-                and isinstance(item.get("text"), str)
-                and isinstance(item.get("start"), (int, float))
-                and not isinstance(item.get("start"), bool)
-                and isinstance(item.get("end"), (int, float))
-                and not isinstance(item.get("end"), bool)
-            ]
+
+                logprob = item.get("logprob")
+
+                if (
+                    isinstance(logprob, (int, float))
+                    and not isinstance(logprob, bool)
+                    and math.isfinite(logprob)
+                ):
+                    word["logprob"] = float(logprob)
+
+                words.append(word)
 
         return Transcription(
             text=payload["text"],
@@ -269,11 +352,13 @@ class ElevenLabsVoiceProvider:
         filename: str,
         content_type: str,
         language_code: str | None = None,
+        keyterms: list[str] | None = None,
     ) -> Transcription:
-        form: dict[str, str] = {
+        form: dict[str, str | list[str]] = {
             "model_id": "scribe_v2",
             "timestamps_granularity": "word",
         }
+
         if language_code:
             lang = (
                 "vie"
@@ -281,6 +366,11 @@ class ElevenLabsVoiceProvider:
                 else language_code
             )
             form["language_code"] = lang
+
+        normalized_keyterms = self._normalize_keyterms(keyterms)
+
+        if normalized_keyterms:
+            form["keyterms"] = normalized_keyterms
 
         if not audio:
             logger.warning("STT request rejected: audio is empty")
@@ -295,8 +385,8 @@ class ElevenLabsVoiceProvider:
             filename,
             content_type,
             len(audio),
-            form.get("language_code", "auto"),
-            form["model_id"],
+            lang if language_code else "auto",
+            "scribe_v2",
         )
 
         try:

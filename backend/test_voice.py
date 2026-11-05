@@ -154,6 +154,7 @@ class VoiceRouteTests(unittest.TestCase):
             filename="reading.webm",
             content_type="audio/webm",
             language_code="vi",
+            keyterms=None,
         )
 
     def test_speech_to_text_rejects_non_audio_and_never_forwards_it(self):

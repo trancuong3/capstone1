@@ -57,16 +57,26 @@ interface IndexedBookWord {
  * Chuẩn hóa từ để so sánh.
  * Ví dụ: "ĐI," và "đi" được xem là cùng một từ.
  */
+/**
+ * Chuẩn hóa từ tiếng Việt để so sánh.
+ *
+ * - Giữ nguyên dấu thanh.
+ * - Giữ nguyên chữ đ.
+ * - Chỉ loại bỏ dấu câu và ký tự không thuộc từ ở hai đầu.
+ * - Chuẩn hóa Unicode NFC để tránh khác biệt giữa các cách mã hóa.
+ *
+ * Ví dụ:
+ * "ĐI," và "đi" => "đi"
+ * "má" và "ma" => khác nhau
+ * "da" và "đa" => khác nhau
+ */
 export function normalizeRealtimeWord(text: string): string {
   return text
     .normalize("NFC")
     .toLocaleLowerCase("vi-VN")
-    .replace(/[^\p{L}\p{N}]/gu, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
+    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
+    .normalize("NFC");
 }
-
 /**
  * Tách transcript thành các từ.
  */

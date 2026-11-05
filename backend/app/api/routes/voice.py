@@ -56,6 +56,7 @@ async def text_to_speech(
 async def speech_to_text(
     file: Annotated[UploadFile, File(description="Audio recording to transcribe")],
     language_code: Annotated[str | None, Form(max_length=8)] = None,
+    keyterms: Annotated[list[str] | None, Form()] = None,
     _actor_id: UUID = Depends(get_current_parent_id),
 ) -> SpeechToTextResponse:
     """Transcribe an uploaded recording without persisting the child's audio."""
@@ -98,6 +99,7 @@ async def speech_to_text(
             filename=file.filename or "recording.webm",
             content_type=content_type,
             language_code=language_code,
+            keyterms=keyterms,
         )
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None

@@ -12,6 +12,7 @@ const wordTimestampSchema = z.object({
   start: z.number().nonnegative(),
   end: z.number().nonnegative(),
   type: z.string().optional(),
+  logprob: z.number().nullable().optional(),
 });
 
 const transcriptionSchema = z.object({
@@ -26,6 +27,7 @@ export interface WordTimestamp {
   readonly start: number;
   readonly end: number;
   readonly type?: string;
+  readonly logprob?: number | null;
 }
 
 export interface SpeechTranscript {
@@ -43,6 +45,7 @@ export interface TextToSpeechOptions {
 export interface SpeechToTextOptions {
   readonly filename?: string;
   readonly languageCode?: string;
+  readonly keyterms?: readonly string[];
   readonly signal?: AbortSignal;
 }
 
@@ -208,6 +211,35 @@ async function speechRequest(
   }
 }
 
+const INVALID_KEYTERM_CHARACTERS = /[<>{}\[\]\\]/u;
+
+function appendKeyterms(
+  form: FormData,
+  keyterms: readonly string[] | undefined,
+): void {
+  if (!keyterms?.length) return;
+
+  const uniqueKeyterms = new Set<string>();
+
+  for (const value of keyterms) {
+    const normalized = value.normalize("NFC").trim();
+
+    if (!normalized) continue;
+    if (normalized.length > 50) continue;
+    if (INVALID_KEYTERM_CHARACTERS.test(normalized)) continue;
+    if (normalized.split(/\s+/u).length > 5) continue;
+
+    uniqueKeyterms.add(normalized);
+
+    if (uniqueKeyterms.size >= 1000) break;
+  }
+
+  for (const keyterm of uniqueKeyterms) {
+    // Gửi cùng tên field nhiều lần để backend nhận thành list[str].
+    form.append("keyterms", keyterm);
+  }
+}
+
 export function createSpeechService(): SpeechService {
   return {
     async synthesize(text, options = {}) {
@@ -248,9 +280,14 @@ export function createSpeechService(): SpeechService {
         (mimeType.includes("ogg") ? "recording.ogg" : "recording.webm");
 
       const form = new FormData();
+
       form.append("file", fileBlob, filename);
-      if (options.languageCode)
+
+      if (options.languageCode) {
         form.append("language_code", options.languageCode);
+      }
+
+      appendKeyterms(form, options.keyterms);
 
       const response = await speechRequest(
         "/voice/speech-to-text",
