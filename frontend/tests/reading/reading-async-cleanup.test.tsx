@@ -129,6 +129,12 @@ function createReadingFixtures() {
       delete: vi
         .fn<ReadingServices["childService"]["delete"]>()
         .mockRejectedValue(new Error("Unused test write")),
+      uploadAvatar: vi
+        .fn<ReadingServices["childService"]["uploadAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
+      removeAvatar: vi
+        .fn<ReadingServices["childService"]["removeAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
     },
     comprehensionService: {
       getQuestion: vi

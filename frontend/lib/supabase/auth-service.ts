@@ -124,15 +124,19 @@ function mapRecoveryError(error: AuthError) {
 }
 
 function mapUser(user: User): AuthUserSnapshot {
-  const displayName: unknown = user.user_metadata.display_name;
+  const displayName = [
+    user.user_metadata.display_name,
+    user.user_metadata.full_name,
+    user.user_metadata.name,
+  ].find(
+    (value): value is string =>
+      typeof value === "string" && Boolean(value.trim()),
+  );
 
   return {
     id: user.id,
     email: user.email ?? null,
-    display_name:
-      typeof displayName === "string" && displayName.trim()
-        ? displayName.trim()
-        : null,
+    display_name: displayName?.trim() || null,
   };
 }
 

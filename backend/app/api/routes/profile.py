@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import select
@@ -6,6 +6,7 @@ from typing import List
 from uuid import UUID
 
 from app.api.deps import get_db, get_current_parent_id
+from app.database.config import SUPABASE_AVATAR_BUCKET
 from app.models import ChildProfile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.profile_service import (
@@ -40,6 +41,13 @@ from app.schemas import (
     ChildProfileUpdate,
     ProfileUpdate,
 )
+from app.services.avatar_service import (
+    MAX_AVATAR_BYTES,
+    AvatarFileValidationError,
+    AvatarResourceNotFoundError,
+    AvatarService,
+)
+from app.services.storage_service import create_signed_image_url
 
 # =========================================================
 # ERRORS
@@ -116,6 +124,24 @@ class ChildProfileRepository:
 
         return child
 
+    async def update_avatar_path(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        avatar_path: str | None,
+    ):
+        child = await self.get_by_id_and_parent(child_id, parent_id)
+        if child is None:
+            return None
+
+        child.AvatarPath = avatar_path
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        return child
+
     async def delete(
         self,
         child: ChildProfile,
@@ -142,13 +168,32 @@ class ChildProfileService:
     ):
         self.repository = repository
 
+    @staticmethod
+    def _response(child: ChildProfile) -> dict:
+        avatar_path = getattr(child, "AvatarPath", None)
+        return {
+            "id": child.Id,
+            "parent_id": child.ParentId,
+            "alias": child.Alias,
+            "grade": child.Grade,
+            "settings": child.Settings,
+            "created_at": child.CreatedAt,
+            "avatar_url": (
+                create_signed_image_url(
+                    avatar_path,
+                    bucket_name=SUPABASE_AVATAR_BUCKET,
+                )
+                if isinstance(avatar_path, str) and avatar_path
+                else None
+            ),
+        }
+
     async def list_children(
         self,
         parent_id: UUID,
     ):
-        return await self.repository.list_by_parent(
-            parent_id
-        )
+        children = await self.repository.list_by_parent(parent_id)
+        return [self._response(child) for child in children]
 
     async def create_child(
         self,
@@ -162,9 +207,7 @@ class ChildProfileService:
             Settings=child_in.settings,
         )
 
-        return await self.repository.create(
-            child
-        )
+        return self._response(await self.repository.create(child))
 
     async def get_child(
         self,
@@ -179,7 +222,7 @@ class ChildProfileService:
         if child is None:
             raise ChildProfileNotFoundError()
 
-        return child
+        return self._response(child)
 
     async def update_child(
         self,
@@ -198,9 +241,7 @@ class ChildProfileService:
         child.Alias = data.alias
         child.Grade = data.grade
 
-        return await self.repository.update(
-            child
-        )
+        return self._response(await self.repository.update(child))
 
     async def delete_child(
         self,
@@ -422,6 +463,133 @@ async def get_current_profile(
         )
 
     return ParentProfileResponse.model_validate(profile)
+
+
+@router.post(
+    "/me/avatar",
+    response_model=ParentProfileResponse,
+)
+async def upload_current_parent_avatar(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    repository = ProfileRepository(db)
+    service = AvatarService(repository, ChildProfileRepository(db))
+    try:
+        await service.upload_parent_avatar(
+            current_parent_id,
+            await file.read(MAX_AVATAR_BYTES + 1),
+            file.content_type,
+        )
+        profile = await ProfileService(repository).get_current_profile(
+            current_parent_id
+        )
+    except AvatarFileValidationError as error:
+        raise HTTPException(
+            status_code=error.http_status,
+            detail=str(error),
+        ) from error
+    except AvatarResourceNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Profile not found"},
+        ) from error
+
+    return ParentProfileResponse.model_validate(profile)
+
+
+@router.delete(
+    "/me/avatar",
+    response_model=ParentProfileResponse,
+)
+async def remove_current_parent_avatar(
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    repository = ProfileRepository(db)
+    service = AvatarService(repository, ChildProfileRepository(db))
+    try:
+        await service.remove_parent_avatar(current_parent_id)
+        profile = await ProfileService(repository).get_current_profile(
+            current_parent_id
+        )
+    except AvatarResourceNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESOURCE_NOT_FOUND", "message": "Profile not found"},
+        ) from error
+
+    return ParentProfileResponse.model_validate(profile)
+
+
+@router.post(
+    "/children/{child_id}/avatar",
+    response_model=ChildProfileResponse,
+)
+async def upload_child_avatar(
+    child_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    child_repository = ChildProfileRepository(db)
+    service = AvatarService(ProfileRepository(db), child_repository)
+    try:
+        await service.upload_child_avatar(
+            current_parent_id,
+            child_id,
+            await file.read(MAX_AVATAR_BYTES + 1),
+            file.content_type,
+        )
+        child = await ChildProfileService(child_repository).get_child(
+            child_id,
+            current_parent_id,
+        )
+    except AvatarFileValidationError as error:
+        raise HTTPException(
+            status_code=error.http_status,
+            detail=str(error),
+        ) from error
+    except (AvatarResourceNotFoundError, ChildProfileNotFoundError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Child profile not found",
+            },
+        ) from error
+
+    return child
+
+
+@router.delete(
+    "/children/{child_id}/avatar",
+    response_model=ChildProfileResponse,
+)
+async def remove_child_avatar(
+    child_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    child_repository = ChildProfileRepository(db)
+    service = AvatarService(ProfileRepository(db), child_repository)
+    try:
+        await service.remove_child_avatar(current_parent_id, child_id)
+        child = await ChildProfileService(child_repository).get_child(
+            child_id,
+            current_parent_id,
+        )
+    except (AvatarResourceNotFoundError, ChildProfileNotFoundError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Child profile not found",
+            },
+        ) from error
+
+    return child
 
 
 @router.patch(

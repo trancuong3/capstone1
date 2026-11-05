@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminLayout } from "@/components/admin/admin-layout";
@@ -21,6 +21,10 @@ const { navigationMock } = vi.hoisted(() => ({
     replace: vi.fn(),
   },
 }));
+const { getProfileMock, profileServiceMock } = vi.hoisted(() => {
+  const getProfileMock = vi.fn();
+  return { getProfileMock, profileServiceMock: { get: getProfileMock } };
+});
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
@@ -29,11 +33,15 @@ vi.mock("next/navigation", () => ({
     replace: navigationMock.replace,
   }),
 }));
+vi.mock("@/hooks/use-profile-service", () => ({
+  useProfileService: () => profileServiceMock,
+}));
 
 beforeEach(() => {
   navigationMock.pathname = "/dashboard";
   navigationMock.refresh.mockClear();
   navigationMock.replace.mockClear();
+  getProfileMock.mockResolvedValue(null);
 });
 
 describe("shared header and footer", () => {
@@ -73,8 +81,6 @@ describe("shared header and footer", () => {
     ["/reports", "Tiến bộ"],
     ["/sessions", "Lịch sử"],
     ["/reports/difficult-words", "Từ cần luyện"],
-    ["/children", "Hồ sơ bé"],
-    ["/profile", "Ba mẹ"],
   ])("keeps Parent navigation active on %s", (pathname, label) => {
     navigationMock.pathname = pathname;
     render(
@@ -121,8 +127,28 @@ describe("shared header and footer", () => {
       }),
     ).toHaveAttribute("aria-current", "page");
     expect(
-      screen.getByRole("button", { name: "Đăng xuất" }),
+      screen.getByRole("button", { name: "Mở menu tài khoản" }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/children", "Hồ sơ bé"],
+    ["/profile", "Hồ sơ ba mẹ"],
+  ])("highlights %s in the avatar menu", (pathname, label) => {
+    navigationMock.pathname = pathname;
+    render(
+      withAuthFixture(
+        <AppShell>
+          <h1>Nội dung phụ huynh</h1>
+        </AppShell>,
+        createAuthServiceFixture(),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("keeps child onboarding minimal while using the Parent footer", () => {

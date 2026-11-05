@@ -13,6 +13,7 @@ class Profile(Base):
     Role = Column("role", String, nullable=False)
     DisplayName = Column("displayname", String)
     ContactPhone = Column("contact_phone", String, nullable=True)
+    AvatarPath = Column("avatar_path", String, nullable=True)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
     Active = Column("active", SmallInteger, nullable=False, server_default=text("1"))
 
@@ -27,6 +28,7 @@ class ChildProfile(Base):
     Alias = Column("alias", String, nullable=False)
     Grade = Column("grade", SmallInteger, nullable=False)
     Settings = Column("settings", JSONB, server_default=text("'{}'::jsonb"), nullable=False)
+    AvatarPath = Column("avatar_path", String, nullable=True)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     parent = relationship("Profile", back_populates="children")

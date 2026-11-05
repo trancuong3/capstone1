@@ -1,6 +1,7 @@
 import { Check, Pencil } from "lucide-react";
 import Link from "next/link";
 
+import { ProfileAvatar } from "@/components/common/profile-avatar";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildProfileCardProps {
@@ -9,11 +10,6 @@ interface ChildProfileCardProps {
   showEditAction?: boolean;
   onSelect?: () => void;
   selected?: boolean;
-}
-
-function childInitial(alias: string): string {
-  const normalized = alias.trim().replace(/^bé\s+/i, "");
-  return normalized.slice(0, 4) || "Bé";
 }
 
 export function ChildProfileCard({
@@ -25,9 +21,12 @@ export function ChildProfileCard({
 }: ChildProfileCardProps) {
   const content = (
     <>
-      <span className="flex size-[104px] items-center justify-center rounded-card bg-purple px-4 text-[44px] font-extrabold leading-[1.4] text-purple-ink">
-        {childInitial(child.alias)}
-      </span>
+      <ProfileAvatar
+        ariaLabel={`Ảnh đại diện của ${child.alias}`}
+        displayName={child.alias}
+        imageUrl={child.avatar_url}
+        size="card"
+      />
       <span className="text-[26px] font-bold leading-[1.4] text-ink">
         {child.alias}
       </span>
