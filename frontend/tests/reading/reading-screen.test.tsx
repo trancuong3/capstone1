@@ -532,6 +532,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     await user.click(retryConsent);
     await screen.findByText(/Bé đọc lại từ/);
+    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bật mic" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Bé đọc với nhận diện giọng nói" }),
+    ).toBeDisabled();
+    expect(screen.queryByText(/Chuẩn bị đọc:/)).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Bật mic" }));
 
     await waitFor(() => {

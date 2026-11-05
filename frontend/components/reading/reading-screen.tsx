@@ -203,10 +203,8 @@ export function ReadingScreen({
   const [retryCandidates, setRetryCandidates] = useState<RetryWordCandidate[]>(
     [],
   );
-  const retryCandidatesRef = useRef<RetryWordCandidate[]>([]);
-  useEffect(() => {
-    retryCandidatesRef.current = retryCandidates;
-  }, [retryCandidates]);
+  // The ref is the authoritative queue for asynchronous retry handlers.
+  // Update it synchronously alongside render state at each queue mutation.
   const [retryConfirmedWordIds, setRetryConfirmedWordIds] = useState<
     Set<string>
   >(() => new Set());
@@ -1024,7 +1022,7 @@ export function ReadingScreen({
     if (retryModeRef.current) {
       stopRetryRecognition();
       if (speechPlayer.isPlaying) speechPlayer.stop();
-      const candidate = retryCandidates[retryWordPosition];
+      const candidate = retryCandidatesRef.current[retryPositionRef.current];
       if (candidate) {
         setIsReadingWord(true);
         try {
@@ -1163,7 +1161,7 @@ export function ReadingScreen({
 
   async function handleToggleListening() {
     if (retryModeRef.current) {
-      const candidate = retryCandidates[retryWordPosition];
+      const candidate = retryCandidatesRef.current[retryPositionRef.current];
       if (!candidate || isBusy || retryProcessingRef.current) return;
       if (isMicRecording) {
         await stopRetryListeningAndTranscribe(candidate);
@@ -1999,8 +1997,15 @@ export function ReadingScreen({
   }
 
   async function beginRetryWord(position: number): Promise<void> {
+    if (!mountedRef.current) return;
     const candidate = retryCandidatesRef.current[position];
-    if (!candidate || !mountedRef.current) return;
+    if (!candidate) {
+      setRetryFeedback("incorrect");
+      setPageNavigationError(
+        "Danh sách từ cần luyện không còn hợp lệ. Tiến trình vẫn được giữ; vui lòng thử lại.",
+      );
+      return;
+    }
 
     stopRetryRecognition();
     retryListeningWantedRef.current = false;
@@ -2089,6 +2094,8 @@ export function ReadingScreen({
       return false;
     }
 
+    // The consent transition invalidates any remaining initial-reading countdown.
+    setCountdown(null);
     retryCandidatesRef.current = [...activeCandidates];
     setRetryCandidates(activeCandidates);
     retryModeRef.current = true;
@@ -2162,6 +2169,7 @@ export function ReadingScreen({
       setCanonicalState("FINISHED");
       setConfirmFinish(false);
       setRetryPrompt(false);
+      retryModeRef.current = false;
       setRetryMode(false);
       setUiState("complete");
     } catch (error) {
@@ -2179,6 +2187,9 @@ export function ReadingScreen({
     if (finishStartedRef.current) return;
 
     prepareFinishStartedRef.current = true;
+    // Cancel the initial reading countdown before finalizing; its expiry must
+    // never restart the original microphone while retry mode owns capture.
+    setCountdown(null);
     setIsBusy(true);
     speechPlayer.stop();
 
@@ -2484,7 +2495,18 @@ export function ReadingScreen({
           </div>
         ) : null}
         {pageNavigationError ? (
-          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+            {retryMode ? (
+              <Button
+                disabled={isBusy}
+                onClick={() => void beginRetryWord(retryPositionRef.current)}
+                variant="secondary"
+              >
+                Thử mở lại trang
+              </Button>
+            ) : null}
+          </div>
         ) : null}
         {pageProgress &&
         pageProgress.current_index === pageProgress.total_pages - 1 ? (
