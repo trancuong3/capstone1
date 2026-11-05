@@ -172,17 +172,17 @@ class SessionEventRead(BaseModel):
     page_id: UUID
     page_revision_id: UUID
     page_revision_word_id: UUID | None
-    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE"]
+    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE","WORD_RETRY"]
     start_ms: int = Field(ge=0)
     end_ms: int | None
     confidence: float | None
-    status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED"]
+    status: Literal["CANDIDATE", "CONFIRMED", "FAILED", "UNCERTAIN", "DISMISSED"]
     metadata: dict[str, object]
 
 
 class HistoryEventRead(SessionEventRead):
-    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE", "MISPRONUNCIATION"]
-    status: Literal["CANDIDATE", "CONFIRMED", "UNCERTAIN", "DISMISSED", "DETECTED", "FEEDBACK_GIVEN", "IGNORED_BY_GATE"]
+    type: Literal["OMISSION", "REPETITION", "LONG_PAUSE", "SUBSTITUTION", "SELF_CORRECTION", "READ_EXAMPLE", "MISPRONUNCIATION","WORD_RETRY"]
+    status: Literal["CANDIDATE", "CONFIRMED", "FAILED", "UNCERTAIN", "DISMISSED", "DETECTED", "FEEDBACK_GIVEN", "IGNORED_BY_GATE"]
     end_ms: int | None = Field(ge=0)
     confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
 

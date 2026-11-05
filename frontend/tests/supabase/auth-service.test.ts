@@ -169,6 +169,7 @@ describe("SupabaseAuthService", () => {
           display_name: "Nguyen Minh Anh",
           email: "parent@example.com",
           id: "10000000-0000-4000-8000-000000000001",
+          providers: ["email"],
         },
       },
     });
@@ -403,6 +404,7 @@ describe("SupabaseAuthService", () => {
       display_name: "Nguyen Minh Anh",
       email: "parent@example.com",
       id: providerUser.id,
+      providers: ["email"],
     });
   });
 
@@ -429,6 +431,7 @@ describe("SupabaseAuthService", () => {
         display_name: "Nguyen Minh Anh",
         email: "parent@example.com",
         id: providerUser.id,
+        providers: [provider, "email"],
       });
     },
   );
@@ -663,6 +666,129 @@ describe("SupabaseAuthService", () => {
       service.resetPassword({ newPassword: "new-password" }),
     ).rejects.toMatchObject({ reason: "invalid-recovery-context" });
     expect(harness.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("changes a password after isolated reauthentication without replacing the active session", async () => {
+    const harness = createHarness();
+    const isolatedSignIn = vi.fn().mockResolvedValue({
+      data: { session: providerSession, user: providerUser },
+      error: null,
+    });
+    const isolatedSignOut = vi.fn().mockResolvedValue({ error: null });
+    const isolatedClient = {
+      auth: {
+        signInWithPassword: isolatedSignIn,
+        signOut: isolatedSignOut,
+      },
+    } as unknown as SupabaseClient;
+    const service = createSupabaseAuthService(harness.client, {
+      getEmailConfirmationRedirectUrl: () =>
+        "https://app.example.com/login?auth_callback=signup",
+      getOAuthRedirectUrl: () => "https://app.example.com/auth/callback",
+      getPasswordResetRedirectUrl: () =>
+        "https://app.example.com/reset-password",
+      createReauthenticationClient: () => isolatedClient,
+    });
+
+    await service.changePassword({
+      currentPassword: "old-password",
+      newPassword: "new-password",
+    });
+
+    expect(isolatedSignIn).toHaveBeenCalledWith({
+      email: "parent@example.com",
+      password: "old-password",
+    });
+    expect(isolatedSignOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(harness.updateUser).toHaveBeenCalledWith({
+      password: "new-password",
+    });
+    expect(harness.signInWithPassword).not.toHaveBeenCalled();
+    expect(harness.signOut).not.toHaveBeenCalled();
+  });
+
+  it("rejects reauthentication when its authenticated user is different", async () => {
+    const harness = createHarness();
+    const otherUser = { ...providerUser, id: "another-user-id" };
+    const isolatedSignIn = vi.fn().mockResolvedValue({
+      data: {
+        session: { ...providerSession, user: otherUser },
+        user: otherUser,
+      },
+      error: null,
+    });
+    const isolatedSignOut = vi.fn().mockResolvedValue({ error: null });
+    const isolatedClient = {
+      auth: { signInWithPassword: isolatedSignIn, signOut: isolatedSignOut },
+    } as unknown as SupabaseClient;
+    const service = createSupabaseAuthService(harness.client, {
+      createReauthenticationClient: () => isolatedClient,
+    });
+
+    await expect(
+      service.changePassword({
+        currentPassword: "old-password",
+        newPassword: "new-password",
+      }),
+    ).rejects.toMatchObject({ reason: "invalid-credentials" });
+
+    expect(harness.updateUser).not.toHaveBeenCalled();
+    expect(isolatedSignOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("does not update the password when the active user changes during reauthentication", async () => {
+    const harness = createHarness();
+    harness.getUser
+      .mockResolvedValueOnce({ data: { user: providerUser }, error: null })
+      .mockResolvedValueOnce({
+        data: { user: { ...providerUser, id: "another-user-id" } },
+        error: null,
+      });
+    const isolatedSignIn = vi.fn().mockResolvedValue({
+      data: { session: providerSession, user: providerUser },
+      error: null,
+    });
+    const isolatedSignOut = vi.fn().mockResolvedValue({ error: null });
+    const isolatedClient = {
+      auth: { signInWithPassword: isolatedSignIn, signOut: isolatedSignOut },
+    } as unknown as SupabaseClient;
+    const service = createSupabaseAuthService(harness.client, {
+      createReauthenticationClient: () => isolatedClient,
+    });
+
+    await expect(
+      service.changePassword({
+        currentPassword: "old-password",
+        newPassword: "new-password",
+      }),
+    ).rejects.toMatchObject({ reason: "unexpected" });
+
+    expect(harness.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("handles wrong current credentials without signing out of the active session", async () => {
+    const harness = createHarness();
+    const isolatedSignIn = vi.fn().mockResolvedValue({
+      data: { session: null, user: null },
+      error: authError("invalid_credentials"),
+    });
+    const isolatedSignOut = vi.fn().mockResolvedValue({ error: null });
+    const isolatedClient = {
+      auth: { signInWithPassword: isolatedSignIn, signOut: isolatedSignOut },
+    } as unknown as SupabaseClient;
+    const service = createSupabaseAuthService(harness.client, {
+      createReauthenticationClient: () => isolatedClient,
+    });
+
+    await expect(
+      service.changePassword({
+        currentPassword: "wrong-password",
+        newPassword: "new-password",
+      }),
+    ).rejects.toMatchObject({ reason: "invalid-credentials" });
+
+    expect(harness.updateUser).not.toHaveBeenCalled();
+    expect(harness.signOut).not.toHaveBeenCalled();
   });
 
   it("uses local sign-out scope", async () => {

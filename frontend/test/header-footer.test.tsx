@@ -95,11 +95,11 @@ describe("shared header and footer", () => {
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("ViRead");
     expect(footer).toHaveTextContent("Đại học Duy Tân");
-    expect(footer).toHaveTextContent("viread@gmail.com");
+    expect(footer).toHaveTextContent("vireadforyou@gmail.com");
     expect(footer).toHaveTextContent("0905373633");
     expect(
-      within(footer).getByRole("link", { name: "viread@gmail.com" }),
-    ).toHaveAttribute("href", "mailto:viread@gmail.com");
+      within(footer).getByRole("link", { name: "vireadforyou@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
     expect(
       within(footer).getByRole("link", { name: "0905373633" }),
     ).toHaveAttribute("href", "tel:0905373633");
@@ -126,8 +126,24 @@ describe("shared header and footer", () => {
         name: label,
       }),
     ).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Mở menu tài khoản" }),
+      screen.getByRole("menuitem", { name: "Hồ sơ ba mẹ" }),
+    ).toHaveAttribute("href", "/profile");
+    expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveAttribute(
+      "href",
+      "/children",
+    );
+    expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" }),
+    ).toHaveAttribute("href", "/help-support");
+    expect(
+      screen.getByRole("menuitem", { name: "Đăng xuất" }),
     ).toBeInTheDocument();
   });
 
@@ -217,7 +233,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 
@@ -246,7 +262,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 });

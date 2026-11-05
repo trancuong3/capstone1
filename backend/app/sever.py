@@ -24,6 +24,7 @@ from sqlalchemy.exc import (
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
+from app.database.config import CORS_ALLOWED_ORIGINS
 from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
@@ -257,10 +258,7 @@ async def database_api_exception_handler(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=list(CORS_ALLOWED_ORIGINS),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

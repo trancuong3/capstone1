@@ -3,9 +3,11 @@
 import {
   BarChart3,
   CalendarClock,
+  CircleHelp,
   History,
   LayoutDashboard,
   LogOut,
+  Settings,
   UserRound,
   UsersRound,
   Volume2,
@@ -68,6 +70,12 @@ function routeIsActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function roleLabel(role: ParentProfileDTO["role"] | undefined): string | null {
+  if (role === "parent") return "Phụ huynh";
+  if (role === "admin") return "Quản trị viên";
+  return null;
+}
+
 export function AppShell({ children }: AppShellProps) {
   const authRuntime = useAuthRuntime();
   const authService = useAuthService();
@@ -113,6 +121,25 @@ export function AppShell({ children }: AppShellProps) {
       isActive = false;
     };
   }, [profileService]);
+
+  useEffect(() => {
+    function handleProfileUpdated(event: Event) {
+      const detail = (event as CustomEvent<{ displayName?: unknown }>).detail;
+      if (typeof detail?.displayName !== "string") return;
+      setProfile((current) =>
+        current
+          ? { ...current, display_name: detail.displayName as string }
+          : current,
+      );
+    }
+
+    window.addEventListener("viread:profile-updated", handleProfileUpdated);
+    return () =>
+      window.removeEventListener(
+        "viread:profile-updated",
+        handleProfileUpdated,
+      );
+  }, []);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;
@@ -313,6 +340,11 @@ export function AppShell({ children }: AppShellProps) {
                   <p className="max-w-full break-words text-label font-extrabold text-ink">
                     {displayName ?? "Tài khoản ViRead"}
                   </p>
+                  {roleLabel(profile?.role) ? (
+                    <p className="text-sm font-semibold text-primary">
+                      {roleLabel(profile?.role)}
+                    </p>
+                  ) : null}
                   {email ? (
                     <p className="max-w-full break-all text-sm text-muted">
                       {email}
@@ -366,6 +398,50 @@ export function AppShell({ children }: AppShellProps) {
                 >
                   <UsersRound aria-hidden="true" className="size-5" />
                   Hồ sơ bé
+                </Link>
+
+                <div className="my-2 border-t border-border" />
+                <Link
+                  aria-current={
+                    routeIsActive(pathname, "/settings") ? "page" : undefined
+                  }
+                  className={cn(
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    routeIsActive(pathname, "/settings")
+                      ? "bg-sky text-primary-hover"
+                      : "hover:bg-sky",
+                  )}
+                  href="/settings"
+                  onClick={() =>
+                    setAccountMenu((current) => ({ ...current, isOpen: false }))
+                  }
+                  role="menuitem"
+                  tabIndex={isAccountMenuVisible ? 0 : -1}
+                >
+                  <Settings aria-hidden="true" className="size-5" />
+                  Cài đặt
+                </Link>
+                <Link
+                  aria-current={
+                    routeIsActive(pathname, "/help-support")
+                      ? "page"
+                      : undefined
+                  }
+                  className={cn(
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    routeIsActive(pathname, "/help-support")
+                      ? "bg-sky text-primary-hover"
+                      : "hover:bg-sky",
+                  )}
+                  href="/help-support"
+                  onClick={() =>
+                    setAccountMenu((current) => ({ ...current, isOpen: false }))
+                  }
+                  role="menuitem"
+                  tabIndex={isAccountMenuVisible ? 0 : -1}
+                >
+                  <CircleHelp aria-hidden="true" className="size-5" />
+                  Trợ giúp &amp; hỗ trợ
                 </Link>
 
                 <div className="my-2 border-t border-border" />

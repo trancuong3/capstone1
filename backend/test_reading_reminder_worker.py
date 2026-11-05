@@ -4,11 +4,11 @@ import unittest
 from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 from uuid import UUID
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
-os.environ.setdefault("SMTP_FROM_EMAIL", "vireadforyou@gmail.com")
 
 from app.jobs.reading_reminder_worker import ParentEmailUnavailable, deliver_claimed_occurrences
 from app.providers.reading_reminder_email_provider import build_reading_reminder_message
@@ -64,8 +64,15 @@ class ReadingReminderWorkerTests(unittest.TestCase):
             timezone_name="Asia/Ho_Chi_Minh",
             occurrence_id=UUID("11111111-1111-4111-8111-111111111111"),
         )
-        first = build_reading_reminder_message(**values)
-        second = build_reading_reminder_message(**values)
+        # SMTP settings are module-level configuration values. Patch the
+        # provider dependency directly so this test is independent of test
+        # discovery/import order and never changes the process environment.
+        with patch(
+            "app.providers.reading_reminder_email_provider.SMTP_FROM_EMAIL",
+            "sender@example.test",
+        ):
+            first = build_reading_reminder_message(**values)
+            second = build_reading_reminder_message(**values)
         self.assertEqual(first["Message-ID"], second["Message-ID"])
         self.assertIn("Bé An", first.get_content())
         self.assertIn("2026-11-04 lúc 19:30", first.get_content())

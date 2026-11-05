@@ -10,6 +10,21 @@ import type {
   ReadingSessionPageProgressDTO,
 } from "@/types/reading";
 
+export interface CreateRetryEventInput {
+  sessionId: string;
+  pageId: string;
+  pageRevisionId: string;
+  wordId: string;
+  status: "CONFIRMED" | "FAILED";
+  startMs: number;
+  endMs: number | null;
+  metadata?: {
+    retry_attempt?: number;
+    original_status?: "OMISSION" | "MISPRONUNCIATION";
+    recognized_text?: string;
+  };
+}
+
 export interface ReadingService {
   create(
     input: ReadingSessionCreateDTO,
@@ -27,6 +42,7 @@ export interface ReadingService {
   ): Promise<ReadingSessionPageProgressDTO>;
   getCompletionSummary(sessionId: string): Promise<ReadingCompletionSummaryUI>;
   finish(sessionId: string): Promise<ReadingSessionSummaryDTO>;
+  createRetryEvent(input: CreateRetryEventInput): Promise<void>;
 }
 
 const sessionCreateResponseSchema = z.object({
@@ -239,6 +255,46 @@ export function createReadingService(): ReadingService {
         ended_at: summary.ended_at ?? null,
         duration_ms: summary.duration_ms ?? null,
       };
+    },
+    async createRetryEvent(input: CreateRetryEventInput): Promise<void> {
+      const startMs = Math.min(32767, Math.max(0, Math.floor(input.startMs)));
+      const endMs =
+        input.endMs === null
+          ? null
+          : Math.min(32767, Math.max(startMs, Math.floor(input.endMs)));
+
+      await requestApi(
+        "/reading/events",
+        z.object({
+          Id: z.uuid(),
+          SessionId: z.uuid(),
+          PageId: z.uuid(),
+          PageRevisionId: z.uuid(),
+          WordId: z.uuid().nullable(),
+          Type: z.string(),
+          StartMs: z.number(),
+          EndMs: z.number().nullable(),
+          Confidence: z.number().nullable(),
+          Status: z.string(),
+          Metadata: z.record(z.string(), z.unknown()),
+          CreatedAt: z.string(),
+        }),
+        undefined,
+        {
+          method: "POST",
+          body: {
+            SessionId: input.sessionId,
+            PageId: input.pageId,
+            PageRevisionId: input.pageRevisionId,
+            WordId: input.wordId,
+            Type: "WORD_RETRY",
+            StartMs: startMs,
+            EndMs: endMs,
+            Status: input.status,
+            Metadata: input.metadata ?? {},
+          },
+        },
+      );
     },
   };
 }

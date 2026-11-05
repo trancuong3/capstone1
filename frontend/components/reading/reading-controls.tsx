@@ -20,6 +20,8 @@ interface ReadingControlsProps {
   onPause: () => void;
   onReadSample?: () => void;
   onToggleListening?: () => void;
+  retryMode?: boolean;
+  retryCompleted?: boolean;
 }
 
 export function ReadingControls({
@@ -32,6 +34,8 @@ export function ReadingControls({
   onPause,
   onReadSample,
   onToggleListening,
+  retryMode = false,
+  retryCompleted = false,
 }: ReadingControlsProps) {
   return (
     <nav
@@ -41,7 +45,7 @@ export function ReadingControls({
       <Button
         aria-label="Tạm dừng buổi đọc"
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled}
+        disabled={disabled || retryMode}
         onClick={onPause}
         variant="quiet"
       >
@@ -51,7 +55,11 @@ export function ReadingControls({
 
       <Button
         aria-label={
-          isPlayingSample ? "Dừng đọc mẫu" : "Đọc mẫu toàn trang bằng TTS"
+          isPlayingSample
+            ? "Dừng đọc mẫu"
+            : retryMode
+              ? "Nghe mẫu từ cần đọc lại"
+              : "Đọc mẫu toàn trang bằng TTS"
         }
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
         disabled={disabled}
@@ -67,7 +75,11 @@ export function ReadingControls({
           <Volume2 aria-hidden="true" className="size-6 shrink-0" />
         )}
         <span className="truncate">
-          {isPlayingSample ? "Dừng mẫu" : "Đọc cả đoạn"}
+          {isPlayingSample
+            ? "Dừng mẫu"
+            : retryMode
+              ? "Nghe mẫu từ"
+              : "Đọc cả đoạn"}
         </span>
       </Button>
 
@@ -78,7 +90,7 @@ export function ReadingControls({
             : "Bé đọc với nhận diện giọng nói"
         }
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled}
+        disabled={disabled || retryMode}
         onClick={onToggleListening ?? onPause}
         variant={isListening ? "primary" : "secondary"}
       >
@@ -96,7 +108,7 @@ export function ReadingControls({
       <Button
         aria-label="Chọn trang hoặc nhận trợ giúp"
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled}
+        disabled={disabled || retryMode}
         onClick={onManualPage}
         variant="quiet"
       >
@@ -109,13 +121,13 @@ export function ReadingControls({
       </Button>
 
       <Button
-        aria-label="Kết thúc buổi đọc"
+        aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled}
+        disabled={disabled || (retryMode && !retryCompleted)}
         onClick={onFinish}
       >
         <Check aria-hidden="true" className="size-6 shrink-0" />
-        <span className="truncate">Xong</span>
+        <span className="truncate">{retryMode ? "Hoàn thành" : "Xong"}</span>
       </Button>
     </nav>
   );

@@ -162,6 +162,11 @@ export function ParentProfileScreen() {
 
   function handleSaved(updatedProfile: ParentProfileDTO, message: string) {
     setState({ status: "ready", profile: updatedProfile });
+    window.dispatchEvent(
+      new CustomEvent("viread:profile-updated", {
+        detail: { displayName: updatedProfile.display_name ?? "" },
+      }),
+    );
     setIsEditing(false);
     setSaveNotice(message);
   }
