@@ -21,18 +21,13 @@ import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ParentProfileForm } from "@/components/profile/parent-profile-form";
-import { useAuthService } from "@/hooks/use-auth-service";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useProfileService } from "@/hooks/use-profile-service";
-import type { AuthUserSnapshot } from "@/types/auth";
 import type { ParentProfileDTO } from "@/types/profile";
 
 type ProfileState =
   | { status: "loading" }
-  | {
-      status: "ready";
-      profile: ParentProfileDTO;
-      metadataName: string | null;
-    }
+  | { status: "ready"; profile: ParentProfileDTO }
   | { status: "error" };
 
 function formatCreatedDate(value: string): string {
@@ -109,7 +104,7 @@ function ParentProfileLoadingState() {
 
 export function ParentProfileScreen() {
   const profileService = useProfileService();
-  const authService = useAuthService();
+  const authRuntime = useAuthRuntime();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ProfileState>({ status: "loading" });
   const [isEditing, setIsEditing] = useState(false);
@@ -120,31 +115,21 @@ export function ParentProfileScreen() {
 
     async function loadProfile() {
       setState({ status: "loading" });
-      const [profileResult, userResult] = await Promise.allSettled([
-        profileService.get(),
-        authService.getCurrentUser(),
-      ]);
 
-      if (!isActive) return;
-      if (profileResult.status === "rejected") {
-        setState({ status: "error" });
-        return;
+      try {
+        const profile = await profileService.get();
+        if (!isActive) return;
+        setState({ status: "ready", profile });
+      } catch {
+        if (isActive) setState({ status: "error" });
       }
-
-      const user: AuthUserSnapshot | null =
-        userResult.status === "fulfilled" ? userResult.value : null;
-      setState({
-        status: "ready",
-        profile: profileResult.value,
-        metadataName: user?.display_name ?? null,
-      });
     }
 
     void loadProfile();
     return () => {
       isActive = false;
     };
-  }, [authService, profileService, requestKey]);
+  }, [profileService, requestKey]);
 
   if (state.status === "loading") {
     return <ParentProfileLoadingState />;
@@ -168,21 +153,21 @@ export function ParentProfileScreen() {
     );
   }
 
-  const { profile, metadataName } = state;
+  const { profile } = state;
   const displayName = resolveDisplayName(
     profile.display_name,
-    metadataName,
+    authRuntime.session?.user.display_name ?? null,
     profile.email,
   );
 
   function handleSaved(updatedProfile: ParentProfileDTO, message: string) {
-    setState({ status: "ready", profile: updatedProfile, metadataName });
+    setState({ status: "ready", profile: updatedProfile });
     setIsEditing(false);
     setSaveNotice(message);
   }
 
   function handlePartialSaved(updatedProfile: ParentProfileDTO) {
-    setState({ status: "ready", profile: updatedProfile, metadataName });
+    setState({ status: "ready", profile: updatedProfile });
   }
 
   return (

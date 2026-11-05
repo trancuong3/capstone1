@@ -19,8 +19,12 @@ const authMocks = vi.hoisted(() => ({
   resend: vi.fn(),
 }));
 
-const authServiceMock = vi.hoisted(() => ({
-  getCurrentUser: vi.fn(),
+const authRuntimeMock = vi.hoisted(() => ({
+  session: {
+    user: {
+      display_name: "Tên từ OAuth",
+    },
+  },
 }));
 const originalCreateObjectURL = Object.getOwnPropertyDescriptor(
   URL,
@@ -31,8 +35,8 @@ const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(
   "revokeObjectURL",
 );
 
-vi.mock("@/hooks/use-auth-service", () => ({
-  useAuthService: () => authServiceMock,
+vi.mock("@/hooks/use-auth-runtime", () => ({
+  useAuthRuntime: () => authRuntimeMock,
 }));
 
 vi.mock("@/lib/supabase/client", () => ({
@@ -75,11 +79,6 @@ beforeEach(() => {
     error: null,
   });
   authMocks.resend.mockResolvedValue({ data: {}, error: null });
-  authServiceMock.getCurrentUser.mockResolvedValue({
-    display_name: "Tên từ OAuth",
-    email: "parent@example.com",
-    id: profile.id,
-  });
 });
 
 afterEach(() => {
@@ -146,6 +145,7 @@ describe("ParentProfileScreen", () => {
     expect(screen.getByText("Lớp 2")).toBeInTheDocument();
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
+    expect(authMocks.getUser).not.toHaveBeenCalled();
   });
 
   it("opens one form for the complete profile, including avatar and all contact fields", async () => {
