@@ -1,26 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/button";
+import { ProfileAvatarUpload } from "@/components/common/profile-avatar-upload";
 import { TextField } from "@/components/common/text-field";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { useProfileService } from "@/hooks/use-profile-service";
 import type { ParentProfileDTO } from "@/types/profile";
 
-export type ParentProfileEditableField =
-  "display_name" | "email" | "contact_phone";
-
 interface ParentProfileFormProps {
-  field: ParentProfileEditableField;
   onCancel: () => void;
-  onSaved: (
-    field: ParentProfileEditableField,
-    profile: ParentProfileDTO,
-    message: string,
-  ) => void;
+  onSaved: (profile: ParentProfileDTO, message: string) => void;
+  onPartialSaved: (profile: ParentProfileDTO) => void;
   profile: ParentProfileDTO;
+  displayName: string;
 }
+
+type EditableField = "display_name" | "email" | "contact_phone" | "avatar";
 
 function safeErrorMessage(error: unknown, fallback: string): string {
   if (
@@ -44,200 +41,301 @@ function canonicalPhoneInput(value: string): string | null {
   return null;
 }
 
+function canonicalStoredPhone(value: string | null): string | null {
+  return value ? canonicalPhoneInput(value) : null;
+}
+
+function formatCreatedDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Chưa có thông tin";
+
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function getRoleLabel(role: ParentProfileDTO["role"]): string {
+  return role === "admin" ? "Quản trị viên" : "Phụ huynh";
+}
+
 export function ParentProfileForm({
-  field,
   onCancel,
   onSaved,
+  onPartialSaved,
   profile,
+  displayName,
 }: ParentProfileFormProps) {
   const isHydrated = useHydrated();
   const profileService = useProfileService();
-
-  const [value, setValue] = useState(() => {
-    switch (field) {
-      case "display_name":
-        return profile.display_name ?? "";
-      case "email":
-        return profile.pending_email ?? profile.email ?? "";
-      case "contact_phone":
-        return profile.contact_phone ?? "";
-    }
-  });
-  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState(profile.display_name ?? displayName);
+  const [email, setEmail] = useState(
+    profile.pending_email ?? profile.email ?? "",
+  );
+  const [phone, setPhone] = useState(profile.contact_phone ?? "");
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(
+    null,
+  );
+  const [isAvatarRemoved, setIsAvatarRemoved] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<EditableField, string>>>(
+    {},
+  );
+  const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const label =
-    field === "display_name"
-      ? "Tên hiển thị của ba mẹ"
-      : field === "email"
-        ? "Email"
-        : "Số điện thoại liên hệ";
+  function validate(): boolean {
+    const nextErrors: Partial<Record<EditableField, string>> = {};
+    const nextName = name.trim();
+    const nextEmail = email.trim().toLowerCase();
+    const nextPhone = phone.trim();
+    const currentEmail = (profile.pending_email ?? profile.email ?? "")
+      .trim()
+      .toLowerCase();
 
-  async function saveField() {
-    if (isSaving) return;
-    setError(null);
-
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setError(
-        field === "display_name"
-          ? "Ba mẹ vui lòng nhập tên hiển thị."
-          : field === "email"
-            ? "Ba mẹ vui lòng nhập email."
-            : "Ba mẹ vui lòng nhập số điện thoại liên hệ.",
-      );
-      return;
+    if (!nextName) {
+      nextErrors.display_name = "Ba mẹ vui lòng nhập tên hiển thị.";
+    } else if (nextName.length > 120) {
+      nextErrors.display_name = "Tên hiển thị không được dài quá 120 ký tự.";
     }
 
+    if (currentEmail && !nextEmail) {
+      nextErrors.email = "Ba mẹ vui lòng nhập email.";
+    }
+
+    if (nextEmail !== currentEmail && nextEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+        nextErrors.email = "Ba mẹ vui lòng nhập email hợp lệ.";
+      } else if (profile.email?.trim().toLowerCase() === nextEmail) {
+        nextErrors.email = "Email mới phải khác email hiện tại.";
+      }
+    }
+
+    if (nextPhone && !canonicalPhoneInput(nextPhone)) {
+      nextErrors.contact_phone =
+        "Nhập số hợp lệ, ví dụ 0912345678 hoặc +84912345678.";
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  async function saveChanges(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSaving || !validate()) return;
+
+    setFormError(null);
     setIsSaving(true);
+    let currentProfile = profile;
+    let activeField: EditableField = "display_name";
+    const savedChanges: string[] = [];
+    const nextName = name.trim();
+    const nextEmail = email.trim().toLowerCase();
+    const nextPhone = phone.trim();
+    const currentEmail = (profile.pending_email ?? profile.email ?? "")
+      .trim()
+      .toLowerCase();
 
     try {
-      if (field === "display_name") {
-        const updatedProfile = await profileService.update({
-          display_name: trimmed,
+      if (nextName !== (profile.display_name ?? "").trim()) {
+        activeField = "display_name";
+        currentProfile = await profileService.update({
+          display_name: nextName,
         });
-        onSaved(field, updatedProfile, "Đã cập nhật tên hiển thị.");
-        return;
+        savedChanges.push("tên hiển thị");
       }
 
-      if (field === "email") {
-        const normalizedEmail = trimmed.toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-          setError("Ba mẹ vui lòng nhập email hợp lệ.");
-          return;
-        }
+      const nextCanonicalPhone = nextPhone
+        ? canonicalPhoneInput(nextPhone)
+        : null;
+      if (nextCanonicalPhone !== canonicalStoredPhone(profile.contact_phone)) {
+        activeField = "contact_phone";
+        currentProfile =
+          await profileService.updateContactPhone(nextCanonicalPhone);
+        savedChanges.push(
+          nextCanonicalPhone ? "số điện thoại" : "xóa số điện thoại",
+        );
+      }
 
-        if (profile.pending_email?.toLowerCase() === normalizedEmail) {
-          await profileService.resendEmailChange(normalizedEmail);
-          let currentProfile = profile;
-          try {
-            currentProfile = await profileService.get();
-          } catch {
-            // The resend request succeeded; the next page load will refresh Auth.
-          }
-          onSaved(
-            field,
-            currentProfile,
-            "Đã gửi lại email xác minh. Ba mẹ hãy kiểm tra hộp thư.",
-          );
-          return;
+      if (nextEmail && nextEmail !== currentEmail) {
+        activeField = "email";
+        if (profile.pending_email?.trim().toLowerCase() === nextEmail) {
+          await profileService.resendEmailChange(nextEmail);
+          savedChanges.push("email xác minh");
+        } else {
+          await profileService.requestEmailChange(nextEmail);
+          savedChanges.push("yêu cầu đổi email");
         }
-
-        if (profile.email?.toLowerCase() === normalizedEmail) {
-          setError("Email mới phải khác email hiện tại.");
-          return;
-        }
-
-        await profileService.requestEmailChange(normalizedEmail);
-        let currentProfile = profile;
         try {
           currentProfile = await profileService.get();
         } catch {
-          // Keep the confirmed profile snapshot; Auth remains the source of truth.
+          // The email request itself is authoritative; a later profile load refreshes Auth.
         }
-        onSaved(
-          field,
-          currentProfile,
-          "Đã gửi yêu cầu đổi email. Email mới chỉ có hiệu lực sau khi xác minh.",
-        );
-        return;
       }
 
-      const normalizedPhone = canonicalPhoneInput(trimmed);
-      if (!normalizedPhone) {
-        setError("Nhập số hợp lệ, ví dụ 0912345678 hoặc +84912345678.");
-        return;
+      if (selectedAvatarFile) {
+        activeField = "avatar";
+        currentProfile = await profileService.uploadAvatar(selectedAvatarFile);
+        savedChanges.push("ảnh đại diện");
+      } else if (isAvatarRemoved && profile.avatar_url) {
+        activeField = "avatar";
+        currentProfile = await profileService.removeAvatar();
+        savedChanges.push("xóa ảnh đại diện");
       }
 
-      const currentPhone = canonicalPhoneInput(profile.contact_phone ?? "");
-      if (currentPhone === normalizedPhone) {
-        setError("Số điện thoại mới phải khác số hiện tại.");
-        return;
-      }
-
-      const updatedProfile =
-        await profileService.updateContactPhone(normalizedPhone);
       onSaved(
-        field,
-        updatedProfile,
-        "Đã lưu số điện thoại liên hệ. Không cần xác minh.",
+        currentProfile,
+        savedChanges.includes("yêu cầu đổi email") ||
+          savedChanges.includes("email xác minh")
+          ? "Đã lưu thay đổi. Email mới chỉ có hiệu lực sau khi ba mẹ xác minh."
+          : savedChanges.length
+            ? "Đã lưu các thay đổi hồ sơ."
+            : "Thông tin hồ sơ đã được cập nhật.",
       );
-    } catch (saveError) {
-      setError(
-        safeErrorMessage(
-          saveError,
-          "Chưa lưu được thay đổi. Ba mẹ vui lòng thử lại sau.",
-        ),
+    } catch (error) {
+      if (savedChanges.length) onPartialSaved(currentProfile);
+
+      const message = safeErrorMessage(
+        error,
+        "Chưa lưu được thay đổi. Ba mẹ vui lòng thử lại sau.",
+      );
+      setErrors((current) => ({ ...current, [activeField]: message }));
+      setFormError(
+        savedChanges.length
+          ? `Đã lưu ${savedChanges.join(", ")}; chưa lưu được thay đổi liên quan đến ${activeField === "avatar" ? "ảnh đại diện" : activeField === "email" ? "email" : activeField === "contact_phone" ? "số điện thoại" : "tên hiển thị"}. ${message}`
+          : null,
       );
     } finally {
       setIsSaving(false);
     }
   }
 
+  function removeOrRestoreAvatar() {
+    if (isAvatarRemoved) {
+      setIsAvatarRemoved(false);
+      return;
+    }
+
+    setSelectedAvatarFile(null);
+    setIsAvatarRemoved(Boolean(profile.avatar_url));
+  }
+
   return (
     <form
-      aria-label={`Chỉnh sửa ${label}`}
-      className="mt-2 flex min-w-0 flex-col gap-3"
+      aria-busy={isSaving}
+      aria-label="Chỉnh sửa hồ sơ ba mẹ"
+      className="flex flex-col gap-6"
       noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        void saveField();
-      }}
+      onSubmit={(event) => void saveChanges(event)}
     >
+      <header>
+        <p className="text-label font-bold text-primary">HỒ SƠ TÀI KHOẢN</p>
+        <h2 className="mt-1 text-xl font-extrabold text-ink">
+          Chỉnh sửa hồ sơ
+        </h2>
+      </header>
+
+      <ProfileAvatarUpload
+        displayName={displayName}
+        imageUrl={profile.avatar_url}
+        isRemoved={isAvatarRemoved}
+        onRemove={removeOrRestoreAvatar}
+        onSelectFile={(file) => {
+          setSelectedAvatarFile(file);
+          setIsAvatarRemoved(false);
+          setErrors((current) => ({ ...current, avatar: undefined }));
+        }}
+        selectedFile={selectedAvatarFile}
+      />
+      {errors.avatar ? (
+        <p className="-mt-4 text-sm text-danger" role="alert">
+          {errors.avatar}
+        </p>
+      ) : null}
+
       <TextField
-        autoComplete={
-          field === "display_name"
-            ? "name"
-            : field === "email"
-              ? "email"
-              : "tel"
-        }
-        autoFocus
-        error={error ?? undefined}
-        inputMode={
-          field === "email"
-            ? "email"
-            : field === "contact_phone"
-              ? "tel"
-              : undefined
-        }
-        label={label}
-        maxLength={field === "contact_phone" ? 16 : 254}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder={
-          field === "display_name"
-            ? "Ví dụ: Nguyễn Minh Anh"
-            : field === "email"
-              ? "name@example.com"
-              : "0912345678 hoặc +84912345678"
-        }
-        type={
-          field === "email"
-            ? "email"
-            : field === "contact_phone"
-              ? "tel"
-              : "text"
-        }
-        value={value}
+        autoComplete="name"
+        error={errors.display_name}
+        label="Họ và tên"
+        maxLength={120}
+        onChange={(event) => setName(event.target.value)}
+        placeholder="Ví dụ: Nguyễn Minh Anh"
+        value={name}
+      />
+      <div className="flex flex-col gap-2">
+        <TextField
+          autoComplete="email"
+          error={errors.email}
+          inputMode="email"
+          label="Email"
+          maxLength={254}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="name@example.com"
+          type="email"
+          value={email}
+        />
+        {profile.pending_email ? (
+          <p className="text-sm text-amber-800">
+            Đang chờ xác minh email mới:{" "}
+            <strong>{profile.pending_email}</strong>
+          </p>
+        ) : null}
+        {profile.email_verified === false ? (
+          <p className="text-sm text-muted">
+            Email mới chỉ được cập nhật sau khi xác minh.
+          </p>
+        ) : null}
+      </div>
+      <TextField
+        autoComplete="tel"
+        error={errors.contact_phone}
+        inputMode="tel"
+        label="Số điện thoại liên hệ"
+        maxLength={16}
+        onChange={(event) => setPhone(event.target.value)}
+        placeholder="0912345678 hoặc +84912345678"
+        type="tel"
+        value={phone}
       />
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+      {formError ? (
+        <p className="text-sm text-danger" role="alert">
+          {formError}
+        </p>
+      ) : null}
+
+      <dl className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-control bg-canvas p-4">
+          <dt className="text-sm font-bold text-muted">Vai trò</dt>
+          <dd className="mt-1 text-label font-bold text-ink">
+            {getRoleLabel(profile.role)}
+          </dd>
+        </div>
+        <div className="rounded-control bg-canvas p-4">
+          <dt className="text-sm font-bold text-muted">Ngày tạo tài khoản</dt>
+          <dd className="mt-1 text-label font-bold text-ink">
+            {formatCreatedDate(profile.created_at)}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button
-          className="!h-11 !w-auto px-4"
-          disabled={!isHydrated || isSaving}
-          isLoading={isSaving}
-          type="submit"
-        >
-          {isSaving ? "Đang lưu…" : "Lưu"}
-        </Button>
-        <Button
-          className="!h-11 !w-auto px-4"
+          className="sm:w-auto sm:px-6"
           disabled={isSaving}
           onClick={onCancel}
           type="button"
           variant="quiet"
         >
           Hủy
+        </Button>
+        <Button
+          className="sm:w-auto sm:px-6"
+          disabled={!isHydrated || isSaving}
+          isLoading={isSaving}
+          type="submit"
+        >
+          {isSaving ? "Đang lưu…" : "Lưu thay đổi"}
         </Button>
       </div>
     </form>

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/common/button";
+import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookService } from "@/hooks/use-book-service";
@@ -479,9 +480,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           ))}
         </select>
         {selectedChild ? (
-          <span className="text-label text-muted">
-            Đang xem: {selectedChild.alias}
-          </span>
+          <div className="flex items-center gap-2 text-label text-muted">
+            <ProfileAvatar
+              ariaLabel={`Ảnh đại diện của ${selectedChild.alias}`}
+              displayName={selectedChild.alias}
+              imageUrl={selectedChild.avatar_url}
+              size="sm"
+            />
+            <span>Đang xem: {selectedChild.alias}</span>
+          </div>
         ) : null}
       </div>
       {error ? (
