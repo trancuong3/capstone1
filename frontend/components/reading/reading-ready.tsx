@@ -1,42 +1,16 @@
-import { ArrowLeft, ArrowRight, Camera, Check, Mic } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpenText } from "lucide-react";
 import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
 import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
-import type { DevicePermissionSnapshotUI } from "@/types/reading";
 
 interface ReadingReadyProps {
   book: BookDetailDTO;
   child: ChildProfileDTO;
   isStarting: boolean;
   onStart: () => void;
-  permissions: DevicePermissionSnapshotUI;
-}
-
-function DeviceCard({
-  icon,
-  label,
-  ready,
-}: {
-  icon: "camera" | "microphone";
-  label: string;
-  ready: boolean;
-}) {
-  const Icon = icon === "camera" ? Camera : Mic;
-  return (
-    <div className="flex min-h-32 flex-col gap-2 rounded-card bg-white p-6">
-      <p className="inline-flex items-center gap-3 text-[26px] font-bold text-ink">
-        <Icon aria-hidden="true" className="size-6" />
-        {label}
-      </p>
-      <p className="inline-flex items-center gap-2 text-body text-success-ink">
-        <Check aria-hidden="true" className="size-5" />
-        {ready ? `${label} đã sẵn sàng` : `${label} chưa sẵn sàng`}
-      </p>
-    </div>
-  );
 }
 
 export function ReadingReady({
@@ -44,9 +18,8 @@ export function ReadingReady({
   child,
   isStarting,
   onStart,
-  permissions,
 }: ReadingReadyProps) {
-  const detailHref = `/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(child.id)}`;
+  const detailHref = `/books/${encodeURIComponent(book.id)}`;
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -80,7 +53,7 @@ export function ReadingReady({
         </h1>
 
         <Image
-          alt="Minh họa đặt sách trước camera"
+          alt="Minh họa bé sẵn sàng đọc sách"
           className="mx-auto h-auto w-full max-w-[320px]"
           height={112}
           priority
@@ -92,22 +65,23 @@ export function ReadingReady({
           {child.alias} · {book.title}
         </p>
 
-        <div className="grid gap-4 sm:grid-cols-2 sm:gap-6">
-          <DeviceCard
-            icon="camera"
-            label="Camera"
-            ready={permissions.camera === "ready"}
+        <div className="flex items-start gap-3 rounded-card bg-sky p-4 sm:p-6">
+          <BookOpenText
+            aria-hidden="true"
+            className="mt-1 size-6 shrink-0 text-primary"
           />
-          <DeviceCard
-            icon="microphone"
-            label="Micro"
-            ready={permissions.microphone === "ready"}
-          />
+          <div className="text-left">
+            <p className="font-extrabold text-ink">{book.title}</p>
+            <p className="mt-1 text-sm text-muted">
+              Microphone đã được kiểm tra ở bước chuẩn bị. Khi ba mẹ bắt đầu,
+              ViRead sẽ mở microphone để nghe bé đọc.
+            </p>
+          </div>
         </div>
 
         <div className="text-left sm:text-center">
           <p className="text-body text-ink sm:text-[26px] sm:font-bold">
-            Đặt sách ngay ngắn trước camera.
+            Đặt sách trước mặt bé và đọc to, tự nhiên nhé.
           </p>
           <p className="text-body text-ink sm:mt-3 sm:text-muted">
             Đọc to và tự nhiên nhé.

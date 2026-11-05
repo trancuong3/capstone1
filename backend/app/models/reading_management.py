@@ -29,6 +29,33 @@ class ReadingGoal(Base):
     UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class ReadingPlan(Base):
+    __tablename__ = "readingplans"
+    __table_args__ = (
+        CheckConstraint("length(trim(title)) BETWEEN 1 AND 100", name="ck_readingplans_title_length"),
+        CheckConstraint("targetminutes BETWEEN 5 AND 240", name="ck_readingplans_target_minutes"),
+        CheckConstraint("cardinality(weekdays) BETWEEN 1 AND 7", name="ck_readingplans_weekdays_count"),
+        CheckConstraint("weekdays <@ ARRAY[0,1,2,3,4,5,6]::smallint[]", name="ck_readingplans_weekdays_range"),
+        CheckConstraint("timezone <> ''", name="ck_readingplans_timezone_nonempty"),
+        CheckConstraint("status IN ('ACTIVE', 'PAUSED', 'COMPLETED', 'ENDED')", name="ck_readingplans_status"),
+        CheckConstraint("endson IS NULL OR endson >= startson", name="ck_readingplans_date_range"),
+        Index("ix_readingplans_child_status", "childid", "status"),
+    )
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ChildId = Column("childid", UUID(as_uuid=True), ForeignKey("childprofiles.id", ondelete="CASCADE"), nullable=False)
+    BookId = Column("bookid", UUID(as_uuid=True), ForeignKey("books.id", ondelete="SET NULL"), nullable=True)
+    Title = Column("title", String(100), nullable=False)
+    TargetMinutes = Column("targetminutes", Integer, nullable=False, server_default=text("20"))
+    Weekdays = Column("weekdays", ARRAY(SmallInteger), nullable=False, server_default=text("ARRAY[0,2,4]::smallint[]"))
+    StartsOn = Column("startson", Date, nullable=False)
+    EndsOn = Column("endson", Date)
+    Timezone = Column("timezone", String(64), nullable=False, server_default=text("'Asia/Ho_Chi_Minh'"))
+    Status = Column("status", String(16), nullable=False, server_default=text("'ACTIVE'"))
+    CompletedAt = Column("completedat", DateTime(timezone=True))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+    UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ChildBookCollection(Base):
     __tablename__ = "childbookcollections"
     __table_args__ = (
@@ -56,6 +83,7 @@ class ReadingReminder(Base):
     Weekdays = Column("weekdays", ARRAY(SmallInteger), nullable=False, server_default=text("ARRAY[0,1,2,3,4,5,6]::smallint[]"))
     Timezone = Column("timezone", String(64), nullable=False, server_default=text("'Asia/Ho_Chi_Minh'"))
     IsActive = Column("isactive", Boolean, nullable=False, server_default=text("true"))
+    EmailEnabled = Column("emailenabled", Boolean, nullable=False, server_default=text("false"))
     DeletedAt = Column("deletedat", DateTime(timezone=True))
     CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
     UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -66,7 +94,9 @@ class ReadingReminderOccurrence(Base):
     __table_args__ = (
         UniqueConstraint("reminderid", "scheduledlocaldate", name="uq_reminder_occurrence_local_day"),
         CheckConstraint("status IN ('PENDING', 'ACKNOWLEDGED')", name="ck_reminderoccurrence_status"),
+        CheckConstraint("emailstatus IN ('NOT_REQUESTED', 'PENDING', 'SENDING', 'RETRY', 'SENT', 'FAILED')", name="ck_reminderoccurrence_email_status"),
         Index("ix_reminderoccurrences_status_scheduled", "status", "scheduledfor"),
+        Index("ix_reminderoccurrences_email_delivery", "emailstatus", "emailnextattemptat"),
     )
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     ReminderId = Column("reminderid", UUID(as_uuid=True), ForeignKey("readingreminders.id", ondelete="CASCADE"), nullable=False)
@@ -74,4 +104,10 @@ class ReadingReminderOccurrence(Base):
     ScheduledFor = Column("scheduledfor", DateTime(timezone=True), nullable=False)
     Status = Column("status", String(16), nullable=False, server_default=text("'PENDING'"))
     AcknowledgedAt = Column("acknowledgedat", DateTime(timezone=True))
+    EmailStatus = Column("emailstatus", String(20), nullable=False, server_default=text("'NOT_REQUESTED'"))
+    EmailAttempts = Column("emailattempts", Integer, nullable=False, server_default=text("0"))
+    EmailLastAttemptAt = Column("emaillastattemptat", DateTime(timezone=True))
+    EmailNextAttemptAt = Column("emailnextattemptat", DateTime(timezone=True))
+    EmailSentAt = Column("emailsentat", DateTime(timezone=True))
+    EmailErrorCode = Column("emailerrorcode", String(64))
     CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())

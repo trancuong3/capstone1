@@ -8,10 +8,22 @@ import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
+import {
+  childFixture,
+  TEST_CHILD_ID,
+} from "@/test/fixtures/report-data-fixture";
 
+const { routePushMock, routeReplaceMock } = vi.hoisted(() => ({
+  routePushMock: vi.fn(),
+  routeReplaceMock: vi.fn(),
+}));
 vi.mock("next/navigation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/navigation")>();
-  return { ...actual, useRouter: () => ({ push: vi.fn() }) };
+  return {
+    ...actual,
+    useRouter: () => ({ push: routePushMock, replace: routeReplaceMock }),
+  };
 });
 
 vi.mock("@/lib/supabase/admin-auth-service", () => ({
@@ -212,17 +224,26 @@ describe("Phase 5 real-data runtime cleanup", () => {
     ).toBe(true);
   });
   it("legacy Parent scenario props cannot replace the real books adapter", async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      Response.json(url.includes("/profiles/children") ? [] : [book]),
-    );
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/reading-management/collections") {
+        return Response.json([]);
+      }
+      return Response.json([book]);
+    });
     render(
-      <AppServicesProvider
-        scenario="empty"
-        bookScenario="empty"
-        reportScenario="error"
-      >
-        <BookLibraryScreen />
-      </AppServicesProvider>,
+      <WithSelectedChild childId={TEST_CHILD_ID}>
+        <AppServicesProvider
+          scenario="empty"
+          bookScenario="empty"
+          reportScenario="error"
+        >
+          <BookLibraryScreen />
+        </AppServicesProvider>
+      </WithSelectedChild>,
     );
     expect(
       await screen.findByRole("heading", { name: book.title }),

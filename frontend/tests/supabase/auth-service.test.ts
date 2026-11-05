@@ -408,6 +408,34 @@ describe("SupabaseAuthService", () => {
     });
   });
 
+  it.each(["google", "facebook"] as const)(
+    "maps the %s account name but ignores provider avatar metadata",
+    async (provider) => {
+      const harness = createHarness();
+      const oauthUser: User = {
+        ...providerUser,
+        app_metadata: { provider, providers: [provider] },
+        user_metadata: {
+          display_name: "Nguyen Minh Anh",
+          full_name: "Nguyen Minh Anh",
+          avatar_url: "https://provider.example/avatar.jpg",
+          picture: "https://provider.example/picture.jpg",
+        },
+      };
+      harness.getUser.mockResolvedValue({
+        data: { user: oauthUser },
+        error: null,
+      });
+
+      await expect(createService(harness).getCurrentUser()).resolves.toEqual({
+        display_name: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        id: providerUser.id,
+        providers: [provider, "email"],
+      });
+    },
+  );
+
   it("returns null when there is no current session or authenticated user", async () => {
     const harness = createHarness();
     harness.getSession.mockResolvedValue({
@@ -640,7 +668,6 @@ describe("SupabaseAuthService", () => {
     expect(harness.updateUser).not.toHaveBeenCalled();
   });
 
-
   it("changes a password after isolated reauthentication without replacing the active session", async () => {
     const harness = createHarness();
     const isolatedSignIn = vi.fn().mockResolvedValue({
@@ -655,9 +682,11 @@ describe("SupabaseAuthService", () => {
       },
     } as unknown as SupabaseClient;
     const service = createSupabaseAuthService(harness.client, {
-      getEmailConfirmationRedirectUrl: () => "https://app.example.com/login?auth_callback=signup",
+      getEmailConfirmationRedirectUrl: () =>
+        "https://app.example.com/login?auth_callback=signup",
       getOAuthRedirectUrl: () => "https://app.example.com/auth/callback",
-      getPasswordResetRedirectUrl: () => "https://app.example.com/reset-password",
+      getPasswordResetRedirectUrl: () =>
+        "https://app.example.com/reset-password",
       createReauthenticationClient: () => isolatedClient,
     });
 
@@ -671,7 +700,9 @@ describe("SupabaseAuthService", () => {
       password: "old-password",
     });
     expect(isolatedSignOut).toHaveBeenCalledWith({ scope: "local" });
-    expect(harness.updateUser).toHaveBeenCalledWith({ password: "new-password" });
+    expect(harness.updateUser).toHaveBeenCalledWith({
+      password: "new-password",
+    });
     expect(harness.signInWithPassword).not.toHaveBeenCalled();
     expect(harness.signOut).not.toHaveBeenCalled();
   });
@@ -680,7 +711,10 @@ describe("SupabaseAuthService", () => {
     const harness = createHarness();
     const otherUser = { ...providerUser, id: "another-user-id" };
     const isolatedSignIn = vi.fn().mockResolvedValue({
-      data: { session: { ...providerSession, user: otherUser }, user: otherUser },
+      data: {
+        session: { ...providerSession, user: otherUser },
+        user: otherUser,
+      },
       error: null,
     });
     const isolatedSignOut = vi.fn().mockResolvedValue({ error: null });

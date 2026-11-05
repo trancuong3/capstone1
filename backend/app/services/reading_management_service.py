@@ -1,11 +1,21 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app.models import ChildProfile
-from app.models.reading_management import ChildBookCollection, ReadingGoal, ReadingReminder
+from app.models.reading_management import ChildBookCollection, ReadingGoal, ReadingPlan, ReadingReminder
 from app.repositories.reading_management_repository import ReadingManagementRepository
-from app.schemas.reading_management import ReadingGoalCreate, ReadingGoalUpdate, ReadingGoalTransition, ChildBookCollectionCreate, ReadingReminderCreate, ReadingReminderUpdate
+from app.schemas.reading_management import (
+    ReadingGoalCreate,
+    ReadingGoalUpdate,
+    ReadingGoalTransition,
+    ReadingPlanCreate,
+    ReadingPlanUpdate,
+    ReadingPlanTransition,
+    ChildBookCollectionCreate,
+    ReadingReminderCreate,
+    ReadingReminderUpdate,
+)
 
 
 class ManagementNotFound(Exception):
@@ -21,7 +31,7 @@ class ManagementConflict(Exception):
 
 
 def completed_metric(sessions, metric: str, now: datetime | None = None, starts_at: datetime | None = None, ends_at: datetime | None = None) -> int:
-    """Count completed sessions and clip valid duration to the requested cycle."""
+    """Count valid sessions or unique reading time within the requested cycle."""
     now = now or datetime.now(timezone.utc)
     valid = []
     for session in sessions:
@@ -30,12 +40,12 @@ def completed_metric(sessions, metric: str, now: datetime | None = None, starts_
             continue
         clipped_start = max(started, starts_at) if starts_at is not None else started
         clipped_end = min(ended, ends_at) if ends_at is not None else ended
-        if clipped_end < clipped_start:
+        if clipped_end <= clipped_start:
             continue
         valid.append((clipped_start, clipped_end))
     if metric == "SESSIONS":
         return len(valid)
-    seconds = sum((ended - started).total_seconds() for started, ended in valid)
+    seconds = union_duration_seconds(valid)
     return max(0, int(seconds // 60))
 
 
@@ -53,6 +63,42 @@ def goal_cycle_window(goal: ReadingGoal, now: datetime):
         return None
     return (datetime.combine(start, time.min, tzinfo=zone).astimezone(timezone.utc),
             datetime.combine(end, time.min, tzinfo=zone).astimezone(timezone.utc))
+
+
+def plan_week_window(plan: ReadingPlan, now: datetime):
+    zone = ZoneInfo(plan.Timezone)
+    today = now.astimezone(zone).date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=7)
+    first_day = max(week_start, plan.StartsOn)
+    final_day = min(week_end - timedelta(days=1), plan.EndsOn or week_end - timedelta(days=1))
+    scheduled_dates = []
+    if first_day <= final_day:
+        cursor = first_day
+        while cursor <= final_day:
+            if cursor.weekday() in (plan.Weekdays or []):
+                scheduled_dates.append(cursor)
+            cursor += timedelta(days=1)
+    starts_at = datetime.combine(week_start, time.min, tzinfo=zone).astimezone(timezone.utc)
+    ends_at = datetime.combine(week_end, time.min, tzinfo=zone).astimezone(timezone.utc)
+    return starts_at, ends_at, scheduled_dates
+
+
+def union_duration_seconds(intervals: list[tuple[datetime, datetime]]) -> float:
+    total = 0.0
+    current_start: datetime | None = None
+    current_end: datetime | None = None
+    for start, end in sorted(intervals):
+        if current_start is None or current_end is None:
+            current_start, current_end = start, end
+        elif start > current_end:
+            total += (current_end - current_start).total_seconds()
+            current_start, current_end = start, end
+        elif end > current_end:
+            current_end = end
+    if current_start is not None and current_end is not None:
+        total += (current_end - current_start).total_seconds()
+    return total
 
 
 class ReadingManagementService:
@@ -136,6 +182,116 @@ class ReadingManagementService:
         goal.Status = payload.status
         return await self.repository.save(goal)
 
+    async def plan_dict(self, plan: ReadingPlan, now: datetime):
+        zone = ZoneInfo(plan.Timezone)
+        starts_at, ends_at, scheduled_dates = plan_week_window(plan, now)
+        intervals_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
+        if scheduled_dates:
+            sessions = await self.repository.completed_plan_sessions(
+                plan.ChildId, starts_at, ends_at, now, plan.BookId
+            )
+            scheduled = set(scheduled_dates)
+            for session in sessions:
+                if session.StartedAt is not None and session.EndedAt is not None:
+                    local_date = session.StartedAt.astimezone(zone).date()
+                    if local_date in scheduled:
+                        day_start = datetime.combine(local_date, time.min, tzinfo=zone).astimezone(timezone.utc)
+                        day_end = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
+                        interval_start = max(session.StartedAt, day_start)
+                        interval_end = min(session.EndedAt, day_end)
+                        if interval_end > interval_start:
+                            intervals_by_date.setdefault(local_date, []).append((interval_start, interval_end))
+        completed_dates = {
+            scheduled_date for scheduled_date, intervals in intervals_by_date.items()
+            if union_duration_seconds(intervals) >= plan.TargetMinutes * 60
+        }
+        scheduled_count = len(scheduled_dates)
+        completed_count = len(completed_dates)
+        book = await self.repository.book(plan.BookId) if plan.BookId else None
+        return {
+            "id": plan.Id,
+            "child_id": plan.ChildId,
+            "book_id": plan.BookId,
+            "book_title": book.Title if book else None,
+            "title": plan.Title,
+            "target_minutes": plan.TargetMinutes,
+            "weekdays": list(plan.Weekdays or []),
+            "starts_on": plan.StartsOn,
+            "ends_on": plan.EndsOn,
+            "timezone": plan.Timezone,
+            "status": plan.Status,
+            "scheduled_days_this_week": scheduled_count,
+            "completed_days_this_week": completed_count,
+            "progress_percent": round(completed_count * 100 / scheduled_count, 1) if scheduled_count else 0,
+            "completed_at": plan.CompletedAt,
+            "created_at": plan.CreatedAt,
+            "updated_at": plan.UpdatedAt,
+        }
+
+    async def list_plans(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
+        await self.require_parent(actor_id)
+        await self.owned_child(actor_id, child_id)
+        now = now or datetime.now(timezone.utc)
+        return [await self.plan_dict(plan, now) for plan in await self.repository.plans(child_id)]
+
+    async def create_plan(self, actor_id: UUID, payload: ReadingPlanCreate):
+        await self.require_parent(actor_id)
+        await self.owned_child(actor_id, payload.child_id)
+        if payload.book_id is not None and await self.repository.eligible_book(payload.book_id) is None:
+            raise ManagementConflict()
+        return await self.repository.save(ReadingPlan(
+            ChildId=payload.child_id,
+            BookId=payload.book_id,
+            Title=payload.title,
+            TargetMinutes=payload.target_minutes,
+            Weekdays=payload.weekdays,
+            StartsOn=payload.starts_on,
+            EndsOn=payload.ends_on,
+            Timezone=payload.timezone,
+            Status="ACTIVE",
+        ))
+
+    async def find_owned_plan(self, actor_id: UUID, plan_id: UUID):
+        plan = await self.repository.plan_for_actor(plan_id, actor_id)
+        if plan is None:
+            raise ManagementNotFound()
+        return plan
+
+    async def update_plan(self, actor_id: UUID, plan_id: UUID, payload: ReadingPlanUpdate):
+        await self.require_parent(actor_id)
+        plan = await self.find_owned_plan(actor_id, plan_id)
+        if plan.Status not in ("ACTIVE", "PAUSED"):
+            raise ManagementConflict()
+        changes = payload.model_dump(exclude_unset=True)
+        if "ends_on" in changes and changes["ends_on"] is not None and changes["ends_on"] < plan.StartsOn:
+            raise ManagementConflict()
+        if changes.get("book_id") is not None and await self.repository.eligible_book(changes["book_id"]) is None:
+            raise ManagementConflict()
+        for key, value in changes.items():
+            if key == "title": plan.Title = value
+            elif key == "book_id": plan.BookId = value
+            elif key == "target_minutes": plan.TargetMinutes = value
+            elif key == "weekdays": plan.Weekdays = value
+            elif key == "ends_on": plan.EndsOn = value
+            elif key == "timezone": plan.Timezone = value
+        return await self.repository.save(plan)
+
+    async def transition_plan(self, actor_id: UUID, plan_id: UUID, payload: ReadingPlanTransition):
+        await self.require_parent(actor_id)
+        plan = await self.find_owned_plan(actor_id, plan_id)
+        allowed = {
+            "ACTIVE": {"PAUSED", "COMPLETED", "ENDED"},
+            "PAUSED": {"ACTIVE", "COMPLETED", "ENDED"},
+            "COMPLETED": set(),
+            "ENDED": set(),
+        }
+        if payload.status not in allowed.get(plan.Status, set()):
+            raise ManagementConflict()
+        if payload.status in ("COMPLETED", "ENDED"):
+            plan.CompletedAt = datetime.now(timezone.utc)
+        plan.Status = payload.status
+        return await self.repository.save(plan)
+
     async def list_collections(self, actor_id: UUID, child_id: UUID):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
@@ -172,7 +328,8 @@ class ReadingManagementService:
     def reminder_dict(row: ReadingReminder):
         return {"id": row.Id, "child_id": row.ChildId, "remind_at": row.RemindAt,
                 "weekdays": list(row.Weekdays or []), "timezone": row.Timezone,
-                "is_active": row.IsActive, "deleted_at": row.DeletedAt,
+                "is_active": row.IsActive, "email_enabled": row.EmailEnabled,
+                "deleted_at": row.DeletedAt,
                 "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 
     async def list_reminders(self, actor_id: UUID, child_id: UUID):
@@ -185,7 +342,8 @@ class ReadingManagementService:
         await self.owned_child(actor_id, payload.child_id)
         return self.reminder_dict(await self.repository.save(ReadingReminder(
             ChildId=payload.child_id, RemindAt=payload.remind_at, Weekdays=payload.weekdays,
-            Timezone=payload.timezone, IsActive=payload.is_active, DeletedAt=None,
+            Timezone=payload.timezone, IsActive=payload.is_active,
+            EmailEnabled=payload.email_enabled, DeletedAt=None,
         )))
 
     async def update_reminder(self, actor_id: UUID, reminder_id: UUID, payload: ReadingReminderUpdate):
@@ -198,7 +356,10 @@ class ReadingManagementService:
             elif key == "weekdays": reminder.Weekdays = value
             elif key == "timezone": reminder.Timezone = value
             elif key == "is_active": reminder.IsActive = value
-        return self.reminder_dict(await self.repository.save(reminder))
+            elif key == "email_enabled": reminder.EmailEnabled = value
+        saved = await self.repository.save(reminder)
+        await self.repository.refresh_unsent_email_occurrences(saved)
+        return self.reminder_dict(saved)
 
     async def delete_reminder(self, actor_id: UUID, reminder_id: UUID):
         await self.require_parent(actor_id)
@@ -208,6 +369,7 @@ class ReadingManagementService:
         reminder.IsActive = False
         reminder.DeletedAt = datetime.now(timezone.utc)
         await self.repository.save(reminder)
+        await self.repository.refresh_unsent_email_occurrences(reminder)
 
     async def due_reminders(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
         await self.require_parent(actor_id)
@@ -217,6 +379,10 @@ class ReadingManagementService:
             result.append({"id": occurrence.Id, "reminder_id": occurrence.ReminderId,
                 "scheduled_local_date": occurrence.ScheduledLocalDate, "scheduled_for": occurrence.ScheduledFor,
                 "status": occurrence.Status, "acknowledged_at": occurrence.AcknowledgedAt,
+                "email_status": occurrence.EmailStatus,
+                "email_attempts": occurrence.EmailAttempts,
+                "email_sent_at": occurrence.EmailSentAt,
+                "email_error_code": occurrence.EmailErrorCode,
                 "reminder": self.reminder_dict(reminder)})
         return result
 
@@ -228,7 +394,16 @@ class ReadingManagementService:
         if occurrence.Status != "ACKNOWLEDGED":
             occurrence.Status = "ACKNOWLEDGED"
             occurrence.AcknowledgedAt = datetime.now(timezone.utc)
+            if occurrence.EmailStatus in ("PENDING", "RETRY"):
+                occurrence.EmailStatus = "NOT_REQUESTED"
+                occurrence.EmailNextAttemptAt = None
+                occurrence.EmailErrorCode = None
             await self.repository.save(occurrence)
         return {"id": occurrence.Id, "reminder_id": occurrence.ReminderId,
                 "scheduled_local_date": occurrence.ScheduledLocalDate, "scheduled_for": occurrence.ScheduledFor,
-                "status": occurrence.Status, "acknowledged_at": occurrence.AcknowledgedAt, "reminder": None}
+                "status": occurrence.Status, "acknowledged_at": occurrence.AcknowledgedAt,
+                "email_status": occurrence.EmailStatus,
+                "email_attempts": occurrence.EmailAttempts,
+                "email_sent_at": occurrence.EmailSentAt,
+                "email_error_code": occurrence.EmailErrorCode,
+                "reminder": None}

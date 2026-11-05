@@ -34,6 +34,10 @@ DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or None
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip() or None
 SUPABASE_STORAGE_BUCKET = (os.getenv("SUPABASE_STORAGE_BUCKET") or "").strip() or None
+SUPABASE_AVATAR_BUCKET = (
+    (os.getenv("SUPABASE_AVATAR_BUCKET") or "viread-avatars").strip()
+    or "viread-avatars"
+)
 
 # Server-only credentials for Supabase Storage/Auth Admin. Prefer the current
 # secret API key and retain the legacy service-role key for existing deployments.
@@ -85,7 +89,7 @@ def _bool_env(name: str, default: bool) -> bool:
 SMTP_HOST = (os.getenv("SMTP_HOST") or "smtp.gmail.com").strip() or None
 SMTP_PORT = _int_env("SMTP_PORT", 587, minimum=1, maximum=65535)
 SMTP_USERNAME = (os.getenv("SMTP_USERNAME") or "").strip() or None
-SMTP_APP_PASSWORD = (os.getenv("SMTP_APP_PASSWORD") or "").strip() or None
+SMTP_APP_PASSWORD = (os.getenv("SMTP_APP_PASSWORD") or "").strip().replace(" ", "") or None
 SMTP_FROM_EMAIL = (
     os.getenv("SMTP_FROM_EMAIL") or SMTP_USERNAME or ""
 ).strip() or None
@@ -107,6 +111,15 @@ CORS_ALLOWED_ORIGINS = tuple(
 )
 if "*" in CORS_ALLOWED_ORIGINS:
     raise ValueError("CORS_ALLOWED_ORIGINS must not contain '*'")
+READING_REMINDER_POLL_SECONDS = _int_env(
+    "READING_REMINDER_POLL_SECONDS", 30, minimum=5, maximum=300
+)
+READING_REMINDER_MAX_ATTEMPTS = _int_env(
+    "READING_REMINDER_MAX_ATTEMPTS", 5, minimum=1, maximum=10
+)
+READING_REMINDER_APP_URL = (
+    os.getenv("READING_REMINDER_APP_URL") or "http://localhost:3000/reading-management"
+).strip()
 
 APP_ENVIRONMENT = (
     os.getenv("APP_ENVIRONMENT") or "development"

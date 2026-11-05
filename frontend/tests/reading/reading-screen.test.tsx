@@ -154,6 +154,12 @@ function createReadingFixtures() {
       delete: vi
         .fn<ReadingServices["childService"]["delete"]>()
         .mockRejectedValue(new Error("Unused test write")),
+      uploadAvatar: vi
+        .fn<ReadingServices["childService"]["uploadAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
+      removeAvatar: vi
+        .fn<ReadingServices["childService"]["removeAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
     },
     comprehensionService: {
       getQuestion: vi
@@ -188,6 +194,18 @@ function createReadingFixtures() {
       getSnapshot: vi
         .fn<ReadingServices["devicePermissionService"]["getSnapshot"]>()
         .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getMicrophonePermissionState: vi.fn().mockResolvedValue("prompt"),
+      watchMicrophonePermissionState: vi
+        .fn()
+        .mockResolvedValue(() => undefined),
+      requestAccess: vi
+        .fn<ReadingServices["devicePermissionService"]["requestAccess"]>()
+        .mockResolvedValue({
+          status: "granted",
+          verified: true,
+          message: "Device is available",
+          mediaRecorderSupported: true,
+        }),
       retry: vi
         .fn<ReadingServices["devicePermissionService"]["retry"]>()
         .mockResolvedValue("ready"),
@@ -241,7 +259,7 @@ function createReadingFixtures() {
           practiced_words: 0,
         }),
       finish: vi.fn().mockResolvedValue({
-    // Giữ nguyên dữ liệu hiện tại
+        // Giữ nguyên dữ liệu hiện tại
       }),
       createRetryEvent: vi.fn().mockResolvedValue(undefined),
     },
@@ -413,6 +431,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
+    await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
 
     await waitFor(() => {
       expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
@@ -502,6 +521,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
+    await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
 
     await waitFor(() => {
       expect(compareTranscriptMock).toHaveBeenCalledOnce();
@@ -565,6 +585,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
+    await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
 
     await waitFor(() => {
       expect(services.readingService.finish).toHaveBeenCalledOnce();
@@ -680,17 +701,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toHaveTextContent("không tạo lỗi đọc");
   });
 
-  it("shows permission recovery and forwards the requested device", async () => {
-    const user = userEvent.setup();
+  it("never requests camera permission from the reading screen", async () => {
     renderReading("camera-denied");
+    expect(await screen.findByText(/Phạm vi đọc: Trang/)).toBeInTheDocument();
     expect(
-      await screen.findByRole("dialog", { name: "Camera chưa sẵn sàng" }),
-    ).toHaveTextContent("camera chưa được mở");
-    await user.click(screen.getByRole("button", { name: "Thử lại" }));
-    expect(
-      await screen.findByText("Mình đang nghe bé đọc"),
-    ).toBeInTheDocument();
-    expect(services.devicePermissionService.retry).toHaveBeenCalledWith(
+      screen.queryByRole("dialog", { name: "Camera chưa sẵn sàng" }),
+    ).not.toBeInTheDocument();
+    expect(services.devicePermissionService.retry).not.toHaveBeenCalledWith(
       "camera",
     );
   });

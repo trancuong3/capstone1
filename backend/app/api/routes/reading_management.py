@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,7 @@ from app.repositories.reading_management_repository import ReadingManagementRepo
 from app.services.reading_management_service import ReadingManagementService, ManagementNotFound, ManagementForbidden, ManagementConflict
 from app.schemas.reading_management import (
     ReadingGoalCreate, ReadingGoalUpdate, ReadingGoalTransition, ReadingGoalRead,
+    ReadingPlanCreate, ReadingPlanUpdate, ReadingPlanTransition, ReadingPlanRead,
     ChildBookCollectionCreate, ChildBookCollectionRead, CollectionType, DeletedResponse,
     ReadingReminderCreate, ReadingReminderUpdate, ReadingReminderRead, ReadingReminderOccurrenceRead,
 )
@@ -63,6 +65,44 @@ async def transition_goal(goal_id: UUID, payload: ReadingGoalTransition, actor_i
         service = build_service(db)
         row = await service.transition_goal(actor_id, goal_id, payload)
         return next(item for item in await service.list_goals(actor_id, row.ChildId) if item["id"] == goal_id)
+    except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
+        raise map_domain_error(exc) from None
+
+
+@router.get("/plans", response_model=list[ReadingPlanRead])
+async def list_plans(child_id: UUID = Query(...), actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)):
+    try:
+        return await build_service(db).list_plans(actor_id, child_id)
+    except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
+        raise map_domain_error(exc) from None
+
+
+@router.post("/plans", response_model=ReadingPlanRead, status_code=status.HTTP_201_CREATED)
+async def create_plan(payload: ReadingPlanCreate, actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)):
+    try:
+        service = build_service(db)
+        row = await service.create_plan(actor_id, payload)
+        return await service.plan_dict(row, datetime.now(timezone.utc))
+    except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
+        raise map_domain_error(exc) from None
+
+
+@router.patch("/plans/{plan_id}", response_model=ReadingPlanRead)
+async def update_plan(plan_id: UUID, payload: ReadingPlanUpdate, actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)):
+    try:
+        service = build_service(db)
+        row = await service.update_plan(actor_id, plan_id, payload)
+        return await service.plan_dict(row, datetime.now(timezone.utc))
+    except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
+        raise map_domain_error(exc) from None
+
+
+@router.post("/plans/{plan_id}/transition", response_model=ReadingPlanRead)
+async def transition_plan(plan_id: UUID, payload: ReadingPlanTransition, actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)):
+    try:
+        service = build_service(db)
+        row = await service.transition_plan(actor_id, plan_id, payload)
+        return await service.plan_dict(row, datetime.now(timezone.utc))
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 

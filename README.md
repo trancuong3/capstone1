@@ -100,6 +100,24 @@ FastAPI hiện có các endpoint CRUD bước đầu cho hồ sơ phụ huynh v�
 
 Frontend mặc định vẫn dùng mock services cho dữ liệu Profile/Child. Khi `NEXT_PUBLIC_API_URL` được cấu hình, adapter có thể gọi các endpoint FastAPI này. Các endpoint chưa xác minh Supabase access token, role và quyền sở hữu hồ sơ, nên chưa được xem là API đã bảo vệ hoàn chỉnh.
 
+## Kế hoạch đọc và email nhắc đọc
+
+Kế hoạch tuần, mục tiêu đọc, lịch nhắc và trạng thái lần gửi email được lưu ở PostgreSQL. Áp dụng migration `supabase/migrations/20261104160000_reading_plans_and_email_reminders.sql` trước khi dùng các API mới.
+
+Email được gửi bởi worker chạy riêng với FastAPI. Trong một tiến trình backend khác, từ thư mục `backend`, chạy:
+
+```powershell
+python -m app.jobs.reading_reminder_worker
+```
+
+Worker cần cùng cấu hình database/Supabase với API và các secret phía máy chủ `SMTP_USERNAME`, `SMTP_APP_PASSWORD`, cùng một Supabase Admin key (`SUPABASE_SECRET_KEY` hoặc khóa legacy `SUPABASE_SERVICE_ROLE_KEY`). Các tên biến và giá trị mẫu nằm trong `backend/.env.example`; chỉ đặt mật khẩu ứng dụng trong secret manager của môi trường chạy, không commit file `.env`.
+
+SMTP mặc định dùng Gmail ở cổng 587 với STARTTLS. `SMTP_FROM_EMAIL` mặc định là `vireadforyou@gmail.com`; tài khoản gửi phải cho phép gửi bằng thông tin xác thực đã cấu hình. Người nhận được đọc từ Supabase Auth theo hồ sơ phụ huynh của bé và chỉ nhận email khi địa chỉ đã xác minh, không lấy email nhận từ request phía trình duyệt.
+
+Worker kiểm tra lịch mỗi 30 giây. Mỗi lịch chỉ tạo một occurrence cho một ngày địa phương; worker dùng khóa hàng để tránh hai tiến trình cùng gửi một occurrence. Lỗi SMTP tạm thời được thử lại tối đa năm lần với thời gian chờ tăng dần. Giờ địa phương không tồn tại khi chuyển DST được bỏ qua ngày đó; giờ lặp lại khi kết thúc DST dùng lần xuất hiện đầu tiên. `Message-ID` ổn định hỗ trợ theo dõi lần gửi. SMTP không cung cấp bảo đảm exactly-once nếu tiến trình dừng sau khi máy chủ nhận email nhưng trước khi database ghi nhận thành công.
+
+Đặt `READING_REMINDER_APP_URL` thành URL production của trang quản lý đọc để liên kết trong email mở đúng ứng dụng. Muốn xem trạng thái giao email, mở trang quản lý khi occurrence đang đến hạn; ứng dụng hiển thị trạng thái chờ gửi, đang gửi, gửi lại, thành công hoặc thất bại.
+
 ## Kiểm tra trước khi mở pull request
 
 Từ thư mục `frontend`:

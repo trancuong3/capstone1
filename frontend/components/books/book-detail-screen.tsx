@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -13,8 +14,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookService } from "@/hooks/use-book-service";
-import { useChildService } from "@/hooks/use-child-service";
-import { useReadingServices } from "@/hooks/use-reading-services";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
@@ -24,7 +24,7 @@ type DetailState =
   | {
       status: "ready";
       book: BookDetailDTO;
-      child: ChildProfileDTO | null;
+      child: ChildProfileDTO;
       pages: BookPagePreviewDTO[];
       previewUnavailable: boolean;
     }
@@ -34,7 +34,6 @@ type DetailState =
 
 interface BookDetailScreenProps {
   bookId: string;
-  requestedChildId?: string;
 }
 
 function invitationFor(book: BookDetailDTO): string {
@@ -45,16 +44,18 @@ function invitationFor(book: BookDetailDTO): string {
   return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")} nhé!`;
 }
 
-export function BookDetailScreen({
-  bookId,
-  requestedChildId,
-}: BookDetailScreenProps) {
+export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   const bookService = useBookService();
-  const childService = useChildService();
-  const { readingService } = useReadingServices();
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetPageId = searchParams.get("pageId");
+  const confidenceParam = searchParams.get("confidence");
+  const targetConfidenceValue =
+    confidenceParam === null ? Number.NaN : Number(confidenceParam);
+  const targetConfidence = Number.isFinite(targetConfidenceValue)
+    ? targetConfidenceValue
+    : null;
 
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -64,10 +65,7 @@ export function BookDetailScreen({
   const [selectedEndPageId, setSelectedEndPageId] = useState<string | null>(
     null,
   );
-  const [startError, setStartError] = useState<string | null>(null);
-  const [startState, setStartState] = useState<"idle" | "starting" | "error">(
-    "idle",
-  );
+  const [startState, setStartState] = useState<"idle" | "starting">("idle");
 
   useEffect(() => {
     let isActive = true;
@@ -76,16 +74,13 @@ export function BookDetailScreen({
       setState({ status: "loading" });
       setSelectedPage(null);
       setSelectedEndPageId(null);
-      setStartError(null);
       setStartState("idle");
 
+      if (childState.status !== "ready") return;
+      const selectedChild = childState.child;
+
       try {
-        const [book, child] = await Promise.all([
-          bookService.get(bookId),
-          requestedChildId
-            ? childService.get(requestedChildId)
-            : childService.list().then((children) => children[0] ?? null),
-        ]);
+        const book = await bookService.get(bookId);
 
         let pages: BookPagePreviewDTO[] = [];
         let previewUnavailable = false;
@@ -102,12 +97,21 @@ export function BookDetailScreen({
         }
 
         if (isActive) {
-          setState({ status: "ready", book, child, pages, previewUnavailable });
+          setState({
+            status: "ready",
+            book,
+            child: selectedChild,
+            pages,
+            previewUnavailable,
+          });
           // Nếu có targetPageId truyền từ dashboard sang thì ưu tiên chọn trang đó
           const matchedPage = targetPageId
             ? pages.find((p) => p.page_id === targetPageId)
             : null;
-          const startPage = matchedPage ?? pages[0] ?? null;
+          // Never silently substitute page 1 when OCR supplied an invalid pageId.
+          const startPage = targetPageId
+            ? (matchedPage ?? null)
+            : (pages[0] ?? null);
           setSelectedPage(startPage);
           setSelectedEndPageId(
             pages[pages.length - 1]?.page_id ?? startPage?.page_id ?? null,
@@ -136,61 +140,77 @@ export function BookDetailScreen({
     return () => {
       isActive = false;
     };
-  }, [
-    bookId,
-    bookService,
-    childService,
-    requestKey,
-    requestedChildId,
-    targetPageId,
-  ]);
+  }, [bookId, bookService, childState, requestKey, targetPageId]);
 
   useEffect(() => {
-    if (state.status === "ready" && targetPageId) {
-      const btn = document.getElementById("start-reading-button");
-      if (btn) {
-        btn.scrollIntoView({ behavior: "smooth", block: "center" });
-        btn.focus();
-      }
+    if (
+      state.status !== "ready" ||
+      !targetPageId ||
+      !state.pages.some((candidate) => candidate.page_id === targetPageId)
+    ) {
+      return;
     }
-  }, [state.status, targetPageId]);
+    const btn = document.getElementById("start-reading-button");
+    if (btn) {
+      btn.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      btn.focus();
+    }
+  }, [state, targetPageId]);
 
-  async function handleStartReading() {
+  function handleStartReading() {
     if (
       state.status !== "ready" ||
       !state.child ||
       !selectedPage ||
       !selectedEndPageId ||
+      selectedRangeHasGap ||
       startState === "starting"
     ) {
       return;
     }
 
     setStartState("starting");
-    setStartError(null);
-    try {
-      const session = await readingService.create({
-        book_id: state.book.id,
-        child_id: state.child.id,
-        mode: "realtime",
-        selected_page_id: selectedPage.page_id,
-        selected_page_revision_id: selectedPage.current_verified_revision_id,
-        end_page_id: selectedEndPageId,
-      });
-      router.push(
-        `/reading/${encodeURIComponent(session.session_id)}?state=ready&pageId=${encodeURIComponent(selectedPage.page_id)}`,
-      );
-    } catch {
-      setStartError(
-        "Chưa thể chuẩn bị buổi đọc với phạm vi này. Ba mẹ hãy kiểm tra các trang rồi thử lại.",
-      );
-      setStartState("error");
+    const params = new URLSearchParams({
+      bookId: state.book.id,
+      pageId: selectedPage.page_id,
+      endPageId: selectedEndPageId,
+    });
+    if (targetConfidence !== null) {
+      params.set("confidence", String(targetConfidence));
     }
+    router.push(`/reading-preparation?${params.toString()}`);
   }
 
-  const booksHref = requestedChildId
-    ? `/books?childId=${encodeURIComponent(requestedChildId)}`
-    : "/books";
+  const booksHref = "/books";
+
+  if (childState.status === "loading" || childState.status === "redirecting") {
+    return (
+      <section
+        aria-busy="true"
+        className="mx-auto w-full max-w-[900px] px-4 py-8"
+      >
+        <span className="sr-only" role="status">
+          Đang xác minh hồ sơ trẻ…
+        </span>
+        <Skeleton className="h-14 w-full max-w-sm rounded-card" />
+      </section>
+    );
+  }
+
+  if (childState.status === "error") {
+    return (
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  }
 
   if (state.status === "loading") {
     return (
@@ -305,6 +325,9 @@ export function BookDetailScreen({
         child={child}
         mobileLabel={book.title}
       />
+      <div className="mx-auto w-full max-w-[1130px]">
+        <SelectedChildIdentity child={child} />
+      </div>
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:items-start sm:gap-12">
         <article className="hidden h-[518px] w-[307px] shrink-0 flex-col gap-[14px] rounded-card bg-white p-[19px] shadow-[0_7px_24px_rgba(33,61,66,0.08)] sm:flex">
@@ -330,6 +353,30 @@ export function BookDetailScreen({
           <p className="text-[26px] font-bold leading-[1.4] text-ink">
             {invitationFor(book)}
           </p>
+
+          {targetPageId &&
+          targetConfidence !== null &&
+          targetConfidence >= 0 &&
+          targetConfidence <= 1 ? (
+            <p className="text-sm font-bold text-primary">
+              Trang nhận diện:{" "}
+              {selectedPage
+                ? `Trang ${selectedPage.page_number}`
+                : "chưa xác nhận"}{" "}
+              · Độ tin cậy {Math.round(targetConfidence * 100)}%
+            </p>
+          ) : null}
+
+          {targetPageId && !selectedPage ? (
+            <StatusMessage
+              title="Không tìm thấy trang được nhận diện"
+              tone="warning"
+            >
+              Trang OCR trả về không nằm trong danh sách trang có thể đọc của
+              cuốn sách này. Ba mẹ hãy chọn đúng trang trong danh sách bên dưới;
+              ViRead sẽ không tự chọn một trang khác thay thế.
+            </StatusMessage>
+          ) : null}
 
           <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
@@ -361,7 +408,6 @@ export function BookDetailScreen({
                 onChange={(event) => {
                   setSelectedEndPageId(event.target.value || null);
                   setStartState("idle");
-                  setStartError(null);
                 }}
                 value={selectedEndPageId ?? ""}
               >
@@ -408,7 +454,9 @@ export function BookDetailScreen({
             isLoading={startState === "starting"}
             onClick={handleStartReading}
           >
-            {startState === "starting" ? "Đang chuẩn bị…" : "Bắt đầu đọc"}
+            {startState === "starting"
+              ? "Đang mở bước chuẩn bị…"
+              : "Chuẩn bị đọc"}
             {startState === "idle" ? (
               <ArrowRight aria-hidden="true" className="size-5" />
             ) : null}
@@ -454,20 +502,12 @@ export function BookDetailScreen({
                         : currentEnd.page_id;
                     });
                     setStartState("idle");
-                    setStartError(null);
                   }}
                   page={page}
                 />
               ))}
             </div>
           </div>
-
-          {startState === "error" ? (
-            <StatusMessage className="order-7 sm:order-none" tone="error">
-              {startError ??
-                "Chưa thể chuẩn bị buổi đọc. Ba mẹ vui lòng thử lại."}
-            </StatusMessage>
-          ) : null}
         </div>
       </div>
     </section>
