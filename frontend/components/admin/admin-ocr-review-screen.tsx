@@ -52,15 +52,11 @@ export function stripVietnameseAccents(value: string): string {
 
 export function getConfidenceLevel(
   confidence: number | null | undefined,
-): "Cao" | "Trung bình" | "Thấp" | "Chưa rõ" {
-  if (
-    confidence === null ||
-    confidence === undefined ||
-    Number.isNaN(confidence)
-  ) {
-    return "Chưa rõ";
+): "Cao" | "Trung bình" | "Thấp" | "Chưa xác định" {
+  if (confidence === null || confidence === undefined || !Number.isFinite(confidence)) {
+    return "Chưa xác định";
   }
-  if (confidence >= 0.8) {
+  if (confidence > 0.8) {
     return "Cao";
   }
   if (confidence >= 0.6) {
@@ -570,6 +566,18 @@ export function AdminOcrReviewScreen({
     return counts;
   }, [words, draftTokens]);
 
+  const confidenceCounts = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0, unknown: 0 };
+    for (const word of words) {
+      const level = getConfidenceLevel(word.ocr_confidence);
+      if (level === "Cao") counts.high += 1;
+      else if (level === "Trung bình") counts.medium += 1;
+      else if (level === "Thấp") counts.low += 1;
+      else counts.unknown += 1;
+    }
+    return counts;
+  }, [words]);
+
   const firstWordToReview = useMemo(() => {
     return (
       words.find((w) => getConfidenceLevel(w.ocr_confidence) !== "Cao") ||
@@ -675,11 +683,15 @@ export function AdminOcrReviewScreen({
                   currentDraftToken,
                 );
 
+                const confidenceLevel = getConfidenceLevel(
+                  word.ocr_confidence,
+                );
                 const colorClass = {
-                  exact: "border-green-600 bg-green-400/35",
-                  partial: "border-yellow-500 bg-yellow-300/35",
-                  mismatch: "border-red-600 bg-red-400/35",
-                }[matchStatus];
+                  Cao: "border-green-600 bg-green-400/35",
+                  "Trung bình": "border-yellow-500 bg-yellow-300/35",
+                  Thấp: "border-red-600 bg-red-400/35",
+                  "Chưa xác định": "border-orange-600 bg-orange-300/35",
+                }[confidenceLevel];
 
                 const selectedClass =
                   word.word_index === selectedWord
@@ -699,8 +711,7 @@ export function AdminOcrReviewScreen({
                   word.ocr_confidence !== undefined
                     ? `Confidence OCR: ${word.ocr_confidence}.`
                     : "Confidence OCR: chưa rõ.";
-                const confLevel = getConfidenceLevel(word.ocr_confidence);
-                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText} Mức ${confLevel}`;
+                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText} Mức ${confidenceLevel}`;
                 const boxTitle = `Từ ${word.word_index + 1}: ${word.text} (Mức ${confLevel}) · ${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
 
                 return (
@@ -728,25 +739,63 @@ export function AdminOcrReviewScreen({
             </div>
           </div>
           <p className="mt-3 text-sm text-muted">
-            Màu sắc phản ánh đối chiếu thời gian thực giữa từ trên ảnh và văn
-            bản trong ô &ldquo;Nội dung trang&rdquo;.
+            Màu bounding box phản ánh độ tin cậy OCR. Trạng thái đối chiếu nội
+            dung được hiển thị riêng trong danh sách từ và phần thống kê bên dưới.
           </p>
           <div
-            aria-label="Chú giải đối chiếu OCR"
+            aria-label="Chú giải confidence OCR"
             className="mt-3 flex flex-wrap gap-4 text-xs font-bold"
           >
             <span className="inline-flex items-center gap-1.5 text-green-800">
               <span className="size-3.5 rounded-sm border border-green-600 bg-green-400/40" />
-              Chính xác (cả từ &amp; dấu)
+              Cao
             </span>
             <span className="inline-flex items-center gap-1.5 text-yellow-800">
               <span className="size-3.5 rounded-sm border border-yellow-500 bg-yellow-300/40" />
-              Nghi sai / lệch dấu thanh
+              Trung bình
             </span>
             <span className="inline-flex items-center gap-1.5 text-red-800">
               <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
-              Không khớp từ / cần kiểm tra
+              Thấp
             </span>
+            <span className="inline-flex items-center gap-1.5 text-orange-800">
+              <span className="size-3.5 rounded-sm border border-orange-600 bg-orange-300/40" />
+              Chưa xác định
+            </span>
+          </div>
+          <div
+            aria-label="Thống kê confidence OCR"
+            className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
+            role="group"
+          >
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
+              <strong className="text-lg text-green-700">
+                {confidenceCounts.high}
+              </strong>
+              <div className="text-xs font-bold text-green-900">Cao</div>
+            </div>
+            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2.5 text-center">
+              <strong className="text-lg text-yellow-700">
+                {confidenceCounts.medium}
+              </strong>
+              <div className="text-xs font-bold text-yellow-900">
+                Trung bình
+              </div>
+            </div>
+            <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
+              <strong className="text-lg text-red-700">
+                {confidenceCounts.low}
+              </strong>
+              <div className="text-xs font-bold text-red-900">Thấp</div>
+            </div>
+            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2.5 text-center">
+              <strong className="text-lg text-orange-700">
+                {confidenceCounts.unknown}
+              </strong>
+              <div className="text-xs font-bold text-orange-900">
+                Chưa xác định
+              </div>
+            </div>
           </div>
           <div
             aria-label="Thống kê đối chiếu OCR"
@@ -949,11 +998,17 @@ export function AdminOcrReviewScreen({
                       >
                         Từ #{word.word_index} · Dòng {word.line_index}
                       </button>
-                      <span
-                        className={`rounded border px-2 py-0.5 text-xs font-bold ${statusBadgeClass}`}
-                      >
-                        {matchLabel}
-                      </span>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="rounded border border-border bg-canvas px-2 py-0.5 text-xs font-bold text-muted">
+                          Confidence OCR: {word.ocr_confidence ?? "chưa rõ"} ·{" "}
+                          {getConfidenceLevel(word.ocr_confidence)}
+                        </span>
+                        <span
+                          className={`rounded border px-2 py-0.5 text-xs font-bold ${statusBadgeClass}`}
+                        >
+                          {matchLabel}
+                        </span>
+                      </div>
                     </div>
 
                     <label className="grid gap-1 text-sm font-bold">
