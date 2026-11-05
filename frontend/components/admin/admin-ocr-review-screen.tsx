@@ -3,7 +3,6 @@
 import {
   ArrowLeft,
   CheckCircle2,
-  HelpCircle,
   RefreshCw,
   RotateCcw,
   Save,
@@ -20,10 +19,8 @@ import {
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
-import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
-import type { AdminAiQuestionDTO } from "@/lib/api/ocr-review-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   normalizeVietnameseWord,
@@ -41,7 +38,7 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 
-export type WordMatchStatus = "exact" | "partial" | "mismatch";
+export type WordDisplayStatus = "exact" | "partial" | "mismatch";
 
 export function stripVietnameseAccents(value: string): string {
   return value
@@ -53,32 +50,43 @@ export function stripVietnameseAccents(value: string): string {
     .trim();
 }
 
-export function evaluateWordMatch(
-  boxText: string,
+/**
+ * Đánh giá chuẩn xác 3 trạng thái độc lập và tự nhiên:
+ * - exact (Xanh lá): Trùng khớp hoàn toàn cả từ ngữ lẫn dấu thanh Unicode NFC.
+ * - partial (Vàng): Trùng chữ cái gốc nhưng lệch/thiếu dấu thanh (ví dụ: để vs đế, đên vs đến).
+ * - mismatch (Đỏ): Khác chữ cái gốc hoặc thiếu từ.
+ */
+export function getWordDisplayStatus(
+  word: AdminRevisionWordDTO,
   draftToken: string | undefined,
-): WordMatchStatus {
+): WordDisplayStatus {
   if (!draftToken) return "mismatch";
-  const normBox = normalizeVietnameseWord(boxText);
+  const normBox = normalizeVietnameseWord(word.text);
   const normDraft = normalizeVietnameseWord(draftToken);
   if (!normBox || !normDraft) return "mismatch";
 
-  // 1. Khớp hoàn toàn cả từ lẫn dấu thanh -> Xanh lá
-  if (normBox === normDraft) return "exact";
+  const baseBox = stripVietnameseAccents(normBox);
+  const baseDraft = stripVietnameseAccents(normDraft);
 
-  // 2. Trùng chữ cái gốc nhưng khác/thiếu dấu thanh -> Vàng
-  if (stripVietnameseAccents(normBox) === stripVietnameseAccents(normDraft)) {
+  // 1. Khác chữ cái gốc -> Không khớp (Đỏ)
+  if (baseBox !== baseDraft) {
+    return "mismatch";
+  }
+
+  // 2. Cùng chữ cái gốc nhưng khác dấu thanh -> Nghi lệch dấu thanh (Vàng)
+  if (normBox !== normDraft) {
     return "partial";
   }
 
-  // 3. Khác từ / không khớp chữ cái -> Đỏ
-  return "mismatch";
+  // 3. Khớp hoàn toàn cả chữ cái và dấu thanh -> Chính xác (Xanh lá)
+  return "exact";
 }
 
-function getWordMatchLabel(status: WordMatchStatus): string {
+function getWordMatchLabel(status: WordDisplayStatus): string {
   return {
-    exact: "Khớp hoàn toàn (cả từ & dấu)",
-    partial: "Khớp chữ cái · lệch/sai dấu thanh",
-    mismatch: "Không khớp từ",
+    exact: "Chính xác (cả từ & dấu)",
+    partial: "Nghi sai / lệch dấu thanh",
+    mismatch: "Không khớp từ / cần kiểm tra",
   }[status];
 }
 
@@ -91,21 +99,6 @@ function getWordRangeInText(
   const match = matches[targetIndex];
   if (match && typeof match.index === "number") {
     return [match.index, match.index + match[0].length];
-  }
-  return null;
-}
-
-function getWordIndexAtCursor(text: string, cursorPosition: number): number | null {
-  const matches = [...text.matchAll(/\S+/gu)];
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i];
-    if (typeof match.index === "number") {
-      const start = match.index;
-      const end = start + match[0].length;
-      if (cursorPosition >= start && cursorPosition <= end) {
-        return i;
-      }
-    }
   }
   return null;
 }
@@ -128,14 +121,11 @@ export function AdminOcrReviewScreen({
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
-  const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | "ai_questions" | null
+    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | null
   >(null);
-  const [aiQuestions, setAiQuestions] = useState<AdminAiQuestionDTO[] | null>(null);
-  const [showQuestionsModal, setShowQuestionsModal] = useState(false);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
@@ -148,6 +138,8 @@ export function AdminOcrReviewScreen({
     setWords(
       next.words.map((word) => ({
         ...word,
+        text: word.text.normalize("NFC"),
+        normalized_text: normalizeVietnameseWord(word.text),
         bbox: [...word.bbox] as [number, number, number, number],
       })),
     );
@@ -240,15 +232,10 @@ export function AdminOcrReviewScreen({
     }
   }
 
-  const selectWordWithCrossReference = useCallback(
+  const selectWordOnImage = useCallback(
     (index: number | null) => {
       setSelectedWord(index);
       if (index === null) return;
-
-      wordRowRefs.current.get(index)?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
 
       const textarea = document.getElementById("ocr-text") as HTMLTextAreaElement | null;
       if (textarea) {
@@ -262,21 +249,10 @@ export function AdminOcrReviewScreen({
     [draftText],
   );
 
-  function handleTextareaSelect(event: React.SyntheticEvent<HTMLTextAreaElement>) {
-    const target = event.currentTarget;
-    const wordIdx = getWordIndexAtCursor(target.value, target.selectionStart);
-    if (wordIdx !== null && wordIdx !== selectedWord) {
-      setSelectedWord(wordIdx);
-      wordRowRefs.current.get(wordIdx)?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }
-
   function handleDraftTextChange(value: string) {
-    setDraftText(value);
-    const result = syncPageTextToWords(value, words);
+    const normalizedText = value.normalize("NFC");
+    setDraftText(normalizedText);
+    const result = syncPageTextToWords(normalizedText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
       setWordSyncError(null);
@@ -293,6 +269,7 @@ export function AdminOcrReviewScreen({
         ? {
             ...word,
             ...patch,
+            text: patch.text !== undefined ? patch.text.normalize("NFC") : word.text,
             ocr_confidence: patch.ocr_confidence ?? 1.0,
             normalized_text:
               patch.text === undefined
@@ -304,7 +281,7 @@ export function AdminOcrReviewScreen({
     setWords(nextWords);
     const result = syncWordsToPageText(draftText, nextWords);
     if (result.status === "synchronized") {
-      setDraftText(result.text);
+      setDraftText(result.text.normalize("NFC"));
       setWordSyncError(null);
     } else {
       setWordSyncError(
@@ -328,7 +305,8 @@ export function AdminOcrReviewScreen({
     const nextText = words
       .map((word) => word.text.trim())
       .filter(Boolean)
-      .join(" ");
+      .join(" ")
+      .normalize("NFC");
     setDraftText(nextText);
     const result = syncPageTextToWords(nextText, words);
     if (result.status === "synchronized") {
@@ -364,7 +342,7 @@ export function AdminOcrReviewScreen({
     setBusy("ai_correct");
     setNotice(null);
     try {
-      const correctedText = await ocr.aiCorrectText(pageId, draftText);
+      const correctedText = (await ocr.aiCorrectText(pageId, draftText)).normalize("NFC");
       setDraftText(correctedText);
 
       const result = syncPageTextToWords(correctedText, words);
@@ -385,32 +363,6 @@ export function AdminOcrReviewScreen({
           : cause instanceof Error
             ? `Không thể sửa lỗi bằng AI: ${cause.message}`
             : "Không thể gọi Gemini AI sửa lỗi. Vui lòng kiểm tra GEMINI_API_KEY.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function generateQuestionsWithAi() {
-    const textToUse = draftText.trim() || detail?.draft_text || "";
-    if (!textToUse) {
-      setNotice("Văn bản trang đang trống, không thể tạo câu hỏi.");
-      return;
-    }
-    setBusy("ai_questions");
-    setNotice(null);
-    try {
-      const questions = await ocr.aiGenerateQuestions(pageId, textToUse, 10);
-      setAiQuestions(questions);
-      setShowQuestionsModal(true);
-      setNotice("Đã tạo thành công 10 câu hỏi đọc hiểu cho trẻ em từ nội dung trang!");
-    } catch (cause) {
-      setNotice(
-        isServiceError(cause)
-          ? cause.message
-          : cause instanceof Error
-            ? `Lỗi tạo câu hỏi: ${cause.message}`
-            : "Không thể tạo câu hỏi từ Gemini AI.",
       );
     } finally {
       setBusy(null);
@@ -444,10 +396,9 @@ export function AdminOcrReviewScreen({
     setBusy("save");
     setNotice(null);
     try {
-      // Chuẩn hóa confidence tương ứng 3 mức trước khi lưu
-      const draftTokens = tokenizePageText(draftText);
+      const currentDraftTokens = tokenizePageText(draftText);
       const wordsToSave = words.map((w) => {
-        const status = evaluateWordMatch(w.text, draftTokens[w.word_index]);
+        const status = getWordDisplayStatus(w, currentDraftTokens[w.word_index]);
         const conf = status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.50;
         return { ...w, ocr_confidence: conf };
       });
@@ -475,9 +426,9 @@ export function AdminOcrReviewScreen({
     setBusy("verify");
     setNotice(null);
     try {
-      const draftTokens = tokenizePageText(draftText);
+      const currentDraftTokens = tokenizePageText(draftText);
       const wordsToVerify = words.map((w) => {
-        const status = evaluateWordMatch(w.text, draftTokens[w.word_index]);
+        const status = getWordDisplayStatus(w, currentDraftTokens[w.word_index]);
         const conf = status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.50;
         return { ...w, ocr_confidence: conf };
       });
@@ -573,14 +524,12 @@ export function AdminOcrReviewScreen({
 
   const verified = detail?.verification_status === "VERIFIED";
 
-  // Phân tách các token từ ô Nội dung trang theo thời gian thực
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
 
-  // Thống kê đối chiếu chuẩn xác 3 mức duy nhất
   const matchCounts = useMemo(() => {
     const counts = { exact: 0, partial: 0, mismatch: 0 };
     for (let i = 0; i < words.length; i++) {
-      const status = evaluateWordMatch(words[i].text, draftTokens[i]);
+      const status = getWordDisplayStatus(words[i], draftTokens[i]);
       counts[status] += 1;
     }
     return counts;
@@ -588,7 +537,7 @@ export function AdminOcrReviewScreen({
 
   const firstWordToReview = useMemo(() => {
     return words.find((word) => {
-      const status = evaluateWordMatch(word.text, draftTokens[word.word_index]);
+      const status = getWordDisplayStatus(word, draftTokens[word.word_index]);
       return status === "partial" || status === "mismatch";
     });
   }, [words, draftTokens]);
@@ -678,9 +627,8 @@ export function AdminOcrReviewScreen({
               role="group"
             >
               {words.map((word) => {
-                // Đánh giá 3 màu trực tiếp giữa Box và ô Nội dung trang
                 const currentDraftToken = draftTokens[word.word_index];
-                const matchStatus = evaluateWordMatch(word.text, currentDraftToken);
+                const matchStatus = getWordDisplayStatus(word, currentDraftToken);
 
                 const colorClass = {
                   exact: "border-green-600 bg-green-400/35",
@@ -714,7 +662,7 @@ export function AdminOcrReviewScreen({
                       selectedClass,
                     ].join(" ")}
                     key={`${word.line_index}-${word.word_index}`}
-                    onClick={() => selectWordWithCrossReference(word.word_index)}
+                    onClick={() => selectWordOnImage(word.word_index)}
                     style={{
                       height: `${word.bbox[3] * 100}%`,
                       left: `${word.bbox[0] * 100}%`,
@@ -737,15 +685,15 @@ export function AdminOcrReviewScreen({
           >
             <span className="inline-flex items-center gap-1.5 text-green-800">
               <span className="size-3.5 rounded-sm border border-green-600 bg-green-400/40" />
-              Khớp hoàn toàn (cả từ &amp; dấu)
+              Chính xác (cả từ &amp; dấu)
             </span>
             <span className="inline-flex items-center gap-1.5 text-yellow-800">
               <span className="size-3.5 rounded-sm border border-yellow-500 bg-yellow-300/40" />
-              Lệch / sai dấu thanh
+              Nghi sai / lệch dấu thanh
             </span>
             <span className="inline-flex items-center gap-1.5 text-red-800">
               <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
-              Không khớp từ
+              Không khớp từ / cần kiểm tra
             </span>
           </div>
           <div
@@ -755,11 +703,11 @@ export function AdminOcrReviewScreen({
           >
             <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
               <strong className="text-lg text-green-700">{matchCounts.exact}</strong>
-              <div className="text-xs font-bold text-green-900">Khớp hoàn toàn</div>
+              <div className="text-xs font-bold text-green-900">Chính xác</div>
             </div>
             <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2.5 text-center">
               <strong className="text-lg text-yellow-700">{matchCounts.partial}</strong>
-              <div className="text-xs font-bold text-yellow-900">Sai / lệch dấu</div>
+              <div className="text-xs font-bold text-yellow-900">Nghi sai dấu</div>
             </div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
               <strong className="text-lg text-red-700">{matchCounts.mismatch}</strong>
@@ -771,7 +719,7 @@ export function AdminOcrReviewScreen({
             disabled={!firstWordToReview}
             onClick={() => {
               if (firstWordToReview) {
-                selectWordWithCrossReference(firstWordToReview.word_index);
+                selectWordOnImage(firstWordToReview.word_index);
               }
             }}
             type="button"
@@ -793,15 +741,12 @@ export function AdminOcrReviewScreen({
                 className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
                 disabled={verified || detail.lifecycle_status !== "ACTIVE"}
                 id="ocr-text"
-                onClick={handleTextareaSelect}
-                onKeyUp={handleTextareaSelect}
-                onSelect={handleTextareaSelect}
                 onChange={(event) => handleDraftTextChange(event.target.value)}
                 value={draftText}
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động cập nhật theo thời gian thực (Xanh: khớp cả từ &amp; dấu, Vàng: sai dấu, Đỏ: khác từ).
+              Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu, Vàng: nghi sai dấu, Đỏ: không khớp).
             </p>
             {wordSyncError ? (
               <p
@@ -857,16 +802,6 @@ export function AdminOcrReviewScreen({
                   </Button>
 
                   <Button
-                    className="sm:w-auto border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700"
-                    disabled={busy !== null || !draftText.trim()}
-                    isLoading={busy === "ai_questions"}
-                    onClick={() => void generateQuestionsWithAi()}
-                    type="button"
-                  >
-                    <HelpCircle aria-hidden className="size-4" /> Tạo 10 câu hỏi đọc hiểu
-                  </Button>
-
-                  <Button
                     className="sm:w-auto"
                     disabled={
                       busy !== null ||
@@ -915,7 +850,7 @@ export function AdminOcrReviewScreen({
             <div className="grid gap-3">
               {words.map((word) => {
                 const currentDraftToken = draftTokens[word.word_index];
-                const matchStatus = evaluateWordMatch(word.text, currentDraftToken);
+                const matchStatus = getWordDisplayStatus(word, currentDraftToken);
                 const matchLabel = getWordMatchLabel(matchStatus);
 
                 const statusBadgeClass = {
@@ -932,19 +867,12 @@ export function AdminOcrReviewScreen({
                         : "rounded-control border border-border p-3"
                     }
                     key={word.word_index}
-                    ref={(element) => {
-                      if (element) {
-                        wordRowRefs.current.set(word.word_index, element);
-                      } else {
-                        wordRowRefs.current.delete(word.word_index);
-                      }
-                    }}
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <button
                         aria-pressed={word.word_index === selectedWord}
                         className="text-left text-sm font-bold text-primary underline"
-                        onClick={() => selectWordWithCrossReference(word.word_index)}
+                        onClick={() => selectWordOnImage(word.word_index)}
                         type="button"
                       >
                         Từ #{word.word_index} · Dòng {word.line_index}
@@ -1090,45 +1018,6 @@ export function AdminOcrReviewScreen({
           </Card>
         </div>
       </div>
-
-      {showQuestionsModal && aiQuestions ? (
-        <Modal
-          isOpen={showQuestionsModal}
-          onClose={() => setShowQuestionsModal(false)}
-          title={`Bộ 10 câu hỏi đọc hiểu cho trẻ (Trang ${image.page_number})`}
-        >
-          <div className="max-h-[70vh] space-y-4 overflow-y-auto p-2 text-sm">
-            {aiQuestions.map((q, idx) => (
-              <div
-                key={idx}
-                className="rounded-control border border-border bg-canvas/40 p-3"
-              >
-                <p className="mb-2 text-base font-bold text-primary">
-                  Câu {idx + 1}: {q.question}
-                </p>
-                <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {q.options.map((opt, oIdx) => (
-                    <div
-                      key={oIdx}
-                      className="rounded border border-border/70 bg-white p-2"
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                </div>
-                <p className="font-bold text-green-700">
-                  Đáp án đúng: {q.correct_answer}
-                </p>
-                {q.explanation ? (
-                  <p className="mt-1 text-xs text-muted">
-                    Giải thích: {q.explanation}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </Modal>
-      ) : null}
     </>
   );
 }
