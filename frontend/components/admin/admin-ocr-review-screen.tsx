@@ -6,10 +6,11 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AdminLoading,
   AdminPageHeader,
@@ -25,6 +26,7 @@ import {
   normalizeVietnameseWord,
   syncPageTextToWords,
   syncWordsToPageText,
+  tokenizePageText,
 } from "@/lib/ocr/sync-page-text-words";
 import type {
   AdminBookDTO,
@@ -36,25 +38,79 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 
-const OCR_CONFIDENCE_HIGH = 0.9;
-const OCR_CONFIDENCE_MEDIUM = 0.7;
+export type WordDisplayStatus = "exact" | "partial" | "mismatch";
 
-type OcrConfidenceLevel = "high" | "medium" | "low" | "unknown";
-
-function getOcrConfidenceLevel(confidence: number | null): OcrConfidenceLevel {
-  if (confidence === null || !Number.isFinite(confidence)) return "unknown";
-  if (confidence >= OCR_CONFIDENCE_HIGH) return "high";
-  if (confidence >= OCR_CONFIDENCE_MEDIUM) return "medium";
-  return "low";
+export function stripVietnameseAccents(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/đ/gu, "d")
+    .replace(/Đ/gu, "D")
+    .toLowerCase()
+    .trim();
 }
 
-function getOcrConfidenceLabel(level: OcrConfidenceLevel): string {
+export function getConfidenceLevel(
+  confidence: number | null | undefined,
+): "Cao" | "Trung bình" | "Thấp" | "Chưa xác định" {
+  if (
+    confidence === null ||
+    confidence === undefined ||
+    !Number.isFinite(confidence)
+  ) {
+    return "Chưa xác định";
+  }
+  if (confidence > 0.8) {
+    return "Cao";
+  }
+  if (confidence >= 0.6) {
+    return "Trung bình";
+  }
+  return "Thấp";
+}
+
+export function getWordDisplayStatus(
+  word: AdminRevisionWordDTO,
+  draftToken: string | undefined,
+): WordDisplayStatus {
+  if (!draftToken) return "mismatch";
+  const normBox = normalizeVietnameseWord(word.text);
+  const normDraft = normalizeVietnameseWord(draftToken);
+  if (!normBox || !normDraft) return "mismatch";
+
+  const baseBox = stripVietnameseAccents(normBox);
+  const baseDraft = stripVietnameseAccents(normDraft);
+
+  if (baseBox !== baseDraft) {
+    return "mismatch";
+  }
+
+  if (normBox !== normDraft) {
+    return "partial";
+  }
+
+  return "exact";
+}
+
+function getWordMatchLabel(status: WordDisplayStatus): string {
   return {
-    high: "Cao",
-    medium: "Trung bình",
-    low: "Thấp · cần kiểm tra",
-    unknown: "Chưa xác định · cần kiểm tra",
-  }[level];
+    exact: "Chính xác (cả từ & dấu)",
+    partial: "Nghi sai / lệch dấu thanh",
+    mismatch: "Không khớp từ / cần kiểm tra",
+  }[status];
+}
+
+function getWordRangeInText(
+  text: string,
+  targetIndex: number,
+): [number, number] | null {
+  const matches = [...text.matchAll(/\S+/gu)];
+  if (targetIndex < 0 || targetIndex >= matches.length) return null;
+  const match = matches[targetIndex];
+  if (match && typeof match.index === "number") {
+    return [match.index, match.index + match[0].length];
+  }
+  return null;
 }
 
 export function AdminOcrReviewScreen({
@@ -75,16 +131,17 @@ export function AdminOcrReviewScreen({
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
-  const wordRowRefs = useRef(new Map<number, HTMLDivElement>());
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | "reupload" | null
+    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | null
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
+  const wordRefs = useRef(new Map<number, HTMLElement>());
+  const autoScrolledRevisionRef = useRef<string | null>(null);
 
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     setDetail(next);
@@ -93,6 +150,8 @@ export function AdminOcrReviewScreen({
     setWords(
       next.words.map((word) => ({
         ...word,
+        text: word.text.normalize("NFC"),
+        normalized_text: normalizeVietnameseWord(word.text),
         bbox: [...word.bbox] as [number, number, number, number],
       })),
     );
@@ -164,6 +223,24 @@ export function AdminOcrReviewScreen({
     };
   }, [load]);
 
+  useEffect(() => {
+    if (!detail || words.length === 0) return;
+    if (autoScrolledRevisionRef.current === detail.page_revision_id) return;
+
+    const firstUncertain = words.find(
+      (word) => getConfidenceLevel(word.ocr_confidence) !== "Cao",
+    );
+    if (firstUncertain) {
+      autoScrolledRevisionRef.current = detail.page_revision_id;
+      const element =
+        wordRefs.current.get(firstUncertain.word_index) ||
+        document.getElementById(`ocr-word-${firstUncertain.word_index}`);
+      if (typeof element?.scrollIntoView === "function") {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  }, [detail, words]);
+
   async function chooseRevision(revisionId: string) {
     const requestId = ++revisionChoiceRequestIdRef.current;
     try {
@@ -185,9 +262,36 @@ export function AdminOcrReviewScreen({
     }
   }
 
+  const selectWordOnImage = useCallback(
+    (index: number | null) => {
+      setSelectedWord(index);
+      if (index === null) return;
+
+      const element =
+        wordRefs.current.get(index) ||
+        document.getElementById(`ocr-word-${index}`);
+      if (typeof element?.scrollIntoView === "function") {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
+      const textarea = document.getElementById(
+        "ocr-text",
+      ) as HTMLTextAreaElement | null;
+      if (textarea) {
+        const range = getWordRangeInText(draftText, index);
+        if (range) {
+          textarea.focus();
+          textarea.setSelectionRange(range[0], range[1]);
+        }
+      }
+    },
+    [draftText],
+  );
+
   function handleDraftTextChange(value: string) {
-    setDraftText(value);
-    const result = syncPageTextToWords(value, words);
+    const normalizedText = value.normalize("NFC");
+    setDraftText(normalizedText);
+    const result = syncPageTextToWords(normalizedText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
       setWordSyncError(null);
@@ -204,6 +308,11 @@ export function AdminOcrReviewScreen({
         ? {
             ...word,
             ...patch,
+            text:
+              patch.text !== undefined
+                ? patch.text.normalize("NFC")
+                : word.text,
+            ocr_confidence: patch.ocr_confidence ?? word.ocr_confidence,
             normalized_text:
               patch.text === undefined
                 ? (patch.normalized_text ?? word.normalized_text)
@@ -214,7 +323,7 @@ export function AdminOcrReviewScreen({
     setWords(nextWords);
     const result = syncWordsToPageText(draftText, nextWords);
     if (result.status === "synchronized") {
-      setDraftText(result.text);
+      setDraftText(result.text.normalize("NFC"));
       setWordSyncError(null);
     } else {
       setWordSyncError(
@@ -234,19 +343,12 @@ export function AdminOcrReviewScreen({
     );
   }
 
-  function goToWordForReview(index: number) {
-    setSelectedWord(index);
-    wordRowRefs.current.get(index)?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
-  }
-
   function syncTextFromWords() {
     const nextText = words
       .map((word) => word.text.trim())
       .filter(Boolean)
-      .join(" ");
+      .join(" ")
+      .normalize("NFC");
     setDraftText(nextText);
     const result = syncPageTextToWords(nextText, words);
     if (result.status === "synchronized") {
@@ -256,6 +358,63 @@ export function AdminOcrReviewScreen({
       setWordSyncError(
         "Không thể đồng bộ vì có từ rỗng hoặc một từ chứa nhiều token. Hãy chỉnh danh sách từ trước khi lưu.",
       );
+    }
+  }
+
+  function reconcileAllMatchedWords() {
+    const result = syncPageTextToWords(draftText, words);
+    if (result.status === "synchronized") {
+      setWords(
+        result.words.map((w) => ({
+          ...w,
+          ocr_confidence: 1.0,
+        })),
+      );
+      setWordSyncError(null);
+      setNotice(
+        "Đã đối chiếu khớp 100% giữa nội dung văn bản và tọa độ bounding box!",
+      );
+    } else {
+      setWordSyncError(
+        "Số lượng từ giữa văn bản và danh sách bounding box chưa khớp để đối chiếu.",
+      );
+    }
+  }
+
+  async function correctWithAi() {
+    if (
+      !draftText.trim() ||
+      busy !== null ||
+      detail?.lifecycle_status !== "ACTIVE"
+    ) {
+      return;
+    }
+    setBusy("ai_correct");
+    setNotice(null);
+    try {
+      const correctedText = (
+        await ocr.aiCorrectText(pageId, draftText)
+      ).normalize("NFC");
+      setDraftText(correctedText);
+
+      const result = syncPageTextToWords(correctedText, words);
+      if (result.status === "synchronized") {
+        setWords([...result.words]);
+        setWordSyncError(null);
+      }
+      setNotice(
+        "Gemini AI đã sửa lỗi chính tả và phục hồi dấu thanh thành công!",
+      );
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? cause.message
+          : cause instanceof Error
+            ? `Không thể sửa lỗi bằng AI: ${cause.message}`
+            : "Không thể gọi Gemini AI sửa lỗi. Vui lòng kiểm tra GEMINI_API_KEY.",
+      );
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -309,12 +468,12 @@ export function AdminOcrReviewScreen({
     setBusy("verify");
     setNotice(null);
     try {
-      const verified = await revisions.verify(pageId, {
+      const verifiedResult = await revisions.verify(pageId, {
         page_revision_id: detail.page_revision_id,
         corrected_text: draftText,
         words,
       });
-      applyDetail(verified);
+      applyDetail(verifiedResult);
       setHistory(await revisions.list(pageId));
       setNotice(
         "Đã xác minh revision. Revision này có thể làm ground truth cho session mới nếu trang đang ACTIVE.",
@@ -399,23 +558,40 @@ export function AdminOcrReviewScreen({
   }
 
   const verified = detail?.verification_status === "VERIFIED";
-  const confidenceCounts = words.reduce(
-    (counts, word) => {
-      counts[getOcrConfidenceLevel(word.ocr_confidence)] += 1;
-      return counts;
-    },
-    {
-      high: 0,
-      medium: 0,
-      low: 0,
-      unknown: 0,
-    } as Record<OcrConfidenceLevel, number>,
-  );
-  const firstWordToReview = words.find(
-    (word) =>
-      getOcrConfidenceLevel(word.ocr_confidence) === "low" ||
-      getOcrConfidenceLevel(word.ocr_confidence) === "unknown",
-  );
+
+  const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
+
+  const matchCounts = useMemo(() => {
+    const counts = { exact: 0, partial: 0, mismatch: 0 };
+    for (let i = 0; i < words.length; i++) {
+      const status = getWordDisplayStatus(words[i], draftTokens[i]);
+      counts[status] += 1;
+    }
+    return counts;
+  }, [words, draftTokens]);
+
+  const confidenceCounts = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0, unknown: 0 };
+    for (const word of words) {
+      const level = getConfidenceLevel(word.ocr_confidence);
+      if (level === "Cao") counts.high += 1;
+      else if (level === "Trung bình") counts.medium += 1;
+      else if (level === "Thấp") counts.low += 1;
+      else counts.unknown += 1;
+    }
+    return counts;
+  }, [words]);
+
+  const firstWordToReview = useMemo(() => {
+    return (
+      words.find((w) => getConfidenceLevel(w.ocr_confidence) !== "Cao") ||
+      words.find((word) => {
+        const status = getWordDisplayStatus(word, draftTokens[word.word_index]);
+        return status === "partial" || status === "mismatch";
+      })
+    );
+  }, [words, draftTokens]);
+
   if (error) {
     return (
       <EmptyState
@@ -431,7 +607,7 @@ export function AdminOcrReviewScreen({
           error === "not-found"
             ? "Trang không thuộc sách hoặc dữ liệu quản trị hiện tại."
             : error === "unavailable"
-              ? "Ảnh hoặc revision chưa đáp ứng contract hiện tại. Không sử dụng dữ liệu mẫu thay thế."
+              ? "Ảnh hoặc revision chưa đáp ứng contract hiện tại. Không sử dữ liệu mẫu thay thế."
               : "Vui lòng thử lại sau."
         }
         action={
@@ -470,7 +646,11 @@ export function AdminOcrReviewScreen({
       {notice ? (
         <StatusMessage
           className="mb-6"
-          tone={notice.startsWith("Không thể") ? "error" : "info"}
+          tone={
+            notice.startsWith("Không thể") || notice.startsWith("Lỗi")
+              ? "error"
+              : "info"
+          }
         >
           {notice}
         </StatusMessage>
@@ -501,13 +681,20 @@ export function AdminOcrReviewScreen({
               role="group"
             >
               {words.map((word) => {
-                const level = getOcrConfidenceLevel(word.ocr_confidence);
+                const currentDraftToken = draftTokens[word.word_index];
+                const matchStatus = getWordDisplayStatus(
+                  word,
+                  currentDraftToken,
+                );
+
+                const confidenceLevel = getConfidenceLevel(word.ocr_confidence);
                 const colorClass = {
-                  high: "border-green-600 bg-green-400/20",
-                  medium: "border-yellow-500 bg-yellow-300/25",
-                  low: "border-red-600 bg-red-400/30",
-                  unknown: "border-orange-600 bg-orange-300/30",
-                }[level];
+                  Cao: "border-green-600 bg-green-400/35",
+                  "Trung bình": "border-yellow-500 bg-yellow-300/35",
+                  Thấp: "border-red-600 bg-red-400/35",
+                  "Chưa xác định": "border-orange-600 bg-orange-300/35",
+                }[confidenceLevel];
+
                 const selectedClass =
                   word.word_index === selectedWord
                     ? [
@@ -519,34 +706,27 @@ export function AdminOcrReviewScreen({
                         "ring-white",
                       ].join(" ")
                     : "border";
-                const confidenceText =
-                  word.ocr_confidence === null
-                    ? "chưa xác định"
-                    : word.ocr_confidence.toFixed(2);
-                const confidenceLabel = getOcrConfidenceLabel(level);
-                const boxLabel = [
-                  `Từ ${word.word_index + 1}: ${word.text}.`,
-                  `Confidence OCR: ${confidenceText}.`,
-                  `Mức ${confidenceLabel}`,
-                ].join(" ");
-                const boxTitle = [
-                  word.text,
-                  confidenceLabel,
-                  word.ocr_confidence === null
-                    ? "confidence không có"
-                    : word.ocr_confidence.toFixed(2),
-                ].join(" · ");
+
+                const matchLabel = getWordMatchLabel(matchStatus);
+                const confText =
+                  word.ocr_confidence !== null &&
+                  word.ocr_confidence !== undefined
+                    ? `Confidence OCR: ${word.ocr_confidence}.`
+                    : "Confidence OCR: chưa rõ.";
+                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText} Mức ${confidenceLevel}`;
+                const boxTitle = `Từ ${word.word_index + 1}: ${word.text} (Mức ${confidenceLevel}) · ${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
+
                 return (
                   <button
                     aria-label={boxLabel}
                     aria-pressed={word.word_index === selectedWord}
                     className={[
-                      "absolute cursor-pointer p-0",
+                      "absolute cursor-pointer p-0 box-border rounded-[2px]",
                       colorClass,
                       selectedClass,
                     ].join(" ")}
                     key={`${word.line_index}-${word.word_index}`}
-                    onClick={() => setSelectedWord(word.word_index)}
+                    onClick={() => selectWordOnImage(word.word_index)}
                     style={{
                       height: `${word.bbox[3] * 100}%`,
                       left: `${word.bbox[0] * 100}%`,
@@ -561,51 +741,88 @@ export function AdminOcrReviewScreen({
             </div>
           </div>
           <p className="mt-3 text-sm text-muted">
-            Ảnh được cấp URL có thời hạn từ Supabase Storage; tọa độ bbox dùng
-            hệ quy chiếu chuẩn hóa 0–1. Confidence là điểm ước lượng của OCR,
-            không phải xác suất chắc chắn nhận diện đúng.
+            Màu bounding box phản ánh độ tin cậy OCR. Trạng thái đối chiếu nội
+            được hiển thị riêng trong danh sách từ và phần thống kê bên dưới.
           </p>
           <div
             aria-label="Chú giải confidence OCR"
-            className="mt-3 flex flex-wrap gap-3 text-xs"
+            className="mt-3 flex flex-wrap gap-4 text-xs font-bold"
           >
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-green-600 bg-green-400/30" />
+            <span className="inline-flex items-center gap-1.5 text-green-800">
+              <span className="size-3.5 rounded-sm border border-green-600 bg-green-400/40" />
               Cao
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-yellow-500 bg-yellow-300/30" />
+            <span className="inline-flex items-center gap-1.5 text-yellow-800">
+              <span className="size-3.5 rounded-sm border border-yellow-500 bg-yellow-300/40" />
               Trung bình
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-red-600 bg-red-400/30" />
+            <span className="inline-flex items-center gap-1.5 text-red-800">
+              <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
               Thấp
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="size-3 rounded-sm border border-orange-600 bg-orange-300/30" />
+            <span className="inline-flex items-center gap-1.5 text-orange-800">
+              <span className="size-3.5 rounded-sm border border-orange-600 bg-orange-300/40" />
               Chưa xác định
             </span>
           </div>
           <div
             aria-label="Thống kê confidence OCR"
-            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
             role="group"
           >
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2 text-sm">
-              <strong>{confidenceCounts.high}</strong>
-              <div>Cao</div>
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
+              <strong className="text-lg text-green-700">
+                {confidenceCounts.high}
+              </strong>
+              <div className="text-xs font-bold text-green-900">Cao</div>
             </div>
-            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2 text-sm">
-              <strong>{confidenceCounts.medium}</strong>
-              <div>Trung bình</div>
+            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2.5 text-center">
+              <strong className="text-lg text-yellow-700">
+                {confidenceCounts.medium}
+              </strong>
+              <div className="text-xs font-bold text-yellow-900">
+                Trung bình
+              </div>
             </div>
-            <div className="rounded-control border border-red-600/40 bg-red-50 p-2 text-sm">
-              <strong>{confidenceCounts.low}</strong>
-              <div>Thấp</div>
+            <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
+              <strong className="text-lg text-red-700">
+                {confidenceCounts.low}
+              </strong>
+              <div className="text-xs font-bold text-red-900">Thấp</div>
             </div>
-            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2 text-sm">
-              <strong>{confidenceCounts.unknown}</strong>
-              <div>Chưa xác định</div>
+            <div className="rounded-control border border-orange-600/40 bg-orange-50 p-2.5 text-center">
+              <strong className="text-lg text-orange-700">
+                {confidenceCounts.unknown}
+              </strong>
+              <div className="text-xs font-bold text-orange-900">
+                Chưa xác định
+              </div>
+            </div>
+          </div>
+          <div
+            aria-label="Thống kê đối chiếu OCR"
+            className="mt-4 grid grid-cols-3 gap-3"
+            role="group"
+          >
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
+              <strong className="text-lg text-green-700">
+                {matchCounts.exact}
+              </strong>
+              <div className="text-xs font-bold text-green-900">Chính xác</div>
+            </div>
+            <div className="rounded-control border border-yellow-500/40 bg-yellow-50 p-2.5 text-center">
+              <strong className="text-lg text-yellow-700">
+                {matchCounts.partial}
+              </strong>
+              <div className="text-xs font-bold text-yellow-900">
+                Nghi sai dấu
+              </div>
+            </div>
+            <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
+              <strong className="text-lg text-red-700">
+                {matchCounts.mismatch}
+              </strong>
+              <div className="text-xs font-bold text-red-900">Không khớp</div>
             </div>
           </div>
           <button
@@ -613,7 +830,7 @@ export function AdminOcrReviewScreen({
             disabled={!firstWordToReview}
             onClick={() => {
               if (firstWordToReview) {
-                goToWordForReview(firstWordToReview.word_index);
+                selectWordOnImage(firstWordToReview.word_index);
               }
             }}
             type="button"
@@ -640,9 +857,9 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi sửa nội dung, danh sách Words tự đồng bộ nếu số lượng từ không
-              đổi. Tọa độ bounding box và confidence OCR được giữ nguyên. Thêm,
-              xóa, tách hoặc gộp từ cần đối chiếu tọa độ mới.
+              Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động
+              cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu,
+              Vàng: nghi sai dấu, Đỏ: không khớp).
             </p>
             {wordSyncError ? (
               <p
@@ -682,6 +899,22 @@ export function AdminOcrReviewScreen({
                   >
                     <Save aria-hidden className="size-4" /> Lưu bản nháp
                   </Button>
+
+                  <Button
+                    className="sm:w-auto border-purple-600 bg-purple-600 text-white hover:bg-purple-700"
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      !draftText.trim()
+                    }
+                    isLoading={busy === "ai_correct"}
+                    onClick={() => void correctWithAi()}
+                    type="button"
+                  >
+                    <Sparkles aria-hidden className="size-4" /> AI sửa chính tả
+                    &amp; dấu
+                  </Button>
+
                   <Button
                     className="sm:w-auto"
                     disabled={
@@ -704,101 +937,130 @@ export function AdminOcrReviewScreen({
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-2xl font-black">Từ và bounding box</h2>
-              <Button
-                className="h-11 w-auto"
-                disabled={verified}
-                onClick={syncTextFromWords}
-                variant="secondary"
-              >
-                Đồng bộ văn bản từ danh sách từ
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="h-11 w-auto border-green-600 bg-green-50 text-green-800 hover:bg-green-100"
+                  disabled={verified || words.length === 0}
+                  onClick={reconcileAllMatchedWords}
+                  type="button"
+                  variant="secondary"
+                >
+                  <CheckCircle2 aria-hidden className="size-4" /> Đối chiếu khớp
+                  (100%)
+                </Button>
+                <Button
+                  className="h-11 w-auto"
+                  disabled={verified}
+                  onClick={syncTextFromWords}
+                  variant="secondary"
+                >
+                  Đồng bộ văn bản từ danh sách từ
+                </Button>
+              </div>
             </div>
             <p className="mb-4 text-sm text-muted">
               Chọn từ để làm nổi bật vùng tương ứng trên ảnh. Bốn giá trị bbox
               là x, y, width, height đã chuẩn hóa.
             </p>
             <div className="grid gap-3">
-              {words.map((word) => (
-                <div
-                  className={
-                    word.word_index === selectedWord
-                      ? "rounded-control border-2 border-orange-500 p-3"
-                      : "rounded-control border border-border p-3"
-                  }
-                  key={word.word_index}
-                  ref={(element) => {
-                    if (element) {
-                      wordRowRefs.current.set(word.word_index, element);
-                    } else {
-                      wordRowRefs.current.delete(word.word_index);
+              {words.map((word) => {
+                const currentDraftToken = draftTokens[word.word_index];
+                const matchStatus = getWordDisplayStatus(
+                  word,
+                  currentDraftToken,
+                );
+                const matchLabel = getWordMatchLabel(matchStatus);
+
+                const statusBadgeClass = {
+                  exact: "bg-green-100 text-green-800 border-green-300",
+                  partial: "bg-yellow-100 text-yellow-800 border-yellow-300",
+                  mismatch: "bg-red-100 text-red-800 border-red-300",
+                }[matchStatus];
+
+                return (
+                  <div
+                    ref={(el) => {
+                      if (el) wordRefs.current.set(word.word_index, el);
+                      else wordRefs.current.delete(word.word_index);
+                    }}
+                    id={`ocr-word-${word.word_index}`}
+                    className={
+                      word.word_index === selectedWord
+                        ? "rounded-control border-2 border-orange-500 p-3"
+                        : "rounded-control border border-border p-3"
                     }
-                  }}
-                >
-                  <button
-                    aria-pressed={word.word_index === selectedWord}
-                    className="mb-3 text-left text-sm font-bold text-primary underline"
-                    onClick={() => setSelectedWord(word.word_index)}
-                    type="button"
+                    key={word.word_index}
                   >
-                    Từ #{word.word_index} · Dòng {word.line_index}
-                  </button>
-                  <label className="grid gap-1 text-sm font-bold">
-                    Văn bản từ
-                    <input
-                      className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
-                      disabled={verified}
-                      onChange={(event) =>
-                        updateWord(word.word_index, {
-                          text: event.target.value,
-                          normalized_text: normalizeVietnameseWord(
-                            event.target.value,
-                          ),
-                        })
-                      }
-                      value={word.text}
-                    />
-                  </label>
-                  <div className="mt-2 grid grid-cols-4 gap-2">
-                    {(["x", "y", "w", "h"] as const).map(
-                      (label, coordinate) => (
-                        <label
-                          className="grid gap-1 text-xs font-bold"
-                          key={label}
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <button
+                        aria-pressed={word.word_index === selectedWord}
+                        className="text-left text-sm font-bold text-primary underline"
+                        onClick={() => selectWordOnImage(word.word_index)}
+                        type="button"
+                      >
+                        Từ #{word.word_index} · Dòng {word.line_index}
+                      </button>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="rounded border border-border bg-canvas px-2 py-0.5 text-xs font-bold text-muted">
+                          Confidence OCR: {word.ocr_confidence ?? "chưa rõ"} ·{" "}
+                          {getConfidenceLevel(word.ocr_confidence)}
+                        </span>
+                        <span
+                          className={`rounded border px-2 py-0.5 text-xs font-bold ${statusBadgeClass}`}
                         >
-                          {label}
-                          <input
-                            aria-label={`Từ ${word.word_index} bbox ${label}`}
-                            className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
-                            disabled={verified}
-                            max={1}
-                            min={0}
-                            onChange={(event) =>
-                              updateBbox(
-                                word.word_index,
-                                coordinate,
-                                Number(event.target.value),
-                              )
-                            }
-                            step="0.001"
-                            type="number"
-                            value={word.bbox[coordinate]}
-                          />
-                        </label>
-                      ),
-                    )}
+                          {matchLabel}
+                        </span>
+                      </div>
+                    </div>
+
+                    <label className="grid gap-1 text-sm font-bold">
+                      Văn bản từ
+                      <input
+                        className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
+                        disabled={verified}
+                        onChange={(event) =>
+                          updateWord(word.word_index, {
+                            text: event.target.value,
+                            normalized_text: normalizeVietnameseWord(
+                              event.target.value,
+                            ),
+                          })
+                        }
+                        value={word.text}
+                      />
+                    </label>
+                    <div className="mt-2 grid grid-cols-4 gap-2">
+                      {(["x", "y", "w", "h"] as const).map(
+                        (label, coordinate) => (
+                          <label
+                            className="grid gap-1 text-xs font-bold"
+                            key={label}
+                          >
+                            {label}
+                            <input
+                              aria-label={`Từ ${word.word_index} bbox ${label}`}
+                              className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
+                              disabled={verified}
+                              max={1}
+                              min={0}
+                              onChange={(event) =>
+                                updateBbox(
+                                  word.word_index,
+                                  coordinate,
+                                  Number(event.target.value),
+                                )
+                              }
+                              step="0.001"
+                              type="number"
+                              value={word.bbox[coordinate]}
+                            />
+                          </label>
+                        ),
+                      )}
+                    </div>
                   </div>
-                  <p className="mt-2 text-xs text-muted">
-                    Confidence OCR:{" "}
-                    {word.ocr_confidence === null
-                      ? "chưa xác định"
-                      : word.ocr_confidence.toFixed(2)}
-                    {" · "}
-                    {getOcrConfidenceLabel(
-                      getOcrConfidenceLevel(word.ocr_confidence),
-                    )}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
 
