@@ -38,8 +38,7 @@ jobs:
 
       - name: Check Prettier formatting for OCR changes
         run: |
-          npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts components/admin/admin-health-screen.tsx lib/api/ocr-review-service.ts
-          git diff -- components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts components/admin/admin-health-screen.tsx lib/api/ocr-review-service.ts
+          npx prettier --check components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
 
       - name: Format check (changed frontend files)
         id: format
