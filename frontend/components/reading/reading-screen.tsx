@@ -2071,14 +2071,23 @@ export function ReadingScreen({
   }
 
   function startRetrySession(candidates: RetryWordCandidate[]): void {
-    // Use the exact candidate array that rendered the consent dialog. This
-    // avoids a stale/empty ref closing the retry flow before it starts.
-    retryCandidatesRef.current = [...candidates];
-    if (retryCandidatesRef.current.length === 0) {
-      void completeReadingSession();
+    // Prefer the exact queue shown in the consent dialog. If an older render
+    // supplied an empty array, rebuild from the durable word-id map rather
+    // than silently completing the reading session.
+    const activeCandidates =
+      candidates.length > 0 ? candidates : buildRetryCandidates();
+
+    if (activeCandidates.length === 0) {
+      setRetryFeedback("incorrect");
+      setLatestTranscript(
+        "Danh sách từ cần luyện chưa sẵn sàng. Bé vui lòng thử lại nhé.",
+      );
+      setRetryPrompt(true);
       return;
     }
 
+    retryCandidatesRef.current = [...activeCandidates];
+    setRetryCandidates(activeCandidates);
     retryModeRef.current = true;
     retryProcessingRef.current = false;
     setRetryConfirmedWordIds(new Set());
@@ -2572,8 +2581,8 @@ export function ReadingScreen({
             isLoading: isBusy,
             label: "Đồng ý, đọc lại",
             onClick: () => {
-              setRetryPrompt(false);
               startRetrySession(retryCandidates);
+              setRetryPrompt(false);
             },
           }}
           secondaryAction={{
