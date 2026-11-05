@@ -96,6 +96,18 @@ SUPPORT_EMAIL = (
     os.getenv("SUPPORT_EMAIL") or "vireadforyou@gmail.com"
 ).strip().lower()
 
+# Explicit browser origins allowed to call this API. Never use "*" when credentials are enabled.
+CORS_ALLOWED_ORIGINS = tuple(
+    origin.strip()
+    for origin in (
+        os.getenv("CORS_ALLOWED_ORIGINS")
+        or "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if origin.strip()
+)
+if "*" in CORS_ALLOWED_ORIGINS:
+    raise ValueError("CORS_ALLOWED_ORIGINS must not contain '*'")
+
 APP_ENVIRONMENT = (
     os.getenv("APP_ENVIRONMENT") or "development"
 ).strip().lower()
