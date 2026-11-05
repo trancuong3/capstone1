@@ -32,9 +32,20 @@ alter table public.readingreminderoccurrences
   add column if not exists emailsentat timestamptz,
   add column if not exists emailerrorcode varchar(64);
 
-alter table public.readingreminderoccurrences
-  add constraint ck_reminderoccurrence_email_status
-  check (emailstatus in ('NOT_REQUESTED', 'PENDING', 'SENDING', 'RETRY', 'SENT', 'FAILED'));
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'ck_reminderoccurrence_email_status'
+      and conrelid = 'public.readingreminderoccurrences'::regclass
+  ) then
+    alter table public.readingreminderoccurrences
+      add constraint ck_reminderoccurrence_email_status
+      check (emailstatus in ('NOT_REQUESTED', 'PENDING', 'SENDING', 'RETRY', 'SENT', 'FAILED'));
+  end if;
+end
+$$;
 create index if not exists ix_reminderoccurrences_email_delivery
   on public.readingreminderoccurrences(emailstatus, emailnextattemptat);
 
