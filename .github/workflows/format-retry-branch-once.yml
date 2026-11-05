@@ -52,6 +52,26 @@ jobs:
           tests/support/help-support-screen.test.tsx
           tests/support/support-service.test.ts
 
+      - name: Verify Prettier formatting
+        working-directory: frontend
+        run: >-
+          npx prettier --check
+          components/layout/account-avatar-menu.tsx
+          components/reading/book-page-content.tsx
+          components/reading/reading-controls.tsx
+          components/reading/reading-layout.tsx
+          components/reading/reading-screen.tsx
+          components/settings/account-settings-screen.tsx
+          components/support/help-support-screen.tsx
+          lib/api/reading-service.ts
+          lib/api/support-service.ts
+          tests/layout/account-avatar-menu.test.tsx
+          tests/reading/reading-async-cleanup.test.tsx
+          tests/reading/reading-screen.test.tsx
+          tests/reading/retry-recognition.test.ts
+          tests/support/help-support-screen.test.tsx
+          tests/support/support-service.test.ts
+
       - name: Commit formatted files to the same branch
         run: |
           git config user.name "github-actions[bot]"
