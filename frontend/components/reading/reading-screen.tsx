@@ -1617,6 +1617,11 @@ export function ReadingScreen({
     retryShouldRestartRef.current = false;
     isListeningActiveRef.current = false;
 
+    if (retryCaptureTimeoutRef.current !== null) {
+      window.clearTimeout(retryCaptureTimeoutRef.current);
+      retryCaptureTimeoutRef.current = null;
+    }
+
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
 
@@ -1628,6 +1633,13 @@ export function ReadingScreen({
       } catch {
         // Recognition có thể đã tự kết thúc.
       }
+    }
+
+    // A successful browser result must release the fallback recorder before
+    // the next retry word starts. Manual stop uses its own transcribe path.
+    if (retryRecorderActiveRef.current) {
+      retryRecorderActiveRef.current = false;
+      speechRecorder.cancel();
     }
 
     if (mountedRef.current) setIsMicRecording(false);
