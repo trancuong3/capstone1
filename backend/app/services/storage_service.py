@@ -6,7 +6,11 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, status
 
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_STORAGE_BUCKET, SUPABASE_URL
+from app.database.config import (
+    SUPABASE_ADMIN_KEY,
+    SUPABASE_STORAGE_BUCKET,
+    SUPABASE_URL,
+)
 from app.database.supabase_client import get_supabase_admin_client
 from app.diagnostic_logging import log_diagnostic
 from app.services.runtime_diagnostics import runtime_configuration_diagnostics
@@ -48,8 +52,8 @@ def _safe_error_code(exc: Exception) -> str | None:
     return None
 
 
-def _bucket_name() -> str:
-    value = (SUPABASE_STORAGE_BUCKET or "").strip()
+def _bucket_name(bucket_name: str | None = None) -> str:
+    value = (bucket_name or SUPABASE_STORAGE_BUCKET or "").strip()
     if not value:
         diagnostics = runtime_configuration_diagnostics(include_ocr=False)
         log_diagnostic(
@@ -66,8 +70,8 @@ def _bucket_name() -> str:
     return value
 
 
-def _storage_bucket():
-    bucket_name = _bucket_name()
+def _storage_bucket(bucket_name: str | None = None):
+    bucket_name = _bucket_name(bucket_name)
     if not SUPABASE_ADMIN_KEY:
         diagnostics = runtime_configuration_diagnostics(include_ocr=False)
         log_diagnostic(
@@ -113,10 +117,16 @@ def _upload_failure_detail(http_status: int | None, error_code: str | None) -> s
     return "Could not save the image to Supabase Storage"
 
 
-def upload_object(object_path: str, data: bytes, content_type: str) -> None:
+def upload_object(
+    object_path: str,
+    data: bytes,
+    content_type: str,
+    *,
+    bucket_name: str | None = None,
+) -> None:
     # Separate config/client initialization from the actual remote write. If this
     # fails, Storage was never asked to create an object and cleanup is pointless.
-    bucket = _storage_bucket()
+    bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
     try:
         bucket.upload(
             object_path,
@@ -149,9 +159,10 @@ def upload_object(object_path: str, data: bytes, content_type: str) -> None:
         ) from exc
 
 
-def delete_object(object_path: str) -> None:
+def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
     try:
-        _storage_bucket().remove([object_path])
+        bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
+        bucket.remove([object_path])
         log_diagnostic(
             logger,
             logging.INFO,
@@ -197,7 +208,11 @@ def download_object(object_path: str) -> bytes:
         ) from exc
 
 
-def create_signed_image_url(image_path: str | None) -> str:
+def create_signed_image_url(
+    image_path: str | None,
+    *,
+    bucket_name: str | None = None,
+) -> str:
     if not isinstance(image_path, str) or not image_path.strip():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
     if image_path.startswith(("https://", "http://")):
@@ -210,7 +225,8 @@ def create_signed_image_url(image_path: str | None) -> str:
             pass
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
     try:
-        result = _storage_bucket().create_signed_url(image_path, SIGNED_URL_TTL_SECONDS)
+        bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
+        result = bucket.create_signed_url(image_path, SIGNED_URL_TTL_SECONDS)
         signed = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
         if not isinstance(signed, str) or not signed:
             raise ValueError("Storage did not return a signed URL")

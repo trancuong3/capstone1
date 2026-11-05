@@ -15,7 +15,9 @@ export interface ProfileService {
   update(request: ParentProfileUpdateInput): Promise<ParentProfileDTO>;
   requestEmailChange(email: string): Promise<void>;
   resendEmailChange(email: string): Promise<void>;
-  updateContactPhone(contactPhone: string): Promise<ParentProfileDTO>;
+  updateContactPhone(contactPhone: string | null): Promise<ParentProfileDTO>;
+  uploadAvatar(file: File): Promise<ParentProfileDTO>;
+  removeAvatar(): Promise<ParentProfileDTO>;
 }
 
 interface ErrorPayload {
@@ -35,6 +37,7 @@ interface ParentProfileApiResponse {
   email_verified?: boolean | null;
   contact_info_status?: ContactInfoStatus;
   children?: ParentProfileChildDTO[];
+  avatar_url?: string | null;
 }
 
 interface ProfileUpdateApiResponse {
@@ -140,7 +143,6 @@ async function createHeaders(): Promise<Headers> {
 
   return new Headers({
     Accept: "application/json",
-    "Content-Type": "application/json",
     Authorization: `Bearer ${session.access_token}`,
   });
 }
@@ -150,6 +152,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   try {
     headers = await createHeaders();
+    if (typeof init?.body === "string") {
+      headers.set("Content-Type", "application/json");
+    }
   } catch (error) {
     if (error instanceof ServiceError) {
       throw error;
@@ -222,6 +227,7 @@ function normalizeParentProfile(
     email_verified: data.email_verified ?? null,
     contact_info_status: data.contact_info_status ?? "lookup_failed",
     children: data.children ?? [],
+    avatar_url: data.avatar_url ?? null,
   };
 }
 
@@ -255,6 +261,7 @@ function normalizeUpdatedProfile(
     email_verified: currentProfile.email_verified,
     contact_info_status: currentProfile.contact_info_status,
     children: currentProfile.children,
+    avatar_url: currentProfile.avatar_url ?? null,
   };
 }
 
@@ -347,14 +354,36 @@ export function createProfileService(): ProfileService {
       return normalizeUpdatedProfile(response, currentProfile);
     },
 
-    async updateContactPhone(contactPhone: string): Promise<ParentProfileDTO> {
-      const normalizedPhone = normalizeVietnamesePhone(contactPhone);
+    async updateContactPhone(
+      contactPhone: string | null,
+    ): Promise<ParentProfileDTO> {
+      const normalizedPhone = contactPhone
+        ? normalizeVietnamesePhone(contactPhone)
+        : null;
       const response = await request<ParentProfileApiResponse>(
         "/profiles/me/contact-phone",
         {
           method: "PATCH",
           body: JSON.stringify({ contact_phone: normalizedPhone }),
         },
+      );
+      return normalizeParentProfile(response);
+    },
+
+    async uploadAvatar(file: File): Promise<ParentProfileDTO> {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await request<ParentProfileApiResponse>(
+        "/profiles/me/avatar",
+        { method: "POST", body },
+      );
+      return normalizeParentProfile(response);
+    },
+
+    async removeAvatar(): Promise<ParentProfileDTO> {
+      const response = await request<ParentProfileApiResponse>(
+        "/profiles/me/avatar",
+        { method: "DELETE" },
       );
       return normalizeParentProfile(response);
     },

@@ -406,6 +406,33 @@ describe("SupabaseAuthService", () => {
     });
   });
 
+  it.each(["google", "facebook"] as const)(
+    "maps the %s account name but ignores provider avatar metadata",
+    async (provider) => {
+      const harness = createHarness();
+      const oauthUser: User = {
+        ...providerUser,
+        app_metadata: { provider, providers: [provider] },
+        user_metadata: {
+          display_name: "Nguyen Minh Anh",
+          full_name: "Nguyen Minh Anh",
+          avatar_url: "https://provider.example/avatar.jpg",
+          picture: "https://provider.example/picture.jpg",
+        },
+      };
+      harness.getUser.mockResolvedValue({
+        data: { user: oauthUser },
+        error: null,
+      });
+
+      await expect(createService(harness).getCurrentUser()).resolves.toEqual({
+        display_name: "Nguyen Minh Anh",
+        email: "parent@example.com",
+        id: providerUser.id,
+      });
+    },
+  );
+
   it("returns null when there is no current session or authenticated user", async () => {
     const harness = createHarness();
     harness.getSession.mockResolvedValue({

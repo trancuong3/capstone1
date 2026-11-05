@@ -57,6 +57,8 @@ class ChildProfileResponse(BaseModel):
         serialization_alias="created_at",
     )
 
+    avatar_url: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -104,6 +106,7 @@ class ParentProfileChildResponse(BaseModel):
     alias: str
     grade: int = Field(ge=1, le=5)
     created_at: datetime
+    avatar_url: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -111,11 +114,13 @@ class ParentProfileChildResponse(BaseModel):
 class ContactPhoneUpdateRequest(BaseModel):
     """Request to change only the current user's unverified contact phone."""
 
-    contact_phone: str = Field(min_length=9, max_length=16)
+    contact_phone: Optional[str] = Field(default=..., min_length=9, max_length=16)
 
     @field_validator("contact_phone")
     @classmethod
-    def validate_contact_phone(cls, value: str) -> str:
+    def validate_contact_phone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not re.fullmatch(r"\+[1-9]\d{7,14}", normalized):
             raise ValueError(
@@ -157,6 +162,7 @@ class ParentProfileResponse(BaseModel):
     contact_info_status: Literal[
         "available", "not_configured", "user_not_found", "lookup_failed"
     ] = "lookup_failed"
+    avatar_url: Optional[str] = None
     children: List[ParentProfileChildResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(

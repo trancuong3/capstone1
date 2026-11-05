@@ -9,6 +9,7 @@ export interface ChildProfileDTO {
   readonly grade: number;
   readonly settings: Record<string, unknown>;
   readonly created_at: ISODateTime;
+  readonly avatar_url?: string | null;
 }
 
 export interface ChildProfileCreateDTO {

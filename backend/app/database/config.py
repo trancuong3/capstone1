@@ -34,6 +34,10 @@ DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or None
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip() or None
 SUPABASE_STORAGE_BUCKET = (os.getenv("SUPABASE_STORAGE_BUCKET") or "").strip() or None
+SUPABASE_AVATAR_BUCKET = (
+    (os.getenv("SUPABASE_AVATAR_BUCKET") or "viread-avatars").strip()
+    or "viread-avatars"
+)
 
 # Server-only credentials for Supabase Storage/Auth Admin. Prefer the current
 # secret API key and retain the legacy service-role key for existing deployments.

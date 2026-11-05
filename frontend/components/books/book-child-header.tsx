@@ -2,6 +2,7 @@ import { ArrowLeft, Heart } from "lucide-react";
 import Link from "next/link";
 
 import { ButtonLink } from "@/components/common/button";
+import { ProfileAvatar } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -28,14 +29,26 @@ export function BookChildHeader({
           href="/dashboard"
           size="md"
         />
-        <ButtonLink
-          className="max-w-[220px] shrink-0"
-          href="/dashboard"
-          variant="quiet"
-        >
-          <Heart aria-hidden="true" className="size-5" />
-          Dành cho ba mẹ
-        </ButtonLink>
+        <div className="flex items-center gap-4">
+          {child ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <ProfileAvatar
+                ariaLabel={`Ảnh đại diện của ${child.alias}`}
+                displayName={child.alias}
+                imageUrl={child.avatar_url}
+                size="sm"
+              />
+            </div>
+          ) : null}
+          <ButtonLink
+            className="max-w-[220px] shrink-0"
+            href="/dashboard"
+            variant="quiet"
+          >
+            <Heart aria-hidden="true" className="size-5" />
+            Dành cho ba mẹ
+          </ButtonLink>
+        </div>
       </div>
 
       <div className="flex h-12 w-full min-w-0 items-center gap-2 sm:hidden">
@@ -55,6 +68,14 @@ export function BookChildHeader({
             {mobileLabel ?? childLabel}
           </span>
         </Link>
+        {child ? (
+          <ProfileAvatar
+            ariaLabel={`Ảnh đại diện của ${child.alias}`}
+            displayName={child.alias}
+            imageUrl={child.avatar_url}
+            size="sm"
+          />
+        ) : null}
       </div>
     </header>
   );
