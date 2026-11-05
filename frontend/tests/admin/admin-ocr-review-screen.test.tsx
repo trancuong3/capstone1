@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
+import {
+  AdminOcrReviewScreen,
+  getConfidenceLevel,
+} from "@/components/admin/admin-ocr-review-screen";
 import type { AdminPageRevisionDetailDTO } from "@/types/admin";
 import {
   ADMIN_BOOK_ID,
@@ -14,6 +17,17 @@ import {
 } from "@/test/fixtures/admin-service-fixture";
 
 describe("AdminOcrReviewScreen safety boundaries", () => {
+  it("classifies confidence values at the documented boundaries", () => {
+    expect(getConfidenceLevel(0.95)).toBe("Cao");
+    expect(getConfidenceLevel(0.81)).toBe("Cao");
+    expect(getConfidenceLevel(0.8)).toBe("Trung bình");
+    expect(getConfidenceLevel(0.6)).toBe("Trung bình");
+    expect(getConfidenceLevel(0.5)).toBe("Thấp");
+    expect(getConfidenceLevel(null)).toBe("Chưa xác định");
+    expect(getConfidenceLevel(undefined)).toBe("Chưa xác định");
+    expect(getConfidenceLevel(Number.NaN)).toBe("Chưa xác định");
+  });
+
   it("returns safe not-found for a page outside the requested book without fetching its content", async () => {
     const services = createAdminServiceFixture();
     const foreignPageId = "83000000-0000-4000-8000-000000000003";
@@ -197,6 +211,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(medium).toHaveClass("border-yellow-500");
     expect(low).toHaveClass("border-red-600");
     expect(unknown).toHaveClass("border-orange-600");
+    expect(
+      screen.getByRole("group", { name: "Thống kê đối chiếu OCR" }),
+    ).toBeInTheDocument();
     const stats = screen.getByRole("group", {
       name: "Thống kê confidence OCR",
     });

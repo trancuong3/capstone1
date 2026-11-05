@@ -1,4 +1,5 @@
 import logging
+import threading
 from functools import lru_cache
 
 from supabase import Client, ClientOptions, create_client
@@ -19,12 +20,39 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+_client_lock = threading.Lock()
+
+
+def _init_supabase_client() -> Client:
+    """Tạo client với cấu hình server-side không lưu session cục bộ, tránh xung đột connection."""
+    return create_client(
+        SUPABASE_URL,
+        SUPABASE_KEY,
+        options=_AdminClientOptions(
+            auto_refresh_token=False,
+            persist_session=False,
+        ),
+    )
+
+
+supabase: Client = _init_supabase_client()
 
 
 def get_supabase_client() -> Client:
     """Return the existing Supabase client used for token verification."""
+    global supabase
     return supabase
+
+
+def reset_supabase_client() -> Client:
+    """Khởi tạo lại client và connection pool mới khi phát hiện socket bị máy chủ ngắt kết nối."""
+    global supabase
+    with _client_lock:
+        try:
+            supabase = _init_supabase_client()
+        except Exception as exc:
+            logger.warning("Không thể reset Supabase client: %s", exc)
+        return supabase
 
 
 @lru_cache(maxsize=1)
@@ -39,8 +67,6 @@ def get_supabase_admin_client() -> Client | None:
     return create_client(
         SUPABASE_URL,
         SUPABASE_ADMIN_KEY,
-        # Use SyncClientOptions on supabase-py 2.x (has `storage` attribute)
-        # and fall back to ClientOptions on older installs.
         options=_AdminClientOptions(
             auto_refresh_token=False,
             persist_session=False,

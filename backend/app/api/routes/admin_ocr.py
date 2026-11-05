@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
@@ -14,6 +15,15 @@ from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
 
 router = APIRouter()
+
+
+class AdminOcrAiCorrectRequest(BaseModel):
+    draft_text: str = Field(..., min_length=1)
+
+
+class AdminOcrGenerateQuestionsRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    count: int = Field(default=10, ge=1, le=20)
 
 
 @router.post("/admin/catalog", response_model=AdminBookMetadataResponse, status_code=201)
@@ -33,8 +43,6 @@ async def upload_admin_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # Legacy clients may still submit page_number, but the Service intentionally ignores it.
-    # Page numbers are derived only from the locked PostgreSQL book/page records.
     return await AdminOcrService(db).upload_page(actor_id, book_id, image)
 
 
@@ -99,3 +107,25 @@ async def reprocess_admin_page(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminOcrService(db).reprocess(actor_id, page_id)
+
+
+@router.post("/admin/pages/{page_id}/ai-correct")
+async def ai_correct_page_text(
+    page_id: UUID,
+    payload: AdminOcrAiCorrectRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sửa lỗi chính tả và phục hồi dấu thanh văn bản OCR qua Gemini API."""
+    return await AdminOcrService(db).ai_correct_text(actor_id, page_id, payload.draft_text)
+
+
+@router.post("/admin/pages/{page_id}/generate-questions")
+async def ai_generate_page_questions(
+    page_id: UUID,
+    payload: AdminOcrGenerateQuestionsRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tạo bộ khoảng 10 câu hỏi đọc hiểu cho trẻ em từ nội dung trang qua Gemini API."""
+    return await AdminOcrService(db).ai_generate_questions(actor_id, page_id, payload.text, payload.count)

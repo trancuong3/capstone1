@@ -100,7 +100,6 @@ function unavailable() {
   });
 }
 
-// Test-only responses/spies, not a mutable store or a runtime adapter.
 function createMetadataQualityServiceFixture() {
   const get = vi
     .fn<AdminServices["metadataQuality"]["get"]>()
@@ -214,6 +213,12 @@ export function createAdminServiceFixture() {
       saveDraft: vi
         .fn<AdminServices["ocr"]["saveDraft"]>()
         .mockRejectedValue(unavailable()),
+      aiCorrectText: vi
+        .fn<AdminServices["ocr"]["aiCorrectText"]>()
+        .mockResolvedValue("Nội dung đã sửa bằng AI"),
+      aiGenerateQuestions: vi
+        .fn<AdminServices["ocr"]["aiGenerateQuestions"]>()
+        .mockResolvedValue([]),
     },
     revisions: {
       list: vi
@@ -243,6 +248,7 @@ export function createAdminServiceFixture() {
     },
   } satisfies AdminServices;
 }
+
 export function withAdminFixture(children: ReactNode, services: AdminServices) {
   return createElement(
     AdminServicesContext.Provider,
