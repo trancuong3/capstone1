@@ -50,12 +50,25 @@ export function stripVietnameseAccents(value: string): string {
     .trim();
 }
 
-/**
- * Đánh giá chuẩn xác 3 trạng thái độc lập và tự nhiên:
- * - exact (Xanh lá): Trùng khớp hoàn toàn cả từ ngữ lẫn dấu thanh Unicode NFC.
- * - partial (Vàng): Trùng chữ cái gốc nhưng lệch/thiếu dấu thanh (ví dụ: để vs đế, đên vs đến).
- * - mismatch (Đỏ): Khác chữ cái gốc hoặc thiếu từ.
- */
+export function getConfidenceLevel(
+  confidence: number | null | undefined,
+): "Cao" | "Vừa" | "Thấp" | "Chưa rõ" {
+  if (
+    confidence === null ||
+    confidence === undefined ||
+    Number.isNaN(confidence)
+  ) {
+    return "Chưa rõ";
+  }
+  if (confidence >= 0.8) {
+    return "Cao";
+  }
+  if (confidence >= 0.6) {
+    return "Vừa";
+  }
+  return "Thấp";
+}
+
 export function getWordDisplayStatus(
   word: AdminRevisionWordDTO,
   draftToken: string | undefined,
@@ -68,17 +81,14 @@ export function getWordDisplayStatus(
   const baseBox = stripVietnameseAccents(normBox);
   const baseDraft = stripVietnameseAccents(normDraft);
 
-  // 1. Khác chữ cái gốc -> Không khớp (Đỏ)
   if (baseBox !== baseDraft) {
     return "mismatch";
   }
 
-  // 2. Cùng chữ cái gốc nhưng khác dấu thanh -> Nghi lệch dấu thanh (Vàng)
   if (normBox !== normDraft) {
     return "partial";
   }
 
-  // 3. Khớp hoàn toàn cả chữ cái và dấu thanh -> Chính xác (Xanh lá)
   return "exact";
 }
 
@@ -130,6 +140,8 @@ export function AdminOcrReviewScreen({
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const mountedRef = useRef(false);
+  const wordRefs = useRef(new Map<number, HTMLElement>());
+  const autoScrolledRevisionRef = useRef<string | null>(null);
 
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     setDetail(next);
@@ -211,6 +223,22 @@ export function AdminOcrReviewScreen({
     };
   }, [load]);
 
+  useEffect(() => {
+    if (!detail || words.length === 0) return;
+    if (autoScrolledRevisionRef.current === detail.page_revision_id) return;
+
+    const firstUncertain = words.find(
+      (word) => getConfidenceLevel(word.ocr_confidence) !== "Cao",
+    );
+    if (firstUncertain) {
+      autoScrolledRevisionRef.current = detail.page_revision_id;
+      const element =
+        wordRefs.current.get(firstUncertain.word_index) ||
+        document.getElementById(`ocr-word-${firstUncertain.word_index}`);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [detail, words]);
+
   async function chooseRevision(revisionId: string) {
     const requestId = ++revisionChoiceRequestIdRef.current;
     try {
@@ -236,6 +264,11 @@ export function AdminOcrReviewScreen({
     (index: number | null) => {
       setSelectedWord(index);
       if (index === null) return;
+
+      const element =
+        wordRefs.current.get(index) ||
+        document.getElementById(`ocr-word-${index}`);
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
 
       const textarea = document.getElementById(
         "ocr-text",
@@ -275,7 +308,7 @@ export function AdminOcrReviewScreen({
               patch.text !== undefined
                 ? patch.text.normalize("NFC")
                 : word.text,
-            ocr_confidence: patch.ocr_confidence ?? 1.0,
+            ocr_confidence: patch.ocr_confidence ?? word.ocr_confidence,
             normalized_text:
               patch.text === undefined
                 ? (patch.normalized_text ?? word.normalized_text)
@@ -362,12 +395,7 @@ export function AdminOcrReviewScreen({
 
       const result = syncPageTextToWords(correctedText, words);
       if (result.status === "synchronized") {
-        setWords(
-          result.words.map((w) => ({
-            ...w,
-            ocr_confidence: 1.0,
-          })),
-        );
+        setWords([...result.words]);
         setWordSyncError(null);
       }
       setNotice(
@@ -413,22 +441,11 @@ export function AdminOcrReviewScreen({
     setBusy("save");
     setNotice(null);
     try {
-      const currentDraftTokens = tokenizePageText(draftText);
-      const wordsToSave = words.map((w) => {
-        const status = getWordDisplayStatus(
-          w,
-          currentDraftTokens[w.word_index],
-        );
-        const conf =
-          status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.5;
-        return { ...w, ocr_confidence: conf };
-      });
-
       const saved = await ocr.saveDraft(
         pageId,
         detail.page_revision_id,
         draftText,
-        wordsToSave,
+        words,
       );
       applyDetail(saved);
       setNotice("Đã lưu bản nháp vào database.");
@@ -447,21 +464,10 @@ export function AdminOcrReviewScreen({
     setBusy("verify");
     setNotice(null);
     try {
-      const currentDraftTokens = tokenizePageText(draftText);
-      const wordsToVerify = words.map((w) => {
-        const status = getWordDisplayStatus(
-          w,
-          currentDraftTokens[w.word_index],
-        );
-        const conf =
-          status === "exact" ? 1.0 : status === "partial" ? 0.75 : 0.5;
-        return { ...w, ocr_confidence: conf };
-      });
-
       const verifiedResult = await revisions.verify(pageId, {
         page_revision_id: detail.page_revision_id,
         corrected_text: draftText,
-        words: wordsToVerify,
+        words,
       });
       applyDetail(verifiedResult);
       setHistory(await revisions.list(pageId));
@@ -561,10 +567,13 @@ export function AdminOcrReviewScreen({
   }, [words, draftTokens]);
 
   const firstWordToReview = useMemo(() => {
-    return words.find((word) => {
-      const status = getWordDisplayStatus(word, draftTokens[word.word_index]);
-      return status === "partial" || status === "mismatch";
-    });
+    return (
+      words.find((w) => getConfidenceLevel(w.ocr_confidence) !== "Cao") ||
+      words.find((word) => {
+        const status = getWordDisplayStatus(word, draftTokens[word.word_index]);
+        return status === "partial" || status === "mismatch";
+      })
+    );
   }, [words, draftTokens]);
 
   if (error) {
@@ -681,7 +690,13 @@ export function AdminOcrReviewScreen({
                     : "border";
 
                 const matchLabel = getWordMatchLabel(matchStatus);
-                const boxLabel = `Từ ${word.word_index + 1}: ${word.text} · ${matchLabel}`;
+                const confText =
+                  word.ocr_confidence !== null &&
+                  word.ocr_confidence !== undefined
+                    ? `Confidence OCR: ${word.ocr_confidence}`
+                    : "Confidence OCR: chưa rõ";
+                const confLevel = getConfidenceLevel(word.ocr_confidence);
+                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText}. Mức ${confLevel}`;
                 const boxTitle = `${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
 
                 return (
@@ -909,6 +924,11 @@ export function AdminOcrReviewScreen({
 
                 return (
                   <div
+                    ref={(el) => {
+                      if (el) wordRefs.current.set(word.word_index, el);
+                      else wordRefs.current.delete(word.word_index);
+                    }}
+                    id={`ocr-word-${word.word_index}`}
                     className={
                       word.word_index === selectedWord
                         ? "rounded-control border-2 border-orange-500 p-3"

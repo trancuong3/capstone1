@@ -51,7 +51,8 @@ export function tokenizePageText(value: string): string[] {
 }
 
 /**
- * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token khớp 1:1.
+ * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token khớp 1:1,
+ * bảo toàn nguyên vẹn ocr_confidence và bbox gốc của từng từ.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -71,13 +72,11 @@ export function syncPageTextToWords(
 
   const words = existingWords.map((word, index) => {
     const token = tokens[index];
-    const isMatched =
-      normalizeVietnameseWord(word.text) === normalizeVietnameseWord(token);
     return {
       ...word,
       text: token,
       normalized_text: normalizeVietnameseWord(token),
-      ocr_confidence: isMatched ? (word.ocr_confidence ?? 1.0) : 1.0,
+      ocr_confidence: word.ocr_confidence,
       bbox: [...word.bbox] as [number, number, number, number],
     };
   });
