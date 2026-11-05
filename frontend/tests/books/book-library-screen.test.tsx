@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BookLibraryScreen } from "@/components/books/book-library-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import {
   apiFetchFixture,
   installApiFetchFixture,
@@ -25,6 +26,10 @@ vi.mock("@/lib/supabase/client", () => ({
     },
   }),
 }));
+const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
+}));
 vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
@@ -45,9 +50,11 @@ function catalogResponse(input: RequestInfo | URL, empty = false) {
 }
 function renderLibrary() {
   return render(
-    <AppServicesProvider>
-      <BookLibraryScreen requestedChildId={TEST_CHILD_ID} />
-    </AppServicesProvider>,
+    <WithSelectedChild childId={TEST_CHILD_ID}>
+      <AppServicesProvider>
+        <BookLibraryScreen />
+      </AppServicesProvider>
+    </WithSelectedChild>,
   );
 }
 describe("BookLibraryScreen with real API adapters", () => {
@@ -64,10 +71,7 @@ describe("BookLibraryScreen with real API adapters", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: `Đọc sách ${bookFixture.title}` }),
-    ).toHaveAttribute(
-      "href",
-      `/books/${TEST_BOOK_ID}?childId=${TEST_CHILD_ID}`,
-    );
+    ).toHaveAttribute("href", `/books/${TEST_BOOK_ID}`);
     const catalogs = apiFetchFixture.mock.calls.filter(
       ([input]) => new URL(String(input)).pathname === "/books/catalog",
     );

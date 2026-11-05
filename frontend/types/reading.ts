@@ -188,11 +188,44 @@ export type ReadingConnectionState =
 
 export type ReadingReconnectDemoMode = "recover" | "timeout";
 export type DeviceKind = "camera" | "microphone";
-export type DevicePermissionUiState = "ready" | "denied";
+export type DevicePermissionUiState =
+  | "checking"
+  | "prompt"
+  | "granted"
+  | "denied"
+  | "unavailable"
+  | "unsupported"
+  | "no_device"
+  | "device_busy"
+  | "error"
+  | "unknown"
+  /** Backward-compatible state used by the existing reading-ready screen. */
+  | "ready";
+
+export type MicrophonePermissionUiState =
+  | "checking"
+  | "granted"
+  | "prompt"
+  | "denied"
+  | "unsupported"
+  | "no_device"
+  | "device_busy"
+  | "error";
 
 export interface DevicePermissionSnapshotUI {
   readonly camera: DevicePermissionUiState;
   readonly microphone: DevicePermissionUiState;
+  readonly mediaDevicesSupported?: boolean;
+  readonly mediaRecorderSupported?: boolean;
+  readonly secureContext?: boolean;
+}
+
+export interface DevicePermissionCheckResult {
+  readonly status: DevicePermissionUiState;
+  /** True only after getUserMedia returned a live track for this device. */
+  readonly verified: boolean;
+  readonly message: string;
+  readonly mediaRecorderSupported: boolean;
 }
 
 export interface ReadingRealtimeSnapshotUI {

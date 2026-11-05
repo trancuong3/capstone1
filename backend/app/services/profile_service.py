@@ -4,8 +4,10 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from app.database.config import SUPABASE_AVATAR_BUCKET
 from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.repositories.profile_repository import ProfileRepository
+from app.services.storage_service import create_signed_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +99,7 @@ class ProfileService:
     async def update_contact_phone_for_owner(
         self,
         parent_id: UUID,
-        contact_phone: str,
+        contact_phone: str | None,
     ) -> dict[str, Any]:
         """Update the authenticated profile's contact number without Auth OTP."""
         profile = await self.repository.update_contact_phone(
@@ -160,6 +162,7 @@ class ProfileService:
             key=lambda child: (child.CreatedAt, str(child.Id)),
             reverse=True,
         )
+        avatar_path = getattr(profile, "AvatarPath", None)
 
         return {
             "id": profile.Id,
@@ -171,6 +174,14 @@ class ProfileService:
             "pending_email": pending_email,
             "email_verified": email_verified,
             "contact_info_status": status_value,
+            "avatar_url": (
+                create_signed_image_url(
+                    avatar_path,
+                    bucket_name=SUPABASE_AVATAR_BUCKET,
+                )
+                if isinstance(avatar_path, str) and avatar_path
+                else None
+            ),
             # Deliberately expose only a small display-safe child summary.
             # Settings JSON and reading/event data stay out of the profile response.
             "children": [
@@ -179,6 +190,15 @@ class ProfileService:
                     "alias": child.Alias,
                     "grade": child.Grade,
                     "created_at": child.CreatedAt,
+                    "avatar_url": (
+                        create_signed_image_url(
+                            getattr(child, "AvatarPath", None),
+                            bucket_name=SUPABASE_AVATAR_BUCKET,
+                        )
+                        if isinstance(getattr(child, "AvatarPath", None), str)
+                        and getattr(child, "AvatarPath", None)
+                        else None
+                    ),
                 }
                 for child in children
             ],

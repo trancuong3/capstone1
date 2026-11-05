@@ -71,20 +71,29 @@ async function assertLayout(page: Page) {
   ).toBeLessThanOrEqual(dimensions.width);
 }
 
+async function selectChildAndOpenBooks(page: Page) {
+  await page.goto("/dashboard");
+  const childButton = page.getByRole("button", {
+    name: `${child.alias}, lớp ${child.grade}`,
+  });
+  await childButton.click();
+  await expect(childButton).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Chọn sách" }).click();
+  await expect(page).toHaveURL(/\/books$/);
+}
+
 test("Parent dashboard → catalog → real book metadata with unavailable preview", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
-  await page.goto("/dashboard");
-  await page.getByRole("link", { name: `${child.alias}, lớp 2` }).click();
-  await expect(page).toHaveURL(new RegExp(`/books\\?childId=${ids.child}`));
+  await selectChildAndOpenBooks(page);
   await page.getByRole("link", { name: `Đọc sách ${book.title}` }).click();
   await expect(
     page.getByRole("heading", { name: book.title, exact: true }).first(),
   ).toBeVisible();
   await expect(page.getByText("Ảnh xem trước chưa sẵn sàng")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Bắt đầu đọc" }),
+    page.getByRole("button", { name: "Chuẩn bị đọc" }),
   ).toBeDisabled();
   expect(api.unexpected).toEqual([]);
 });
@@ -93,7 +102,7 @@ test("Parent search, no result, keyboard clear and API retry", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
-  await page.goto("/books?state=empty");
+  await selectChildAndOpenBooks(page);
   await expect(
     page.getByRole("link", { name: `Đọc sách ${book.title}` }),
   ).toBeVisible();
@@ -107,7 +116,9 @@ test("Parent search, no result, keyboard clear and API retry", async ({
     page.getByRole("link", { name: `Đọc sách ${book.title}` }),
   ).toBeVisible();
   api.catalogStatus = 503;
-  await page.reload();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.getByRole("button", { name: "Chọn sách" }).click();
   await expect(page.getByText("Chưa tải được thư viện sách")).toBeVisible();
   await expect(page.getByText("private sql token")).toHaveCount(0);
   api.catalogStatus = 200;
@@ -118,18 +129,21 @@ test("Parent search, no result, keyboard clear and API retry", async ({
   expect(api.unexpected).toEqual([]);
 });
 
-test("Parent actual empty catalog and foreign book not found", async ({
+test("Parent empty catalog and detail route require a selected child", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
   api.emptyCatalog = true;
-  await page.goto("/books");
+  await selectChildAndOpenBooks(page);
   await expect(
     page.getByRole("heading", { name: "Thư viện đang được cập nhật" }),
   ).toBeVisible();
   await page.goto(`/books/${ids.page}`);
+  await expect(page).toHaveURL(
+    /\/dashboard\?focus=child-selection&reason=missing$/,
+  );
   await expect(
-    page.getByRole("heading", { name: "Không tìm thấy sách" }),
+    page.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });

@@ -11,7 +11,7 @@ Các khu vực giao diện đã có:
 - Đăng nhập, đăng ký và khôi phục mật khẩu.
 - Hồ sơ ba mẹ và hồ sơ bé.
 - Thư viện, tìm kiếm, lọc và chi tiết sách.
-- Luồng đọc mô phỏng cùng các trạng thái camera, microphone, kết nối, câu hỏi và hoàn thành.
+- Chọn một hồ sơ bé đang hoạt động làm hồ sơ đọc hiện tại; xác minh quyền microphone trước khi tạo buổi đọc và chỉ mở camera sau thao tác rõ ràng trên scanner.
 - Lịch sử đọc, báo cáo tiến bộ và danh sách từ cần luyện.
 - Khu vực Admin quản lý sách, trang sách, OCR/revision, audit log và health.
 
@@ -109,25 +109,37 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Auth     | `/forgot-password`                     | Yêu cầu khôi phục mật khẩu                                 |
 | Auth     | `/reset-password`                      | Đặt mật khẩu mới và trạng thái token                       |
 | Parent   | `/dashboard`                           | Tổng quan gia đình và lối tắt đọc sách/báo cáo             |
+| Parent   | `/book-scanner`                        | Quét trang sách sau khi phụ huynh chủ động bật camera      |
 | Parent   | `/profile`                             | Xem, chỉnh sửa hồ sơ phụ huynh                             |
 | Parent   | `/children`                            | Danh sách hồ sơ bé                                         |
 | Parent   | `/children/new`                        | Tạo hồ sơ bé; nhận `from=register` cho onboarding          |
 | Parent   | `/children/[childId]`                  | Xem/chỉnh sửa hồ sơ bé thuộc tài khoản hiện tại            |
 | Books    | `/books`                               | Tìm kiếm, lọc danh mục ACTIVE + VERIFIED                   |
-| Books    | `/books/[bookId]`                      | Chi tiết, trang xem trước và bắt đầu đọc                   |
+| Books    | `/books/[bookId]`                      | Chi tiết, chọn trang bắt đầu và khoảng trang               |
+| Reading  | `/reading-preparation`                 | Xác minh microphone và tạo session cho hồ sơ đã chọn       |
 | Reading  | `/reading/[sessionId]`                 | Trình diễn trạng thái buổi đọc, không dùng camera/mic thật |
 | Sessions | `/sessions`                            | Lịch sử buổi đọc theo bé                                   |
 | Sessions | `/sessions/[sessionId]`                | Chi tiết lịch sử gắn revision                              |
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
 | Reports  | `/reports/difficult-words`             | Từ khó trong cửa sổ 90 ngày                                |
 | Admin    | `/admin/login`                         | Đăng nhập Admin bằng Supabase và kiểm tra role             |
-| Admin    | `/admin/parents`                       | Danh sách hồ sơ phụ huynh từ database                       |
+| Admin    | `/admin/parents`                       | Danh sách hồ sơ phụ huynh từ database                      |
 | Admin    | `/admin/books`                         | Danh mục, tìm kiếm và lọc vận hành                         |
 | Admin    | `/admin/books/new`                     | Tạo sách                                                   |
 | Admin    | `/admin/books/[bookId]`                | Chi tiết sách, upload trang, lifecycle                     |
 | Admin    | `/admin/books/[bookId]/pages/[pageId]` | Review OCR/revision, verify và reprocess                   |
 | Admin    | `/admin/audit-logs`                    | Nhật ký kiểm toán an toàn                                  |
 | Admin    | `/admin/health`                        | Trạng thái vận hành mô phỏng                               |
+
+### Luồng xác minh thiết bị và quét trang sách
+
+1. Dashboard là nơi duy nhất để chọn hồ sơ bé cho luồng đọc. Chọn một hồ sơ trước khi bấm **Quét sách** hoặc **Chọn sách**. Lựa chọn được giữ trong bộ nhớ của tab; chưa chọn thì hai thao tác đều bị khóa.
+2. `/books`, `/books/[bookId]`, `/book-scanner` và `/reading-preparation` xác minh lại hồ sơ đã chọn bằng dịch vụ có xác thực. Nếu hồ sơ thiếu, không còn hợp lệ hoặc không thuộc tài khoản hiện tại, ứng dụng xóa lựa chọn và đưa phụ huynh về Dashboard. Query string không thể chọn thay hồ sơ.
+3. `/book-scanner` chỉ đọc trạng thái quyền camera khi mở. Camera chỉ được yêu cầu sau khi phụ huynh bấm **Bật camera để quét**; khi rời scanner hoặc nhận diện xong, stream, tracks và tiến trình quét đang chờ được dừng. Chỉ kết quả có `bookId` và `pageId` hợp lệ mới được mở chi tiết sách cùng trang OCR và độ tin cậy.
+4. Trang chi tiết sách cho phép chọn trang bắt đầu và khoảng trang rồi mở `/reading-preparation`. Trang chuẩn bị chỉ yêu cầu microphone sau thao tác **Kiểm tra và cấp quyền microphone**; bước xác minh mở luồng âm thanh tạm, xác nhận audio track đang hoạt động rồi dừng mọi track. Không có truy cập camera trên trang này.
+5. Nút **Bắt đầu đọc** chỉ bật sau khi hồ sơ và phạm vi trang hợp lệ, microphone đã xác minh và quyền chưa bị thu hồi. Ứng dụng xác minh lại hồ sơ ngay trước khi tạo đúng một Reading Session. Session giữ `childId`, `bookId`, trang bắt đầu/kết thúc và revision trang đã chọn. Nhận diện trang hoặc mở trang chuẩn bị không tự tạo session.
+
+Permissions API không được hỗ trợ đồng nhất trên mọi trình duyệt nên trạng thái không truy vấn được hiển thị là chưa xác định, không tự coi là đã cấp quyền. Cấp quyền camera và microphone là hai thao tác độc lập. Trình duyệt cần HTTPS hoặc localhost; quyền website có thể bị thay đổi và cần xác minh lại. Việc chọn hồ sơ chỉ nằm trong bộ nhớ tab và không thay thế xác thực người dùng hoặc kiểm tra quyền sở hữu ở backend.
 
 Các route Parent yêu cầu `profiles.role = parent`; các route `/admin/**` (trừ `/admin/login`) yêu cầu `profiles.role = admin`. Người chưa đăng nhập được chuyển đến trang đăng nhập tương ứng, còn tài khoản sai role được đưa về khu vực hợp lệ của mình. Role chỉ được đọc từ bảng `profiles`, không tin `user_metadata.role` hoặc query parameter.
 
@@ -258,8 +270,8 @@ Các viewport nghiệm thu mục tiêu: `1440`, `1024`, `768` và `390` px.
 - FastAPI, PostgreSQL/Storage persistence cho các module nghiệp vụ
 - Di chuyển profile legacy để validate khóa ngoại Auth
 - HTTP API, WebSocket, reading-session token và realtime server
-- Camera, microphone, MediaDevices, ghi/stream audio/video
-- OpenCV, OCR/Tesseract, page matching thực, STT, TTS hoặc provider AI
+- Microphone recording/STT, WebSocket, OpenCV/Tesseract OCR, STT, TTS, alignment/scoring và AI thật
+- Camera permission preflight và camera capture/page-match chỉ hoạt động ở luồng scanner khi API backend tương ứng sẵn sàng
 - Alignment/scoring, reading-event inference, Tutor/comprehension engine thật
 - Upload/storage, operational health và audit backend thật
 

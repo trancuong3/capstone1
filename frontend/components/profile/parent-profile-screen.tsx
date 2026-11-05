@@ -7,21 +7,21 @@ import {
   Phone,
   RefreshCw,
   ShieldCheck,
-  UserRound,
-  UsersRound,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import {
-  ParentProfileForm,
-  type ParentProfileEditableField,
-} from "@/components/profile/parent-profile-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import {
+  ProfileAvatar,
+  resolveDisplayName,
+} from "@/components/common/profile-avatar";
 import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ParentProfileForm } from "@/components/profile/parent-profile-form";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useProfileService } from "@/hooks/use-profile-service";
 import type { ParentProfileDTO } from "@/types/profile";
 
@@ -104,13 +104,11 @@ function ParentProfileLoadingState() {
 
 export function ParentProfileScreen() {
   const profileService = useProfileService();
+  const authRuntime = useAuthRuntime();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ProfileState>({ status: "loading" });
-  const [editingField, setEditingField] =
-    useState<ParentProfileEditableField | null>(null);
-  const [fieldNotices, setFieldNotices] = useState<
-    Partial<Record<ParentProfileEditableField, string>>
-  >({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -120,55 +118,18 @@ export function ParentProfileScreen() {
 
       try {
         const profile = await profileService.get();
-        if (isActive) {
-          setState({ status: "ready", profile });
-        }
+        if (!isActive) return;
+        setState({ status: "ready", profile });
       } catch {
-        if (isActive) {
-          setState({ status: "error" });
-        }
+        if (isActive) setState({ status: "error" });
       }
     }
 
     void loadProfile();
-
     return () => {
       isActive = false;
     };
   }, [profileService, requestKey]);
-
-  function beginEditing(field: ParentProfileEditableField) {
-    setFieldNotices((current) => ({ ...current, [field]: undefined }));
-    setEditingField(field);
-  }
-
-  function handleSaved(
-    field: ParentProfileEditableField,
-    updatedProfile: ParentProfileDTO,
-    message: string,
-  ) {
-    setState({ status: "ready", profile: updatedProfile });
-    window.dispatchEvent(
-      new CustomEvent("viread:profile-updated", {
-        detail: { displayName: updatedProfile.display_name ?? "" },
-      }),
-    );
-    setEditingField(null);
-    setFieldNotices((current) => ({ ...current, [field]: message }));
-  }
-
-  function renderInlineEditor(field: ParentProfileEditableField) {
-    if (editingField !== field || state.status !== "ready") return null;
-
-    return (
-      <ParentProfileForm
-        field={field}
-        onCancel={() => setEditingField(null)}
-        onSaved={handleSaved}
-        profile={state.profile}
-      />
-    );
-  }
 
   if (state.status === "loading") {
     return <ParentProfileLoadingState />;
@@ -193,6 +154,26 @@ export function ParentProfileScreen() {
   }
 
   const { profile } = state;
+  const displayName = resolveDisplayName(
+    profile.display_name,
+    authRuntime.session?.user.display_name ?? null,
+    profile.email,
+  );
+
+  function handleSaved(updatedProfile: ParentProfileDTO, message: string) {
+    setState({ status: "ready", profile: updatedProfile });
+    window.dispatchEvent(
+      new CustomEvent("viread:profile-updated", {
+        detail: { displayName: updatedProfile.display_name ?? "" },
+      }),
+    );
+    setIsEditing(false);
+    setSaveNotice(message);
+  }
+
+  function handlePartialSaved(updatedProfile: ParentProfileDTO) {
+    setState({ status: "ready", profile: updatedProfile });
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-[800px] flex-col gap-6">
@@ -203,67 +184,61 @@ export function ParentProfileScreen() {
         title="Thông tin tài khoản"
       />
 
-      <Card className="sm:p-10">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="flex size-24 shrink-0 items-center justify-center rounded-full bg-sky text-primary">
-            <UserRound aria-hidden="true" className="size-12" />
-          </div>
-          <div className="min-w-0 flex-1">
-            {editingField === "display_name" ? (
-              renderInlineEditor("display_name")
-            ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="break-words text-2xl font-extrabold leading-[1.4] text-ink">
-                  {profile.display_name || "Chưa cập nhật tên hiển thị"}
-                </h2>
-                <Button
-                  aria-label="Chỉnh sửa tên hiển thị"
-                  className="!h-10 !w-10 shrink-0 px-2"
-                  onClick={() => beginEditing("display_name")}
-                  title="Chỉnh sửa tên hiển thị"
-                  variant="quiet"
-                >
-                  <Pencil aria-hidden="true" className="size-4" />
-                </Button>
-              </div>
-            )}
-            {editingField !== "display_name" ? (
-              <p className="mt-1 text-body text-muted">
-                {getRoleLabel(profile.role)}
-              </p>
-            ) : null}
-            {fieldNotices.display_name ? (
-              <p className="mt-2 text-sm text-primary" role="status">
-                {fieldNotices.display_name}
-              </p>
-            ) : null}
-          </div>
-        </div>
+      {saveNotice ? (
+        <StatusMessage tone="success" role="status">
+          {saveNotice}
+        </StatusMessage>
+      ) : null}
 
-        <dl className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="min-w-0 rounded-control bg-white p-4">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <Mail aria-hidden="true" className="size-5" />
-              Email
-            </dt>
-            {editingField === "email" ? (
-              renderInlineEditor("email")
-            ) : (
-              <>
-                <div className="mt-2 flex min-w-0 items-start gap-2">
-                  <dd className="min-w-0 flex-1 break-words text-body font-bold text-ink">
-                    {contactValue(profile.email, profile.contact_info_status)}
-                  </dd>
-                  <Button
-                    aria-label="Chỉnh sửa email"
-                    className="!h-10 !w-10 shrink-0 px-2"
-                    onClick={() => beginEditing("email")}
-                    title="Chỉnh sửa email"
-                    variant="quiet"
-                  >
-                    <Pencil aria-hidden="true" className="size-4" />
-                  </Button>
-                </div>
+      <Card className="sm:p-10">
+        {isEditing ? (
+          <ParentProfileForm
+            displayName={displayName ?? ""}
+            onCancel={() => setIsEditing(false)}
+            onPartialSaved={handlePartialSaved}
+            onSaved={handleSaved}
+            profile={profile}
+          />
+        ) : (
+          <>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <ProfileAvatar
+                ariaLabel={`Ảnh đại diện của ${displayName ?? "ba mẹ"}`}
+                displayName={displayName}
+                imageUrl={profile.avatar_url}
+                size="lg"
+              />
+              <div className="min-w-0 flex-1">
+                <h2 className="break-words text-2xl font-extrabold leading-[1.4] text-ink">
+                  {displayName || "Chưa cập nhật tên hiển thị"}
+                </h2>
+                <p className="mt-1 text-body text-muted">
+                  {getRoleLabel(profile.role)}
+                </p>
+              </div>
+              <Button
+                className="sm:w-auto sm:px-6"
+                onClick={() => {
+                  setSaveNotice(null);
+                  setIsEditing(true);
+                }}
+                type="button"
+                variant="secondary"
+              >
+                <Pencil aria-hidden="true" className="size-5" />
+                Chỉnh sửa
+              </Button>
+            </div>
+
+            <dl className="mt-8 grid gap-4 sm:grid-cols-2">
+              <div className="min-w-0 rounded-control bg-white p-4">
+                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                  <Mail aria-hidden="true" className="size-5" />
+                  Email
+                </dt>
+                <dd className="mt-2 break-words text-body font-bold text-ink">
+                  {contactValue(profile.email, profile.contact_info_status)}
+                </dd>
                 <p className="mt-1 text-label text-muted">
                   {emailVerificationLabel(
                     profile.email,
@@ -272,76 +247,45 @@ export function ParentProfileScreen() {
                   )}
                 </p>
                 {profile.pending_email ? (
-                  <p className="mt-2 break-words text-sm text-amber-700">
+                  <p className="mt-2 break-words text-sm text-amber-800">
                     Đang chờ xác minh email mới:{" "}
                     <strong>{profile.pending_email}</strong>
                   </p>
                 ) : null}
-              </>
-            )}
-            {fieldNotices.email ? (
-              <p
-                className="mt-2 break-words text-sm text-primary"
-                role="status"
-              >
-                {fieldNotices.email}
-              </p>
-            ) : null}
-          </div>
+              </div>
 
-          <div className="min-w-0 rounded-control bg-white p-4">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <Phone aria-hidden="true" className="size-5" />
-              Số điện thoại liên hệ
-            </dt>
-            {editingField === "contact_phone" ? (
-              renderInlineEditor("contact_phone")
-            ) : (
-              <div className="mt-2 flex min-w-0 items-start gap-2">
-                <dd className="min-w-0 flex-1 break-words text-body font-bold text-ink">
+              <div className="min-w-0 rounded-control bg-white p-4">
+                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                  <Phone aria-hidden="true" className="size-5" />
+                  Số điện thoại liên hệ
+                </dt>
+                <dd className="mt-2 break-words text-body font-bold text-ink">
                   {profile.contact_phone || "Chưa cập nhật"}
                 </dd>
-                <Button
-                  aria-label="Chỉnh sửa số điện thoại liên hệ"
-                  className="!h-10 !w-10 shrink-0 px-2"
-                  onClick={() => beginEditing("contact_phone")}
-                  title="Chỉnh sửa số điện thoại liên hệ"
-                  variant="quiet"
-                >
-                  <Pencil aria-hidden="true" className="size-4" />
-                </Button>
               </div>
-            )}
-            {fieldNotices.contact_phone ? (
-              <p
-                className="mt-2 break-words text-sm text-primary"
-                role="status"
-              >
-                {fieldNotices.contact_phone}
-              </p>
-            ) : null}
-          </div>
 
-          <div className="rounded-control bg-white p-4">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <ShieldCheck aria-hidden="true" className="size-5" />
-              Vai trò
-            </dt>
-            <dd className="mt-2 text-body font-bold text-ink">
-              {getRoleLabel(profile.role)}
-            </dd>
-          </div>
+              <div className="rounded-control bg-white p-4">
+                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                  <ShieldCheck aria-hidden="true" className="size-5" />
+                  Vai trò
+                </dt>
+                <dd className="mt-2 text-body font-bold text-ink">
+                  {getRoleLabel(profile.role)}
+                </dd>
+              </div>
 
-          <div className="rounded-control bg-white p-4">
-            <dt className="flex items-center gap-2 text-label font-bold text-muted">
-              <CalendarDays aria-hidden="true" className="size-5" />
-              Ngày tạo tài khoản
-            </dt>
-            <dd className="mt-2 text-body font-bold text-ink">
-              {formatCreatedDate(profile.created_at)}
-            </dd>
-          </div>
-        </dl>
+              <div className="rounded-control bg-white p-4">
+                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                  <CalendarDays aria-hidden="true" className="size-5" />
+                  Ngày tạo tài khoản
+                </dt>
+                <dd className="mt-2 text-body font-bold text-ink">
+                  {formatCreatedDate(profile.created_at)}
+                </dd>
+              </div>
+            </dl>
+          </>
+        )}
       </Card>
 
       <section
@@ -374,9 +318,12 @@ export function ParentProfileScreen() {
             {profile.children.map((child) => (
               <Card className="gap-3" key={child.id}>
                 <div className="flex items-start gap-3">
-                  <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-sky text-primary">
-                    <UsersRound aria-hidden="true" className="size-6" />
-                  </div>
+                  <ProfileAvatar
+                    ariaLabel={`Ảnh đại diện của ${child.alias}`}
+                    displayName={child.alias}
+                    imageUrl={child.avatar_url}
+                    size="md"
+                  />
                   <div className="min-w-0">
                     <h3 className="break-words text-lg font-extrabold text-ink">
                       {child.alias}
@@ -393,18 +340,9 @@ export function ParentProfileScreen() {
             ))}
           </div>
         ) : (
-          <Card>
-            <h3 className="text-lg font-bold text-ink">Chưa có hồ sơ trẻ</h3>
-            <p className="mt-1 text-body text-muted">
-              Ba mẹ có thể tạo hồ sơ cho trẻ để bắt đầu sử dụng ViRead.
-            </p>
-            <Link
-              className="mt-3 inline-flex font-bold text-primary underline-offset-4 hover:underline"
-              href="/children/new"
-            >
-              Tạo hồ sơ trẻ
-            </Link>
-          </Card>
+          <StatusMessage tone="info">
+            Chưa có hồ sơ trẻ nào được liên kết với tài khoản.
+          </StatusMessage>
         )}
       </section>
     </section>

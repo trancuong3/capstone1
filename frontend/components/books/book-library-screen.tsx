@@ -5,13 +5,14 @@ import { useEffect, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useBookService } from "@/hooks/use-book-service";
-import { useChildService } from "@/hooks/use-child-service";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
@@ -19,36 +20,25 @@ import type {
   BookCollectionType,
   ChildBookCollectionDTO,
 } from "@/types/reading-management";
-import { CHILD_GRADES, type ChildProfileDTO } from "@/types/child";
-
-type ChildContextState =
-  | { status: "loading" }
-  | { status: "ready"; child: ChildProfileDTO | null }
-  | { status: "error" };
+import { CHILD_GRADES } from "@/types/child";
 
 type CatalogState =
   | { status: "loading" }
   | { status: "ready"; books: BookListItemDTO[]; hasCatalog: boolean }
   | { status: "error" };
 
-interface BookLibraryScreenProps {
-  requestedChildId?: string;
-}
-
-export function BookLibraryScreen({
-  requestedChildId,
-}: BookLibraryScreenProps) {
+export function BookLibraryScreen() {
   const bookService = useBookService();
-  const childService = useChildService();
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const readingManagementService = useReadingManagementService();
-  const [childState, setChildState] = useState<ChildContextState>({
-    status: "loading",
-  });
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: "loading",
   });
   const [search, setSearch] = useState("");
-  const [selectedGrade, setSelectedGrade] = useState<number | null>(null);
+  const [gradeSelection, setGradeSelection] = useState<{
+    childId: string;
+    grade: number | null;
+  } | null>(null);
   const [requestKey, setRequestKey] = useState(0);
   const [savedCollections, setSavedCollections] = useState<
     ChildBookCollectionDTO[]
@@ -59,39 +49,15 @@ export function BookLibraryScreen({
     tone: "success" | "error";
     text: string;
   } | null>(null);
-  const selectedChildId =
-    childState.status === "ready" ? (childState.child?.id ?? "") : "";
+  const child = childState.status === "ready" ? childState.child : null;
+  const selectedChildId = child?.id ?? "";
+  const selectedGrade = child
+    ? gradeSelection && gradeSelection.childId === child.id
+      ? gradeSelection.grade
+      : child.grade
+    : null;
   const visibleSavedCollections =
     savedCollectionOwner === selectedChildId ? savedCollections : [];
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadChild() {
-      setChildState({ status: "loading" });
-      try {
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
-          : ((await childService.list())[0] ?? null);
-
-        if (isActive) {
-          setChildState({ status: "ready", child });
-          if (child) {
-            setSelectedGrade((current) => current ?? child.grade);
-          }
-        }
-      } catch {
-        if (isActive) {
-          setChildState({ status: "error" });
-        }
-      }
-    }
-
-    void loadChild();
-    return () => {
-      isActive = false;
-    };
-  }, [childService, requestedChildId, requestKey]);
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -210,27 +176,50 @@ export function BookLibraryScreen({
     return () => {
       isActive = false;
     };
-  }, [bookService, childState.status, requestKey, search, selectedGrade]);
+  }, [
+    bookService,
+    childState.status,
+    requestKey,
+    search,
+    selectedChildId,
+    selectedGrade,
+  ]);
 
-  const child = childState.status === "ready" ? childState.child : null;
+  if (childState.status === "loading" || childState.status === "redirecting") {
+    return (
+      <section
+        aria-busy="true"
+        className="mx-auto w-full max-w-[1130px] px-4 py-8"
+      >
+        <span className="sr-only" role="status">
+          Đang xác minh hồ sơ trẻ…
+        </span>
+        <Skeleton className="h-14 w-full max-w-sm rounded-card" />
+      </section>
+    );
+  }
+
+  if (childState.status === "error") {
+    return (
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  }
+
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader child={child} />
-
-      {childState.status === "error" ? (
-        <div className="flex flex-col gap-4">
-          <StatusMessage title="Không thể chọn hồ sơ bé" tone="error">
-            Chưa tải được hồ sơ. Hồ sơ có thể không tồn tại hoặc không thuộc tài
-            khoản hiện tại.
-          </StatusMessage>
-          <Button
-            className="sm:w-auto sm:self-start sm:px-8"
-            onClick={() => setRequestKey((key) => key + 1)}
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden="true" className="size-5" />
-            Thử lại
-          </Button>
+      {child ? (
+        <div className="mx-auto w-full max-w-[1130px]">
+          <SelectedChildIdentity child={child} />
         </div>
       ) : null}
 
@@ -291,7 +280,11 @@ export function BookLibraryScreen({
                       : "bg-white text-ink hover:bg-sky",
                   )}
                   key={grade ?? "all"}
-                  onClick={() => setSelectedGrade(grade)}
+                  onClick={() => {
+                    if (child) {
+                      setGradeSelection({ childId: child.id, grade });
+                    }
+                  }}
                   type="button"
                 >
                   {isSelected ? (
@@ -304,7 +297,7 @@ export function BookLibraryScreen({
           </div>
         </fieldset>
 
-        {childState.status !== "error" && catalogState.status === "loading" ? (
+        {catalogState.status === "loading" ? (
           <div
             aria-busy="true"
             aria-label="Đang tải thư viện sách"
@@ -322,7 +315,7 @@ export function BookLibraryScreen({
           </div>
         ) : null}
 
-        {childState.status === "ready" && catalogState.status === "error" ? (
+        {catalogState.status === "error" ? (
           <div className="flex flex-col gap-4">
             <StatusMessage title="Chưa tải được thư viện sách" tone="error">
               Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
@@ -338,8 +331,7 @@ export function BookLibraryScreen({
           </div>
         ) : null}
 
-        {childState.status === "ready" &&
-        catalogState.status === "ready" &&
+        {catalogState.status === "ready" &&
         catalogState.books.length === 0 &&
         !catalogState.hasCatalog ? (
           <EmptyState
@@ -354,8 +346,7 @@ export function BookLibraryScreen({
           />
         ) : null}
 
-        {childState.status === "ready" &&
-        catalogState.status === "ready" &&
+        {catalogState.status === "ready" &&
         catalogState.books.length === 0 &&
         catalogState.hasCatalog ? (
           <EmptyState
@@ -364,7 +355,10 @@ export function BookLibraryScreen({
                 className="max-w-72"
                 onClick={() => {
                   setSearch("");
-                  setSelectedGrade(null);
+                  setGradeSelection({
+                    childId: selectedChildId,
+                    grade: null,
+                  });
                 }}
                 variant="secondary"
               >
@@ -379,14 +373,11 @@ export function BookLibraryScreen({
           />
         ) : null}
 
-        {childState.status === "ready" &&
-        catalogState.status === "ready" &&
-        catalogState.books.length > 0 ? (
+        {catalogState.status === "ready" && catalogState.books.length > 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {catalogState.books.map((book) => (
               <BookCard
                 book={book}
-                childId={child?.id}
                 key={book.id}
                 savedTypes={visibleSavedCollections
                   .filter((item) => item.book_id === book.id)

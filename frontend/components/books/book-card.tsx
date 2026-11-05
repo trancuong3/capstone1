@@ -13,7 +13,6 @@ export function formatGradeRange(book: BookListItemDTO): string {
 
 interface BookCardProps {
   book: BookListItemDTO;
-  childId?: string;
   savedTypes?: readonly BookCollectionType[];
   onToggleCollection?: (type: BookCollectionType) => void;
   collectionBusy?: boolean;
@@ -21,13 +20,10 @@ interface BookCardProps {
 
 export function BookCard({
   book,
-  childId,
   savedTypes = [],
   onToggleCollection,
   collectionBusy = false,
 }: BookCardProps) {
-  const query = childId ? `?childId=${encodeURIComponent(childId)}` : "";
-
   return (
     <article className="flex min-h-[432px] w-full flex-col items-center gap-3 rounded-card bg-white p-4 shadow-[0_6px_24px_rgba(33,61,66,0.08)] sm:w-64 sm:items-start">
       <BookCover book={book} titleAsHeading />
@@ -40,12 +36,12 @@ export function BookCard({
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
         className="mt-auto max-w-56"
-        href={`/books/${encodeURIComponent(book.id)}${query}`}
+        href={`/books/${encodeURIComponent(book.id)}`}
       >
         Đọc sách
         <ArrowRight aria-hidden="true" className="size-5" />
       </ButtonLink>
-      {onToggleCollection && childId ? (
+      {onToggleCollection ? (
         <div className="flex w-full flex-wrap gap-2">
           {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
             const saved = savedTypes.includes(type);

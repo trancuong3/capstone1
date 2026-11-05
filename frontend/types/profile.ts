@@ -12,6 +12,7 @@ export interface ParentProfileChildDTO {
   readonly alias: string;
   readonly grade: number;
   readonly created_at: ISODateTime;
+  readonly avatar_url?: string | null;
 }
 
 export interface ParentProfileDTO {
@@ -25,6 +26,7 @@ export interface ParentProfileDTO {
   readonly email_verified: boolean | null;
   readonly contact_info_status: ContactInfoStatus;
   readonly children: readonly ParentProfileChildDTO[];
+  readonly avatar_url?: string | null;
 }
 
 export interface ParentProfileUpdateInput {

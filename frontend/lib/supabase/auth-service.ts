@@ -8,10 +8,7 @@ import type {
   User,
 } from "@supabase/supabase-js";
 
-import {
-  AuthServiceError,
-  type AuthService,
-} from "@/lib/api/auth-service";
+import { AuthServiceError, type AuthService } from "@/lib/api/auth-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import type {
@@ -130,7 +127,14 @@ function mapRecoveryError(error: AuthError) {
 }
 
 function mapUser(user: User): AuthUserSnapshot {
-  const displayName: unknown = user.user_metadata.display_name;
+  const displayName = [
+    user.user_metadata.display_name,
+    user.user_metadata.full_name,
+    user.user_metadata.name,
+  ].find(
+    (value): value is string =>
+      typeof value === "string" && Boolean(value.trim()),
+  );
   const metadataProviders = user.app_metadata.providers;
   const identityProviders =
     user.identities?.map((identity) => identity.provider) ?? [];
@@ -148,14 +152,10 @@ function mapUser(user: User): AuthUserSnapshot {
       ),
     ),
   );
-
   return {
     id: user.id,
     email: user.email ?? null,
-    display_name:
-      typeof displayName === "string" && displayName.trim()
-        ? displayName.trim()
-        : null,
+    display_name: displayName?.trim() || null,
     providers,
   };
 }
@@ -332,8 +332,7 @@ export function createSupabaseAuthService(
         throw unexpectedAuthError();
       }
 
-      const scopes =
-        provider === "facebook" ? "email" : "openid email profile";
+      const scopes = provider === "facebook" ? "email" : "openid email profile";
       const { error } = await runProviderOperation(() =>
         supabase.auth.signInWithOAuth({
           provider,
