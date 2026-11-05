@@ -203,6 +203,7 @@ export function ReadingScreen({
   const [retryCandidates, setRetryCandidates] = useState<RetryWordCandidate[]>(
     [],
   );
+  const retryCandidatesRef = useRef<RetryWordCandidate[]>([]);
   // The ref is the authoritative queue for asynchronous retry handlers.
   // Update it synchronously alongside render state at each queue mutation.
   const [retryConfirmedWordIds, setRetryConfirmedWordIds] = useState<
