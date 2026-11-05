@@ -2523,7 +2523,9 @@ export function ReadingScreen({
         bookTitle={book.title}
         previewSnapshot={previewSnapshot}
         controlsDisabled={
-          uiState !== "reading" || (isBusy && !speechPlayer.isPlaying)
+          uiState !== "reading" ||
+          (isBusy && !speechPlayer.isPlaying) ||
+          (retryMode && pageNavigationError !== null)
         }
         correctWordIds={
           retryConfirmedWordIds.size > 0
@@ -2533,7 +2535,9 @@ export function ReadingScreen({
         countdown={countdown}
         currentWordId={currentWordId}
         currentWordText={
-          page.words.find((w) => w.word_id === currentWordId)?.text ?? null
+          retryMode
+            ? (retryCandidates[retryWordPosition]?.text ?? null)
+            : (page.words.find((w) => w.word_id === currentWordId)?.text ?? null)
         }
         exitHref={detailHref}
         isCurrentWordMispronounced={Boolean(
