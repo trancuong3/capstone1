@@ -514,7 +514,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           {
             isFinal: true,
             length: 1,
-            0: { transcript: "Bé méo nhỏ đang" },
+            0: { transcript: "Bé nhỏ đang" },
           },
         ],
       });

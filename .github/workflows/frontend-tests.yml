@@ -52,6 +52,14 @@ jobs:
           tests/reading/reading-report-page.test.tsx
           test/speech-service.test.ts
 
+      - name: ESLint for retry reading changes
+        run: >-
+          npx eslint
+          components/reading/reading-screen.tsx
+          lib/reading/retry-recognition.ts
+          tests/reading/reading-screen.test.tsx
+          tests/reading/retry-recognition.test.ts
+
       - name: Run realtime device permission and scanner navigation tests
         run: >-
           npm test --
