@@ -56,22 +56,22 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add
-          frontend/components/layout/account-avatar-menu.tsx
-          frontend/components/reading/book-page-content.tsx
-          frontend/components/reading/reading-controls.tsx
-          frontend/components/reading/reading-layout.tsx
-          frontend/components/reading/reading-screen.tsx
-          frontend/components/settings/account-settings-screen.tsx
-          frontend/components/support/help-support-screen.tsx
-          frontend/lib/api/reading-service.ts
-          frontend/lib/api/support-service.ts
-          frontend/tests/layout/account-avatar-menu.test.tsx
-          frontend/tests/reading/reading-async-cleanup.test.tsx
-          frontend/tests/reading/reading-screen.test.tsx
-          frontend/tests/reading/retry-recognition.test.ts
-          frontend/tests/support/help-support-screen.test.tsx
-          frontend/tests/support/support-service.test.tsx
+          git add -- \
+            frontend/components/layout/account-avatar-menu.tsx \
+            frontend/components/reading/book-page-content.tsx \
+            frontend/components/reading/reading-controls.tsx \
+            frontend/components/reading/reading-layout.tsx \
+            frontend/components/reading/reading-screen.tsx \
+            frontend/components/settings/account-settings-screen.tsx \
+            frontend/components/support/help-support-screen.tsx \
+            frontend/lib/api/reading-service.ts \
+            frontend/lib/api/support-service.ts \
+            frontend/tests/layout/account-avatar-menu.test.tsx \
+            frontend/tests/reading/reading-async-cleanup.test.tsx \
+            frontend/tests/reading/reading-screen.test.tsx \
+            frontend/tests/reading/retry-recognition.test.ts \
+            frontend/tests/support/help-support-screen.test.tsx \
+            frontend/tests/support/support-service.test.ts
           if git diff --cached --quiet; then
             echo "All requested files were already formatted."
             exit 0
