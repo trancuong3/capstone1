@@ -5,7 +5,7 @@ import os
 import smtplib
 import unittest
 from email.message import EmailMessage
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -26,6 +26,7 @@ from app.providers.support_email_provider import (
     SupportEmailProvider,
 )
 from app.schemas.support import SupportFeedbackRequest
+from app.services.support_service import SupportService
 
 VALID_PAYLOAD = {
     "category": "technical_issue",
@@ -110,6 +111,29 @@ class SupportFeedbackTests(unittest.TestCase):
             for name, value in previous.items():
                 setattr(settings, name, value)
 
+
+    def test_support_service_formats_message_subject_timestamp_and_reply_to(self):
+        request = SupportFeedbackRequest(**VALID_PAYLOAD)
+        provider = MagicMock()
+        provider.send = AsyncMock(return_value=None)
+
+        asyncio.run(
+            SupportService(email_provider=provider).submit_feedback(request)
+        )
+
+        kwargs = provider.send.await_args.kwargs
+        self.assertTrue(
+            kwargs["subject"].startswith(
+                "[ViRead Support] Báo lỗi kỹ thuật - Không thể bắt đầu đọc sách"
+            )
+        )
+        self.assertIn("Sản phẩm: ViRead", kwargs["body"])
+        self.assertIn("Loại yêu cầu: Báo lỗi kỹ thuật", kwargs["body"])
+        self.assertIn("Email liên hệ: parent@example.com", kwargs["body"])
+        self.assertIn("Thời điểm tiếp nhận (UTC):", kwargs["body"])
+        self.assertIn(VALID_PAYLOAD["message"], kwargs["body"])
+        self.assertEqual(kwargs["reply_to"], "parent@example.com")
+
     def test_provider_fails_closed_without_smtp_credentials(self):
         names = ("SMTP_USERNAME", "SMTP_APP_PASSWORD", "SMTP_FROM_EMAIL")
         previous = {name: getattr(settings, name) for name in names}
@@ -178,6 +202,28 @@ class SupportFeedbackTests(unittest.TestCase):
             json={**VALID_PAYLOAD, "recipient": "attacker@example.com"},
         )
         self.assertEqual(invalid.status_code, 422)
+
+
+    def test_feedback_route_returns_accepted_only_after_provider_accepts(self):
+        app = FastAPI()
+        app.include_router(support_route.router, prefix="/support")
+        app.dependency_overrides[get_current_parent_id] = (
+            lambda: "10000000-0000-4000-8000-000000000001"
+        )
+        client = TestClient(app)
+
+        with patch.object(
+            support_route,
+            "SupportService",
+            return_value=MagicMock(
+                submit_feedback=AsyncMock(return_value=None)
+            ),
+        ):
+            response = client.post("/support/feedback", json=VALID_PAYLOAD)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["accepted"], True)
+        self.assertEqual(response.json()["delivery_status"], "accepted_by_smtp")
 
     def test_feedback_route_returns_503_when_smtp_is_not_configured(self):
         app = FastAPI()

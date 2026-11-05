@@ -43,6 +43,8 @@ describe("HelpSupportScreen", () => {
       ),
     );
 
+    expect(screen.getByRole("link", { name: "vireadforyou@gmail.com" })).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
+
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
     const contactEmail = screen.getByRole("textbox", { name: "Email liên hệ" });
