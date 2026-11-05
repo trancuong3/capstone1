@@ -687,9 +687,7 @@ export function AdminOcrReviewScreen({
                   currentDraftToken,
                 );
 
-                const confidenceLevel = getConfidenceLevel(
-                  word.ocr_confidence,
-                );
+                const confidenceLevel = getConfidenceLevel(word.ocr_confidence);
                 const colorClass = {
                   Cao: "border-green-600 bg-green-400/35",
                   "Trung bình": "border-yellow-500 bg-yellow-300/35",
@@ -744,8 +742,7 @@ export function AdminOcrReviewScreen({
           </div>
           <p className="mt-3 text-sm text-muted">
             Màu bounding box phản ánh độ tin cậy OCR. Trạng thái đối chiếu nội
-            được hiển thị riêng trong danh sách từ và phần thống kê bên
-            dưới.
+            được hiển thị riêng trong danh sách từ và phần thống kê bên dưới.
           </p>
           <div
             aria-label="Chú giải confidence OCR"
