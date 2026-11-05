@@ -53,7 +53,11 @@ export function stripVietnameseAccents(value: string): string {
 export function getConfidenceLevel(
   confidence: number | null | undefined,
 ): "Cao" | "Trung bình" | "Thấp" | "Chưa xác định" {
-  if (confidence === null || confidence === undefined || !Number.isFinite(confidence)) {
+  if (
+    confidence === null ||
+    confidence === undefined ||
+    !Number.isFinite(confidence)
+  ) {
     return "Chưa xác định";
   }
   if (confidence > 0.8) {
@@ -740,7 +744,8 @@ export function AdminOcrReviewScreen({
           </div>
           <p className="mt-3 text-sm text-muted">
             Màu bounding box phản ánh độ tin cậy OCR. Trạng thái đối chiếu nội
-            dung được hiển thị riêng trong danh sách từ và phần thống kê bên dưới.
+            được hiển thị riêng trong danh sách từ và phần thống kê bên
+            dưới.
           </p>
           <div
             aria-label="Chú giải confidence OCR"
