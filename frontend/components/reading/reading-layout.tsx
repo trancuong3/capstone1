@@ -50,6 +50,7 @@ interface ReadingLayoutProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  retryCompleted?: boolean;
 }
 
 export function ReadingLayout({
@@ -69,7 +70,6 @@ export function ReadingLayout({
   retryWordPosition = 0,
   retryWordCount = 0,
   retryFeedback = "waiting",
-  retryContextPhrase,
   isPlayingSample = false,
   isReadingWord = false,
   isSpeaking = false,
@@ -90,6 +90,7 @@ export function ReadingLayout({
   repeatedWordIds,
   hesitationWordIds,
   previewSnapshot,
+  retryCompleted = false,
 }: ReadingLayoutProps) {
   return (
     <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
@@ -148,7 +149,10 @@ export function ReadingLayout({
           </span>
         </div>
       ) : retryMode ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm animate-in fade-in">
+        <div
+          className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm animate-in fade-in"
+          aria-live="polite"
+        >
           <div className="min-w-0 flex-1">
             <p className="text-xs font-extrabold uppercase tracking-wider text-primary">
               Bé đọc lại từ · {retryWordPosition}/{retryWordCount}
@@ -156,52 +160,22 @@ export function ReadingLayout({
 
             <p className="truncate text-lg font-black text-ink">
               {retryFeedback === "incorrect"
-                ? "Chưa chính xác, bé thử lại nhé!"
+                ? "Chưa nghe rõ, bé thử lại nhé!"
                 : retryFeedback === "success"
                   ? "Chính xác rồi!"
                   : isMicRecording
                     ? "Microphone đang bật, bé hãy đọc từ này nhé!"
-                    : "Bấm nghe mẫu hoặc bật mic khi bé sẵn sàng."}
+                    : "Bé hãy đọc riêng từ bên dưới nhé."}
             </p>
 
-            <p className="text-base font-bold text-primary">
+            <p className="mt-1 text-lg font-extrabold text-primary">
               Từ cần luyện: “{currentWordText}”
             </p>
 
-            {retryContextPhrase ? (
-              <p className="mt-1 text-sm font-semibold text-ink">
-                Bé hãy đọc cả cụm:
-                <span className="ml-1 text-primary">
-                  “{retryContextPhrase}”
-                </span>
+            {latestTranscript ? (
+              <p className="mt-1 truncate text-sm font-medium text-ink">
+                {latestTranscript}
               </p>
-            ) : null}
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {onToggleListening ? (
-              <button
-                type="button"
-                onClick={onToggleListening}
-                aria-pressed={isMicRecording}
-                className={`rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
-                  isMicRecording
-                    ? "bg-rose-600 text-white hover:bg-rose-700"
-                    : "bg-emerald-600 text-white hover:bg-emerald-700"
-                }`}
-              >
-                {isMicRecording ? "Tắt mic" : "Bật mic"}
-              </button>
-            ) : null}
-
-            {currentWordText && onReadWord ? (
-              <button
-                type="button"
-                onClick={onReadWord}
-                className="rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90"
-              >
-                🔊 Nghe mẫu
-              </button>
             ) : null}
           </div>
         </div>
@@ -329,6 +303,8 @@ export function ReadingLayout({
         disabled={controlsDisabled}
         isListening={isMicRecording}
         isPlayingSample={isPlayingSample}
+        retryMode={retryMode}
+        retryCompleted={retryCompleted}
         onFinish={onFinish}
         onHelp={onHelp}
         onManualPage={onManualPage}

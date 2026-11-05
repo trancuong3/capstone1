@@ -33,7 +33,7 @@ class SpeechWord(BaseModel):
     text: str
     start: float = Field(ge=0)
     end: float = Field(ge=0)
-
+    logprob: float | None = None
 
 class SpeechToTextResponse(BaseModel):
     """The safe, provider-neutral part of a transcription result."""
