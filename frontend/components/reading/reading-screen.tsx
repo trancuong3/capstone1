@@ -203,6 +203,7 @@ export function ReadingScreen({
   const [retryCandidates, setRetryCandidates] = useState<RetryWordCandidate[]>(
     [],
   );
+  const retryCandidatesRef = useRef<RetryWordCandidate[]>([]);
   const [retryConfirmedWordIds, setRetryConfirmedWordIds] = useState<
     Set<string>
   >(() => new Set());
@@ -1227,6 +1228,7 @@ export function ReadingScreen({
       pageTranscriptsRef.current.clear();
       browserTranscriptCollectorRef.current.reset();
       retryWordsByIdRef.current.clear();
+      retryCandidatesRef.current = [];
       retryModeRef.current = false;
       retryListeningWantedRef.current = false;
       retryProcessingRef.current = false;
@@ -1705,7 +1707,7 @@ export function ReadingScreen({
       retryProcessingRef.current = false;
 
       const nextPosition = retryPositionRef.current + 1;
-      if (nextPosition >= retryCandidates.length) {
+      if (nextPosition >= retryCandidatesRef.current.length) {
         retryModeRef.current = false;
         retryListeningWantedRef.current = false;
         setRetryMode(false);
@@ -1994,7 +1996,7 @@ export function ReadingScreen({
   }
 
   async function beginRetryWord(position: number): Promise<void> {
-    const candidate = retryCandidates[position];
+    const candidate = retryCandidatesRef.current[position];
     if (!candidate || !mountedRef.current) return;
 
     stopRetryRecognition();
@@ -2056,7 +2058,7 @@ export function ReadingScreen({
     const nextPosition = retryPositionRef.current + 1;
     stopRetryRecognition();
 
-    if (nextPosition >= retryCandidates.length) {
+    if (nextPosition >= retryCandidatesRef.current.length) {
       retryModeRef.current = false;
       setRetryMode(false);
       void completeReadingSession();
@@ -2069,7 +2071,7 @@ export function ReadingScreen({
   }
 
   function startRetrySession(): void {
-    if (retryCandidates.length === 0) {
+    if (retryCandidatesRef.current.length === 0) {
       void completeReadingSession();
       return;
     }
@@ -2251,6 +2253,7 @@ export function ReadingScreen({
 
       // 7. Tạo danh sách từ cần đọc lại.
       const candidates = buildRetryCandidates();
+      retryCandidatesRef.current = candidates;
 
       setRetryCandidates(candidates);
       setConfirmFinish(false);

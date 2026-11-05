@@ -524,9 +524,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
-    await screen.findByRole("button", { name: "Đồng ý, đọc lại" });
+    const retryConsent = await screen.findByRole("button", {
+      name: "Đồng ý, đọc lại",
+    });
+    await waitFor(() => expect(retryConsent).toBeEnabled());
+    expect(screen.getByText(/Bé còn 1 từ cần đọc lại/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Đồng ý, đọc lại" }));
+    await user.click(retryConsent);
+    await screen.findByText(/Bé đọc lại từ/);
     await user.click(await screen.findByRole("button", { name: "Bật mic" }));
 
     await waitFor(() => {
