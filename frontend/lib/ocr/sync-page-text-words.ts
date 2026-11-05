@@ -51,8 +51,8 @@ export function tokenizePageText(value: string): string[] {
 }
 
 /**
- * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token khớp 1:1,
- * bảo toàn nguyên vẹn ocr_confidence và bbox gốc của từng từ.
+ * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token
+ * khớp 1:1, bảo toàn nguyên vẹn ocr_confidence và bbox gốc của từng từ.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -94,7 +94,8 @@ export type WordsToPageTextSyncResult =
     };
 
 /**
- * Đồng bộ danh sách từ đơn trở lại khung văn bản mà không làm vỡ cấu trúc ngắt dòng.
+ * Đồng bộ danh sách từ đơn trở lại khung văn bản mà không làm vỡ cấu trúc
+ * ngắt dòng.
  */
 export function syncWordsToPageText(
   currentPageText: string,
