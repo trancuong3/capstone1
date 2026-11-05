@@ -9,27 +9,14 @@ export const metadata: Metadata = {
 
 interface BookDetailPageProps {
   params: Promise<{ bookId: string }>;
-  searchParams: Promise<{
-    childId?: string | string[];
-  }>;
 }
 
-function firstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function BookDetailPage({
-  params,
-  searchParams,
-}: BookDetailPageProps) {
-  const [{ bookId }, query] = await Promise.all([params, searchParams]);
+export default async function BookDetailPage({ params }: BookDetailPageProps) {
+  const { bookId } = await params;
 
   return (
     <AppServicesProvider>
-      <BookDetailScreen
-        bookId={bookId}
-        requestedChildId={firstValue(query.childId)}
-      />
+      <BookDetailScreen bookId={bookId} />
     </AppServicesProvider>
   );
 }

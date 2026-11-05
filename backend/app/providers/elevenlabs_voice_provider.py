@@ -380,18 +380,28 @@ class ElevenLabsVoiceProvider:
             provider_code, provider_status, raw_message = (
                 self._provider_error_fields(error_payload)
             )
+
             provider_message = self._safe_provider_message(
-                raw_message, self._api_key
+                raw_message,
+                self._api_key,
             )
+
+            provider_request_id = self._provider_request_id(error_payload)
+
             request_id = (
                 response.headers.get("request-id")
-                or response.headers.get("xi-request-id")
-                or self._provider_request_id(error_payload)
+                or response.headers.get("x-request-id")
+                or provider_request_id
                 or "unavailable"
             )
+
             classification = " ".join(
                 value or ""
-                for value in (provider_code, provider_status, provider_message)
+                for value in (
+                    provider_code,
+                    provider_status,
+                    provider_message,
+                )
             ).lower()
 
             logger.warning(
@@ -408,6 +418,7 @@ class ElevenLabsVoiceProvider:
                 self._key_fingerprint or "unavailable",
             )
 
+            # 1. Quota / credit exhausted
             if response.status_code == 402 or any(
                 marker in classification
                 for marker in (
@@ -417,7 +428,12 @@ class ElevenLabsVoiceProvider:
                     "usage_limit",
                 )
             ):
-                raise VoiceProviderError(status_code=503, code="STT_QUOTA_EXCEEDED")
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_QUOTA_EXCEEDED",
+                )
+
+            # 2. Terms not accepted
             if any(
                 marker in classification
                 for marker in (
@@ -431,18 +447,24 @@ class ElevenLabsVoiceProvider:
                     status_code=503,
                     code="STT_TERMS_NOT_ACCEPTED",
                 )
-            if response.status_code == 401 or any(
+
+            # 3. Concurrent request limit
+            if any(
                 marker in classification
                 for marker in (
-                    "invalid_api_key",
-                    "authentication_failed",
-                    "authentication_error",
-                    "invalid_credentials",
-                    "unauthorized",
+                    "concurrent_limit",
+                    "concurrency",
+                    "simultaneous_request",
+                    "too_many_active",
                 )
             ):
-                raise VoiceProviderError(status_code=503, code="STT_AUTH_FAILED")
-            if response.status_code == 403 or any(
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_CONCURRENCY_LIMITED",
+                )
+
+            # 4. Permission / model access denied
+            if any(
                 marker in classification
                 for marker in (
                     "permission_denied",
@@ -457,7 +479,49 @@ class ElevenLabsVoiceProvider:
                     status_code=503,
                     code="STT_PERMISSION_DENIED",
                 )
-            if any(
+
+            # 5. Authentication failure
+            if response.status_code == 401 or any(
+                marker in classification
+                for marker in (
+                    "invalid_api_key",
+                    "authentication_failed",
+                    "authentication_error",
+                    "invalid_credentials",
+                    "unauthorized",
+                )
+            ):
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_AUTH_FAILED",
+                )
+
+            # 6. Invalid audio
+            if response.status_code in (400, 422) or any(
+                marker in classification
+                for marker in (
+                    "invalid_audio",
+                    "unsupported_audio",
+                    "audio_too_short",
+                    "input_error",
+                    "invalid_parameters",
+                    "validation_error",
+                )
+            ):
+                raise VoiceProviderError(
+                    status_code=422,
+                    code="STT_INVALID_AUDIO",
+                )
+
+            # 7. Rate limit
+            if response.status_code == 429 or "rate_limit" in classification:
+                raise VoiceProviderError(
+                    status_code=503,
+                    code="STT_RATE_LIMITED",
+                )
+
+            # 8. Temporary provider failure
+            if response.status_code >= 500 or any(
                 marker in classification
                 for marker in (
                     "system_busy",
@@ -472,46 +536,11 @@ class ElevenLabsVoiceProvider:
                     status_code=503,
                     code="STT_TEMPORARILY_UNAVAILABLE",
                 )
-            if response.status_code == 429 or "rate_limit" in classification:
-                concurrency_limited = any(
-                    marker in classification
-                    for marker in (
-                        "concurr",
-                        "simultaneous_request",
-                        "too_many_active",
-                    )
-                )
-                raise VoiceProviderError(
-                    status_code=503,
-                    code=(
-                        "STT_CONCURRENCY_LIMITED"
-                        if concurrency_limited
-                        else "STT_RATE_LIMITED"
-                    ),
-                )
-            if response.status_code in (400, 422) and any(
-                marker in classification
-                for marker in (
-                    "invalid_audio",
-                    "unsupported_audio",
-                    "audio_too_short",
-                    "input_error",
-                    "invalid_parameters",
-                    "validation_error",
-                )
-            ):
-                raise VoiceProviderError(status_code=422, code="STT_INVALID_AUDIO")
-            if response.status_code >= 500:
-                raise VoiceProviderError(
-                    status_code=503,
-                    code="STT_TEMPORARILY_UNAVAILABLE",
-                )
 
             raise VoiceProviderError(
                 status_code=502,
                 code="STT_PROVIDER_REJECTED",
             )
-
         try:
             payload = response.json()
         except ValueError as error:

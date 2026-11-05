@@ -22,6 +22,7 @@ export function useSpeechPlayer(): SpeechPlayer {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const mountedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const stop = useCallback(() => {
@@ -43,15 +44,25 @@ export function useSpeechPlayer(): SpeechPlayer {
     const objectUrl = objectUrlRef.current;
     objectUrlRef.current = null;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
-    setIsPlaying(false);
+    if (mountedRef.current) setIsPlaying(false);
   }, []);
 
-  useEffect(() => stop, [stop]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stop();
+    };
+  }, [stop]);
 
   const play = useCallback(
     async (text: string, options?: SpeechPlayOptions) => {
+      if (!mountedRef.current) return;
+
       stop();
       const source = await speechService.synthesize(text);
+      if (!mountedRef.current) return;
+
       const objectUrl = URL.createObjectURL(source);
       const audio = new Audio(objectUrl);
       objectUrlRef.current = objectUrl;
@@ -104,6 +115,8 @@ export function useSpeechPlayer(): SpeechPlayer {
 
       try {
         await audio.play();
+        if (!mountedRef.current) return;
+
         const dur = audio.duration;
         if (dur && !isNaN(dur) && dur > 0) {
           options?.onPlay?.(dur);
@@ -112,7 +125,7 @@ export function useSpeechPlayer(): SpeechPlayer {
           startProgressLoop();
         }
       } catch (error) {
-        stop();
+        if (mountedRef.current) stop();
         throw error;
       }
     },

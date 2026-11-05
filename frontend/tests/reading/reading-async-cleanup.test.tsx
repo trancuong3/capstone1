@@ -14,11 +14,18 @@ import type {
   TutorAction,
 } from "@/types/reading";
 const TEST_QUESTION_ID = "80000000-0000-4000-8000-000000000001";
-const { servicesHook } = vi.hoisted(() => ({
+const { servicesHook, speechSynthesizeMock } = vi.hoisted(() => ({
   servicesHook: vi.fn<() => ReadingServices>(),
+  speechSynthesizeMock: vi.fn(),
 }));
 vi.mock("@/hooks/use-reading-services", () => ({
   useReadingServices: servicesHook,
+}));
+vi.mock("@/lib/api/speech-service", () => ({
+  createSpeechService: () => ({
+    synthesize: speechSynthesizeMock,
+    transcribe: vi.fn(),
+  }),
 }));
 
 // Typed, test-local responses only. The application provider still uses
@@ -90,8 +97,8 @@ const pageProgressFixture: ReadingSessionPageProgressDTO = {
 const tutorAction: TutorAction = {
   action: "READ_EXAMPLE",
   action_id: "70000000-0000-4000-8000-000000000001",
-  page_revision_word_id: pageFour.words[3].word_id,
-  tts_text: "đang",
+  page_revision_word_id: pageFour.words[0].word_id,
+  tts_text: "Bé",
 };
 function createReadingFixtures() {
   return {
@@ -156,6 +163,18 @@ function createReadingFixtures() {
       getSnapshot: vi
         .fn<ReadingServices["devicePermissionService"]["getSnapshot"]>()
         .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getMicrophonePermissionState: vi.fn().mockResolvedValue("prompt"),
+      watchMicrophonePermissionState: vi
+        .fn()
+        .mockResolvedValue(() => undefined),
+      requestAccess: vi
+        .fn<ReadingServices["devicePermissionService"]["requestAccess"]>()
+        .mockResolvedValue({
+          status: "granted",
+          verified: true,
+          message: "Device is available",
+          mediaRecorderSupported: true,
+        }),
       retry: vi
         .fn<ReadingServices["devicePermissionService"]["retry"]>()
         .mockResolvedValue("ready"),
@@ -244,6 +263,8 @@ function createReadingFixtures() {
 
 describe("Reading action cleanup with a typed service boundary", () => {
   it("does not continue a delayed tutor retry after unmount", async () => {
+    speechSynthesizeMock.mockReset();
+
     const services = createReadingFixtures();
     servicesHook.mockReset().mockReturnValue(services);
     let settle: (action: TutorAction) => void = () => undefined;
@@ -266,12 +287,13 @@ describe("Reading action cleanup with a typed service boundary", () => {
     fireEvent.click(retry);
     expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
       TEST_SESSION_ID,
-      pageFour.words[3].word_id,
+      pageFour.words[0].word_id,
     );
     view.unmount();
     await act(async () => {
       settle(tutorAction);
     });
+    expect(speechSynthesizeMock).not.toHaveBeenCalled();
     expect(services.tutorService.retryReadExample).not.toHaveBeenCalled();
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(view.container).toBeEmptyDOMElement();

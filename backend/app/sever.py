@@ -14,11 +14,16 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import InterfaceError, TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    TimeoutError as SQLAlchemyTimeoutError,
+)
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
-from app.database.session import engine
+from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 
@@ -172,6 +177,8 @@ async def http_exception_diagnostic_handler(
     return await default_http_exception_handler(request, exc)
 
 
+@app.exception_handler(DatabaseConcurrencyLimitExceeded)
+@app.exception_handler(OperationalError)
 @app.exception_handler(InterfaceError)
 @app.exception_handler(SQLAlchemyTimeoutError)
 async def database_connection_exception_handler(
@@ -221,6 +228,28 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         content={"detail": "Internal server error", "request_id": request_id},
         headers={"X-Request-ID": request_id},
     )
+
+
+@app.exception_handler(DBAPIError)
+async def database_api_exception_handler(
+    request: Request,
+    exc: DBAPIError,
+) -> JSONResponse:
+    """Map known transient pooler/connection failures to a safe retryable response."""
+    original = exc.orig
+    sqlstate = getattr(original, "sqlstate", None)
+    message = str(original)
+    transient = (
+        exc.connection_invalidated
+        or (isinstance(sqlstate, str) and (
+            sqlstate.startswith("08")
+            or sqlstate in {"53300", "57P01", "57P02", "57P03"}
+        ))
+        or "EMAXCONNSESSION" in message
+    )
+    if transient:
+        return await database_connection_exception_handler(request, exc)
+    return await unhandled_exception_handler(request, exc)
 
 
 app.add_middleware(

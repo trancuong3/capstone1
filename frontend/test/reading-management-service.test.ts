@@ -25,6 +25,17 @@ describe("ReadingManagementService HTTP contracts", () => {
       undefined,
     );
   });
+  it("loads weekly plans for the selected child", async () => {
+    vi.mocked(requestApi).mockResolvedValueOnce([]);
+    await createReadingManagementService().listPlans(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(requestApi).toHaveBeenCalledWith(
+      "/reading-management/plans?child_id=00000000-0000-4000-8000-000000000001",
+      expect.anything(),
+      undefined,
+    );
+  });
   it("sends a delete request to backend for a reminder", async () => {
     vi.mocked(requestApi).mockResolvedValueOnce({ deleted: true });
     await createReadingManagementService().deleteReminder(

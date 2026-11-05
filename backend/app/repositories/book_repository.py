@@ -37,7 +37,14 @@ class BookRepository:
         return book
 
     async def list_pages(self, book_id: UUID) -> list[BookPage]:
-        query = select(BookPage).where(BookPage.BookId == book_id).order_by(BookPage.PageNumber)
+        query = (
+            select(BookPage)
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus != "PROCESSING",
+            )
+            .order_by(BookPage.PageNumber)
+        )
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -103,11 +110,11 @@ class CatalogRepository:
 
 class AdminCatalogRepository(CatalogRepository):
     async def max_page_number(self, book_id: UUID) -> int | None:
-        """Return the maximum page number among active pages only."""
+        """Return the maximum page number among active pages and pending reservations."""
         value = await self.db.scalar(
             select(func.max(BookPage.PageNumber)).where(
                 BookPage.BookId == book_id,
-                BookPage.LifecycleStatus == "ACTIVE",
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
             )
         )
         return int(value) if value is not None else None

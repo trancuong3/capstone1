@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import Link from "next/link";
 
 import type { ChildProfileDTO } from "@/types/child";
@@ -7,6 +7,8 @@ interface ChildProfileCardProps {
   child: ChildProfileDTO;
   href?: string;
   showEditAction?: boolean;
+  onSelect?: () => void;
+  selected?: boolean;
 }
 
 function childInitial(alias: string): string {
@@ -18,6 +20,8 @@ export function ChildProfileCard({
   child,
   href,
   showEditAction = false,
+  onSelect,
+  selected = false,
 }: ChildProfileCardProps) {
   const content = (
     <>
@@ -42,7 +46,29 @@ export function ChildProfileCard({
   );
 
   const className =
-    "flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-card border border-border bg-white p-6 text-center transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary";
+    "relative flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-card border p-6 text-center transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
+    (selected
+      ? "border-primary bg-sky ring-2 ring-primary"
+      : "border-border bg-white hover:border-primary");
+
+  if (onSelect) {
+    return (
+      <button
+        aria-label={`${child.alias}, lớp ${child.grade}`}
+        aria-pressed={selected}
+        className={className}
+        onClick={onSelect}
+        type="button"
+      >
+        {selected ? (
+          <span className="absolute right-4 top-4 flex size-9 items-center justify-center rounded-full bg-primary text-white">
+            <Check aria-hidden="true" className="size-5" />
+          </span>
+        ) : null}
+        {content}
+      </button>
+    );
+  }
 
   if (href) {
     return (

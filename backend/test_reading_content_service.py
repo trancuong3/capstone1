@@ -46,6 +46,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             VerifiedText="Chú",
         )
         repo = SimpleNamespace(
+            db=SimpleNamespace(rollback=AsyncMock()),
             profile_role=AsyncMock(return_value="parent"),
             sessions_for_parent=AsyncMock(return_value=[]),
             child_belongs_to_parent=AsyncMock(return_value=True),

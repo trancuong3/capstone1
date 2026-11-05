@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from sqlalchemy.dialects import postgresql
 
+from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.book_repository import AdminCatalogRepository
 from app.services.admin_ocr_service import AdminOcrService
 
@@ -168,7 +169,7 @@ class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
-    async def test_max_page_number_query_uses_active_pages_only(self):
+    async def test_max_page_number_query_includes_active_and_processing_reservations(self):
         db = MagicMock()
         db.scalar = AsyncMock(return_value=4)
 
@@ -179,10 +180,37 @@ class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
         compiled = statement.compile(dialect=postgresql.dialect())
         self.assertIn("max(bookpages.pagenumber)", str(compiled))
         self.assertIn("lifecyclestatus", str(compiled).lower())
-        self.assertIn("ACTIVE", compiled.params.values())
+        status_values = [
+            value
+            for value in compiled.params.values()
+            if isinstance(value, (list, tuple))
+        ]
+        self.assertEqual(len(status_values), 1)
+        self.assertEqual(set(status_values[0]), {"ACTIVE", "PROCESSING"})
+        self.assertNotIn("RETIRED", status_values[0])
         self.assertIn(BOOK, compiled.params.values())
 
-    async def test_admin_page_list_query_excludes_retired_pages(self):
+    async def test_next_upload_page_number_includes_active_and_processing_reservations(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=4)
+
+        result = await AdminOcrRepository(db).next_active_page_number(BOOK)
+
+        self.assertEqual(result, 5)
+        statement = db.scalar.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("max(bookpages.pagenumber)", str(compiled).lower())
+        status_values = [
+            value
+            for value in compiled.params.values()
+            if isinstance(value, (list, tuple))
+        ]
+        self.assertEqual(len(status_values), 1)
+        self.assertEqual(set(status_values[0]), {"ACTIVE", "PROCESSING"})
+        self.assertNotIn("RETIRED", status_values[0])
+        self.assertIn(BOOK, compiled.params.values())
+
+    async def test_admin_page_list_query_excludes_processing_and_retired_pages(self):
         db = MagicMock()
         active_page = make_page()
         result = MagicMock()
@@ -196,6 +224,8 @@ class AdminCatalogActivePageListTests(unittest.IsolatedAsyncioTestCase):
         compiled = statement.compile(dialect=postgresql.dialect())
         self.assertIn("lifecyclestatus", str(compiled))
         self.assertIn("ACTIVE", compiled.params.values())
+        self.assertNotIn("PROCESSING", compiled.params.values())
+        self.assertNotIn("RETIRED", compiled.params.values())
 
 
 

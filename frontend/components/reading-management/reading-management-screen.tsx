@@ -6,10 +6,13 @@ import {
   BellRing,
   BookHeart,
   CalendarClock,
+  CalendarDays,
   Check,
+  CheckCircle2,
   Clock3,
   Heart,
   ListChecks,
+  Mail,
   RefreshCw,
   Target,
   Trash2,
@@ -30,6 +33,9 @@ import type {
   ReadingGoalMetric,
   ReadingGoalPeriod,
   ReadingGoalStatus,
+  ReadingPlanDTO,
+  ReadingPlanStatus,
+  ReadingReminderEmailStatus,
   ReadingReminderDTO,
   ReadingReminderOccurrenceDTO,
 } from "@/types/reading-management";
@@ -48,11 +54,16 @@ const inputClass =
 const actionClass =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-bold";
 
-function localToday(): string {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 10);
+function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 function statusText(status: ReadingGoalStatus): string {
   const labels: Record<ReadingGoalStatus, string> = {
@@ -60,6 +71,26 @@ function statusText(status: ReadingGoalStatus): string {
     PAUSED: "Tạm dừng",
     COMPLETED: "Đã hoàn thành",
     ENDED: "Đã kết thúc",
+  };
+  return labels[status];
+}
+function planStatusText(status: ReadingPlanStatus): string {
+  const labels: Record<ReadingPlanStatus, string> = {
+    ACTIVE: "Đang theo kế hoạch",
+    PAUSED: "Tạm dừng",
+    COMPLETED: "Đã hoàn thành",
+    ENDED: "Đã kết thúc",
+  };
+  return labels[status];
+}
+function emailStatusText(status: ReadingReminderEmailStatus): string {
+  const labels: Record<ReadingReminderEmailStatus, string> = {
+    NOT_REQUESTED: "Không gửi email",
+    PENDING: "Đang chờ gửi email",
+    SENDING: "Đang gửi email",
+    RETRY: "Sẽ thử gửi lại",
+    SENT: "Đã gửi email",
+    FAILED: "Gửi email chưa thành công",
   };
   return labels[status];
 }
@@ -78,6 +109,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [children, setChildren] = useState<ChildProfileDTO[]>([]);
   const [childId, setChildId] = useState(requestedChildId ?? "");
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
+  const [plans, setPlans] = useState<ReadingPlanDTO[]>([]);
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
   const [reminders, setReminders] = useState<ReadingReminderDTO[]>([]);
   const [due, setDue] = useState<ReadingReminderOccurrenceDTO[]>([]);
@@ -96,11 +128,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [goalEnd, setGoalEnd] = useState("");
   const [editingGoalId, setEditingGoalId] = useState("");
   const [editingTarget, setEditingTarget] = useState("20");
+  const [planTitle, setPlanTitle] = useState("");
+  const [planMinutes, setPlanMinutes] = useState("20");
+  const [planBookId, setPlanBookId] = useState("");
+  const [planDays, setPlanDays] = useState<number[]>([0, 2, 4]);
+  const [planStart, setPlanStart] = useState(localToday());
+  const [planEnd, setPlanEnd] = useState("");
+  const [planTimezone, setPlanTimezone] = useState("Asia/Ho_Chi_Minh");
+  const [editingPlanId, setEditingPlanId] = useState("");
   const [reminderTime, setReminderTime] = useState("19:00");
   const [reminderDays, setReminderDays] = useState<number[]>([
     0, 1, 2, 3, 4, 5, 6,
   ]);
   const [reminderTimezone, setReminderTimezone] = useState("Asia/Ho_Chi_Minh");
+  const [reminderEmailEnabled, setReminderEmailEnabled] = useState(false);
   const [editingReminderId, setEditingReminderId] = useState("");
 
   const currentRequestKey = `${childId}:${reloadKey}`;
@@ -152,14 +193,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     let active = true;
     Promise.all([
       service.listGoals(childId, controller.signal),
+      service.listPlans(childId, controller.signal),
       service.listCollections(childId, controller.signal),
       service.listReminders(childId, controller.signal),
       bookService.list({ grade: selectedChild?.grade }),
     ])
-      .then(([goalRows, savedRows, reminderRows, bookRows]) => {
+      .then(([goalRows, planRows, savedRows, reminderRows, bookRows]) => {
         if (!active) return;
         setError("");
         setGoals(goalRows);
+        setPlans(planRows);
         setCollections(savedRows);
         setReminders(reminderRows);
         setBooks(bookRows);
@@ -197,8 +240,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     key: string,
     operation: () => Promise<unknown>,
     message: string,
-  ) {
-    if (busyKey) return;
+  ): Promise<boolean> {
+    if (busyKey) return false;
     setBusyKey(key);
     setError("");
     setSuccess("");
@@ -206,10 +249,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       await operation();
       setSuccess(message);
       setReloadKey((value) => value + 1);
+      return true;
     } catch {
       setError(
         "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
       );
+      return false;
     } finally {
       setBusyKey("");
     }
@@ -240,10 +285,91 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   }
 
   async function transition(goal: ReadingGoalDTO, next: ReadingGoalStatus) {
+    if (
+      next === "ENDED" &&
+      !window.confirm(
+        "Kết thúc mục tiêu này? Tiến độ đã ghi nhận vẫn được lưu.",
+      )
+    )
+      return;
     await runAction(
       "goal-" + goal.id,
       () => service.transitionGoal(goal.id, next),
       "Đã cập nhật trạng thái mục tiêu.",
+    );
+  }
+  async function submitPlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!childId || planDays.length === 0) {
+      setError("Hãy chọn ít nhất một ngày đọc trong tuần.");
+      return;
+    }
+    const targetMinutes = Number(planMinutes);
+    if (
+      !Number.isInteger(targetMinutes) ||
+      targetMinutes < 5 ||
+      targetMinutes > 240
+    ) {
+      setError("Thời lượng mỗi buổi phải từ 5 đến 240 phút.");
+      return;
+    }
+    const title = planTitle.trim();
+    if (!title) {
+      setError("Hãy đặt tên cho kế hoạch đọc.");
+      return;
+    }
+    const values = {
+      title,
+      book_id: planBookId || null,
+      target_minutes: targetMinutes,
+      weekdays: [...planDays].sort((a, b) => a - b),
+      ends_on: planEnd || null,
+      timezone: planTimezone,
+    };
+    const saved = editingPlanId
+      ? await runAction(
+          "plan-edit-" + editingPlanId,
+          () => service.updatePlan(editingPlanId, values),
+          "Đã cập nhật kế hoạch đọc.",
+        )
+      : await runAction(
+          "plan-create",
+          () =>
+            service.createPlan({
+              child_id: childId,
+              starts_on: planStart,
+              ...values,
+            }),
+          "Đã tạo kế hoạch đọc tuần.",
+        );
+    if (saved) {
+      setEditingPlanId("");
+      setPlanTitle("");
+      setPlanBookId("");
+      setPlanMinutes("20");
+      setPlanDays([0, 2, 4]);
+      setPlanStart(localToday());
+      setPlanEnd("");
+    }
+  }
+  async function transitionPlan(plan: ReadingPlanDTO, next: ReadingPlanStatus) {
+    if (
+      next === "ENDED" &&
+      !window.confirm(
+        "Kết thúc kế hoạch này? Lịch sử tiến độ đã ghi nhận vẫn được lưu.",
+      )
+    )
+      return;
+    const messages: Record<ReadingPlanStatus, string> = {
+      ACTIVE: "Đã tiếp tục kế hoạch.",
+      PAUSED: "Đã tạm dừng kế hoạch.",
+      COMPLETED: "Đã hoàn thành kế hoạch.",
+      ENDED: "Đã kết thúc kế hoạch.",
+    };
+    await runAction(
+      "plan-transition-" + plan.id,
+      () => service.transitionPlan(plan.id, next),
+      messages[next],
     );
   }
   async function saveEditedGoal(goal: ReadingGoalDTO) {
@@ -282,16 +408,17 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       remind_at: reminderTime,
       weekdays: [...reminderDays].sort((a, b) => a - b),
       timezone: reminderTimezone,
+      email_enabled: reminderEmailEnabled,
     };
     if (editingReminderId) {
-      await runAction(
+      const saved = await runAction(
         "reminder-edit",
         () => service.updateReminder(editingReminderId, payload),
         "Đã cập nhật lịch nhắc.",
       );
-      setEditingReminderId("");
+      if (saved) setEditingReminderId("");
     } else {
-      await runAction(
+      const saved = await runAction(
         "reminder-create",
         () =>
           service.createReminder({
@@ -301,6 +428,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           }),
         "Đã tạo lịch nhắc.",
       );
+      if (saved) setReminderEmailEnabled(false);
     }
   }
   if (loadingChildren)
@@ -383,12 +511,322 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       !isReadingDataLoading &&
       loadedRequestKey === currentRequestKey ? (
         <>
+          <section
+            aria-label="Tổng quan thói quen đọc"
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          >
+            {[
+              {
+                label: "Mục tiêu đang chạy",
+                value: goals.filter((goal) => goal.status === "ACTIVE").length,
+                detail: "mục tiêu đọc",
+                icon: <Target className="size-5" />,
+              },
+              {
+                label: "Kế hoạch trong tuần",
+                value: plans.filter((plan) => plan.status === "ACTIVE").length,
+                detail: "kế hoạch đang hoạt động",
+                icon: <CalendarDays className="size-5" />,
+              },
+              {
+                label: "Lịch nhắc đã bật",
+                value: reminders.filter((reminder) => reminder.is_active)
+                  .length,
+                detail: "lịch nhắc cho bé",
+                icon: <BellRing className="size-5" />,
+              },
+              {
+                label: "Sách đã lưu",
+                value: collections.length,
+                detail: "sách yêu thích hoặc muốn đọc",
+                icon: <BookHeart className="size-5" />,
+              },
+            ].map((item) => (
+              <article
+                key={item.label}
+                className="rounded-card border border-border bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-center gap-2 text-primary">
+                  {item.icon}
+                  <p className="text-label font-bold text-muted">
+                    {item.label}
+                  </p>
+                </div>
+                <p className="mt-3 text-3xl font-extrabold text-ink">
+                  {item.value}
+                </p>
+                <p className="mt-1 text-sm text-muted">{item.detail}</p>
+              </article>
+            ))}
+          </section>
+
+          <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6">
+            <div className="mb-5 flex items-start gap-3">
+              <div className="rounded-full bg-sky p-3 text-primary">
+                <CalendarDays className="size-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold text-ink">
+                  Kế hoạch đọc trong tuần
+                </h2>
+                <p className="mt-1 text-label text-muted">
+                  Chọn ngày, thời lượng và sách dự định đọc. Tiến độ được tính
+                  từ các buổi đọc hợp lệ của bé.
+                </p>
+              </div>
+            </div>
+            <form
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+              onSubmit={submitPlan}
+            >
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Tên kế hoạch
+                <input
+                  className={inputClass}
+                  maxLength={100}
+                  required
+                  value={planTitle}
+                  onChange={(event) => setPlanTitle(event.target.value)}
+                  placeholder="Ví dụ: Đọc cùng bé sau bữa tối"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Sách dự định đọc
+                <select
+                  className={inputClass}
+                  value={planBookId}
+                  onChange={(event) => setPlanBookId(event.target.value)}
+                >
+                  <option value="">Chưa chọn sách</option>
+                  {books.map((book) => (
+                    <option key={book.id} value={book.id}>
+                      {book.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Thời lượng mỗi buổi (phút)
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={5}
+                  max={240}
+                  step={1}
+                  required
+                  value={planMinutes}
+                  onChange={(event) => setPlanMinutes(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Múi giờ
+                <input
+                  className={inputClass}
+                  list="reading-timezones"
+                  required
+                  value={planTimezone}
+                  onChange={(event) => setPlanTimezone(event.target.value)}
+                />
+              </label>
+              <fieldset className="sm:col-span-2 lg:col-span-4">
+                <legend className="mb-2 text-label font-bold text-ink">
+                  Ngày đọc mỗi tuần
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {weekdayOptions.map((day) => (
+                    <label
+                      key={day.value}
+                      className={
+                        actionClass +
+                        (planDays.includes(day.value)
+                          ? " bg-sky text-primary"
+                          : " border border-border")
+                      }
+                    >
+                      <input
+                        className="accent-primary"
+                        type="checkbox"
+                        checked={planDays.includes(day.value)}
+                        onChange={(event) =>
+                          setPlanDays((current) =>
+                            event.target.checked
+                              ? [...current, day.value].sort((a, b) => a - b)
+                              : current.filter((value) => value !== day.value),
+                          )
+                        }
+                      />
+                      {day.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Bắt đầu từ
+                <input
+                  className={inputClass}
+                  type="date"
+                  required
+                  disabled={Boolean(editingPlanId)}
+                  value={planStart}
+                  onChange={(event) => setPlanStart(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+                Kết thúc (tùy chọn)
+                <input
+                  className={inputClass}
+                  type="date"
+                  min={planStart}
+                  value={planEnd}
+                  onChange={(event) => setPlanEnd(event.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+                <Button type="submit" disabled={Boolean(busyKey)}>
+                  {editingPlanId ? "Lưu kế hoạch" : "Tạo kế hoạch tuần"}
+                </Button>
+                {editingPlanId ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setEditingPlanId("")}
+                  >
+                    Hủy sửa
+                  </Button>
+                ) : null}
+              </div>
+            </form>
+            {plans.length === 0 ? (
+              <div className="mt-5 rounded-card bg-canvas p-5 text-center">
+                <CalendarDays className="mx-auto size-8 text-primary" />
+                <p className="mt-2 font-bold text-ink">
+                  Chưa có kế hoạch đọc tuần
+                </p>
+                <p className="mt-1 text-label text-muted">
+                  Tạo lịch đọc phù hợp với thời gian của gia đình.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                {plans.map((plan) => (
+                  <article
+                    key={plan.id}
+                    className="rounded-card border border-border bg-canvas p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-extrabold text-ink">
+                          {plan.title}
+                        </h3>
+                        <p className="mt-1 text-label text-muted">
+                          {plan.weekdays
+                            .map(
+                              (day) =>
+                                weekdayOptions.find(
+                                  (option) => option.value === day,
+                                )?.label,
+                            )
+                            .join(", ")}{" "}
+                          · {plan.target_minutes} phút mỗi buổi
+                        </p>
+                        {plan.book_title ? (
+                          <p className="mt-1 text-label text-muted">
+                            Sách: {plan.book_title}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-label font-bold text-primary">
+                        {planStatusText(plan.status)}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between gap-3 text-label">
+                      <span>Ngày đọc hoàn thành trong tuần này</span>
+                      <strong>
+                        {plan.completed_days_this_week}/
+                        {plan.scheduled_days_this_week}
+                      </strong>
+                    </div>
+                    <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{
+                          width: `${Math.min(100, plan.progress_percent)}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="mt-1 text-right text-label font-bold text-primary">
+                      {plan.progress_percent}%
+                    </p>
+                    {plan.status === "ACTIVE" || plan.status === "PAUSED" ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          className={
+                            actionClass + " border border-border bg-white"
+                          }
+                          type="button"
+                          onClick={() => {
+                            setEditingPlanId(plan.id);
+                            setPlanTitle(plan.title);
+                            setPlanBookId(plan.book_id ?? "");
+                            setPlanMinutes(String(plan.target_minutes));
+                            setPlanDays(plan.weekdays);
+                            setPlanStart(plan.starts_on);
+                            setPlanEnd(plan.ends_on ?? "");
+                            setPlanTimezone(plan.timezone);
+                          }}
+                        >
+                          Chỉnh sửa
+                        </button>
+                        {plan.status === "ACTIVE" ? (
+                          <button
+                            className={actionClass + " bg-cream text-ink"}
+                            type="button"
+                            disabled={Boolean(busyKey)}
+                            onClick={() => void transitionPlan(plan, "PAUSED")}
+                          >
+                            Tạm dừng
+                          </button>
+                        ) : (
+                          <button
+                            className={actionClass + " bg-sky text-primary"}
+                            type="button"
+                            disabled={Boolean(busyKey)}
+                            onClick={() => void transitionPlan(plan, "ACTIVE")}
+                          >
+                            Tiếp tục
+                          </button>
+                        )}
+                        <button
+                          className={actionClass + " bg-sky text-primary"}
+                          type="button"
+                          disabled={Boolean(busyKey)}
+                          onClick={() => void transitionPlan(plan, "COMPLETED")}
+                        >
+                          <CheckCircle2 className="size-4" /> Hoàn thành
+                        </button>
+                        <button
+                          className={
+                            actionClass +
+                            " border border-border bg-white text-muted"
+                          }
+                          type="button"
+                          disabled={Boolean(busyKey)}
+                          onClick={() => void transitionPlan(plan, "ENDED")}
+                        >
+                          Kết thúc
+                        </button>
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
               <Target className="size-6 text-primary" />
-              <h2 className="text-xl font-extrabold text-ink">
-                Kế hoạch và mục tiêu đọc
-              </h2>
+              <h2 className="text-xl font-extrabold text-ink">Mục tiêu đọc</h2>
             </div>
             <form
               className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
@@ -583,8 +1021,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </div>
             )}
             <p className="mt-4 text-xs text-muted">
-              Tiến độ chỉ tính phiên FINISHED có thời điểm bắt đầu/kết thúc hợp
-              lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.
+              Tiến độ chỉ tính phiên đã hoàn tất với thời điểm bắt đầu/kết thúc
+              hợp lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.
             </p>
           </section>
 
@@ -758,8 +1196,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <h2 className="text-xl font-extrabold text-ink">Lịch nhắc đọc</h2>
             </div>
             <p className="mb-4 text-label text-muted">
-              Nhắc trong ứng dụng khi phụ huynh mở trang này sau giờ đặt. Chưa
-              có push, email, SMS hoặc nhắc nền khi ứng dụng đóng.
+              Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy chủ sẽ gửi
+              lời nhắc đến địa chỉ đã xác minh của tài khoản phụ huynh.
             </p>
             <form
               className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"
@@ -824,6 +1262,31 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
+              <fieldset className="rounded-control border border-border bg-canvas p-3 md:col-span-2 lg:col-span-4">
+                <legend className="px-1 text-label font-bold text-ink">
+                  Email nhắc đọc
+                </legend>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    className="mt-1 size-5 accent-primary"
+                    type="checkbox"
+                    checked={reminderEmailEnabled}
+                    onChange={(event) =>
+                      setReminderEmailEnabled(event.target.checked)
+                    }
+                  />
+                  <span>
+                    <span className="flex items-center gap-2 font-bold text-ink">
+                      <Mail className="size-4 text-primary" /> Gửi email cho phụ
+                      huynh khi đến giờ
+                    </span>
+                    <span className="mt-1 block text-sm text-muted">
+                      Email được gửi tới địa chỉ đã xác minh của tài khoản phụ
+                      huynh.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
               <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-4">
                 <Button type="submit" disabled={Boolean(busyKey)}>
                   {editingReminderId ? "Lưu chỉnh sửa" : "Tạo lịch nhắc"}
@@ -861,6 +1324,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             )}{" "}
                         · {item.scheduled_local_date}
                       </span>
+                      {item.email_status !== "NOT_REQUESTED" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-3 py-1 text-sm font-bold text-primary">
+                          <Mail className="size-4" />{" "}
+                          {item.email_error_code === "PARENT_EMAIL_UNVERIFIED"
+                            ? "Email phụ huynh chưa xác minh"
+                            : emailStatusText(item.email_status)}
+                        </span>
+                      ) : null}
                       <button
                         className={actionClass + " bg-sky text-primary"}
                         type="button"
@@ -909,6 +1380,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             .join(", ")}{" "}
                           · {reminder.timezone}
                         </p>
+                        <p className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-primary">
+                          <Mail className="size-4" />
+                          {reminder.email_enabled
+                            ? "Có gửi email nhắc"
+                            : "Chỉ nhắc trong ứng dụng"}
+                        </p>
                       </div>
                       <label className="flex items-center gap-2 text-label font-bold">
                         <input
@@ -940,6 +1417,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           setReminderTime(clock(reminder.remind_at));
                           setReminderDays(reminder.weekdays);
                           setReminderTimezone(reminder.timezone);
+                          setReminderEmailEnabled(reminder.email_enabled);
                         }}
                       >
                         Chỉnh sửa
@@ -951,10 +1429,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         type="button"
                         disabled={Boolean(busyKey)}
                         onClick={() =>
-                          void runAction(
-                            "reminder-delete-" + reminder.id,
-                            () => service.deleteReminder(reminder.id),
-                            "Đã xóa lịch nhắc.",
+                          void (
+                            window.confirm(
+                              "Xóa lịch nhắc này? Các lần gửi trong tương lai sẽ bị hủy.",
+                            ) &&
+                            runAction(
+                              "reminder-delete-" + reminder.id,
+                              () => service.deleteReminder(reminder.id),
+                              "Đã xóa lịch nhắc.",
+                            )
                           )
                         }
                       >

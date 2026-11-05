@@ -7,6 +7,10 @@ import type {
   ReadingGoalCreateDTO,
   ReadingGoalDTO,
   ReadingGoalStatus,
+  ReadingPlanCreateDTO,
+  ReadingPlanDTO,
+  ReadingPlanStatus,
+  ReadingPlanUpdateDTO,
   ReadingReminderDTO,
   ReadingReminderOccurrenceDTO,
   ReadingReminderWriteDTO,
@@ -28,6 +32,25 @@ const goalSchema = z.object({
   progress_percent: z.number().min(0).max(100),
   completed_value: z.number().int().nonnegative().nullable().optional(),
   completed_at: dateTimeSchema.nullable().optional(),
+  created_at: dateTimeSchema,
+  updated_at: dateTimeSchema,
+});
+const planSchema = z.object({
+  id: z.string().uuid(),
+  child_id: z.string().uuid(),
+  book_id: z.string().uuid().nullable(),
+  book_title: z.string().nullable(),
+  title: z.string().min(1).max(100),
+  target_minutes: z.number().int().min(5).max(240),
+  weekdays: z.array(z.number().int().min(0).max(6)),
+  starts_on: dateSchema,
+  ends_on: dateSchema.nullable(),
+  timezone: z.string().min(1),
+  status: z.enum(["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]),
+  scheduled_days_this_week: z.number().int().nonnegative(),
+  completed_days_this_week: z.number().int().nonnegative(),
+  progress_percent: z.number().min(0).max(100),
+  completed_at: dateTimeSchema.nullable(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
 });
@@ -54,6 +77,7 @@ const reminderSchema = z.object({
   weekdays: z.array(z.number().int().min(0).max(6)),
   timezone: z.string().min(1),
   is_active: z.boolean(),
+  email_enabled: z.boolean().default(false),
   deleted_at: dateTimeSchema.nullable(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
@@ -65,6 +89,12 @@ const occurrenceSchema = z.object({
   scheduled_for: dateTimeSchema,
   status: z.enum(["PENDING", "ACKNOWLEDGED"]),
   acknowledged_at: dateTimeSchema.nullable(),
+  email_status: z
+    .enum(["NOT_REQUESTED", "PENDING", "SENDING", "RETRY", "SENT", "FAILED"])
+    .default("NOT_REQUESTED"),
+  email_attempts: z.number().int().nonnegative().default(0),
+  email_sent_at: dateTimeSchema.nullable().default(null),
+  email_error_code: z.string().nullable().default(null),
   reminder: reminderSchema.nullable(),
 });
 const deletedSchema = z.object({ deleted: z.literal(true) });
@@ -80,6 +110,16 @@ export interface ReadingManagementService {
     goalId: string,
     status: ReadingGoalStatus,
   ): Promise<ReadingGoalDTO>;
+  listPlans(childId: string, signal?: AbortSignal): Promise<ReadingPlanDTO[]>;
+  createPlan(payload: ReadingPlanCreateDTO): Promise<ReadingPlanDTO>;
+  updatePlan(
+    planId: string,
+    payload: ReadingPlanUpdateDTO,
+  ): Promise<ReadingPlanDTO>;
+  transitionPlan(
+    planId: string,
+    status: ReadingPlanStatus,
+  ): Promise<ReadingPlanDTO>;
   listCollections(
     childId: string,
     signal?: AbortSignal,
@@ -104,7 +144,7 @@ export interface ReadingManagementService {
         ReadingReminderWriteDTO,
         "child_id" | "remind_at" | "weekdays" | "timezone"
       >
-    > & { is_active?: boolean },
+    > & { is_active?: boolean; email_enabled?: boolean },
   ): Promise<ReadingReminderDTO>;
   updateReminder(
     reminderId: string,
@@ -144,6 +184,31 @@ export function createReadingManagementService(): ReadingManagementService {
       requestApi(
         "/reading-management/goals/" + encodeURIComponent(id) + "/transition",
         goalSchema,
+        undefined,
+        { method: "POST", body: { status } },
+      ),
+    listPlans: (childId, signal) =>
+      requestApi(
+        "/reading-management/plans" + apiQuery({ child_id: childId }),
+        z.array(planSchema),
+        signal,
+      ),
+    createPlan: (payload) =>
+      requestApi("/reading-management/plans", planSchema, undefined, {
+        method: "POST",
+        body: payload,
+      }),
+    updatePlan: (id, payload) =>
+      requestApi(
+        "/reading-management/plans/" + encodeURIComponent(id),
+        planSchema,
+        undefined,
+        { method: "PATCH", body: payload },
+      ),
+    transitionPlan: (id, status) =>
+      requestApi(
+        "/reading-management/plans/" + encodeURIComponent(id) + "/transition",
+        planSchema,
         undefined,
         { method: "POST", body: { status } },
       ),
