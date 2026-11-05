@@ -129,6 +129,12 @@ function createReadingFixtures() {
       delete: vi
         .fn<ReadingServices["childService"]["delete"]>()
         .mockRejectedValue(new Error("Unused test write")),
+      uploadAvatar: vi
+        .fn<ReadingServices["childService"]["uploadAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
+      removeAvatar: vi
+        .fn<ReadingServices["childService"]["removeAvatar"]>()
+        .mockRejectedValue(new Error("Unused test write")),
     },
     comprehensionService: {
       getQuestion: vi
@@ -163,6 +169,18 @@ function createReadingFixtures() {
       getSnapshot: vi
         .fn<ReadingServices["devicePermissionService"]["getSnapshot"]>()
         .mockResolvedValue({ camera: "ready", microphone: "ready" }),
+      getMicrophonePermissionState: vi.fn().mockResolvedValue("prompt"),
+      watchMicrophonePermissionState: vi
+        .fn()
+        .mockResolvedValue(() => undefined),
+      requestAccess: vi
+        .fn<ReadingServices["devicePermissionService"]["requestAccess"]>()
+        .mockResolvedValue({
+          status: "granted",
+          verified: true,
+          message: "Device is available",
+          mediaRecorderSupported: true,
+        }),
       retry: vi
         .fn<ReadingServices["devicePermissionService"]["retry"]>()
         .mockResolvedValue("ready"),
@@ -216,7 +234,7 @@ function createReadingFixtures() {
           practiced_words: 0,
         }),
       finish: vi.fn().mockResolvedValue({
-      // Giữ nguyên dữ liệu kết quả finish hiện tại
+        // Giữ nguyên dữ liệu kết quả finish hiện tại
       }),
       createRetryEvent: vi.fn().mockResolvedValue(undefined),
     },

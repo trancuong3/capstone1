@@ -19,6 +19,26 @@ const authMocks = vi.hoisted(() => ({
   resend: vi.fn(),
 }));
 
+const authRuntimeMock = vi.hoisted(() => ({
+  session: {
+    user: {
+      display_name: "Tên từ OAuth",
+    },
+  },
+}));
+const originalCreateObjectURL = Object.getOwnPropertyDescriptor(
+  URL,
+  "createObjectURL",
+);
+const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(
+  URL,
+  "revokeObjectURL",
+);
+
+vi.mock("@/hooks/use-auth-runtime", () => ({
+  useAuthRuntime: () => authRuntimeMock,
+}));
+
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: authMocks,
@@ -30,6 +50,14 @@ vi.mock("@/lib/supabase/config", () => ({
 }));
 
 beforeEach(() => {
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:parent-preview"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
   installApiFetchFixture();
   authMocks.getSession.mockResolvedValue({
     data: { session: { access_token: "isolated-test-token" } },
@@ -53,7 +81,19 @@ beforeEach(() => {
   authMocks.resend.mockResolvedValue({ data: {}, error: null });
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  if (originalCreateObjectURL) {
+    Object.defineProperty(URL, "createObjectURL", originalCreateObjectURL);
+  } else {
+    Reflect.deleteProperty(URL, "createObjectURL");
+  }
+  if (originalRevokeObjectURL) {
+    Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectURL);
+  } else {
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+});
 
 const profile: ParentProfileDTO = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -83,7 +123,7 @@ function renderProfile() {
   );
 }
 
-describe("ParentProfileScreen inline editing", () => {
+describe("ParentProfileScreen", () => {
   it("renders profile and children without account ID or phone verification UI", async () => {
     apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
     renderProfile();
@@ -105,9 +145,49 @@ describe("ParentProfileScreen inline editing", () => {
     expect(screen.getByText("Lớp 2")).toBeInTheDocument();
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
+    expect(authMocks.getUser).not.toHaveBeenCalled();
   });
 
-  it("edits the email in place and leaves verification pending until Auth confirms it", async () => {
+  it("opens one form for the complete profile, including avatar and all contact fields", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
+    const user = userEvent.setup();
+    renderProfile();
+
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+
+    expect(screen.getByLabelText("Họ và tên")).toHaveValue(
+      profile.display_name,
+    );
+    expect(screen.getByLabelText("Email")).toHaveValue(profile.email);
+    expect(screen.getByLabelText("Số điện thoại liên hệ")).toHaveValue(
+      profile.contact_phone,
+    );
+    expect(
+      screen.getByLabelText("Chọn ảnh đại diện PNG, JPG hoặc WEBP"),
+    ).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    expect(
+      screen.getByRole("button", { name: "Lưu thay đổi" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hủy" })).toBeInTheDocument();
+  });
+
+  it("discards all unsaved values when the parent cancels", async () => {
+    apiFetchFixture.mockResolvedValueOnce(Response.json(profile));
+    const user = userEvent.setup();
+    renderProfile();
+
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.clear(screen.getByLabelText("Họ và tên"));
+    await user.type(screen.getByLabelText("Họ và tên"), "Tên chưa lưu");
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+
+    expect(
+      screen.getByRole("heading", { name: profile.display_name ?? "" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Họ và tên")).not.toBeInTheDocument();
+  });
+
+  it("edits the email in the unified form and leaves verification pending until Auth confirms it", async () => {
     apiFetchFixture
       .mockResolvedValueOnce(Response.json(profile))
       .mockResolvedValueOnce(
@@ -120,21 +200,17 @@ describe("ParentProfileScreen inline editing", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Chỉnh sửa email" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(
-      screen.queryByLabelText("Số điện thoại liên hệ"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Email"));
     await user.type(screen.getByLabelText("Email"), "new-parent@example.com");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Đã gửi yêu cầu đổi email",
+      "Email mới chỉ có hiệu lực sau khi ba mẹ xác minh",
     );
     expect(authMocks.updateUser).toHaveBeenCalledWith(
       { email: "new-parent@example.com" },
@@ -151,7 +227,7 @@ describe("ParentProfileScreen inline editing", () => {
     expect(authMocks.verifyOtp).not.toHaveBeenCalled();
   });
 
-  it("edits contact phone in place by saving to the Profile API without Auth OTP or SMS", async () => {
+  it("edits contact phone in the unified form through the Profile API without Auth OTP or SMS", async () => {
     apiFetchFixture
       .mockResolvedValueOnce(Response.json(profile))
       .mockResolvedValueOnce(
@@ -164,11 +240,7 @@ describe("ParentProfileScreen inline editing", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Chỉnh sửa số điện thoại liên hệ",
-      }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
 
     expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
     expect(
@@ -180,10 +252,10 @@ describe("ParentProfileScreen inline editing", () => {
       screen.getByLabelText("Số điện thoại liên hệ"),
       "0912345678",
     );
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Đã lưu số điện thoại liên hệ. Không cần xác minh.",
+      "Đã lưu các thay đổi hồ sơ.",
     );
     expect(screen.getByText("+84912345678")).toBeInTheDocument();
 
@@ -201,7 +273,7 @@ describe("ParentProfileScreen inline editing", () => {
     expect(authMocks.resend).not.toHaveBeenCalled();
   });
 
-  it("edits display name inline and persists through the existing profile API", async () => {
+  it("edits display name in the unified form through the existing profile API", async () => {
     apiFetchFixture.mockImplementation(async (input, init) => {
       const url = String(input);
       if (url.endsWith("/profiles/me")) {
@@ -221,29 +293,60 @@ describe("ParentProfileScreen inline editing", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Chỉnh sửa tên hiển thị" }),
-    );
-    const field = screen.getByLabelText("Tên hiển thị của ba mẹ");
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    const field = screen.getByLabelText("Họ và tên");
     await user.clear(field);
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(
       await screen.findByText("Ba mẹ vui lòng nhập tên hiển thị."),
     ).toBeInTheDocument();
-    await user.type(
-      screen.getByLabelText("Tên hiển thị của ba mẹ"),
-      "Ba Mẹ Mây",
-    );
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.type(screen.getByLabelText("Họ và tên"), "Ba Mẹ Mây");
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(
       await screen.findByRole("heading", { name: "Ba Mẹ Mây" }),
     ).toBeInTheDocument();
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Đã cập nhật tên hiển thị.",
+      "Đã lưu các thay đổi hồ sơ.",
     );
     expect(authMocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps the persisted avatar when an upload fails", async () => {
+    const existingAvatar = "https://storage.example/parent-current.webp";
+    apiFetchFixture
+      .mockResolvedValueOnce(
+        Response.json({ ...profile, avatar_url: existingAvatar }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ detail: "safe storage failure" }, { status: 503 }),
+      );
+
+    const user = userEvent.setup();
+    renderProfile();
+    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.upload(
+      screen.getByLabelText("Chọn ảnh đại diện PNG, JPG hoặc WEBP"),
+      new File(["new-avatar"], "avatar.png", { type: "image/png" }),
+    );
+
+    expect(
+      screen
+        .getByRole("img", { name: "Ảnh xem trước của Ba mẹ kiểm thử" })
+        .querySelector("img"),
+    ).toHaveAttribute("src", "blob:parent-preview");
+    await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "safe storage failure",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Hủy" }));
+    expect(
+      screen
+        .getByRole("img", { name: "Ảnh đại diện của Ba mẹ kiểm thử" })
+        .querySelector("img"),
+    ).toHaveAttribute("src", existingAvatar);
   });
 
   it("keeps load errors generic", async () => {

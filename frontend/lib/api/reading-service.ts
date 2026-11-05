@@ -261,10 +261,7 @@ export function createReadingService(): ReadingService {
       const endMs =
         input.endMs === null
           ? null
-          : Math.min(
-              32767,
-              Math.max(startMs, Math.floor(input.endMs)),
-            );
+          : Math.min(32767, Math.max(startMs, Math.floor(input.endMs)));
 
       await requestApi(
         "/reading/events",

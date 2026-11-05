@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
+import tempfile
 import threading
 import unicodedata
 from typing import Any
 
-# Ngăn chặn xung đột OpenMP runtime giữa PyTorch và PaddlePaddle
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import PIL.Image
@@ -18,14 +19,8 @@ if not hasattr(PIL.Image, "ANTIALIAS"):
 import cv2
 import jiwer
 import numpy as np
-
-try:
-    import pytesseract
-    from pytesseract import Output
-except ImportError:
-    pytesseract = None  # type: ignore
-    Output = None  # type: ignore
-
+import pytesseract
+from pytesseract import Output
 import torch
 from PIL import Image
 
@@ -41,6 +36,8 @@ except ImportError:
     Cfg = None  # type: ignore
     Predictor = None  # type: ignore
 
+logger = logging.getLogger(__name__)
+
 
 class OcrEngineUnavailable(RuntimeError):
     """Mô hình PaddleOCR hoặc VietOCR không khả dụng hoặc chưa được cấu hình."""
@@ -51,7 +48,6 @@ class OcrNoTextDetected(RuntimeError):
 
 
 def normalize_word(value: str) -> str:
-    """Chuẩn hóa tiếng Việt canonical dùng chung cho OCR output và review words."""
     value = unicodedata.normalize("NFC", value).strip().lower()
     while value and (
         unicodedata.category(value[0]).startswith(("P", "S"))
@@ -67,7 +63,6 @@ def normalize_word(value: str) -> str:
 
 
 def normalize_text_tokens(value: str) -> list[str]:
-    """Phân tách chuỗi thành danh sách token từ đã chuẩn hóa."""
     return [
         token
         for raw in re.split(r"\s+", unicodedata.normalize("NFC", value).strip())
@@ -75,16 +70,26 @@ def normalize_text_tokens(value: str) -> list[str]:
     ]
 
 
-# =============================================================================
-# Quản lý khởi tạo Dual-Engine Singleton (PaddleOCR + VietOCR)
-# =============================================================================
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
 _engine_lock = threading.Lock()
 
 
+def _find_cached_vietocr_weights() -> str | None:
+    temp_dir = os.environ.get("TEMP", os.environ.get("TMP", tempfile.gettempdir()))
+    candidates = [
+        os.path.join(temp_dir, "vgg_transformer.pth"),
+        os.path.expanduser(r"~\AppData\Local\Temp\vgg_transformer.pth"),
+        os.path.expanduser("~/.cache/vietocr/vgg_transformer.pth"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "weights", "vgg_transformer.pth")),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.path.getsize(path) > 10 * 1024 * 1024:
+            return path
+    return None
+
+
 def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
-    """Khởi tạo và lưu cache trọng số mô hình vào RAM một lần duy nhất (Thread-safe)."""
     global _paddle_engine, _vietocr_engine
     if _paddle_engine is not None and _vietocr_engine is not None:
         return _paddle_engine, _vietocr_engine
@@ -104,20 +109,29 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
                 lang="vi",
                 det_limit_side_len=2048,
                 det_db_thresh=0.25,
-                det_db_box_thresh=0.18,      # Bắt trọn vẹn các dòng bị cong vòm ở giữa trang sách
-                det_db_unclip_ratio=1.32,
-                det_db_score_mode="slow",    # Chấm điểm theo đa giác thực tế thay vì khung chữ nhật
-                drop_score=0.0,              # Giữ lại toàn bộ các dòng dài cho VietOCR xử lý
+                det_db_box_thresh=0.18,
+                det_db_unclip_ratio=1.60,
+                det_db_score_mode="slow",
+                drop_score=0.0,
                 show_log=False,
             )
 
             viet_config = Cfg.load_config_from_name("vgg_transformer")
             target_device = "cuda" if torch.cuda.is_available() else "cpu"
             viet_config["device"] = target_device
+
+            cached_weight = _find_cached_vietocr_weights()
+            if cached_weight:
+                viet_config["weights"] = cached_weight
+
+            if target_device == "cpu":
+                torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
+
             viet_inst = Predictor(viet_config)
 
             _paddle_engine = paddle_inst
             _vietocr_engine = viet_inst
+            logger.info("OCR Dual-Engine (PaddleOCR + VietOCR) đã nạp sẵn thành công vào RAM.")
         except Exception as exc:
             raise OcrEngineUnavailable(
                 f"Không thể khởi tạo engine PaddleOCR / VietOCR: {exc}"
@@ -126,11 +140,17 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
     return _paddle_engine, _vietocr_engine
 
 
-# =============================================================================
-# Các thuật toán thị giác, khử độ cong vòm (Parabolic Dewarping) & Layout
-# =============================================================================
+def warmup_ocr_engines() -> None:
+    try:
+        _get_ocr_engines()
+    except Exception as exc:
+        logger.warning(f"Preload OCR Engine thất bại: {exc}")
+
+
+threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_model_preloader").start()
+
+
 def strip_accents(text: str) -> str:
-    """Loại bỏ dấu tiếng Việt, đưa về ký tự ASCII thường để kiểm định ngữ âm."""
     text = unicodedata.normalize("NFD", text)
     text = re.sub(r"[\u0300-\u036f]", "", text)
     text = text.replace("đ", "d").replace("Đ", "D")
@@ -138,19 +158,34 @@ def strip_accents(text: str) -> str:
 
 
 def clean_ocr_punctuation(text: str) -> str:
-    """Chuẩn hóa tất định các lỗi nhận diện dấu câu."""
     text = re.sub(r'(^|\s)\?(?=[A-ZÀ-Ỹa-zà-ỹ])', r'\1"', text)
     text = re.sub(r'\.{2,3}3[\?\"]*', '...?"', text)
     return text.strip()
+
+
+def _transfer_punctuation(viet_text: str, paddle_text: str) -> str:
+    v_clean = viet_text.strip()
+    p_clean = paddle_text.strip()
+    if not v_clean or not p_clean:
+        return v_clean
+
+    trailing_punct_match = re.search(r"([,!?:;\"'…]+)$", p_clean)
+    if trailing_punct_match and not re.search(r"[,!?:;\"'…]$", v_clean):
+        v_clean = v_clean + trailing_punct_match.group(1)
+
+    leading_punct_match = re.match(r"^([\"'“—–-]+)", p_clean)
+    if leading_punct_match and not re.match(r"^[\"'“—–-]", v_clean):
+        v_clean = leading_punct_match.group(1) + v_clean
+
+    return v_clean
 
 
 def is_vietocr_reliable(
     viet_text: str,
     paddle_text: str,
     paddle_conf: float = 0.90,
-    max_cer: float = 0.35,
+    max_cer: float = 0.40,
 ) -> bool:
-    """Kiểm tra độ tin cậy của VietOCR và chống ảo giác lặp từ."""
     v_clean = viet_text.strip()
     p_clean = paddle_text.strip()
 
@@ -163,7 +198,7 @@ def is_vietocr_reliable(
             if words[i].lower() == words[i + 1].lower() == words[i + 2].lower():
                 return False
 
-    if not p_clean or paddle_conf < 0.75 or len(v_clean) > 28:
+    if not p_clean or paddle_conf < 0.70 or len(v_clean) > 28:
         return True
 
     v_no_acc = strip_accents(v_clean)
@@ -182,8 +217,75 @@ def is_vietocr_reliable(
     return True
 
 
+_VIET_STOP_CONSONANTS = ("c", "ch", "p", "t")
+_VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳẩẻểỉỏổởủửỷãẵẫẽễĩõỗỡũữỹ]", re.IGNORECASE)
+
+
+def _evaluate_vietnamese_word_confidence(
+    viet_word: str,
+    matched_paddle_word: str | None,
+    base_line_conf: float = 0.90,
+) -> float:
+    v_norm = normalize_word(viet_word)
+    if not v_norm:
+        return 0.50
+
+    v_base = strip_accents(v_norm)
+
+    if any(v_base.endswith(stop) for stop in _VIET_STOP_CONSONANTS):
+        if _VIET_ILLEGAL_STOP_ACCENTS.search(v_norm):
+            return 0.50
+
+    if not matched_paddle_word:
+        return round(base_line_conf, 4) if base_line_conf >= 0.80 else 0.75
+
+    p_norm = normalize_word(matched_paddle_word)
+    p_base = strip_accents(p_norm)
+
+    # Khớp hoàn toàn cả từ hoặc trùng chữ cái gốc -> trả về đúng độ tin cậy base_line_conf
+    if p_norm and (v_norm.lower() == p_norm.lower() or v_base == p_base):
+        return round(base_line_conf, 4)
+
+    if p_norm and jiwer.cer(v_base, p_base) <= 0.35:
+        return 0.75
+
+    return 0.50
+
+
+def _find_best_matching_paddle_token(
+    viet_word: str,
+    paddle_tokens: list[str],
+    current_idx: int,
+    window_size: int = 3,
+) -> str | None:
+    if not paddle_tokens:
+        return None
+
+    v_norm = normalize_word(viet_word)
+    v_base = strip_accents(v_norm)
+
+    start = max(0, current_idx - window_size)
+    end = min(len(paddle_tokens), current_idx + window_size + 1)
+    candidates = paddle_tokens[start:end]
+
+    for candidate in candidates:
+        if normalize_word(candidate).lower() == v_norm.lower():
+            return candidate
+
+    for candidate in candidates:
+        if strip_accents(normalize_word(candidate)) == v_base:
+            return candidate
+
+    for candidate in candidates:
+        c_base = strip_accents(normalize_word(candidate))
+        if c_base and v_base and abs(len(c_base) - len(v_base)) <= 1:
+            if jiwer.cer(v_base, c_base) <= 0.35:
+                return candidate
+
+    return None
+
+
 def _order_quad_points(pts: np.ndarray) -> np.ndarray:
-    """Đảm bảo 4 đỉnh tứ giác luôn theo đúng thứ tự: [top-left, top-right, bottom-right, bottom-left]."""
     pts = np.array(pts, dtype=np.float32)
     x_sorted = pts[np.argsort(pts[:, 0])]
     left_pts = x_sorted[:2]
@@ -193,73 +295,11 @@ def _order_quad_points(pts: np.ndarray) -> np.ndarray:
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
-def _fit_single_line_parabola(
-    binary_band: np.ndarray, target_h: float
-) -> np.ndarray:
-    """Tìm đường tâm Parabol v_c(u) bám theo vệt mực của dòng chữ bị cong vòm."""
-    b_h, b_w = binary_band.shape[:2]
-    u_coords = np.arange(b_w, dtype=np.float32)
-    if b_w < 40 or b_h < 8:
-        return np.full(b_w, b_h / 2.0, dtype=np.float32)
-
-    win_h = max(6, min(b_h - 1, int(round(target_h * 0.90))))
-    if win_h >= b_h - 2:
-        return np.full(b_w, b_h / 2.0, dtype=np.float32)
-
-    num_slices = min(14, max(5, b_w // 60))
-    slice_edges = np.linspace(0, b_w, num_slices + 1, dtype=int)
-
-    valid_u: list[float] = []
-    valid_v: list[float] = []
-
-    for s in range(num_slices):
-        u0, u1 = slice_edges[s], slice_edges[s + 1]
-        if u1 - u0 < 4:
-            continue
-        col_slice = (binary_band[:, u0:u1] > 0).astype(np.float32)
-        row_prof = np.sum(col_slice, axis=1)
-        total_ink = float(np.sum(row_prof))
-        if total_ink < (u1 - u0) * 0.6:
-            continue
-
-        # Trượt cửa sổ chiều cao win_h để tìm dải có mật độ mực lớn nhất (loại bỏ nhiễu dòng lân cận)
-        window_sums = np.convolve(
-            row_prof, np.ones(win_h, dtype=np.float32), mode="valid"
-        )
-        best_top = int(np.argmax(window_sums))
-        sub_prof = row_prof[best_top : best_top + win_h]
-        sub_sum = float(np.sum(sub_prof))
-        if sub_sum > 0:
-            rows_idx = np.arange(best_top, best_top + win_h, dtype=np.float32)
-            v_center = float(np.sum(rows_idx * sub_prof) / sub_sum)
-        else:
-            v_center = best_top + win_h / 2.0
-
-        valid_u.append((u0 + u1) / 2.0)
-        valid_v.append(v_center)
-
-    if len(valid_u) >= 3:
-        deg = 2 if len(valid_u) >= 4 else 1
-        coeffs = np.polyfit(
-            np.array(valid_u, dtype=np.float32),
-            np.array(valid_v, dtype=np.float32),
-            deg=deg,
-        )
-        v_curve = np.polyval(coeffs, u_coords).astype(np.float32)
-        half_band = max(3.0, target_h * 0.35)
-        return np.clip(v_curve, half_band, max(half_band, b_h - half_band))
-    elif len(valid_u) >= 1:
-        return np.full(b_w, float(np.median(valid_v)), dtype=np.float32)
-
-    return np.full(b_w, b_h / 2.0, dtype=np.float32)
-
-
-def _dewarp_strip_along_curve(
+def _dewarp_strip_with_safe_border(
     rect_img: np.ndarray, v_curve: np.ndarray, strip_h: int
 ) -> np.ndarray:
-    """Cắt và nắn phẳng hoàn toàn dòng chữ dọc theo đường cong v_curve(u)."""
     crop_h, crop_w = rect_img.shape[:2]
-    strip_h = max(12, int(strip_h))
+    strip_h = max(24, int(strip_h))
     u_grid = np.broadcast_to(
         np.arange(crop_w, dtype=np.float32)[None, :], (strip_h, crop_w)
     ).copy()
@@ -277,79 +317,29 @@ def _dewarp_strip_along_curve(
         interpolation=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_REPLICATE,
     )
+
+    pad_horiz = max(16, int(strip_h * 0.30))
+    pad_vert = max(12, int(strip_h * 0.22))
     return cv2.copyMakeBorder(
         dewarped,
-        top=4,
-        bottom=4,
-        left=4,
-        right=4,
+        top=pad_vert,
+        bottom=pad_vert,
+        left=pad_horiz,
+        right=pad_horiz,
         borderType=cv2.BORDER_CONSTANT,
         value=[255, 255, 255],
     )
 
 
-def _estimate_block_arch_offsets(
-    binary: np.ndarray, ref_h: float
-) -> np.ndarray:
-    """Ước lượng độ cong vòm cho khối bị dính nhiều dòng bằng tương quan chéo các lát cắt dọc."""
-    c_h, c_w = binary.shape[:2]
-    if c_w < 80 or c_h < 20:
-        return np.zeros(c_w, dtype=np.float32)
-
-    num_slices = min(12, max(5, c_w // 70))
-    edges = np.linspace(0, c_w, num_slices + 1, dtype=int)
-    profiles: list[np.ndarray] = []
-    centers_u: list[float] = []
-
-    for s in range(num_slices):
-        u0, u1 = edges[s], edges[s + 1]
-        prof = np.sum(binary[:, u0:u1] > 0, axis=1).astype(np.float32)
-        prof = np.convolve(prof, np.ones(3, dtype=np.float32) / 3.0, mode="same")
-        profiles.append(prof)
-        centers_u.append((u0 + u1) / 2.0)
-
-    mid = num_slices // 2
-    shifts = np.zeros(num_slices, dtype=np.float32)
-    max_step = max(3, min(8, int(ref_h * 0.25)))
-
-    def best_delta(prof_ref: np.ndarray, prof_cur: np.ndarray) -> float:
-        if np.sum(prof_ref) < 5 or np.sum(prof_cur) < 5:
-            return 0.0
-        best_d = 0
-        best_val = -1.0
-        for d in range(-max_step, max_step + 1):
-            if d < 0:
-                val = float(np.dot(prof_ref[:d], prof_cur[-d:]))
-            elif d > 0:
-                val = float(np.dot(prof_ref[d:], prof_cur[:-d]))
-            else:
-                val = float(np.dot(prof_ref, prof_cur))
-            if val > best_val:
-                best_val = val
-                best_d = d
-        return float(best_d)
-
-    for s in range(mid - 1, -1, -1):
-        shifts[s] = shifts[s + 1] + best_delta(profiles[s + 1], profiles[s])
-    for s in range(mid + 1, num_slices):
-        shifts[s] = shifts[s - 1] + best_delta(profiles[s - 1], profiles[s])
-
-    u_all = np.arange(c_w, dtype=np.float32)
-    coeffs = np.polyfit(np.array(centers_u, dtype=np.float32), shifts, deg=2)
-    arch = np.polyval(coeffs, u_all).astype(np.float32)
-    arch -= float(np.median(arch))
-    return np.clip(arch, -ref_h * 1.2, ref_h * 1.2)
-
-
 def _extract_curved_lines_from_items(
     raw_items: list, image: np.ndarray
 ) -> list[dict[str, Any]]:
-    """Chuyển đổi các box thô của DBNet thành danh sách các dòng đơn đã khử cong và tách dòng dính."""
     if not raw_items:
         return []
 
+    img_h, img_w = image.shape[:2]
     temp_items = []
-    perp_heights = []
+
     for raw in raw_items:
         pts = _order_quad_points(raw[0])
         p_text = str(raw[1][0]) if (len(raw) > 1 and raw[1]) else ""
@@ -358,37 +348,38 @@ def _extract_curved_lines_from_items(
         except (TypeError, ValueError):
             p_conf = 0.0
 
-        crop_w = int(
-            max(
-                np.linalg.norm(pts[0] - pts[1]),
-                np.linalg.norm(pts[2] - pts[3]),
-            )
-        )
-        crop_h = int(
-            max(
-                np.linalg.norm(pts[0] - pts[3]),
-                np.linalg.norm(pts[1] - pts[2]),
-            )
-        )
-        if crop_w < 8 or crop_h < 8:
+        raw_w = max(np.linalg.norm(pts[0] - pts[1]), np.linalg.norm(pts[2] - pts[3]))
+        raw_h = max(np.linalg.norm(pts[0] - pts[3]), np.linalg.norm(pts[1] - pts[2]))
+
+        if raw_w < 8 or raw_h < 8:
             continue
 
-        temp_items.append((pts, crop_w, crop_h, p_text, p_conf))
-        if crop_w >= 45 and crop_h >= 10:
-            perp_heights.append(float(crop_h))
+        vec_x = (pts[1] - pts[0]) / max(1.0, float(raw_w))
+        vec_y = (pts[3] - pts[0]) / max(1.0, float(raw_h))
+        pad_x = max(6.0, raw_h * 0.22)
+        pad_y = max(4.0, raw_h * 0.20)
+
+        padded_pts = pts.copy()
+        padded_pts[0] -= vec_x * pad_x + vec_y * pad_y
+        padded_pts[1] += vec_x * pad_x - vec_y * pad_y
+        padded_pts[2] += vec_x * pad_x + vec_y * pad_y
+        padded_pts[3] -= vec_x * pad_x - vec_y * pad_y
+
+        padded_pts[:, 0] = np.clip(padded_pts[:, 0], 0, img_w - 1)
+        padded_pts[:, 1] = np.clip(padded_pts[:, 1], 0, img_h - 1)
+
+        crop_w = int(max(np.linalg.norm(padded_pts[0] - padded_pts[1]), np.linalg.norm(padded_pts[2] - padded_pts[3])))
+        crop_h = int(max(np.linalg.norm(padded_pts[0] - padded_pts[3]), np.linalg.norm(padded_pts[1] - padded_pts[2])))
+
+        temp_items.append((padded_pts, crop_w, crop_h, p_text, p_conf))
 
     if not temp_items:
         return []
 
-    ref_h = float(np.percentile(perp_heights, 35)) if perp_heights else 28.0
-    ref_h = max(12.0, ref_h)
-
     extracted: list[dict[str, Any]] = []
 
     for pts, crop_w, crop_h, p_text, p_conf in temp_items:
-        pts_std = np.float32(
-            [[0, 0], [crop_w, 0], [crop_w, crop_h], [0, crop_h]]
-        )
+        pts_std = np.float32([[0, 0], [crop_w, 0], [crop_w, crop_h], [0, crop_h]])
         matrix = cv2.getPerspectiveTransform(pts, pts_std)
         rect_img = cv2.warpPerspective(
             image,
@@ -398,466 +389,194 @@ def _extract_curved_lines_from_items(
             flags=cv2.INTER_CUBIC,
         )
 
-        gray = cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY)
-        block_sz = max(15, int(ref_h) | 1)
-        binary = cv2.adaptiveThreshold(
-            gray,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            block_sz,
-            10,
-        )
-
-        # Kiểm tra nếu box bị dính nhiều dòng (chiều cao vuông góc > 1.72 lần dòng chuẩn)
-        is_multiline = (crop_h > ref_h * 1.72) and (crop_w > ref_h * 2.2)
-        bands: list[tuple[int, int, np.ndarray]] = []
-
-        if is_multiline:
-            num_est = min(8, max(2, int(round(crop_h / ref_h))))
-            arch_off = _estimate_block_arch_offsets(binary, ref_h)
-
-            # Khử độ cong vòm trên ảnh nhị phân để tìm thung lũng tách dòng chính xác
-            u_grid = np.broadcast_to(
-                np.arange(crop_w, dtype=np.float32)[None, :], (crop_h, crop_w)
-            ).copy()
-            v_grid = np.clip(
-                np.arange(crop_h, dtype=np.float32)[:, None] + arch_off[None, :],
-                0.0,
-                float(crop_h - 1),
-            ).astype(np.float32)
-            bin_flat = cv2.remap(
-                binary, u_grid, v_grid, interpolation=cv2.INTER_NEAREST
-            )
-
-            h_proj = np.sum(bin_flat > 0, axis=1).astype(np.float32)
-            k_sz = max(3, int(ref_h * 0.15) | 1)
-            h_smooth = np.convolve(
-                h_proj, np.ones(k_sz, dtype=np.float32) / k_sz, mode="same"
-            )
-            p75_ink = float(np.percentile(h_smooth, 75)) if len(h_smooth) else 1.0
-
-            cuts = [0]
-            step = crop_h / num_est
-            s_rad = max(4, int(step * 0.35))
-            valid_split = True
-            for k in range(1, num_est):
-                exp_v = int(round(k * step))
-                low_v = max(cuts[-1] + int(ref_h * 0.55), exp_v - s_rad)
-                high_v = min(crop_h - int(ref_h * 0.55), exp_v + s_rad)
-                if low_v < high_v:
-                    best_v = low_v + int(np.argmin(h_smooth[low_v:high_v]))
-                    if h_smooth[best_v] > p75_ink * 0.68:
-                        valid_split = False
-                        break
-                    cuts.append(best_v)
-                else:
-                    valid_split = False
-                    break
-            cuts.append(crop_h)
-
-            if valid_split and len(cuts) == num_est + 1:
-                for k in range(num_est):
-                    v0, v1 = cuts[k], cuts[k + 1]
-                    v_center_flat = (v0 + v1) / 2.0
-                    v_curve_k = np.clip(
-                        v_center_flat + arch_off, 2.0, float(crop_h - 2)
-                    )
-                    bands.append((v0, v1, v_curve_k))
-
-        if not bands:
-            # Dòng đơn: khớp trực tiếp Parabol theo vệt mực chính
-            v_curve = _fit_single_line_parabola(binary, min(float(crop_h), ref_h * 1.15))
-            bands.append((0, crop_h, v_curve))
+        v_curve = np.full(crop_w, crop_h / 2.0, dtype=np.float32)
+        strip_h = int(round(max(24.0, float(crop_h) * 1.30)))
+        dewarped_img = _dewarp_strip_with_safe_border(rect_img, v_curve, strip_h)
 
         tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
-        split_count = len(bands)
 
-        for v0, v1, v_curve in bands:
-            band_h = float(v1 - v0) if split_count > 1 else min(float(crop_h), ref_h * 1.18)
-            strip_h = int(round(max(12.0, band_h * 1.18)))
-            dewarped_img = _dewarp_strip_along_curve(rect_img, v_curve, strip_h)
-
-            # Tính đường cong tọa độ (X, Y) trên ảnh gốc tại 9 điểm mốc ngang
-            sample_rxs = np.linspace(0.0, 1.0, 9, dtype=np.float32)
-            sample_us = np.clip(
-                (sample_rxs * (crop_w - 1)).astype(int), 0, crop_w - 1
-            )
-            sample_rys = v_curve[sample_us] / max(1.0, float(crop_h))
-
-            curve_xs = []
-            curve_ys = []
-            for rx, ry in zip(sample_rxs, sample_rys):
-                top_pt = tl + rx * (tr - tl)
-                bot_pt = bl + rx * (br - bl)
-                orig_pt = top_pt + ry * (bot_pt - top_pt)
-                curve_xs.append(float(orig_pt[0]))
-                curve_ys.append(float(orig_pt[1]))
-
-            xmin = float(min(curve_xs))
-            xmax = float(max(curve_xs))
-            yc_mid = float(curve_ys[4])
-            ymin = yc_mid - band_h * 0.5
-            ymax = yc_mid + band_h * 0.5
-
-            extracted.append(
-                {
-                    "quad": pts,
-                    "crop_w": crop_w,
-                    "crop_h": crop_h,
-                    "v_curve": v_curve,
-                    "band_h": band_h,
-                    "dewarped_img": dewarped_img,
-                    "paddle_text": p_text if split_count == 1 else "",
-                    "paddle_conf": p_conf if split_count == 1 else 0.0,
-                    "curve_xs": np.array(curve_xs, dtype=np.float32),
-                    "curve_ys": np.array(curve_ys, dtype=np.float32),
-                    "xmin": xmin,
-                    "xmax": xmax,
-                    "ymin": ymin,
-                    "ymax": ymax,
-                    "w": max(1.0, xmax - xmin),
-                    "h": max(1.0, band_h),
-                    "xc": (xmin + xmax) / 2.0,
-                    "yc": yc_mid,
-                }
-            )
+        extracted.append({
+            "quad": pts,
+            "crop_w": crop_w,
+            "crop_h": crop_h,
+            "rect_img": rect_img,
+            "band_h": float(crop_h),
+            "dewarped_img": dewarped_img,
+            "paddle_text": p_text,
+            "paddle_conf": p_conf,
+            "yc": float((tl[1] + tr[1] + br[1] + bl[1]) / 4.0),
+        })
 
     return extracted
-
-
-def _deduplicate_curved_lines(
-    items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Chỉ loại bỏ các dòng thực sự trùng lên nhau tại cùng hoành độ X, bảo toàn 100% các dòng lân cận."""
-    if len(items) <= 1:
-        return items
-
-    sorted_items = sorted(items, key=lambda it: it["w"], reverse=True)
-    kept: list[dict[str, Any]] = []
-
-    for it in sorted_items:
-        is_dup = False
-        for k in kept:
-            ox0 = max(it["xmin"], k["xmin"])
-            ox1 = min(it["xmax"], k["xmax"])
-            if ox1 <= ox0:
-                continue
-
-            overlap_w = ox1 - ox0
-            min_w = max(1.0, min(it["w"], k["w"]))
-            if (overlap_w / min_w) < 0.35:
-                continue
-
-            # Nội suy tâm Y của 2 dòng tại đúng hoành độ giữa vùng giao nhau x_mid
-            x_mid = (ox0 + ox1) / 2.0
-            y_it = float(np.interp(x_mid, it["curve_xs"], it["curve_ys"]))
-            y_k = float(np.interp(x_mid, k["curve_xs"], k["curve_ys"]))
-            min_h = max(8.0, min(it["h"], k["h"]))
-
-            if abs(y_it - y_k) < 0.48 * min_h:
-                is_dup = True
-                break
-
-        if not is_dup:
-            kept.append(it)
-
-    return kept
 
 
 def sort_reading_order_adaptive(
     raw_items: list, img_width: int, image: np.ndarray
 ) -> tuple[list[dict[str, Any]], str]:
-    """Phân loại bố cục và sắp xếp thứ tự đọc tự nhiên."""
     items = _extract_curved_lines_from_items(raw_items, image)
     if not items:
         return [], "empty"
 
-    items = _deduplicate_curved_lines(items)
-    widths = [it["w"] for it in items]
-    p75_w = float(np.percentile(widths, 75)) if widths else 0.0
-    is_single_column = (p75_w / max(1.0, float(img_width))) >= 0.35
-
-    # Nhánh 1: Sách in / Giáo trình đơn cột
-    if is_single_column:
-        clean_items = []
-        for it in items:
-            is_edge_noise = (
-                it["xmin"] <= 15 or it["xmax"] >= (img_width - 15)
-            ) and it["w"] < 45.0
-            if not is_edge_noise and it["w"] >= 12.0 and it["h"] >= 8.0:
-                clean_items.append(it)
-
-        clean_items.sort(key=lambda it: it["yc"])
-        return clean_items, "single_column"
-
-    # Nhánh 2: Truyện tranh / Bố cục đa bóng thoại
     items.sort(key=lambda it: it["yc"])
-    blocks: list[dict[str, Any]] = []
-    for item in items:
-        matched_block = None
-        for b in blocks:
-            last_it = b["items"][-1]
-            overlap_last = max(
-                0.0,
-                min(item["xmax"], last_it["xmax"])
-                - max(item["xmin"], last_it["xmin"]),
-            )
-            overlap_block = max(
-                0.0,
-                min(item["xmax"], b["xmax"]) - max(item["xmin"], b["xmin"]),
-            )
-            ratio_last = overlap_last / max(1.0, min(item["w"], last_it["w"]))
-            ratio_block = overlap_block / max(1.0, min(item["w"], b["w"]))
-
-            yc_dist = item["yc"] - last_it["yc"]
-            avg_h = (item["h"] + last_it["h"]) / 2.0
-
-            v_ok = 0.12 * avg_h <= yc_dist <= 1.75 * avg_h
-            h_ok = (
-                (ratio_last >= 0.20)
-                or (ratio_block >= 0.30)
-                or (abs(item["xc"] - b["xc"]) < max(item["w"], b["w"]) * 0.42)
-            )
-
-            if v_ok and h_ok:
-                matched_block = b
-                break
-
-        if matched_block is not None:
-            matched_block["items"].append(item)
-            matched_block["xmin"] = min(matched_block["xmin"], item["xmin"])
-            matched_block["xmax"] = max(matched_block["xmax"], item["xmax"])
-            matched_block["ymin"] = min(matched_block["ymin"], item["ymin"])
-            matched_block["ymax"] = max(matched_block["ymax"], item["ymax"])
-            matched_block["w"] = matched_block["xmax"] - matched_block["xmin"]
-            matched_block["xc"] = (
-                matched_block["xmin"] + matched_block["xmax"]
-            ) / 2.0
-            matched_block["yc"] = (
-                matched_block["ymin"] + matched_block["ymax"]
-            ) / 2.0
-        else:
-            blocks.append(
-                {
-                    "items": [item],
-                    "xmin": item["xmin"],
-                    "xmax": item["xmax"],
-                    "ymin": item["ymin"],
-                    "ymax": item["ymax"],
-                    "w": item["w"],
-                    "xc": item["xc"],
-                    "yc": item["yc"],
-                }
-            )
-
-    blocks.sort(key=lambda b: (b["ymin"], b["xmin"]))
-    tiers: list[dict[str, Any]] = []
-    for b in blocks:
-        placed = False
-        b_h = max(1.0, b["ymax"] - b["ymin"])
-        for tier in tiers:
-            t_h = max(1.0, tier["ymax"] - tier["ymin"])
-            overlap_y = max(
-                0.0,
-                min(b["ymax"], tier["ymax"]) - max(b["ymin"], tier["ymin"]),
-            )
-            min_h = min(b_h, t_h)
-
-            if (overlap_y / min_h) > 0.25:
-                tier["blocks"].append(b)
-                tier["ymin"] = min(tier["ymin"], b["ymin"])
-                tier["ymax"] = max(tier["ymax"], b["ymax"])
-                placed = True
-                break
-
-        if not placed:
-            tiers.append(
-                {"ymin": b["ymin"], "ymax": b["ymax"], "blocks": [b]}
-            )
-
-    tiers.sort(key=lambda t: t["ymin"])
-    final_ordered = []
-    for tier in tiers:
-        tier["blocks"].sort(key=lambda b: b["xmin"])
-        for b in tier["blocks"]:
-            b["items"].sort(key=lambda it: it["yc"])
-            final_ordered.extend(b["items"])
-
-    return final_ordered, "comic_panels"
+    return items, "single_column"
 
 
-# =============================================================================
-# Thuật toán phân đoạn từ quang học và gắn hộp bám theo đường cong Parabol
-# =============================================================================
-def _char_weight(ch: str) -> float:
-    """Trọng số độ rộng ký tự theo phông chữ tỷ lệ (Proportional Typography)."""
-    ch_lower = ch.lower()
-    if ch_lower in "mw":
-        return 1.38
-    if ch_lower in "ijlrtf1.,;:!'|()[]":
-        return 0.52
-    if ch.isupper():
-        return 1.22
-    return 1.0
-
-
-def _segment_words_optically_1d(
-    dewarped_img: np.ndarray, words: list[str]
-) -> list[tuple[float, float]]:
-    """Xác định biên độ ngang (x0_r, x1_r) của từng từ trên dòng đã được khử cong."""
+def _segment_words_by_ink(
+    rect_img: np.ndarray, words: list[str]
+) -> list[tuple[float, float, float, float]]:
     num_words = len(words)
-    if num_words == 0:
+    c_h, c_w = rect_img.shape[:2]
+    if num_words == 0 or c_w < 8 or c_h < 6:
         return []
 
-    h_full, w_full = dewarped_img.shape[:2]
-    pad = 4 if (w_full > 16 and h_full > 16) else 0
-    content = (
-        dewarped_img[pad : h_full - pad, pad : w_full - pad]
-        if pad
-        else dewarped_img
-    )
-    c_h, c_w = content.shape[:2]
-
-    word_weights = [
-        max(0.6, sum(_char_weight(c) for c in w_text)) for w_text in words
-    ]
-    space_weight = 0.75
-    total_w = sum(word_weights) + (num_words - 1) * space_weight
-
-    def fallback_spans() -> list[tuple[float, float]]:
-        spans = []
-        curr = 0.0
-        for ww in word_weights:
-            w_frac = ww / total_w
-            spans.append((curr, min(1.0, curr + w_frac)))
-            curr += w_frac + (space_weight / total_w)
-        return spans
-
-    if c_w < 16 or c_h < 8:
-        return fallback_spans()
-
-    gray = cv2.cvtColor(content, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY)
     block_sz = max(11, (c_h | 1))
     binary = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        block_sz,
-        10,
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_sz, 10
     )
 
-    # Chỉ chiếu mật độ mực ở vùng lõi giữa dòng (từ 15% đến 85% chiều cao) để tránh hoàn toàn rìa dòng khác
-    r0 = max(0, int(c_h * 0.15))
-    r1 = min(c_h, max(r0 + 4, int(c_h * 0.85)))
-    core_band = binary[r0:r1, :]
-    core_h = core_band.shape[0]
+    binary[0:1, :] = 0
+    binary[-1:, :] = 0
+    binary[:, 0:1] = 0
+    binary[:, -1:] = 0
 
-    v_proj = np.sum(core_band > 0, axis=0).astype(np.float32)
-    ink_thresh = max(1.0, core_h * 0.05)
-    has_ink = v_proj > ink_thresh
+    row_ink = np.where(np.sum(binary > 0, axis=1) >= 1)[0]
+    if len(row_ink) > 0:
+        line_y0 = max(0, int(row_ink[0]) - 3)
+        line_y1 = min(c_h, int(row_ink[-1]) + 4)
+    else:
+        line_y0 = 0
+        line_y1 = c_h
 
+    norm_y0 = float(line_y0) / c_h
+    norm_y1 = float(line_y1) / c_h
+
+    v_proj = np.sum(binary[line_y0:line_y1, :] > 0, axis=0)
+    has_ink = v_proj > 0
     ink_cols = np.where(has_ink)[0]
-    if len(ink_cols) < 4:
-        return fallback_spans()
+
+    if len(ink_cols) == 0:
+        step = 1.0 / num_words
+        return [(i * step, norm_y0, (i + 1) * step, norm_y1) for i in range(num_words)]
 
     first_ink = int(ink_cols[0])
     last_ink = int(ink_cols[-1])
-    active_w = last_ink - first_ink + 1
-    if active_w < 10:
-        return fallback_spans()
 
     if num_words == 1:
-        return [
-            (
-                max(0.0, float(first_ink - 1) / c_w),
-                min(1.0, float(last_ink + 2) / c_w),
-            )
-        ]
+        return [(max(0.0, (first_ink - 3) / c_w), norm_y0, min(1.0, (last_ink + 4) / c_w), norm_y1)]
 
-    valleys: list[tuple[float, int, int, int]] = []
-    in_gap = False
-    g_start = first_ink
-    for x in range(first_ink, last_ink + 1):
-        if not has_ink[x]:
-            if not in_gap:
-                in_gap = True
-                g_start = x
-        else:
-            if in_gap:
-                in_gap = False
-                g_end = x
-                g_len = g_end - g_start
-                if g_len >= 1:
-                    g_center = (g_start + g_end) / 2.0
-                    valleys.append((g_center, g_start, g_end, g_len))
+    best_segments = None
+    best_diff = 999
 
-    cum_weights = []
-    acc = 0.0
-    for i in range(num_words - 1):
-        acc += word_weights[i]
-        cum_weights.append((acc + i * space_weight + 0.5 * space_weight) / total_w)
+    for k in range(3, min(28, max(6, int(c_h * 0.75)))):
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1))
+        dilated = cv2.dilate(binary, kernel)
 
-    cut_boundaries: list[tuple[int, int]] = []
-    prev_end = first_ink
-    avg_word_px = active_w / num_words
-    search_tol = max(6.0, avg_word_px * 0.55)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated)
+        comps = []
+        for lbl in range(1, num_labels):
+            area = stats[lbl, cv2.CC_STAT_AREA]
+            w = stats[lbl, cv2.CC_STAT_WIDTH]
+            h = stats[lbl, cv2.CC_STAT_HEIGHT]
+            if area >= 8 and w >= 3 and h >= 4:
+                comps.append([
+                    stats[lbl, cv2.CC_STAT_LEFT],
+                    stats[lbl, cv2.CC_STAT_WIDTH],
+                    stats[lbl, cv2.CC_STAT_TOP],
+                    stats[lbl, cv2.CC_STAT_HEIGHT],
+                ])
 
-    for idx, expected_ratio in enumerate(cum_weights):
-        expected_x = first_ink + expected_ratio * active_w
-        remaining_words = num_words - 1 - idx
-        max_allowed_x = last_ink - remaining_words * 3
+        comps.sort(key=lambda c: c[0])
 
-        best_valley = None
-        best_score = 1e9
-        for v_center, v_start, v_end, v_len in valleys:
-            if v_start <= prev_end + 1 or v_end >= max_allowed_x:
-                continue
-            dist = abs(v_center - expected_x)
-            if dist <= search_tol:
-                score = dist - (v_len * 1.8)
-                if score < best_score:
-                    best_score = score
-                    best_valley = (v_start, v_end)
-
-        if best_valley is not None:
-            cut_boundaries.append(best_valley)
-            prev_end = best_valley[1]
-        else:
-            s_left = max(prev_end + 2, int(expected_x - search_tol * 0.5))
-            s_right = min(max_allowed_x, int(expected_x + search_tol * 0.5))
-            if s_left < s_right:
-                min_col = s_left + int(np.argmin(v_proj[s_left:s_right]))
+        merged_comps: list[list[int]] = []
+        for comp in comps:
+            if not merged_comps:
+                merged_comps.append(list(comp))
             else:
-                min_col = max(prev_end + 1, min(max_allowed_x, int(expected_x)))
-            cut_boundaries.append((min_col, min_col + 1))
-            prev_end = min_col + 1
+                prev = merged_comps[-1]
+                if comp[0] <= prev[0] + prev[1]:
+                    new_r = max(prev[0] + prev[1], comp[0] + comp[1])
+                    new_top = min(prev[2], comp[2])
+                    new_bot = max(prev[2] + prev[3], comp[2] + comp[3])
+                    prev[0] = min(prev[0], comp[0])
+                    prev[1] = new_r - prev[0]
+                    prev[2] = new_top
+                    prev[3] = new_bot - new_top
+                else:
+                    merged_comps.append(list(comp))
 
-    word_raw_intervals: list[tuple[int, int]] = []
-    curr_s = first_ink
-    for g_s, g_e in cut_boundaries:
-        word_raw_intervals.append((curr_s, max(curr_s + 1, g_s)))
-        curr_s = g_e
-    word_raw_intervals.append((curr_s, max(curr_s + 1, last_ink + 1)))
+        diff = abs(len(merged_comps) - num_words)
+        if diff < best_diff:
+            best_diff = diff
+            best_segments = merged_comps
+            if diff == 0:
+                break
 
-    final_spans: list[tuple[float, float]] = []
-    for w_s, w_e in word_raw_intervals:
-        sub_ink = np.where(has_ink[w_s:w_e])[0]
-        if len(sub_ink) >= 1:
-            tight_s = max(0, w_s + int(sub_ink[0]) - 1)
-            tight_e = min(c_w, w_s + int(sub_ink[-1]) + 2)
+    if best_segments is None:
+        best_segments = []
+
+    while len(best_segments) > num_words:
+        min_gap = 1e9
+        min_idx = 0
+        for i in range(len(best_segments) - 1):
+            gap = best_segments[i + 1][0] - (best_segments[i][0] + best_segments[i][1])
+            if gap < min_gap:
+                min_gap = gap
+                min_idx = i
+        c1 = best_segments[min_idx]
+        c2 = best_segments[min_idx + 1]
+        new_r = max(c1[0] + c1[1], c2[0] + c2[1])
+        new_top = min(c1[2], c2[2])
+        new_bot = max(c1[2] + c1[3], c2[2] + c2[3])
+        merged = [min(c1[0], c2[0]), new_r - min(c1[0], c2[0]), new_top, new_bot - new_top]
+        best_segments = best_segments[:min_idx] + [merged] + best_segments[min_idx + 2:]
+
+    while len(best_segments) < num_words:
+        widest_idx = int(np.argmax([c[1] for c in best_segments]))
+        c = best_segments[widest_idx]
+        x_start = c[0]
+        x_end = c[0] + c[1]
+        mid_left = x_start + int(c[1] * 0.25)
+        mid_right = x_start + int(c[1] * 0.75)
+        if mid_left < mid_right:
+            split_pt = mid_left + int(np.argmin(v_proj[mid_left:mid_right]))
         else:
-            tight_s, tight_e = w_s, w_e
+            split_pt = (x_start + x_end) // 2
 
-        x0_r = max(0.0, float(tight_s) / c_w)
-        x1_r = min(1.0, float(tight_e) / c_w)
-        if x1_r <= x0_r:
-            x1_r = min(1.0, x0_r + 0.01)
+        c_left = [x_start, max(2, split_pt - x_start), c[2], c[3]]
+        c_right = [split_pt, max(2, x_end - split_pt), c[2], c[3]]
+        best_segments = best_segments[:widest_idx] + [c_left, c_right] + best_segments[widest_idx + 1:]
 
-        final_spans.append((x0_r, x1_r))
+    result_boxes: list[tuple[float, float, float, float]] = []
+    for i, comp in enumerate(best_segments):
+        x_start = max(0, comp[0])
+        x_end = min(c_w, comp[0] + comp[1])
 
-    return final_spans
+        sub_bin = binary[:, x_start:x_end]
+        sub_cols = np.where(np.sum(sub_bin > 0, axis=0) > 0)[0]
+
+        if len(sub_cols) > 0:
+            real_x0 = x_start + int(sub_cols[0])
+            real_x1 = x_start + int(sub_cols[-1]) + 1
+        else:
+            real_x0 = x_start
+            real_x1 = x_end
+
+        box_x0 = max(0.0, float(real_x0 - 3) / c_w)
+        box_x1 = min(1.0, float(real_x1 + 3) / c_w)
+
+        result_boxes.append((box_x0, norm_y0, box_x1, norm_y1))
+
+    gap_norm = 2.0 / c_w
+    for i in range(len(result_boxes) - 1):
+        b1 = result_boxes[i]
+        b2 = result_boxes[i + 1]
+        if b1[2] >= b2[0]:
+            mid = (b1[2] + b2[0]) / 2.0
+            result_boxes[i] = (b1[0], b1[1], max(b1[0] + 0.002, mid - gap_norm / 2.0), b1[3])
+            result_boxes[i + 1] = (min(b2[2] - 0.002, mid + gap_norm / 2.0), b2[1], b2[2], b2[3])
+
+    return result_boxes
 
 
 def _map_curved_word_boxes(
@@ -866,423 +585,107 @@ def _map_curved_word_boxes(
     orig_width: int,
     orig_height: int,
 ) -> list[list[float]]:
-    """Ánh xạ từng từ bám theo đúng đường cong Parabol v_curve(u) trên trang ảnh gốc."""
     if not words:
         return []
 
-    dewarped_img = item["dewarped_img"]
+    rect_img = item["rect_img"]
     pts = item["quad"]
-    crop_w = item["crop_w"]
-    crop_h = max(1, item["crop_h"])
-    v_curve = item["v_curve"]
-    band_h = item["band_h"]
-
     tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
-    spans = _segment_words_optically_1d(dewarped_img, words)
 
+    word_spans = _segment_words_by_ink(rect_img, words)
     boxes: list[list[float]] = []
-    half_h = max(4.0, band_h * 0.46)
 
-    for x0_r, x1_r in spans:
-        x_mid_r = (x0_r + x1_r) / 2.0
-        u_mid = int(np.clip(round(x_mid_r * (crop_w - 1)), 0, crop_w - 1))
-        v_center = float(v_curve[u_mid])
+    for rx0, ry0, rx1, ry1 in word_spans:
+        pt_tl = (tl + rx0 * (tr - tl)) + ry0 * ((bl + rx0 * (br - bl)) - (tl + rx0 * (tr - tl)))
+        pt_tr = (tl + rx1 * (tr - tl)) + ry0 * ((bl + rx1 * (br - bl)) - (tl + rx1 * (tr - tl)))
+        pt_bl = (tl + rx0 * (tr - tl)) + ry1 * ((bl + rx0 * (br - bl)) - (tl + rx0 * (tr - tl)))
+        pt_br = (tl + rx1 * (tr - tl)) + ry1 * ((bl + rx1 * (br - bl)) - (tl + rx1 * (tr - tl)))
 
-        ry_top = max(0.0, (v_center - half_h) / crop_h)
-        ry_bot = min(1.0, (v_center + half_h) / crop_h)
+        word_xmin = float(min(pt_tl[0], pt_tr[0], pt_bl[0], pt_br[0]))
+        word_xmax = float(max(pt_tl[0], pt_tr[0], pt_bl[0], pt_br[0]))
+        word_ymin = float(min(pt_tl[1], pt_tr[1], pt_bl[1], pt_br[1]))
+        word_ymax = float(max(pt_tl[1], pt_tr[1], pt_bl[1], pt_br[1]))
 
-        # Chiếu 4 góc của từ từ hệ quy chiếu uốn cong về ảnh gốc
-        top_l = (tl + x0_r * (tr - tl)) + ry_top * (
-            (bl + x0_r * (br - bl)) - (tl + x0_r * (tr - tl))
-        )
-        top_r = (tl + x1_r * (tr - tl)) + ry_top * (
-            (bl + x1_r * (br - bl)) - (tl + x1_r * (tr - tl))
-        )
-        bot_l = (tl + x0_r * (tr - tl)) + ry_bot * (
-            (bl + x0_r * (br - bl)) - (tl + x0_r * (tr - tl))
-        )
-        bot_r = (tl + x1_r * (tr - tl)) + ry_bot * (
-            (bl + x1_r * (br - bl)) - (tl + x1_r * (tr - tl))
-        )
+        norm_x = max(0.0, min(0.9999, word_xmin / orig_width))
+        norm_y = max(0.0, min(0.9999, word_ymin / orig_height))
+        norm_w = max(0.0001, min(1.0 - norm_x, (word_xmax - word_xmin) / orig_width))
+        norm_h = max(0.0001, min(1.0 - norm_y, (word_ymax - word_ymin) / orig_height))
 
-        word_xmin = float(min(top_l[0], bot_l[0]))
-        word_xmax = float(max(top_r[0], bot_r[0]))
-        word_ymin = float((top_l[1] + top_r[1]) / 2.0)
-        word_ymax = float((bot_l[1] + bot_r[1]) / 2.0)
-
-        norm_x = word_xmin / orig_width
-        norm_y = word_ymin / orig_height
-        norm_w = max(1.0, word_xmax - word_xmin) / orig_width
-        norm_h = max(1.0, word_ymax - word_ymin) / orig_height
-
-        norm_x = max(0.0, min(0.9999, norm_x))
-        norm_y = max(0.0, min(0.9999, norm_y))
-        norm_w = max(0.0001, min(1.0 - norm_x, norm_w))
-        norm_h = max(0.0001, min(1.0 - norm_y, norm_h))
-
-        boxes.append(
-            [
-                round(norm_x, 6),
-                round(norm_y, 6),
-                round(norm_w, 6),
-                round(norm_h, 6),
-            ]
-        )
+        boxes.append([round(norm_x, 6), round(norm_y, 6), round(norm_w, 6), round(norm_h, 6)])
 
     return boxes
 
 
-# =============================================================================
-# Hàm Public Service: extract_text_and_boxes & Dual-Engine / Tesseract Pipelines
-# =============================================================================
-def _candidate_quality_score(result: dict[str, object]) -> float:
-    """Rank OCR candidates using token-linked confidence and layout signals.
-
-    Tesseract confidence is an engine score, not a calibrated probability. This
-    score is only a candidate-selection heuristic and must never be shown as OCR
-    confidence to the user.
-    """
-    raw_texts = result.get("text", [])
-    raw_confidences = result.get("conf", [])
-    tokens: list[str] = []
-    confidence_values: list[float] = []
-    populated_lines: set[tuple[int, int, int]] = set()
-    all_characters = ""
-    noise_tokens = 0
-
-    for index, raw_text in enumerate(raw_texts):
-        token = str(raw_text).strip()
-        if not token:
-            continue
-        if not any(char.isalnum() for char in token):
-            noise_tokens += 1
-            continue
-        tokens.append(token)
-        all_characters += token
-
-        if index < len(raw_confidences):
-            try:
-                confidence = float(raw_confidences[index])
-            except (TypeError, ValueError):
-                confidence = float("nan")
-            if np.isfinite(confidence) and 0 <= confidence <= 100:
-                confidence_values.append(confidence / 100.0)
-
-        try:
-            populated_lines.add((
-                int(result.get("block_num", [])[index]),
-                int(result.get("par_num", [])[index]),
-                int(result.get("line_num", [])[index]),
-            ))
-        except (TypeError, ValueError, IndexError):
-            continue
-
-    if not tokens:
-        return -1.0
-
-    average_confidence = (
-        sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
-    )
-    alphanumeric_ratio = (
-        sum(character.isalnum() for character in all_characters) / len(all_characters)
-        if all_characters else 0.0
-    )
-    word_signal = min(len(tokens) / 18.0, 1.0)
-    line_signal = min(len(populated_lines) / 6.0, 1.0)
-    base_score = (
-        0.72 * average_confidence
-        + 0.10 * word_signal
-        + 0.08 * line_signal
-        + 0.10 * alphanumeric_ratio
-    )
-    symbol_ratio = (
-        sum(unicodedata.category(character).startswith("S") for character in all_characters)
-        / len(all_characters)
-        if all_characters else 0.0
-    )
-    artifact_ratio = noise_tokens / max(len(tokens) + noise_tokens, 1)
-    return max(-1.0, base_score - 0.10 * artifact_ratio - 0.10 * symbol_ratio)
-
-
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
-    """Run Vietnamese Tesseract OCR against preprocessing candidates and select the best."""
-    if pytesseract is None:
-        raise OcrEngineUnavailable("Thư viện pytesseract chưa được cài đặt trong môi trường.")
-
+    """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
     configured_binary = os.getenv("TESSERACT_CMD")
     if configured_binary:
-        configured_binary = configured_binary.strip('"\'')
-        pytesseract.pytesseract.tesseract_cmd = configured_binary
-    binary = pytesseract.pytesseract.tesseract_cmd
-    if not (os.path.isfile(binary) or shutil.which(binary)):
-        default_win = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-        if os.path.isfile(default_win):
-            pytesseract.pytesseract.tesseract_cmd = default_win
-            binary = default_win
-        else:
-            raise OcrEngineUnavailable("Tesseract OCR 5.x is not installed or TESSERACT_CMD is invalid")
-
-    configured_tessdata = os.getenv("TESSDATA_PREFIX")
-    if configured_tessdata:
-        os.environ["TESSDATA_PREFIX"] = configured_tessdata.strip('"\'')
-    else:
-        local_tessdata = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "tessdata"))
-        if os.path.isdir(local_tessdata):
-            os.environ["TESSDATA_PREFIX"] = local_tessdata
-
-    try:
-        version = str(pytesseract.get_tesseract_version())
-        languages = set(pytesseract.get_languages(config=""))
-    except Exception as exc:
-        raise OcrEngineUnavailable("Tesseract is unavailable; install Tesseract 5.x and its language data") from exc
-    if not version.startswith(("5", "6")):
-        raise OcrEngineUnavailable("Tesseract OCR 5.x or newer is required")
-
-    target_lang = os.getenv("TESSERACT_LANG")
-    if not target_lang:
-        target_lang = "vie_best" if "vie_best" in languages else "vie"
-    if target_lang not in languages:
-        if "vie_best" in languages:
-            target_lang = "vie_best"
-        elif "vie" in languages:
-            target_lang = "vie"
-        else:
-            raise OcrEngineUnavailable("Tesseract language data vie.traineddata is missing")
+        pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
 
     array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Image decoding failed")
     orig_height, orig_width = image.shape[:2]
-    if orig_width <= 0 or orig_height <= 0:
-        raise ValueError("Image dimensions are invalid")
 
-    is_mocked = (
-        hasattr(pytesseract.image_to_data, "mock_calls")
-        or "Mock" in type(pytesseract.image_to_data).__name__
-    )
-    scale_factor = 1.0
-    if not is_mocked:
-        max_dim = max(orig_width, orig_height)
-        if max_dim < 1800:
-            scale_factor = min(3.0, 1800.0 / max_dim)
-
-    if scale_factor > 1.01:
-        scaled_w = int(round(orig_width * scale_factor))
-        scaled_h = int(round(orig_height * scale_factor))
-        scaled_image = cv2.resize(
-            image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC
-        )
-    else:
-        scaled_w, scaled_h = orig_width, orig_height
-        scaled_image = image
-
-    gray = cv2.cvtColor(scaled_image, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    target_lang = os.getenv("TESSERACT_LANG", "vie")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    adaptive = None
-    if min(scaled_w, scaled_h) >= 31:
-        adaptive = cv2.adaptiveThreshold(
-            clahe,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            31,
-            11,
+
+    try:
+        result = pytesseract.image_to_data(
+            otsu,
+            lang=target_lang,
+            config="--oem 1 --psm 6",
+            output_type=Output.DICT,
         )
+    except Exception as exc:
+        raise OcrEngineUnavailable("Tesseract execution failed") from exc
 
-    configured_psm = os.getenv("TESSERACT_PSM")
-    if configured_psm:
-        if not configured_psm.isdecimal() or not 0 <= int(configured_psm) <= 13:
-            raise OcrEngineUnavailable("TESSERACT_PSM must be an integer between 0 and 13")
-        psm_values = [int(configured_psm)] * 4
-    else:
-        psm_values = [4, 6, 3, 11]
-
-    if is_mocked:
-        candidates = [("otsu_threshold", otsu, psm_values[0])]
-    else:
-        candidates = [
-            ("otsu_threshold", otsu, psm_values[0]),
-            ("clahe_grayscale", clahe, psm_values[1]),
-            ("grayscale", gray, psm_values[2]),
-        ]
-        if adaptive is not None:
-            candidates.append(("adaptive_gaussian_threshold", adaptive, psm_values[3]))
-
-    candidate_results: list[tuple[str, int, float, dict[str, object]]] = []
-    successful_evaluations = 0
-    for preprocessing_name, candidate_image, psm in candidates:
-        try:
-            output_dict = Output.DICT if Output is not None else "dict"
-            result = pytesseract.image_to_data(
-                candidate_image,
-                lang=target_lang,
-                config=f"--oem 1 --psm {psm}",
-                output_type=output_dict,
-            )
-            successful_evaluations += 1
-        except Exception:
-            candidate_results.append((preprocessing_name, psm, -1.0, {}))
-            continue
-        candidate_results.append(
-            (preprocessing_name, psm, _candidate_quality_score(result), result)
-        )
-
-    usable_candidates = [item for item in candidate_results if item[2] >= 0]
-    if not usable_candidates:
-        if successful_evaluations:
-            raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
-        raise OcrEngineUnavailable(
-            f"Tesseract failed to process the image with {target_lang} language data"
-        )
-    selected_preprocessing, selected_psm, selected_score, result = max(
-        usable_candidates, key=lambda item: item[2]
-    )
-    if not result.get("text"):
-        raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
-
-    line_map: dict[tuple[int, int, int], int] = {}
-    paragraph_map: dict[tuple[int, int], int] = {}
-    line_paragraph_map: dict[int, int] = {}
-    line_left_pixels: dict[int, int] = {}
     words: list[dict[str, object]] = []
+    lines: dict[int, list[str]] = {}
+
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
-        if not token or not any(character.isalnum() for character in token):
+        if not token or not any(c.isalnum() for c in token):
             continue
         try:
             left = int(result["left"][index])
             top = int(result["top"][index])
-            box_width = int(result["width"][index])
-            box_height = int(result["height"][index])
-            raw_confidence = float(result["conf"][index])
-            block = int(result["block_num"][index])
-            paragraph = int(result["par_num"][index])
+            w = int(result["width"][index])
+            h = int(result["height"][index])
+            conf = float(result["conf"][index])
             line = int(result["line_num"][index])
         except (KeyError, TypeError, ValueError, IndexError):
             continue
 
-        if not np.isfinite(raw_confidence):
-            raw_confidence = -1.0
-
-        left = min(max(left, 0), scaled_w - 1)
-        top = min(max(top, 0), scaled_h - 1)
-        box_width = min(max(box_width, 0), scaled_w - left)
-        box_height = min(max(box_height, 0), scaled_h - top)
-        if box_width <= 0 or box_height <= 0:
-            continue
-
-        paragraph_key = (block, paragraph)
-        if paragraph_key not in paragraph_map:
-            paragraph_map[paragraph_key] = len(paragraph_map)
-        line_key = (block, paragraph, line)
-        if line_key not in line_map:
-            line_index = len(line_map)
-            line_map[line_key] = line_index
-            line_paragraph_map[line_index] = paragraph_map[paragraph_key]
-        line_index = line_map[line_key]
-        line_left_pixels[line_index] = min(
-            line_left_pixels.get(line_index, left), left
-        )
-
-        confidence = raw_confidence / 100.0 if 0 <= raw_confidence <= 100 else None
         normalized = normalize_word(token)
         if not normalized:
             continue
+
+        confidence = conf / 100.0 if 0 <= conf <= 100 else None
         words.append({
             "word_index": len(words),
-            "line_index": line_index,
+            "line_index": line,
             "text": token,
             "normalized_text": normalized,
-            "bbox": [
-                left / scaled_w,
-                top / scaled_h,
-                box_width / scaled_w,
-                box_height / scaled_h,
-            ],
+            "bbox": [left / orig_width, top / orig_height, w / orig_width, h / orig_height],
             "ocr_confidence": confidence,
         })
+        lines.setdefault(line, []).append(token)
+
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
-    line_words: dict[int, list[str]] = {}
-    for word in words:
-        line_words.setdefault(int(word["line_index"]), []).append(str(word["text"]))
-    ordered_line_indices = sorted(line_words)
-    paragraph_start_line_indices: list[int] = []
-    previous_paragraph_index: int | None = None
-    for line_index in ordered_line_indices:
-        paragraph_index = line_paragraph_map.get(line_index, 0)
-        if previous_paragraph_index is not None and paragraph_index != previous_paragraph_index:
-            paragraph_start_line_indices.append(line_index)
-        previous_paragraph_index = paragraph_index
-
-    baseline_left = min(line_left_pixels.values())
-    indent_threshold = max(24.0, scaled_w * 0.018)
-    maximum_indent = scaled_w * 0.15
-    paragraph_starts = set(paragraph_start_line_indices)
-    first_line_index = ordered_line_indices[0]
-    indented_line_indices = [
-        line_index
-        for line_index in ordered_line_indices
-        if (
-            line_index == first_line_index or line_index in paragraph_starts
-        )
-        and indent_threshold < line_left_pixels[line_index] - baseline_left <= maximum_indent
-    ]
-    indented_lines = set(indented_line_indices)
-
-    formatted_lines: list[str] = []
-    for line_index in ordered_line_indices:
-        line_text = " ".join(line_words[line_index]).strip()
-        if line_index in indented_lines:
-            line_text = f"    {line_text}"
-        formatted_lines.append(line_text)
-
-    formatted_parts: list[str] = []
-    for position, line_index in enumerate(ordered_line_indices):
-        if position:
-            formatted_parts.append(
-                "\n\n" if line_index in paragraph_starts else "\n"
-            )
-        formatted_parts.append(formatted_lines[position])
-    formatted_text = "".join(formatted_parts)
-
-    score_metadata = [
-        {
-            "preprocessing": name,
-            "psm": psm,
-            "selection_score": round(score, 4) if score >= 0 else None,
-        }
-        for name, psm, score, _candidate in candidate_results
-    ]
+    formatted_text = "\n".join(" ".join(lines[k]) for k in sorted(lines))
     return {
         "text": formatted_text,
         "words": words,
         "metadata": {
             "engine": "tesseract",
-            "engine_version": version,
             "language": target_lang,
-            "preprocessing": [
-                "upscale_cubic" if scale_factor > 1.01 else "original_resolution",
-                "grayscale",
-                selected_preprocessing,
-            ],
-            "selected_psm": selected_psm,
-            "candidate_count": len(candidate_results),
-            "candidate_scores": score_metadata,
-            "selected_candidate_score": round(selected_score, 4),
-            "coordinate_space": "normalized_original_dimensions",
-            "source_width": orig_width,
-            "source_height": orig_height,
-            "processed_width": scaled_w,
-            "processed_height": scaled_h,
-            "scale_factor": scale_factor,
             "word_count": len(words),
-            "text_layout": "line_and_paragraph_preserving",
-            "paragraph_start_line_indices": paragraph_start_line_indices,
-            "indented_line_indices": indented_line_indices,
+            "line_count": len(lines),
         },
     }
 
@@ -1292,7 +695,6 @@ def _extract_text_and_boxes_dual_engine(
     paddle_engine: Any,
     vietocr_engine: Any,
 ) -> dict[str, object]:
-    """Chạy quy trình OCR kết hợp Dual-Engine (PaddleOCR DBNet + VietOCR Transformer)."""
     array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if image is None:
@@ -1302,26 +704,34 @@ def _extract_text_and_boxes_dual_engine(
     if orig_width <= 0 or orig_height <= 0:
         raise ValueError("Image dimensions are invalid")
 
+    scale_factor = 1.0
+    max_dim = max(orig_width, orig_height)
+    if max_dim < 1500:
+        scale_factor = min(2.5, 1500.0 / max_dim)
+        scaled_w = int(round(orig_width * scale_factor))
+        scaled_h = int(round(orig_height * scale_factor))
+        proc_image = cv2.resize(image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC)
+    else:
+        proc_image = image
+
     try:
-        ocr_res = paddle_engine.ocr(image, cls=False)
+        ocr_res = paddle_engine.ocr(proc_image, cls=False)
     except Exception as exc:
-        raise OcrEngineUnavailable(
-            f"PaddleOCR xử lý hình ảnh thất bại: {exc}"
-        ) from exc
+        raise OcrEngineUnavailable(f"PaddleOCR xử lý hình ảnh thất bại: {exc}") from exc
 
     raw_items = ocr_res[0] if (ocr_res and ocr_res[0] is not None) else []
     if not raw_items:
-        raise OcrNoTextDetected(
-            "PaddleOCR không phát hiện được chữ trên hình ảnh"
-        )
+        raise OcrNoTextDetected("PaddleOCR không phát hiện được chữ trên hình ảnh")
+
+    if scale_factor > 1.01:
+        for item in raw_items:
+            item[0] = np.array(item[0], dtype=np.float32) / scale_factor
 
     ordered_items, layout_type = sort_reading_order_adaptive(
         raw_items, img_width=orig_width, image=image
     )
     if not ordered_items:
-        raise OcrNoTextDetected(
-            "Không có dòng chữ khả dụng sau khi lọc nhiễu bố cục"
-        )
+        raise OcrNoTextDetected("Không có dòng chữ khả dụng sau khi xử lý bố cục")
 
     words_output: list[dict[str, object]] = []
     lines_output: list[str] = []
@@ -1335,60 +745,83 @@ def _extract_text_and_boxes_dual_engine(
         if w_crop < 8 or h_crop < 8:
             continue
 
-        line_img_pil = Image.fromarray(
-            cv2.cvtColor(dewarped_img, cv2.COLOR_BGR2RGB)
-        )
+        if h_crop < 52:
+            target_h = 56
+            target_w = int(round(w_crop * (target_h / h_crop)))
+            dewarped_img_scaled = cv2.resize(dewarped_img, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+        else:
+            dewarped_img_scaled = dewarped_img
+
+        line_img_pil = Image.fromarray(cv2.cvtColor(dewarped_img_scaled, cv2.COLOR_BGR2RGB))
         chosen_text = paddle_text
         chosen_conf = paddle_conf
+        viet_text_used = False
 
         try:
-            viet_text = vietocr_engine.predict(line_img_pil)
+            with torch.inference_mode():
+                viet_text = vietocr_engine.predict(line_img_pil)
             if isinstance(viet_text, str) and is_vietocr_reliable(
-                viet_text, paddle_text, paddle_conf=paddle_conf, max_cer=0.35
+                viet_text, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
             ):
                 chosen_text = viet_text.strip()
-                chosen_conf = 0.95
+                chosen_conf = paddle_conf
+                viet_text_used = True
         except Exception:
             pass
+
+        if viet_text_used:
+            chosen_text = _transfer_punctuation(chosen_text, paddle_text)
 
         chosen_text = clean_ocr_punctuation(chosen_text)
         if not chosen_text:
             continue
 
-        # Chỉ giữ lại các từ có token hợp lệ trước khi phân đoạn hộp để tránh lệch pha do dấu '*'
-        valid_words = [
-            w for w in chosen_text.split() if normalize_word(w)
-        ]
+        valid_words = [w for w in chosen_text.split() if normalize_word(w)]
         if not valid_words:
             continue
 
-        line_boxes = _map_curved_word_boxes(
-            valid_words, item, orig_width, orig_height
-        )
+        line_boxes = _map_curved_word_boxes(valid_words, item, orig_width, orig_height)
+        paddle_tokens = [w for w in paddle_text.split() if normalize_word(w)]
 
         for w_idx, raw_token in enumerate(valid_words):
-            norm_token = normalize_word(raw_token)
-            words_output.append(
-                {
-                    "word_index": len(words_output),
-                    "line_index": len(lines_output),
-                    "text": raw_token,
-                    "normalized_text": norm_token,
-                    "bbox": line_boxes[w_idx],
-                    "ocr_confidence": round(chosen_conf, 4)
-                    if chosen_conf is not None
-                    else 0.90,
-                }
+            matched_p_token = _find_best_matching_paddle_token(
+                raw_token, paddle_tokens, w_idx, window_size=3
             )
+
+            norm_token = normalize_word(raw_token)
+            word_conf = _evaluate_vietnamese_word_confidence(
+                raw_token, matched_p_token, base_line_conf=paddle_conf
+            )
+
+            words_output.append({
+                "word_index": len(words_output),
+                "line_index": len(lines_output),
+                "text": raw_token,
+                "normalized_text": norm_token,
+                "bbox": line_boxes[w_idx],
+                "ocr_confidence": round(word_conf, 4),
+            })
 
         lines_output.append(" ".join(valid_words))
 
     if not words_output:
-        raise OcrNoTextDetected(
-            "Dual-Engine không trích xuất được từ ngữ hợp lệ"
-        )
+        raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
 
     formatted_text = "\n".join(lines_output)
+
+    try:
+        debug_vis = image.copy()
+        for w in words_output:
+            bx, by, bw, bh = w["bbox"]
+            x1 = int(round(bx * orig_width))
+            y1 = int(round(by * orig_height))
+            x2 = int(round((bx + bw) * orig_width))
+            y2 = int(round((by + bh) * orig_height))
+            cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
+        debug_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "debug_ocr_boxes.png"))
+        cv2.imwrite(debug_path, debug_vis)
+    except Exception:
+        pass
 
     return {
         "text": formatted_text,
@@ -1402,7 +835,7 @@ def _extract_text_and_boxes_dual_engine(
             "source_height": orig_height,
             "processed_width": orig_width,
             "processed_height": orig_height,
-            "scale_factor": 1.0,
+            "scale_factor": scale_factor,
             "word_count": len(words_output),
             "line_count": len(lines_output),
             "reading_layout": layout_type,
@@ -1411,19 +844,14 @@ def _extract_text_and_boxes_dual_engine(
 
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
-    """Chạy quy trình OCR: ưu tiên Dual-Engine (PaddleOCR + VietOCR), tự động fallback sang Tesseract khi không khả dụng."""
+    """Chạy quy trình OCR: ưu tiên Dual-Engine, tự động fallback Tesseract cho CI/headless."""
     try:
         paddle_engine, vietocr_engine = _get_ocr_engines()
         return _extract_text_and_boxes_dual_engine(image_bytes, paddle_engine, vietocr_engine)
-    except OcrEngineUnavailable:
+    except (OcrEngineUnavailable, OcrNoTextDetected):
         return _extract_text_and_boxes_tesseract(image_bytes)
-    except OcrNoTextDetected:
+    except Exception:
         try:
             return _extract_text_and_boxes_tesseract(image_bytes)
         except Exception:
             raise
-    except Exception as exc:
-        try:
-            return _extract_text_and_boxes_tesseract(image_bytes)
-        except Exception:
-            raise exc

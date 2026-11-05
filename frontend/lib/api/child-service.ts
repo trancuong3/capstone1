@@ -3,10 +3,7 @@ import type {
   ChildProfileDTO,
   ChildProfilePatchDTO,
 } from "@/types/child";
-import {
-  ServiceError,
-  type ServiceErrorCode,
-} from "@/lib/api/service-error";
+import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -18,6 +15,8 @@ export interface ChildService {
     childId: string,
     request: ChildProfilePatchDTO,
   ): Promise<ChildProfileDTO>;
+  uploadAvatar(childId: string, file: File): Promise<ChildProfileDTO>;
+  removeAvatar(childId: string): Promise<ChildProfileDTO>;
   delete(childId: string): Promise<void>;
 }
 
@@ -116,19 +115,18 @@ async function createHeaders(): Promise<Headers> {
 
   return new Headers({
     Accept: "application/json",
-    "Content-Type": "application/json",
     Authorization: `Bearer ${session.access_token}`,
   });
 }
 
-async function request<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let headers: Headers;
 
   try {
     headers = await createHeaders();
+    if (typeof init?.body === "string") {
+      headers.set("Content-Type", "application/json");
+    }
   } catch (error) {
     if (error instanceof ServiceError) {
       throw error;
@@ -192,9 +190,7 @@ export function createChildService(): ChildService {
       return request<ChildProfileDTO[]>("/profiles/children");
     },
 
-    async create(
-      requestBody: ChildProfileCreateDTO,
-    ): Promise<ChildProfileDTO> {
+    async create(requestBody: ChildProfileCreateDTO): Promise<ChildProfileDTO> {
       const body: ChildProfileCreateDTO = {
         alias: requestBody.alias,
         grade: requestBody.grade,
@@ -233,11 +229,24 @@ export function createChildService(): ChildService {
     },
 
     async delete(childId: string): Promise<void> {
-      await request<void>(
-        `/profiles/children/${encodeURIComponent(childId)}`,
-        {
-          method: "DELETE",
-        },
+      await request<void>(`/profiles/children/${encodeURIComponent(childId)}`, {
+        method: "DELETE",
+      });
+    },
+
+    async uploadAvatar(childId: string, file: File): Promise<ChildProfileDTO> {
+      const body = new FormData();
+      body.append("file", file);
+      return request<ChildProfileDTO>(
+        `/profiles/children/${encodeURIComponent(childId)}/avatar`,
+        { method: "POST", body },
+      );
+    },
+
+    async removeAvatar(childId: string): Promise<ChildProfileDTO> {
+      return request<ChildProfileDTO>(
+        `/profiles/children/${encodeURIComponent(childId)}/avatar`,
+        { method: "DELETE" },
       );
     },
   };

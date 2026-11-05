@@ -97,7 +97,7 @@ export function ReadingControls({
               : "Bé đọc với nhận diện giọng nói"
         }
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled}
+        disabled={disabled || retryMode}
         onClick={onToggleListening ?? onPause}
         variant={isListening ? "primary" : "secondary"}
       >
@@ -149,7 +149,6 @@ export function ReadingControls({
         onClick={onFinish}
       >
         <Check aria-hidden="true" className="size-6 shrink-0" />
-
         <span className="truncate">
           {retryMode ? "Hoàn thành" : "Xong"}
         </span>

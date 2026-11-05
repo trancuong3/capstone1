@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminLayout } from "@/components/admin/admin-layout";
@@ -21,6 +21,10 @@ const { navigationMock } = vi.hoisted(() => ({
     replace: vi.fn(),
   },
 }));
+const { getProfileMock, profileServiceMock } = vi.hoisted(() => {
+  const getProfileMock = vi.fn();
+  return { getProfileMock, profileServiceMock: { get: getProfileMock } };
+});
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
@@ -29,11 +33,15 @@ vi.mock("next/navigation", () => ({
     replace: navigationMock.replace,
   }),
 }));
+vi.mock("@/hooks/use-profile-service", () => ({
+  useProfileService: () => profileServiceMock,
+}));
 
 beforeEach(() => {
   navigationMock.pathname = "/dashboard";
   navigationMock.refresh.mockClear();
   navigationMock.replace.mockClear();
+  getProfileMock.mockResolvedValue(null);
 });
 
 describe("shared header and footer", () => {
@@ -73,8 +81,6 @@ describe("shared header and footer", () => {
     ["/reports", "Tiến bộ"],
     ["/sessions", "Lịch sử"],
     ["/reports/difficult-words", "Từ cần luyện"],
-    ["/children", "Hồ sơ bé"],
-    ["/profile", "Ba mẹ"],
   ])("keeps Parent navigation active on %s", (pathname, label) => {
     navigationMock.pathname = pathname;
     render(
@@ -89,11 +95,11 @@ describe("shared header and footer", () => {
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("ViRead");
     expect(footer).toHaveTextContent("Đại học Duy Tân");
-    expect(footer).toHaveTextContent("viread@gmail.com");
+    expect(footer).toHaveTextContent("vireadforyou@gmail.com");
     expect(footer).toHaveTextContent("0905373633");
     expect(
-      within(footer).getByRole("link", { name: "viread@gmail.com" }),
-    ).toHaveAttribute("href", "mailto:viread@gmail.com");
+      within(footer).getByRole("link", { name: "vireadforyou@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
     expect(
       within(footer).getByRole("link", { name: "0905373633" }),
     ).toHaveAttribute("href", "tel:0905373633");
@@ -120,9 +126,45 @@ describe("shared header and footer", () => {
         name: label,
       }),
     ).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Đăng xuất" }),
+      screen.getByRole("menuitem", { name: "Hồ sơ ba mẹ" }),
+    ).toHaveAttribute("href", "/profile");
+    expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveAttribute(
+      "href",
+      "/children",
+    );
+    expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" }),
+    ).toHaveAttribute("href", "/help-support");
+    expect(
+      screen.getByRole("menuitem", { name: "Đăng xuất" }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/children", "Hồ sơ bé"],
+    ["/profile", "Hồ sơ ba mẹ"],
+  ])("highlights %s in the avatar menu", (pathname, label) => {
+    navigationMock.pathname = pathname;
+    render(
+      withAuthFixture(
+        <AppShell>
+          <h1>Nội dung phụ huynh</h1>
+        </AppShell>,
+        createAuthServiceFixture(),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("keeps child onboarding minimal while using the Parent footer", () => {
@@ -191,7 +233,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 
@@ -220,7 +262,7 @@ describe("shared header and footer", () => {
       "Khu vực quản trị ViRead.",
     );
     expect(screen.getByRole("contentinfo")).not.toHaveTextContent(
-      "viread@gmail.com",
+      "vireadforyou@gmail.com",
     );
   });
 });

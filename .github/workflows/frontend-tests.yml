@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/retry-reading-controls
   pull_request:
     branches:
       - main
@@ -14,7 +15,7 @@ permissions:
 jobs:
   frontend-checks:
     name: Frontend tests, typecheck, lint and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     defaults:
@@ -23,10 +24,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -46,9 +47,50 @@ jobs:
         run: >-
           npm test --
           tests/reading/reading-screen.test.tsx
+          tests/reading/retry-recognition.test.ts
           tests/reading/browser-transcript-collector.test.ts
           tests/reading/reading-report-page.test.tsx
+          tests/reading/reading-async-cleanup.test.tsx
           test/speech-service.test.ts
+
+      - name: ESLint for retry reading changes
+        run: >-
+          npx eslint
+          components/reading/reading-screen.tsx
+          components/reading/reading-layout.tsx
+          components/reading/reading-controls.tsx
+          lib/reading/retry-recognition.ts
+          tests/reading/reading-screen.test.tsx
+          tests/reading/retry-recognition.test.ts
+
+      - name: Full frontend TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Run realtime device permission and scanner navigation tests
+        run: >-
+          npm test --
+          tests/reading/device-permission-service.test.ts
+          tests/reading/device-permission-screen.test.tsx
+          tests/reading/reading-preparation-screen.test.tsx
+          tests/dashboard/dashboard-screen.test.tsx
+          tests/books/book-detail-screen.test.tsx
+
+      - name: ESLint for realtime device permission changes
+        run: >-
+          npx eslint
+          components/reading/reading-preparation-screen.tsx
+          components/reading/book-scanner-screen.tsx
+          components/reading/camera-preview.tsx
+          components/reading/reading-ready.tsx
+          components/books/book-detail-screen.tsx
+          components/dashboard/dashboard-screen.tsx
+          lib/api/device-permission-service.ts
+          types/reading.ts
+          tests/reading/device-permission-service.test.ts
+          tests/reading/device-permission-screen.test.tsx
+          tests/reading/reading-preparation-screen.test.tsx
+          tests/dashboard/dashboard-screen.test.tsx
+          tests/books/book-detail-screen.test.tsx
 
       - name: TypeScript check for Parent CRUD source
         run: npx tsc --noEmit -p tsconfig.admin-parent-crud.json

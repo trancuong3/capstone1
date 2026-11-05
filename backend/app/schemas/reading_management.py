@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 GoalMetric = Literal["MINUTES", "SESSIONS"]
 GoalPeriod = Literal["DAILY", "WEEKLY"]
 GoalStatus = Literal["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]
+PlanStatus = Literal["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]
 CollectionType = Literal["FAVORITE", "WANT_TO_READ"]
 ReminderStatus = Literal["PENDING", "ACKNOWLEDGED"]
+ReminderEmailStatus = Literal["NOT_REQUESTED", "PENDING", "SENDING", "RETRY", "SENT", "FAILED"]
 
 
 def validate_timezone(value: str) -> str:
@@ -79,6 +81,94 @@ class ReadingGoalRead(BaseModel):
     updated_at: datetime
 
 
+class ReadingPlanCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    child_id: UUID
+    book_id: UUID | None = None
+    title: str = Field(min_length=1, max_length=100)
+    target_minutes: int = Field(ge=5, le=240)
+    weekdays: list[int] = Field(min_length=1, max_length=7)
+    starts_on: date
+    ends_on: date | None = None
+    timezone: str = "Asia/Ho_Chi_Minh"
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, value: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in value) or len(set(value)) != len(value):
+            raise ValueError("weekdays must be unique values from 0 to 6")
+        return sorted(value)
+
+    @field_validator("timezone")
+    @classmethod
+    def check_timezone(cls, value: str) -> str:
+        return validate_timezone(value)
+
+    @model_validator(mode="after")
+    def check_dates(self):
+        if self.ends_on is not None and self.ends_on < self.starts_on:
+            raise ValueError("ends_on must be on or after starts_on")
+        return self
+
+
+class ReadingPlanUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    book_id: UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    target_minutes: int | None = Field(default=None, ge=5, le=240)
+    weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
+    ends_on: date | None = None
+    timezone: str | None = None
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return value
+        if any(day < 0 or day > 6 for day in value) or len(set(value)) != len(value):
+            raise ValueError("weekdays must be unique values from 0 to 6")
+        return sorted(value)
+
+    @field_validator("timezone")
+    @classmethod
+    def check_timezone(cls, value: str | None) -> str | None:
+        return validate_timezone(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def require_changes(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be supplied")
+        for field_name in ("title", "target_minutes", "weekdays", "timezone"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null")
+        return self
+
+
+class ReadingPlanTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: PlanStatus
+
+
+class ReadingPlanRead(BaseModel):
+    id: UUID
+    child_id: UUID
+    book_id: UUID | None
+    book_title: str | None = None
+    title: str
+    target_minutes: int
+    weekdays: list[int]
+    starts_on: date
+    ends_on: date | None
+    timezone: str
+    status: PlanStatus
+    scheduled_days_this_week: int = Field(ge=0)
+    completed_days_this_week: int = Field(ge=0)
+    progress_percent: float = Field(ge=0, le=100)
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ChildBookCollectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     child_id: UUID
@@ -111,6 +201,7 @@ class ReadingReminderCreate(BaseModel):
     weekdays: list[int] = Field(min_length=1, max_length=7)
     timezone: str = "Asia/Ho_Chi_Minh"
     is_active: bool = True
+    email_enabled: bool = False
 
     @field_validator("weekdays")
     @classmethod
@@ -133,6 +224,7 @@ class ReadingReminderUpdate(BaseModel):
     weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
     timezone: str | None = None
     is_active: bool | None = None
+    email_enabled: bool | None = None
 
     @field_validator("weekdays")
     @classmethod
@@ -152,7 +244,7 @@ class ReadingReminderUpdate(BaseModel):
     def require_changes(self):
         if not self.model_fields_set:
             raise ValueError("At least one field must be supplied")
-        for field_name in ("remind_at", "weekdays", "timezone", "is_active"):
+        for field_name in ("remind_at", "weekdays", "timezone", "is_active", "email_enabled"):
             if field_name in self.model_fields_set and getattr(self, field_name) is None:
                 raise ValueError(f"{field_name} cannot be null")
         return self
@@ -165,6 +257,7 @@ class ReadingReminderRead(BaseModel):
     weekdays: list[int]
     timezone: str
     is_active: bool
+    email_enabled: bool = False
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -177,6 +270,10 @@ class ReadingReminderOccurrenceRead(BaseModel):
     scheduled_for: datetime
     status: ReminderStatus
     acknowledged_at: datetime | None
+    email_status: ReminderEmailStatus = "NOT_REQUESTED"
+    email_attempts: int = Field(default=0, ge=0)
+    email_sent_at: datetime | None = None
+    email_error_code: str | None = None
     reminder: ReadingReminderRead | None = None
 
 

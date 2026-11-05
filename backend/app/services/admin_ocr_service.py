@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
 import math
+import os
+import re
 import time
+import unicodedata
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from io import BytesIO
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
@@ -22,7 +29,11 @@ from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import AdminOcrDraftRequest, AdminOcrVerifyRequest
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.services.ocr_engine import (
-    OcrEngineUnavailable, OcrNoTextDetected, extract_text_and_boxes, normalize_text_tokens, normalize_word,
+    OcrEngineUnavailable,
+    OcrNoTextDetected,
+    extract_text_and_boxes,
+    normalize_text_tokens,
+    normalize_word,
 )
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
@@ -51,7 +62,6 @@ class AdminOcrService:
         page_id: UUID | None = None,
         started_at: float | None = None,
     ) -> None:
-        """Best-effort cleanup without masking the primary upload/OCR/database error."""
         if not object_may_exist:
             return
         try:
@@ -67,7 +77,6 @@ class AdminOcrService:
                 page_id=str(page_id) if page_id else None,
                 elapsed_ms=int((time.perf_counter() - started_at) * 1000) if started_at else None,
             )
-
 
     async def _discard_processing_page(self, page_id: UUID) -> bool:
         """Delete only a pending upload placeholder; never delete an activated page."""
@@ -139,7 +148,6 @@ class AdminOcrService:
 
     async def require_admin(self, actor_id: UUID) -> None:
         if await self.repo.role(actor_id) != "admin":
-            # Safe even when auth.users.id is not mapped to profiles.id; fail closed.
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     async def _read_validate_image(self, file: UploadFile) -> tuple[bytes, str, str, int, int]:
@@ -162,8 +170,6 @@ class AdminOcrService:
                 canonical_image = ImageOps.exif_transpose(image)
                 width, height = canonical_image.size
                 if orientation not in (None, 1):
-                    # Store physical pixels in display orientation so the browser,
-                    # OpenCV and persisted normalized bounding boxes share a frame.
                     output = BytesIO()
                     save_image = canonical_image
                     save_options: dict[str, object] = {}
@@ -204,7 +210,7 @@ class AdminOcrService:
     def _word_data(words: list[dict[str, object]]) -> list[dict[str, object]]:
         normalized: list[dict[str, object]] = []
         for position, item in enumerate(words):
-            text_value = str(item["text"]).strip()
+            text_value = unicodedata.normalize("NFC", str(item["text"]).strip())
             norm = normalize_word(text_value)
             if not norm:
                 continue
@@ -237,8 +243,6 @@ class AdminOcrService:
         for expected_number, page in enumerate(active_pages, start=1):
             if page.PageNumber != expected_number:
                 self.repo.set_page_number(page, expected_number)
-                # Execute each move in ascending old-number order so the partial
-                # unique index never observes a transient collision.
                 await self.repo.flush()
                 changed = True
         return changed
@@ -246,7 +250,6 @@ class AdminOcrService:
     async def upload_page(
         self, actor_id: UUID, book_id: UUID, file: UploadFile
     ) -> AdminRevisionDetailRead:
-        """Reserve a hidden page row, perform Storage/OCR work, then activate it atomically."""
         started_at = time.perf_counter()
         log_diagnostic(
             logger,
@@ -256,7 +259,6 @@ class AdminOcrService:
             book_id=str(book_id),
         )
         await self.require_admin(actor_id)
-        # End the authorization read transaction before local image work.
         await self.db.rollback()
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
@@ -303,16 +305,13 @@ class AdminOcrService:
             await self._discard_processing_page(page_id)
             raise
         except Exception:
-            # A connection failure during COMMIT can have an uncertain outcome.
-            # Remove the row only if it is still the unexposed PROCESSING reservation.
             await self.db.rollback()
             await self._discard_processing_page(page_id)
             raise
 
+        # Phase 2: storage upload and OCR work outside database transaction
         storage_uploaded = False
         try:
-            # Phase 2: no DB transaction or row lock is held during remote Storage
-            # upload or local CPU-bound OCR processing.
             try:
                 await run_in_threadpool(upload_object, object_path, data, content_type)
                 storage_uploaded = True
@@ -338,28 +337,10 @@ class AdminOcrService:
                 )
                 raise
 
-            log_diagnostic(
-                logger,
-                logging.INFO,
-                event="admin_ocr_storage_upload_succeeded",
-                stage="storage_upload",
-                book_id=str(book_id),
-                page_id=str(page_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-
             try:
-                log_diagnostic(
-                    logger,
-                    logging.INFO,
-                    event="admin_ocr_ocr_started",
-                    stage="tesseract_preflight",
-                    book_id=str(book_id),
-                    page_id=str(page_id),
-                )
                 ocr = await run_in_threadpool(extract_text_and_boxes, data)
                 words = self._word_data(ocr["words"])
-                text_value = str(ocr["text"]).strip()
+                text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
                 if not text_value:
                     raise HTTPException(status_code=422, detail="OCR produced empty text")
                 metadata = dict(ocr["metadata"])
@@ -421,8 +402,7 @@ class AdminOcrService:
                     detail="OCR processing failed; check the local OCR configuration",
                 ) from exc
 
-            # Phase 3: short transaction. Revalidate the book and reservation,
-            # then make the page ACTIVE together with its initial unverified revision.
+            # Phase 3: short transaction to activate page with its revision
             stage = "database_finalize"
             try:
                 await self.require_admin(actor_id)
@@ -456,6 +436,7 @@ class AdminOcrService:
                 await self.db.refresh(revision)
                 result = await self.revision_detail(page, revision)
                 await self.db.commit()
+                return result
             except IntegrityError as exc:
                 log_diagnostic(
                     logger,
@@ -476,6 +457,13 @@ class AdminOcrService:
                     status_code=409,
                     detail="Page number conflicts with an existing page",
                 ) from exc
+            except HTTPException:
+                await self.db.rollback()
+                await self._abort_page_upload(
+                    page_id, object_path, object_may_exist=storage_uploaded,
+                    book_id=book_id, started_at=started_at,
+                )
+                raise
             except Exception as exc:
                 log_diagnostic(
                     logger,
@@ -494,42 +482,22 @@ class AdminOcrService:
                     book_id=book_id, started_at=started_at,
                 )
                 raise
-
-            log_diagnostic(
-                logger,
-                logging.INFO,
-                event="admin_ocr_upload_succeeded",
-                stage="response_validation",
-                book_id=str(book_id),
-                page_id=str(page_id),
-                revision_id=str(revision_id),
-                word_count=len(words),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            return result
         except asyncio.CancelledError:
-            # The reservation may still be PROCESSING, or the final commit may
-            # already have activated it. The cleanup helper deletes only the
-            # former and protects Storage objects referenced by an ACTIVE page.
             await self.db.rollback()
             await self._abort_page_upload(
                 page_id,
                 object_path,
-                object_may_exist=True,
+                object_may_exist=storage_uploaded,
                 book_id=book_id,
                 started_at=started_at,
             )
             raise
         finally:
-            # The outer request dependency closes the AsyncSession as well; this
-            # rollback is a no-op after a successful commit and releases any
-            # unexpected read-only transaction started during response building.
             await self.db.rollback()
 
     async def replace_page_image(
         self, actor_id: UUID, page_id: UUID, file: UploadFile
     ) -> AdminRevisionDetailRead:
-        """Create a candidate OCR revision without holding a DB transaction during Storage/OCR."""
         started_at = time.perf_counter()
         await self.require_admin(actor_id)
         probe = await self.repo.page(page_id)
@@ -539,7 +507,6 @@ class AdminOcrService:
         book_id = probe.BookId
         await self.db.rollback()
 
-        # Snapshot the page and its revision history under short Book -> Page locks.
         book = await self.repo.book(book_id, lock=True)
         if book is None:
             await self.db.rollback()
@@ -567,7 +534,6 @@ class AdminOcrService:
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
         storage_uploaded = False
 
-        # External Storage and Tesseract work runs with no active DB transaction.
         try:
             await run_in_threadpool(upload_object, object_path, data, content_type)
             storage_uploaded = True
@@ -585,7 +551,7 @@ class AdminOcrService:
         try:
             ocr = await run_in_threadpool(extract_text_and_boxes, data)
             words = self._word_data(ocr["words"])
-            text_value = str(ocr["text"]).strip()
+            text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
             if not text_value:
                 raise HTTPException(status_code=422, detail="OCR produced empty text")
         except OcrEngineUnavailable as exc:
@@ -652,8 +618,6 @@ class AdminOcrService:
         commit_started = False
 
         try:
-            # Revalidate the exact snapshot after external work. Concurrent page
-            # edits or verification must win rather than be silently overwritten.
             await self.require_admin(actor_id)
             current_book = await self.repo.book(book_id, lock=True)
             if current_book is None or current_book.LifecycleStatus != "ACTIVE":
@@ -746,8 +710,6 @@ class AdminOcrService:
         except Exception as exc:
             await self.db.rollback()
             if commit_started:
-                # The network may have failed after PostgreSQL committed. Confirm
-                # the revision before deleting the image it could now reference.
                 try:
                     persisted_page = await self.repo.page(page_id)
                     persisted_revision = await self.repo.revision(page_id, revision_id)
@@ -785,12 +747,12 @@ class AdminOcrService:
         words = []
         for row in rows:
             box = row.BoundingBox
-            if isinstance(box, dict):  # Read legacy records; never write this shape again.
+            if isinstance(box, dict):
                 box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
             if not isinstance(box, list) or len(box) != 4:
                 raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
             words.append({
-                "word_index": row.WordIndex, "line_index": row.LineIndex, "text": row.Text,
+                "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
                 "bbox": tuple(box),
                 "ocr_confidence": self._normalize_confidence(row.OCRConfidence),
@@ -811,7 +773,7 @@ class AdminOcrService:
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
             verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-            draft_text=revision.DraftText if revision.DraftText is not None else revision.VerifiedText,
+            draft_text=unicodedata.normalize("NFC", revision.DraftText if revision.DraftText is not None else (revision.VerifiedText or "")),
             words=words, ocr_metadata=metadata, created_at=revision.CreatedAt,
             verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
         )
@@ -821,7 +783,7 @@ class AdminOcrService:
         for expected_index, item in enumerate(raw):
             if item["word_index"] != expected_index:
                 raise HTTPException(status_code=422, detail="word_index values must be contiguous and start at zero")
-            item["text"] = str(item["text"]).strip()
+            item["text"] = unicodedata.normalize("NFC", str(item["text"]).strip())
             item["normalized_text"] = normalize_word(item["text"])
             if not item["normalized_text"]:
                 raise HTTPException(status_code=422, detail="Word text cannot be empty")
@@ -829,7 +791,6 @@ class AdminOcrService:
         return raw
 
     async def create_edit_draft(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
-        """Start a new editable revision from the current verified text without rerunning OCR."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
@@ -848,19 +809,19 @@ class AdminOcrService:
 
         candidates = []
         for row in source_words:
-            bbox = row.BoundingBox
-            if isinstance(bbox, dict):
-                bbox = [bbox.get("x"), bbox.get("y"), bbox.get("width"), bbox.get("height")]
-            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            box = row.BoundingBox
+            if isinstance(box, dict):
+                box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
+            if not isinstance(box, (list, tuple)) or len(bbox) != 4:
                 raise HTTPException(status_code=409, detail="Stored word coordinates cannot be copied safely")
             candidates.append({
-                "text": row.Text,
+                "text": unicodedata.normalize("NFC", row.Text),
                 "line_index": row.LineIndex,
                 "bbox": bbox,
                 "ocr_confidence": row.OCRConfidence,
             })
         words = self._word_data(candidates)
-        text_value = source.VerifiedText.strip()
+        text_value = unicodedata.normalize("NFC", source.VerifiedText.strip())
         if normalize_text_tokens(text_value) != [str(item["normalized_text"]) for item in words]:
             raise HTTPException(status_code=409, detail="Current verified text and word data are inconsistent")
 
@@ -908,7 +869,7 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be edited")
         if not payload.draft_text.strip():
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
-        draft_text = payload.draft_text.strip()
+        draft_text = unicodedata.normalize("NFC", payload.draft_text.strip())
         words = self._validated_words(payload.words)
         text_tokens = normalize_text_tokens(draft_text)
         word_tokens = [str(item["normalized_text"]) for item in words]
@@ -922,7 +883,6 @@ class AdminOcrService:
             json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
-            # Keep draft text and the corresponding word records in one transaction.
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_draft(
                 revision,
@@ -949,7 +909,7 @@ class AdminOcrService:
             raise HTTPException(status_code=404, detail="Revision does not belong to this page")
         if revision.VerificationStatus != "NEEDS_REVIEW":
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be verified")
-        corrected_text = payload.corrected_text.strip()
+        corrected_text = unicodedata.normalize("NFC", payload.corrected_text.strip())
         if not corrected_text:
             raise HTTPException(status_code=422, detail="Verified text must not be blank")
         words = self._validated_words(payload.words)
@@ -961,8 +921,6 @@ class AdminOcrService:
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
-            # Word persistence, revision verification and the page's current pointer
-            # must succeed or roll back together.
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
                 revision,
@@ -983,7 +941,6 @@ class AdminOcrService:
                 and source_width > 0
                 and source_height > 0
             ):
-                # Promote image + OCR only when verified. Until then, reading retains the old pair.
                 self.repo.set_page_image_source(
                     page, image_path=source_path, width=source_width, height=source_height
                 )
@@ -998,7 +955,6 @@ class AdminOcrService:
         return await self.revision_detail(page, revision)
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
-        """Download and OCR the existing source without holding a PostgreSQL transaction."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
@@ -1021,7 +977,6 @@ class AdminOcrService:
         )
         await self.db.rollback()
 
-        # Storage download and OCR execute outside the database transaction.
         try:
             image_bytes = await run_in_threadpool(download_object, source_image_path)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
@@ -1039,7 +994,7 @@ class AdminOcrService:
             ) from exc
 
         words = self._word_data(ocr["words"])
-        text_value = str(ocr["text"]).strip()
+        text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
         if not text_value:
             raise HTTPException(status_code=422, detail="OCR produced empty text")
 
@@ -1066,8 +1021,6 @@ class AdminOcrService:
         ).hexdigest()
 
         try:
-            # Revalidate the page snapshot after the external work. A concurrent
-            # verification, replacement, retirement or new revision must not be overwritten.
             await self.require_admin(actor_id)
             current_page = await self.repo.page(page_id, lock=True)
             if current_page is None or current_page.BookId != page_book_id:
@@ -1112,8 +1065,6 @@ class AdminOcrService:
             await self.db.refresh(current_page)
             result = await self.revision_detail(current_page, revision)
             await self.db.commit()
-            # The current verified pointer and historical session/event references
-            # remain untouched until an Admin explicitly verifies the new revision.
             return result
         except IntegrityError as exc:
             await self.db.rollback()
@@ -1126,13 +1077,11 @@ class AdminOcrService:
             raise
 
     async def retire_page(self, actor_id: UUID, page_id: UUID) -> AdminPageLifecycleRead:
-        """Soft-retire a page and reindex ACTIVE pages without deleting historical data."""
         await self.require_admin(actor_id)
         probe = await self.repo.page(page_id)
         if probe is None:
             raise HTTPException(status_code=404, detail="Page not found")
 
-        # Use a consistent Book -> Page lock order with upload allocation to avoid deadlocks.
         book = await self.repo.book(probe.BookId, lock=True)
         if book is None:
             raise HTTPException(status_code=404, detail="Book not found")
@@ -1148,8 +1097,6 @@ class AdminOcrService:
         try:
             if page.LifecycleStatus != "RETIRED":
                 self.repo.set_page_lifecycle_status(page, "RETIRED")
-                # Free the retiring page's active unique-index entry before moving
-                # the next active page into its number.
                 await self.repo.flush()
                 changed = True
             changed = await self._renumber_active_pages(page.BookId, lock=True) or changed
@@ -1165,6 +1112,143 @@ class AdminOcrService:
             page_number=page.PageNumber,
             lifecycle_status="RETIRED",
         )
+
+    async def ai_correct_text(
+        self, actor_id: UUID, page_id: UUID, draft_text: str
+    ) -> dict[str, object]:
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=False)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if not gemini_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="Chưa cấu hình GEMINI_API_KEY trong file .env của backend",
+            )
+
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+        image_bytes: bytes | None = None
+        mime_type = "image/jpeg"
+        if page.ImagePath:
+            try:
+                image_bytes = await run_in_threadpool(download_object, page.ImagePath)
+                ext = page.ImagePath.rsplit(".", 1)[-1].lower() if "." in page.ImagePath else "jpeg"
+                mime_type = "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/jpeg"
+            except Exception as exc:
+                logger.warning("Không thể tải ảnh gốc cho AI vision: %s", exc)
+
+        normalized_draft = unicodedata.normalize("NFC", draft_text.strip())
+        input_tokens = normalize_text_tokens(normalized_draft)
+        expected_word_count = len(input_tokens)
+
+        system_instruction = (
+            "Bạn là chuyên gia hiệu đính văn bản tiếng Việt cho sách và tài liệu OCR.\n"
+            "Nhiệm vụ của bạn là rà soát văn bản OCR dựa trên HÌNH ẢNH TRANG ĐƯỢC ĐÍNH KÈM.\n\n"
+            "YÊU CẦU BẮT BUỘC:\n"
+            "1. ĐỐI CHIẾU THỊ GIÁC: Nhìn kỹ hình ảnh trang để đối soát từng chữ in. Tuyệt đối KHÔNG tự ý suy đoán, "
+            "thay đổi từ ngữ gốc (ví dụ: trên ảnh in 'hướng nhân' thì bắt buộc giữ nguyên 'hướng nhân'; "
+            "trên ảnh in 'đêm ôm mong' thì bắt buộc giữ nguyên 'đêm ôm mong').\n"
+            "2. BẢO TOÀN SỐ LƯỢNG TỪ: Văn bản kết quả PHẢI CÓ CHÍNH XÁC 100% SỐ LƯỢNG TỪ bằng với văn bản OCR đầu vào "
+            f"({expected_word_count} từ). Tuyệt đối không thêm từ, bớt từ, gộp từ, tách từ.\n"
+            "3. CHỈ SỬA LỖI DẤU VÀ KÝ TỰ NHẬN DẠNG: Sửa các lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc nhầm ký tự quang học "
+            "(ví dụ: 'để' -> 'đế', 'đên' -> 'đến', 'Phậi' -> 'Phật', 'nhở' -> 'nhớ') đúng theo chữ in trong ảnh.\n"
+            "4. GIỮ NGUYÊN CẤU TRÚC DÒNG: Giữ nguyên thứ tự các dòng và ngắt dòng (\\n) của văn bản gốc.\n"
+            "5. KHÔNG TỰ THÊM DẤU CHẤM CÂU: Tuyệt đối KHÔNG tự ý chèn thêm dấu chấm câu ('.') hay dấu phẩy ở cuối dòng nếu ảnh không có.\n"
+            "6. Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích hay định dạng markdown."
+        )
+
+        prompt = (
+            f"Dưới đây là văn bản OCR nháp hiện tại gồm đúng {expected_word_count} từ:\n\n"
+            f"{normalized_draft}\n\n"
+            f"Hãy đối chiếu từng từ với hình ảnh trang sách đính kèm và sửa đúng chính tả, dấu thanh. "
+            f"QUAN TRỌNG: Kết quả BẮT BUỘC phải có đúng {expected_word_count} từ, không được thêm hay bớt bất kỳ từ nào!"
+        )
+
+        def _call_gemini_with_prompt(user_prompt: str) -> str:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
+            parts: list[dict[str, Any]] = []
+            if image_bytes:
+                parts.append({
+                    "inlineData": {
+                        "mimeType": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("utf-8"),
+                    }
+                })
+            parts.append({"text": user_prompt})
+
+            payload = {
+                "contents": [{"parts": parts}],
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "generationConfig": {"temperature": 0.1},
+            }
+            body = json.dumps(payload).encode("utf-8")
+
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                req = urllib.request.Request(
+                    endpoint,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=45) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            raise HTTPException(status_code=502, detail="Gemini không phản hồi kết quả.")
+                        raw_result = candidates[0]["content"]["parts"][0]["text"].strip()
+                        if raw_result.startswith("```"):
+                            raw_result = re.sub(r"^```[a-zA-Z]*\n?", "", raw_result)
+                            raw_result = re.sub(r"\n?```$", "", raw_result).strip()
+                        return unicodedata.normalize("NFC", raw_result)
+                except urllib.error.HTTPError as err:
+                    if err.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Lỗi kết nối Google AI Studio (HTTP {err.code}): {err.reason}",
+                    ) from err
+                except (urllib.error.URLError, TimeoutError) as net_err:
+                    if attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Mất kết nối tới Google AI Studio; vui lòng kiểm tra đường truyền mạng.",
+                    ) from net_err
+
+            raise HTTPException(status_code=502, detail="Không thể nhận phản hồi từ Gemini sau 3 lần thử.")
+
+        def _execute_ai_correction() -> str:
+            result_text = _call_gemini_with_prompt(prompt)
+            output_tokens = normalize_text_tokens(result_text)
+
+            if len(output_tokens) != expected_word_count:
+                retry_prompt = (
+                    f"CẢNH BÁO: Lần trả lời trước có {len(output_tokens)} từ, không khớp với {expected_word_count} từ gốc!\n"
+                    f"Bạn BẮT BUỘC phải giữ nguyên chính xác {expected_word_count} từ.\n\n"
+                    f"Văn bản OCR gốc ({expected_word_count} từ):\n{normalized_draft}"
+                )
+                result_text = _call_gemini_with_prompt(retry_prompt)
+                output_tokens = normalize_text_tokens(result_text)
+
+            if len(output_tokens) != expected_word_count:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"AI đã tự ý thay đổi số lượng từ ({len(output_tokens)} từ thay vì {expected_word_count} từ). "
+                        "Hệ thống đã từ chối để bảo vệ vị trí bounding box. Vui lòng thử lại hoặc chỉnh sửa trực tiếp."
+                    ),
+                )
+            return result_text
+
+        corrected_text = await run_in_threadpool(_execute_ai_correction)
+        return {"corrected_text": corrected_text}
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath

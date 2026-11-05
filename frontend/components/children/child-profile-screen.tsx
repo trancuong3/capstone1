@@ -19,10 +19,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
 import { ServiceError } from "@/lib/api/service-error";
-import type {
-  ChildProfileCreateDTO,
-  ChildProfileDTO,
-} from "@/types/child";
+import type { ChildProfileCreateDTO, ChildProfileDTO } from "@/types/child";
 
 type ChildLoadState =
   | {
@@ -46,6 +43,7 @@ interface ChildProfileScreenProps {
   childId?: string;
   fromRegistration?: boolean;
   hasCreatedNotice?: boolean;
+  hasAvatarError?: boolean;
   mode: "create" | "edit";
 }
 
@@ -53,6 +51,7 @@ export function ChildProfileScreen({
   childId,
   fromRegistration = false,
   hasCreatedNotice = false,
+  hasAvatarError = false,
   mode,
 }: ChildProfileScreenProps) {
   const childService = useChildService();
@@ -60,33 +59,29 @@ export function ChildProfileScreen({
 
   const [requestKey, setRequestKey] = useState(0);
 
-  const [loadState, setLoadState] =
-    useState<ChildLoadState>(
-      mode === "create"
-        ? {
-            status: "create-ready",
-          }
-        : {
-            status: "loading",
-          },
-    );
-
-  const [saveNotice, setSaveNotice] = useState<
-    "created" | "updated" | "error" | null
-  >(
-    hasCreatedNotice
-      ? "created"
-      : null,
+  const [loadState, setLoadState] = useState<ChildLoadState>(
+    mode === "create"
+      ? {
+          status: "create-ready",
+        }
+      : {
+          status: "loading",
+        },
   );
 
-  const [isDeleteModalOpen, setIsDeleteModalOpen] =
-    useState(false);
+  const [saveNotice, setSaveNotice] = useState<
+    "created" | "updated" | "error" | "avatar-error" | null
+  >(hasAvatarError ? "avatar-error" : hasCreatedNotice ? "created" : null);
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(
+    null,
+  );
+  const [isAvatarRemoved, setIsAvatarRemoved] = useState(false);
 
-  const [isDeleting, setIsDeleting] =
-    useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const [deleteError, setDeleteError] =
-    useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [deleteError, setDeleteError] = useState(false);
 
   useEffect(() => {
     if (mode === "create" || !childId) {
@@ -103,8 +98,7 @@ export function ChildProfileScreen({
       });
 
       try {
-        const child =
-          await childService.get(requestedChildId);
+        const child = await childService.get(requestedChildId);
 
         if (!isActive) {
           return;
@@ -141,36 +135,34 @@ export function ChildProfileScreen({
     return () => {
       isActive = false;
     };
-  }, [
-    childId,
-    childService,
-    mode,
-    requestKey,
-  ]);
+  }, [childId, childService, mode, requestKey]);
 
-  async function handleSubmit(
-    values: ChildProfileCreateDTO,
-  ) {
+  async function handleSubmit(values: ChildProfileCreateDTO) {
     setSaveNotice(null);
     setDeleteError(false);
 
     try {
       if (mode === "create") {
-        const child =
-          await childService.create(values);
+        let child = await childService.create(values);
+
+        if (selectedAvatarFile) {
+          try {
+            child = await childService.uploadAvatar(
+              child.id,
+              selectedAvatarFile,
+            );
+          } catch {
+            router.push(
+              `/children/${encodeURIComponent(child.id)}?created=1&avatarError=1`,
+            );
+            return;
+          }
+        }
 
         if (fromRegistration) {
-          router.push(
-            `/books?childId=${encodeURIComponent(
-              child.id,
-            )}`,
-          );
+          router.push(`/books?childId=${encodeURIComponent(child.id)}`);
         } else {
-          router.push(
-            `/children/${encodeURIComponent(
-              child.id,
-            )}?created=1`,
-          );
+          router.push(`/children/${encodeURIComponent(child.id)}?created=1`);
         }
 
         return;
@@ -181,19 +173,35 @@ export function ChildProfileScreen({
         return;
       }
 
-      const child =
-        await childService.update(
-          childId,
-          {
-            alias: values.alias,
-            grade: values.grade,
-          },
-        );
+      let child = await childService.update(childId, {
+        alias: values.alias,
+        grade: values.grade,
+      });
+
+      if (selectedAvatarFile) {
+        try {
+          child = await childService.uploadAvatar(childId, selectedAvatarFile);
+        } catch {
+          setLoadState({ status: "ready", child });
+          setSaveNotice("avatar-error");
+          return;
+        }
+      } else if (isAvatarRemoved && child.avatar_url) {
+        try {
+          child = await childService.removeAvatar(childId);
+        } catch {
+          setLoadState({ status: "ready", child });
+          setSaveNotice("avatar-error");
+          return;
+        }
+      }
 
       setLoadState({
         status: "ready",
         child,
       });
+      setSelectedAvatarFile(null);
+      setIsAvatarRemoved(false);
 
       setSaveNotice("updated");
     } catch (error) {
@@ -213,10 +221,7 @@ export function ChildProfileScreen({
   }
 
   async function handleDelete() {
-    if (
-      !childId ||
-      loadState.status !== "ready"
-    ) {
+    if (!childId || loadState.status !== "ready") {
       return;
     }
 
@@ -252,14 +257,8 @@ export function ChildProfileScreen({
   if (loadState.status === "loading") {
     return (
       <section className="mx-auto w-full max-w-[640px]">
-        <Card
-          aria-busy="true"
-          aria-label="Đang tải hồ sơ bé"
-        >
-          <span
-            className="sr-only"
-            role="status"
-          >
+        <Card aria-busy="true" aria-label="Đang tải hồ sơ bé">
+          <span className="sr-only" role="status">
             Đang tải…
           </span>
 
@@ -284,19 +283,13 @@ export function ChildProfileScreen({
               href="/children"
               variant="secondary"
             >
-              <ArrowLeft
-                aria-hidden="true"
-                className="size-5"
-              />
+              <ArrowLeft aria-hidden="true" className="size-5" />
               Về danh sách hồ sơ
             </ButtonLink>
           }
           description="Hồ sơ này không tồn tại hoặc không thuộc tài khoản hiện tại."
           icon={
-            <UserRoundX
-              aria-hidden="true"
-              className="size-10 text-primary"
-            />
+            <UserRoundX aria-hidden="true" className="size-10 text-primary" />
           }
           title="Không tìm thấy hồ sơ bé"
         />
@@ -307,69 +300,48 @@ export function ChildProfileScreen({
   if (loadState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-        <StatusMessage
-          title="Chưa tải được hồ sơ bé"
-          tone="error"
-        >
+        <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
 
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
-          onClick={() =>
-            setRequestKey(
-              (key) => key + 1,
-            )
-          }
+          onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw
-            aria-hidden="true"
-            className="size-5"
-          />
+          <RefreshCw aria-hidden="true" className="size-5" />
           Thử lại
         </Button>
       </section>
     );
   }
 
-  const child =
-    loadState.status === "ready"
-      ? loadState.child
-      : null;
+  const child = loadState.status === "ready" ? loadState.child : null;
 
-  const title =
-    fromRegistration
-      ? "Tài khoản đã sẵn sàng"
-      : mode === "create"
-        ? "Tạo hồ sơ bé"
-        : `Hồ sơ của ${child?.alias ?? "bé"}`;
+  const title = fromRegistration
+    ? "Tài khoản đã sẵn sàng"
+    : mode === "create"
+      ? "Tạo hồ sơ bé"
+      : `Hồ sơ của ${child?.alias ?? "bé"}`;
 
-  const description =
-    fromRegistration
-      ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
-      : mode === "create"
-        ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
-        : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
+  const description = fromRegistration
+    ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
+    : mode === "create"
+      ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
+      : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
 
   return (
     <>
       <section className="mx-auto w-full max-w-[640px]">
         <Card>
           <div>
-            <h1 className="text-heading font-extrabold text-ink">
-              {title}
-            </h1>
+            <h1 className="text-heading font-extrabold text-ink">{title}</h1>
 
-            <p className="mt-4 text-body text-muted sm:mt-6">
-              {description}
-            </p>
+            <p className="mt-4 text-body text-muted sm:mt-6">{description}</p>
           </div>
 
           {saveNotice === "created" ? (
-            <StatusMessage tone="success">
-              Hồ sơ bé đã được tạo.
-            </StatusMessage>
+            <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
           ) : null}
 
           {saveNotice === "updated" ? (
@@ -384,6 +356,13 @@ export function ChildProfileScreen({
             </StatusMessage>
           ) : null}
 
+          {saveNotice === "avatar-error" ? (
+            <StatusMessage tone="error">
+              Thông tin hồ sơ đã lưu, nhưng ảnh đại diện chưa được cập nhật. Ba
+              mẹ có thể thử tải ảnh lại.
+            </StatusMessage>
+          ) : null}
+
           {deleteError ? (
             <StatusMessage tone="error">
               Chưa thể xóa hồ sơ. Ba mẹ vui lòng thử lại sau.
@@ -391,6 +370,7 @@ export function ChildProfileScreen({
           ) : null}
 
           <ChildProfileForm
+            avatarUrl={mode === "edit" ? child?.avatar_url : null}
             defaultValues={
               mode === "edit" && child
                 ? {
@@ -400,26 +380,34 @@ export function ChildProfileScreen({
                 : undefined
             }
             mode={mode}
+            isAvatarRemoved={isAvatarRemoved}
             onSubmit={handleSubmit}
-            submitLabel={
-              fromRegistration
-                ? "Lưu và chọn sách"
-                : undefined
-            }
+            onAvatarFileChange={(file) => {
+              setSelectedAvatarFile(file);
+              if (file) setIsAvatarRemoved(false);
+            }}
+            onAvatarRemove={() => {
+              if (isAvatarRemoved) {
+                setIsAvatarRemoved(false);
+                return;
+              }
+              setSelectedAvatarFile(null);
+              setIsAvatarRemoved(
+                loadState.status === "ready" &&
+                  Boolean(loadState.child.avatar_url),
+              );
+            }}
+            selectedAvatarFile={selectedAvatarFile}
+            submitLabel={fromRegistration ? "Lưu và chọn sách" : undefined}
           />
 
           {mode === "edit" && child ? (
             <>
               <ButtonLink
-                href={`/books?childId=${encodeURIComponent(
-                  child.id,
-                )}`}
+                href={`/books?childId=${encodeURIComponent(child.id)}`}
                 variant="secondary"
               >
-                <BookOpenText
-                  aria-hidden="true"
-                  className="size-5"
-                />
+                <BookOpenText aria-hidden="true" className="size-5" />
                 Chọn sách cho {child.alias}
               </ButtonLink>
 
@@ -430,24 +418,15 @@ export function ChildProfileScreen({
                 }}
                 variant="quiet"
               >
-                <Trash2
-                  aria-hidden="true"
-                  className="size-5"
-                />
+                <Trash2 aria-hidden="true" className="size-5" />
                 Xóa hồ sơ bé
               </Button>
             </>
           ) : null}
 
           {!fromRegistration ? (
-            <ButtonLink
-              href="/children"
-              variant="quiet"
-            >
-              <ArrowLeft
-                aria-hidden="true"
-                className="size-5"
-              />
+            <ButtonLink href="/children" variant="quiet">
+              <ArrowLeft aria-hidden="true" className="size-5" />
               Về danh sách hồ sơ
             </ButtonLink>
           ) : null}
@@ -466,8 +445,7 @@ export function ChildProfileScreen({
         >
           <div className="flex flex-col gap-6">
             <p className="text-body text-ink">
-              Bạn có chắc muốn xóa hồ sơ của{" "}
-              <strong>{child.alias}</strong>?
+              Bạn có chắc muốn xóa hồ sơ của <strong>{child.alias}</strong>?
               <br />
               Thao tác này không thể hoàn tác.
             </p>
@@ -481,9 +459,7 @@ export function ChildProfileScreen({
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
                 disabled={isDeleting}
-                onClick={() =>
-                  setIsDeleteModalOpen(false)
-                }
+                onClick={() => setIsDeleteModalOpen(false)}
                 variant="secondary"
               >
                 Hủy
@@ -491,9 +467,7 @@ export function ChildProfileScreen({
 
               <Button
                 isLoading={isDeleting}
-                onClick={() =>
-                  void handleDelete()
-                }
+                onClick={() => void handleDelete()}
                 variant="primary"
               >
                 Xóa hồ sơ
