@@ -25,7 +25,11 @@ import {
   RealtimeAlignmentEngine,
   type RealtimeAlignmentSnapshot,
 } from "@/lib/reading/realtime-alignment";
-import { isRetryWordRecognized } from "@/lib/reading/retry-recognition";
+import {
+  isRetryWordRecognized,
+  sortRetryWordRecords,
+  type RetryWordRecord,
+} from "@/lib/reading/retry-recognition";
 import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
@@ -117,17 +121,7 @@ interface PageTranscriptBucket {
   readonly segments: string[];
   readonly words: WordTimestamp[];
 }
-type RetryOriginalStatus = "OMISSION" | "MISPRONUNCIATION";
-
-interface RetryWordItem {
-  word_id: string;
-  page_id: string;
-  page_revision_id: string;
-  page_number: number;
-  word_index: number;
-  text: string;
-  original_status: RetryOriginalStatus;
-}
+type RetryWordItem = RetryWordRecord;
 
 export function ReadingScreen({
   initialPageId,
@@ -242,6 +236,9 @@ export function ReadingScreen({
   const browserStopResolveRef = useRef<(() => void) | null>(null);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const retryWordsByIdRef = useRef<Map<string, RetryWordItem>>(new Map());
+  const pageWordsByRevisionRef = useRef(
+    new Map<string, readonly ReadingPageWordDTO[]>(),
+  );
   const finishStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -390,6 +387,11 @@ export function ReadingScreen({
 
   useEffect(() => {
     if (!page) return;
+
+    pageWordsByRevisionRef.current.set(
+      `${page.page_id}:${page.page_revision_id}`,
+      page.words,
+    );
 
     page.words.forEach((word, index) => {
       wordTextByIdRef.current.set(word.word_id, word.text);
@@ -544,6 +546,7 @@ export function ReadingScreen({
 
     for (const word of snapshot.statusByWordId.values()) {
       const retryItem = retryWordsByIdRef.current.get(word.wordId);
+      const retryContext = pageWordContextRef.current.get(word.wordId);
 
       switch (word.status) {
         case "MATCH":
@@ -562,7 +565,17 @@ export function ReadingScreen({
           nextSkippedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
 
-          if (retryItem) {
+          if (retryContext) {
+            retryWordsByIdRef.current.set(word.wordId, {
+              word_id: word.wordId,
+              page_id: retryContext.pageId,
+              page_revision_id: retryContext.pageRevisionId,
+              page_number: retryContext.pageNumber,
+              word_index: retryContext.wordIndex,
+              text: retryContext.text,
+              original_status: "MISPRONUNCIATION",
+            });
+          } else if (retryItem) {
             retryWordsByIdRef.current.set(word.wordId, {
               ...retryItem,
               original_status: "MISPRONUNCIATION",
@@ -576,7 +589,17 @@ export function ReadingScreen({
           nextMispronouncedIds.delete(word.wordId);
           nextRepeatedIds.delete(word.wordId);
 
-          if (retryItem) {
+          if (retryContext) {
+            retryWordsByIdRef.current.set(word.wordId, {
+              word_id: word.wordId,
+              page_id: retryContext.pageId,
+              page_revision_id: retryContext.pageRevisionId,
+              page_number: retryContext.pageNumber,
+              word_index: retryContext.wordIndex,
+              text: retryContext.text,
+              original_status: "OMISSION",
+            });
+          } else if (retryItem) {
             retryWordsByIdRef.current.set(word.wordId, {
               ...retryItem,
               original_status: "OMISSION",
@@ -1308,6 +1331,21 @@ export function ReadingScreen({
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
       }
+
+      // Finalize this page before its live alignment state is reset. Keep only
+      // pages where the child actually produced final speech; opening a page
+      // without reading it must not turn every word into an omission.
+      const currentEngine = alignmentEngineRef.current;
+      if (currentEngine) {
+        const currentSnapshot = currentEngine.getSnapshot();
+        if (
+          currentSnapshot.spokenWords.length > 0 ||
+          currentSnapshot.statusByWordId.size > 0
+        ) {
+          applyRealtimeSnapshot(currentEngine.finish());
+        }
+      }
+
       const nextProgress = await services.readingService.navigateToPage(
         sessionId,
         target.page_id,
@@ -1526,30 +1564,31 @@ export function ReadingScreen({
       .join(" ");
   }
   function buildRetryCandidates(): RetryWordCandidate[] {
-    if (!page) return [];
+    return sortRetryWordRecords(retryWordsByIdRef.current.values()).map(
+      (item) => {
+        const pageWords = pageWordsByRevisionRef.current.get(
+          `${item.page_id}:${item.page_revision_id}`,
+        );
+        const targetIndex = pageWords?.findIndex(
+          (word) => word.word_id === item.word_id,
+        );
+        const contextPhrase =
+          pageWords && targetIndex !== undefined && targetIndex >= 0
+            ? buildRetryContextPhrase(pageWords, targetIndex)
+            : item.text;
 
-    return page.words
-      .map((word, index) => ({
-        word,
-        index,
-      }))
-      .filter(
-        ({ word }) =>
-          skippedWordIdsRef.current.has(word.word_id) ||
-          mispronouncedWordIdsRef.current.has(word.word_id),
-      )
-      .map(({ word, index }) => ({
-        wordId: word.word_id,
-        text: word.text,
-        contextPhrase: buildRetryContextPhrase(page.words, index),
-        pageId: page.page_id,
-        pageRevisionId: page.page_revision_id,
-        pageNumber: page.page_number,
-        wordIndex: word.word_index ?? index,
-        originalStatus: skippedWordIdsRef.current.has(word.word_id)
-          ? "OMISSION"
-          : "MISPRONUNCIATION",
-      }));
+        return {
+          wordId: item.word_id,
+          text: item.text,
+          contextPhrase,
+          pageId: item.page_id,
+          pageRevisionId: item.page_revision_id,
+          pageNumber: item.page_number,
+          wordIndex: item.word_index,
+          originalStatus: item.original_status,
+        };
+      },
+    );
   }
 
   function stopRetryRecognition(): void {
@@ -1670,6 +1709,7 @@ export function ReadingScreen({
           next.add(candidate.wordId);
           return next;
         });
+        retryWordsByIdRef.current.delete(candidate.wordId);
 
         // Chỉ cập nhật màu giao diện, không thay đổi kết quả lượt đọc gốc.
         setCorrectWordIds((previous) => {
@@ -1798,10 +1838,48 @@ export function ReadingScreen({
     retryPositionRef.current = position;
     setRetryWordPosition(position);
     setRetryFeedback("waiting");
-    setCurrentWordId(candidate.wordId);
     setLatestTranscript("");
     setIsReadingWord(false);
-    setRetryFeedback("waiting");
+    setPageNavigationError(null);
+
+    // Retry candidates can belong to pages visited earlier in a multi-page
+    // session. Re-open the candidate's verified page before highlighting it.
+    if (
+      page?.page_id !== candidate.pageId ||
+      page.page_revision_id !== candidate.pageRevisionId
+    ) {
+      setIsBusy(true);
+      try {
+        const progress = await services.readingService.navigateToPage(
+          sessionId,
+          candidate.pageId,
+        );
+        const retryPage = await services.readingService.getCurrentPage(sessionId);
+        if (!mountedRef.current) return;
+        if (
+          retryPage.page_id !== candidate.pageId ||
+          retryPage.page_revision_id !== candidate.pageRevisionId
+        ) {
+          throw new Error("The retry page revision no longer matches the session.");
+        }
+        setPageProgress(progress);
+        setPage(retryPage);
+        setSelectedManualPageId(retryPage.page_id);
+      } catch {
+        if (mountedRef.current) {
+          setRetryFeedback("incorrect");
+          setPageNavigationError(
+            `Chưa mở lại được trang ${candidate.pageNumber} để bé đọc từ này. Tiến trình vẫn được giữ; vui lòng thử lại.`,
+          );
+        }
+        return;
+      } finally {
+        if (mountedRef.current) setIsBusy(false);
+      }
+    }
+
+    if (!mountedRef.current) return;
+    setCurrentWordId(candidate.wordId);
     // Không tự phát âm mẫu và không tự bật microphone.
     // Bé chủ động bấm "Nghe mẫu" hoặc "Bật mic" khi đã sẵn sàng.
   }

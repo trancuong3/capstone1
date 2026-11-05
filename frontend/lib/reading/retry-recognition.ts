@@ -40,3 +40,29 @@ export function isRetryWordRecognized(
     );
   });
 }
+
+export interface RetryWordRecord {
+  readonly word_id: string;
+  readonly page_id: string;
+  readonly page_revision_id: string;
+  readonly page_number: number;
+  readonly word_index: number;
+  readonly text: string;
+  readonly original_status: "OMISSION" | "MISPRONUNCIATION";
+}
+
+/**
+ * Keeps a retry queue in reading order across every page visited in a session.
+ * The final word-id comparison makes ordering deterministic if malformed
+ * source data contains equal page and word indexes.
+ */
+export function sortRetryWordRecords<T extends RetryWordRecord>(
+  records: Iterable<T>,
+): T[] {
+  return [...records].sort(
+    (left, right) =>
+      left.page_number - right.page_number ||
+      left.word_index - right.word_index ||
+      left.word_id.localeCompare(right.word_id),
+  );
+}
