@@ -50,15 +50,21 @@ jobs:
           tests/reading/retry-recognition.test.ts
           tests/reading/browser-transcript-collector.test.ts
           tests/reading/reading-report-page.test.tsx
+          tests/reading/reading-async-cleanup.test.tsx
           test/speech-service.test.ts
 
       - name: ESLint for retry reading changes
         run: >-
           npx eslint
           components/reading/reading-screen.tsx
+          components/reading/reading-layout.tsx
+          components/reading/reading-controls.tsx
           lib/reading/retry-recognition.ts
           tests/reading/reading-screen.test.tsx
           tests/reading/retry-recognition.test.ts
+
+      - name: Full frontend TypeScript check
+        run: npx tsc --noEmit
 
       - name: Run realtime device permission and scanner navigation tests
         run: >-
