@@ -87,17 +87,16 @@ export function ReadingControls({
               : "Đọc cả đoạn"}
         </span>
       </Button>
-
       <Button
         aria-label={
           isListening
-            ? "Dừng ghi âm"
+            ? "Dừng nhận diện giọng nói"
             : retryMode
-              ? "Đọc lại từ cần luyện"
+              ? "Bật mic"
               : "Bé đọc với nhận diện giọng nói"
         }
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled || retryMode}
+        disabled={disabled}
         onClick={onToggleListening ?? onPause}
         variant={isListening ? "primary" : "secondary"}
       >
@@ -117,10 +116,11 @@ export function ReadingControls({
           {isListening
             ? "Dừng mic"
             : retryMode
-              ? "Đọc lại từ"
+              ? "Bật mic"
               : "Bé đọc"}
         </span>
       </Button>
+
 
       <Button
         aria-label="Chọn trang hoặc nhận trợ giúp"

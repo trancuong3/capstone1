@@ -533,10 +533,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(retryConsent);
     await screen.findByText(/Bé đọc lại từ/);
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bật mic" })).toBeEnabled();
     expect(
-      screen.getByRole("button", { name: "Bé đọc với nhận diện giọng nói" }),
-    ).toBeDisabled();
+      screen.getByRole("button", { name: "Bật mic" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Chuẩn bị đọc:/)).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Bật mic" }));
 
@@ -558,16 +562,19 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
     expect(
-      screen.getByText("Chưa chính xác, bé thử lại nhé!"),
+      screen.getByText("Chưa nghe rõ, bé thử lại nhé!"),
     ).toBeInTheDocument();
-
     speechServiceMock.transcribe.mockResolvedValueOnce({
       text: "mèo",
       language_code: "vi",
       language_probability: 0.98,
       words: [],
     });
-    await user.click(await screen.findByRole("button", { name: "Tắt mic" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Dừng nhận diện giọng nói",
+      }),
+    );
 
     await waitFor(() => {
       expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(2);
