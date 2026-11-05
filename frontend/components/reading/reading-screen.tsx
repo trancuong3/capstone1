@@ -25,6 +25,7 @@ import {
   RealtimeAlignmentEngine,
   type RealtimeAlignmentSnapshot,
 } from "@/lib/reading/realtime-alignment";
+import { isRetryWordRecognized } from "@/lib/reading/retry-recognition";
 import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
@@ -1551,15 +1552,6 @@ export function ReadingScreen({
       }));
   }
 
-  function normalizeRetryText(value: string): string {
-    return value
-      .normalize("NFC")
-      .toLocaleLowerCase("vi-VN")
-      .replace(/[.,/#!$%^&*;:{}=\-_`~()?'\"“”—]/g, "")
-      .trim()
-      .replace(/\s+/g, " ");
-  }
-
   function stopRetryRecognition(): void {
     // Tắt cờ trước khi gọi stop để onend không tự bật microphone lại.
     retryListeningWantedRef.current = false;
@@ -1622,24 +1614,32 @@ export function ReadingScreen({
       if (!mountedRef.current || !retryModeRef.current) return;
 
       let interim = "";
-      let finalText = "";
+      const finalTranscripts: string[] = [];
 
-      for (
-        let index = event.resultIndex;
-        index < event.results.length;
-        index += 1
-      ) {
+      // Read every final segment and every alternative. SpeechRecognition may
+      // split an utterance into multiple results, and maxAlternatives is
+      // meaningful only when the alternatives are actually inspected.
+      for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
 
         if (result.isFinal) {
-          // Chỉ lấy kết quả STT đầu tiên.
-          const transcript = result[0]?.transcript?.trim() ?? "";
+          for (
+            let alternativeIndex = 0;
+            alternativeIndex < result.length;
+            alternativeIndex += 1
+          ) {
+            const transcript =
+              result[alternativeIndex]?.transcript?.trim() ?? "";
 
-          if (transcript) {
-            finalText = transcript;
+            if (transcript && !finalTranscripts.includes(transcript)) {
+              finalTranscripts.push(transcript);
+            }
           }
         } else {
-          interim = result[0]?.transcript?.trim() ?? "";
+          const transcript = result[0]?.transcript?.trim() ?? "";
+          if (transcript) {
+            interim = [interim, transcript].filter(Boolean).join(" ");
+          }
         }
       }
 
@@ -1647,21 +1647,17 @@ export function ReadingScreen({
         setLatestTranscript(interim);
       }
 
-      if (!finalText || retryProcessingRef.current) return;
+      if (finalTranscripts.length === 0 || retryProcessingRef.current) return;
 
       retryProcessingRef.current = true;
-      setLatestTranscript(finalText);
+      setLatestTranscript(finalTranscripts[0]);
 
-      const expected = normalizeRetryText(candidate.text);
-      const recognized = normalizeRetryText(finalText);
-
-      console.log("[RETRY STT DEBUG]", {
-        expected,
-        recognized,
-        finalText,
-      });
-
-      const isCorrect = recognized.split(" ").includes(expected);
+      // Accept the target as a complete Vietnamese token anywhere in the
+      // utterance (including a short context phrase), not a substring.
+      const isCorrect = isRetryWordRecognized(
+        candidate.text,
+        finalTranscripts,
+      );
       if (isCorrect) {
         retryListeningWantedRef.current = false;
         retryShouldRestartRef.current = false;
@@ -1808,6 +1804,24 @@ export function ReadingScreen({
     setRetryFeedback("waiting");
     // Không tự phát âm mẫu và không tự bật microphone.
     // Bé chủ động bấm "Nghe mẫu" hoặc "Bật mic" khi đã sẵn sàng.
+  }
+
+  function skipRetryWord(): void {
+    if (!retryModeRef.current || retryProcessingRef.current) return;
+
+    const nextPosition = retryPositionRef.current + 1;
+    stopRetryRecognition();
+
+    if (nextPosition >= retryCandidates.length) {
+      retryModeRef.current = false;
+      setRetryMode(false);
+      void completeReadingSession();
+      return;
+    }
+
+    // A skipped word remains unresolved; it is deliberately not added to the
+    // retry-confirmed set or the original correct-word statistics.
+    void beginRetryWord(nextPosition);
   }
 
   function startRetrySession(): void {
@@ -2247,6 +2261,11 @@ export function ReadingScreen({
             : null
         }
         retryMode={retryMode}
+        retryCompleted={
+          retryCandidates.length === 0 ||
+          retryConfirmedWordIds.size >= retryCandidates.length
+        }
+        onSkipRetryWord={skipRetryWord}
         retryWordPosition={retryWordPosition + 1}
         retryWordCount={retryCandidates.length}
         retryFeedback={retryFeedback}

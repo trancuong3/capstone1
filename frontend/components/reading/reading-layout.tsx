@@ -27,6 +27,8 @@ interface ReadingLayoutProps {
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   retryMode?: boolean;
+  retryCompleted?: boolean;
+  onSkipRetryWord?: () => void;
   retryWordPosition?: number;
   retryWordCount?: number;
   retryFeedback?: "waiting" | "incorrect" | "success";
@@ -66,6 +68,8 @@ export function ReadingLayout({
   isMicRecording = false,
   isPageTransitioning = false,
   retryMode = false,
+  retryCompleted = false,
+  onSkipRetryWord,
   retryWordPosition = 0,
   retryWordCount = 0,
   retryFeedback = "waiting",
@@ -178,7 +182,7 @@ export function ReadingLayout({
             ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {onToggleListening ? (
               <button
                 type="button"
@@ -201,6 +205,15 @@ export function ReadingLayout({
                 className="rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90"
               >
                 🔊 Nghe mẫu
+              </button>
+            ) : null}
+            {onSkipRetryWord ? (
+              <button
+                type="button"
+                onClick={onSkipRetryWord}
+                className="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-surface"
+              >
+                Bỏ qua từ này
               </button>
             ) : null}
           </div>
@@ -335,6 +348,8 @@ export function ReadingLayout({
         onPause={onPause}
         onReadSample={onReadSample}
         onToggleListening={onToggleListening}
+        retryMode={retryMode}
+        retryCompleted={retryCompleted}
       />
       <ReadingProgress
         isListening={isListening}
