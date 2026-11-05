@@ -1,0 +1,80 @@
+name: One-time Prettier formatting
+
+on:
+  push:
+    branches:
+      - fix/retry-reading-controls
+    paths:
+      - "frontend/**"
+      - ".github/workflows/format-retry-branch-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/retry-reading-controls
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Format files reported by the failed Prettier check
+        working-directory: frontend
+        run: >-
+          npx prettier --write
+          components/layout/account-avatar-menu.tsx
+          components/reading/book-page-content.tsx
+          components/reading/reading-controls.tsx
+          components/reading/reading-layout.tsx
+          components/reading/reading-screen.tsx
+          components/settings/account-settings-screen.tsx
+          components/support/help-support-screen.tsx
+          lib/api/reading-service.ts
+          lib/api/support-service.ts
+          tests/layout/account-avatar-menu.test.tsx
+          tests/reading/reading-async-cleanup.test.tsx
+          tests/reading/reading-screen.test.tsx
+          tests/reading/retry-recognition.test.ts
+          tests/support/help-support-screen.test.tsx
+          tests/support/support-service.test.ts
+
+      - name: Commit formatted files to the same branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add
+          frontend/components/layout/account-avatar-menu.tsx
+          frontend/components/reading/book-page-content.tsx
+          frontend/components/reading/reading-controls.tsx
+          frontend/components/reading/reading-layout.tsx
+          frontend/components/reading/reading-screen.tsx
+          frontend/components/settings/account-settings-screen.tsx
+          frontend/components/support/help-support-screen.tsx
+          frontend/lib/api/reading-service.ts
+          frontend/lib/api/support-service.ts
+          frontend/tests/layout/account-avatar-menu.test.tsx
+          frontend/tests/reading/reading-async-cleanup.test.tsx
+          frontend/tests/reading/reading-screen.test.tsx
+          frontend/tests/reading/retry-recognition.test.ts
+          frontend/tests/support/help-support-screen.test.tsx
+          frontend/tests/support/support-service.test.tsx
+          if git diff --cached --quiet; then
+            echo "All requested files were already formatted."
+            exit 0
+          fi
+          git commit -m "style(frontend): apply Prettier formatting"
+          git push origin HEAD:fix/retry-reading-controls
