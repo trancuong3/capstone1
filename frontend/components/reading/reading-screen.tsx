@@ -2070,7 +2070,10 @@ export function ReadingScreen({
     void beginRetryWord(nextPosition);
   }
 
-  function startRetrySession(): void {
+  function startRetrySession(candidates: RetryWordCandidate[]): void {
+    // Use the exact candidate array that rendered the consent dialog. This
+    // avoids a stale/empty ref closing the retry flow before it starts.
+    retryCandidatesRef.current = [...candidates];
     if (retryCandidatesRef.current.length === 0) {
       void completeReadingSession();
       return;
@@ -2570,7 +2573,7 @@ export function ReadingScreen({
             label: "Đồng ý, đọc lại",
             onClick: () => {
               setRetryPrompt(false);
-              startRetrySession();
+              startRetrySession(retryCandidates);
             },
           }}
           secondaryAction={{
