@@ -55,7 +55,9 @@ describe("SupportService", () => {
       ),
     );
 
-    await expect(createSupportService().submitFeedback(request)).resolves.toMatchObject({
+    await expect(
+      createSupportService().submitFeedback(request),
+    ).resolves.toMatchObject({
       accepted: true,
       delivery_status: "accepted_by_smtp",
     });
@@ -71,7 +73,10 @@ describe("SupportService", () => {
       }),
     );
     const requestOptions = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const body = JSON.parse(String(requestOptions.body)) as Record<string, unknown>;
+    const body = JSON.parse(String(requestOptions.body)) as Record<
+      string,
+      unknown
+    >;
     expect(body).toEqual(request);
     expect(body).not.toHaveProperty("recipient");
   });
@@ -84,12 +89,15 @@ describe("SupportService", () => {
       }),
     );
 
-    await expect(createSupportService().submitFeedback(request)).rejects.toBeInstanceOf(
-      SupportFeedbackError,
-    );
-    await expect(createSupportService().submitFeedback(request)).rejects.toMatchObject({
+    await expect(
+      createSupportService().submitFeedback(request),
+    ).rejects.toBeInstanceOf(SupportFeedbackError);
+    await expect(
+      createSupportService().submitFeedback(request),
+    ).rejects.toMatchObject({
       status: 503,
-      message: "Hệ thống email hỗ trợ đang tạm thời không khả dụng. Ba mẹ có thể thử gửi lại sau.",
+      message:
+        "Hệ thống email hỗ trợ đang tạm thời không khả dụng. Ba mẹ có thể thử gửi lại sau.",
     });
   });
 
@@ -99,7 +107,9 @@ describe("SupportService", () => {
       error: null,
     });
 
-    await expect(createSupportService().submitFeedback(request)).rejects.toMatchObject({
+    await expect(
+      createSupportService().submitFeedback(request),
+    ).rejects.toMatchObject({
       status: 401,
     });
     expect(fetchMock).not.toHaveBeenCalled();

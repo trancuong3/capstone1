@@ -34,7 +34,7 @@ export function ReadingControls({
   onPause,
   onReadSample,
   onToggleListening,
-   retryMode = false,
+  retryMode = false,
   retryCompleted = false,
 }: ReadingControlsProps) {
   return (
@@ -45,7 +45,7 @@ export function ReadingControls({
       <Button
         aria-label="Tạm dừng buổi đọc"
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
-        disabled={disabled || retryMode} 
+        disabled={disabled || retryMode}
         onClick={onPause}
         variant="quiet"
       >
@@ -127,9 +127,7 @@ export function ReadingControls({
         onClick={onFinish}
       >
         <Check aria-hidden="true" className="size-6 shrink-0" />
-        <span className="truncate">
-          {retryMode ? "Hoàn thành" : "Xong"}
-        </span>
+        <span className="truncate">{retryMode ? "Hoàn thành" : "Xong"}</span>
       </Button>
     </nav>
   );

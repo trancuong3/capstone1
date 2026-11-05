@@ -51,19 +51,16 @@ export function createSupportService(): SupportService {
 
       let response: Response;
       try {
-        response = await fetch(
-          getApiBaseUrl() + "/support/feedback",
-          {
-            method: "POST",
-            headers: {
-              Accept: "application/json",
-              Authorization: "Bearer " + session.access_token,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(request),
-            cache: "no-store",
+        response = await fetch(getApiBaseUrl() + "/support/feedback", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: "Bearer " + session.access_token,
+            "Content-Type": "application/json",
           },
-        );
+          body: JSON.stringify(request),
+          cache: "no-store",
+        });
       } catch {
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
       }

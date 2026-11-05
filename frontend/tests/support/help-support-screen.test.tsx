@@ -36,14 +36,11 @@ describe("HelpSupportScreen", () => {
       detail: "SMTP accepted",
     });
 
-    render(
-      withAuthFixture(
-        <HelpSupportScreen />,
-        createAuthServiceFixture(),
-      ),
-    );
+    render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
 
-    expect(screen.getByRole("link", { name: "vireadforyou@gmail.com" })).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
+    expect(
+      screen.getByRole("link", { name: "vireadforyou@gmail.com" }),
+    ).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
 
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
@@ -59,13 +56,17 @@ describe("HelpSupportScreen", () => {
 
     await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
 
-    await waitFor(() => expect(submitFeedbackMock).toHaveBeenCalledWith({
-      category: "account_support",
-      subject: "Không thể cập nhật hồ sơ",
-      message: "Tôi gặp lỗi khi lưu thông tin phụ huynh.",
-      contact_email: "parent@example.com",
-    }));
-    expect(await screen.findByRole("status")).toHaveTextContent("đã tiếp nhận phản hồi");
+    await waitFor(() =>
+      expect(submitFeedbackMock).toHaveBeenCalledWith({
+        category: "account_support",
+        subject: "Không thể cập nhật hồ sơ",
+        message: "Tôi gặp lỗi khi lưu thông tin phụ huynh.",
+        contact_email: "parent@example.com",
+      }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "đã tiếp nhận phản hồi",
+    );
     expect(subject).toHaveValue("");
     expect(message).toHaveValue("");
     expect(contactEmail).toHaveValue("parent@example.com");
@@ -75,12 +76,7 @@ describe("HelpSupportScreen", () => {
     const user = userEvent.setup();
     submitFeedbackMock.mockRejectedValue(new Error("Temporary error"));
 
-    render(
-      withAuthFixture(
-        <HelpSupportScreen />,
-        createAuthServiceFixture(),
-      ),
-    );
+    render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
 
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
@@ -91,7 +87,9 @@ describe("HelpSupportScreen", () => {
     await user.type(message, "Vui lòng kiểm tra giúp.");
     await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Chưa gửi được phản hồi");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Chưa gửi được phản hồi",
+    );
     expect(subject).toHaveValue("Không nhận được mã");
     expect(message).toHaveValue("Vui lòng kiểm tra giúp.");
   });
@@ -99,12 +97,7 @@ describe("HelpSupportScreen", () => {
   it("rejects whitespace-only required content without calling the API", async () => {
     const user = userEvent.setup();
 
-    render(
-      withAuthFixture(
-        <HelpSupportScreen />,
-        createAuthServiceFixture(),
-      ),
-    );
+    render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
 
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });

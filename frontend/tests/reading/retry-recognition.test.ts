@@ -21,9 +21,9 @@ describe("retry speech recognition", () => {
   });
 
   it("checks every supplied recognition alternative instead of only the first", () => {
-    expect(
-      isRetryWordRecognized("mèo", ["Bé méo nhỏ", "Bé mèo nhỏ"]),
-    ).toBe(true);
+    expect(isRetryWordRecognized("mèo", ["Bé méo nhỏ", "Bé mèo nhỏ"])).toBe(
+      true,
+    );
   });
 
   it("does not accept a substring as a complete word", () => {
@@ -40,7 +40,6 @@ describe("retry speech recognition", () => {
     expect(isRetryWordRecognized("mèo", [" ", ""])).toBe(false);
   });
 });
-
 
 describe("retry word queue ordering", () => {
   const word = (
@@ -74,10 +73,7 @@ describe("retry word queue ordering", () => {
   });
 
   it("uses word id as a deterministic tie-breaker", () => {
-    const records = [
-      word("word-b", 1, 4),
-      word("word-a", 1, 4),
-    ];
+    const records = [word("word-b", 1, 4), word("word-a", 1, 4)];
 
     expect(sortRetryWordRecords(records).map((item) => item.word_id)).toEqual([
       "word-a",

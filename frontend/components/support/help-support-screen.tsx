@@ -149,7 +149,9 @@ export function HelpSupportScreen() {
     const normalizedEmail = contactEmail.trim().toLowerCase();
 
     if (!normalizedSubject || !normalizedMessage || !normalizedEmail) {
-      setErrorMessage("Ba mẹ vui lòng điền tiêu đề, nội dung và email liên hệ.");
+      setErrorMessage(
+        "Ba mẹ vui lòng điền tiêu đề, nội dung và email liên hệ.",
+      );
       return;
     }
     if (normalizedSubject.length > 120 || normalizedMessage.length > 5000) {
@@ -196,16 +198,24 @@ export function HelpSupportScreen() {
         title="Trợ giúp & hỗ trợ"
       />
 
-      <section aria-labelledby="support-faq-heading" className="flex flex-col gap-4">
+      <section
+        aria-labelledby="support-faq-heading"
+        className="flex flex-col gap-4"
+      >
         <div className="flex items-center gap-3">
           <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
             <CircleHelp aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-xl font-extrabold text-ink" id="support-faq-heading">
+            <h2
+              className="text-xl font-extrabold text-ink"
+              id="support-faq-heading"
+            >
               Câu hỏi thường gặp
             </h2>
-            <p className="text-sm text-muted">Một số hướng dẫn nhanh khi sử dụng ViRead.</p>
+            <p className="text-sm text-muted">
+              Một số hướng dẫn nhanh khi sử dụng ViRead.
+            </p>
           </div>
         </div>
 
@@ -217,9 +227,16 @@ export function HelpSupportScreen() {
                 <details className="group py-3" key={item.question}>
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-control py-2 text-left text-sm font-bold text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
                     <span>{item.question}</span>
-                    <span aria-hidden="true" className="shrink-0 text-lg text-primary transition-transform group-open:rotate-45">+</span>
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 text-lg text-primary transition-transform group-open:rotate-45"
+                    >
+                      +
+                    </span>
                   </summary>
-                  <p className="pb-2 pt-1 text-sm leading-6 text-muted">{item.answer}</p>
+                  <p className="pb-2 pt-1 text-sm leading-6 text-muted">
+                    {item.answer}
+                  </p>
                 </details>
               ))}
             </div>
@@ -234,14 +251,20 @@ export function HelpSupportScreen() {
               <Mail aria-hidden="true" className="size-5" />
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-ink" id="support-contact-heading">
+              <h2
+                className="text-xl font-extrabold text-ink"
+                id="support-contact-heading"
+              >
                 Liên hệ chính thức
               </h2>
-              <p className="text-sm text-muted">Kết nối trực tiếp với đội ngũ ViRead.</p>
+              <p className="text-sm text-muted">
+                Kết nối trực tiếp với đội ngũ ViRead.
+              </p>
             </div>
           </div>
           <p className="text-body leading-6 text-muted">
-            Bạn có thể liên hệ với đội ngũ ViRead qua email để được hỗ trợ khi gặp vấn đề trong quá trình sử dụng.
+            Bạn có thể liên hệ với đội ngũ ViRead qua email để được hỗ trợ khi
+            gặp vấn đề trong quá trình sử dụng.
           </p>
           <a
             className="inline-flex min-h-12 w-fit max-w-full items-center gap-3 rounded-control border border-border px-4 py-3 font-extrabold text-primary underline-offset-4 hover:bg-sky hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
@@ -260,35 +283,58 @@ export function HelpSupportScreen() {
               <MessageSquareText aria-hidden="true" className="size-5" />
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-ink" id="support-feedback-heading">
+              <h2
+                className="text-xl font-extrabold text-ink"
+                id="support-feedback-heading"
+              >
                 Gửi phản hồi
               </h2>
-              <p className="text-sm text-muted">Mô tả vấn đề hoặc đề xuất để đội ngũ ViRead tiếp nhận.</p>
+              <p className="text-sm text-muted">
+                Mô tả vấn đề hoặc đề xuất để đội ngũ ViRead tiếp nhận.
+              </p>
             </div>
           </div>
 
-          {successMessage ? <StatusMessage tone="success">{successMessage}</StatusMessage> : null}
-          {errorMessage ? <StatusMessage tone="error">{errorMessage}</StatusMessage> : null}
+          {successMessage ? (
+            <StatusMessage tone="success">{successMessage}</StatusMessage>
+          ) : null}
+          {errorMessage ? (
+            <StatusMessage tone="error">{errorMessage}</StatusMessage>
+          ) : null}
 
-          <form className="flex flex-col gap-4" noValidate onSubmit={handleSubmit}>
+          <form
+            className="flex flex-col gap-4"
+            noValidate
+            onSubmit={handleSubmit}
+          >
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label className="text-label font-bold text-muted" htmlFor="support-category">
+              <label
+                className="text-label font-bold text-muted"
+                htmlFor="support-category"
+              >
                 Loại yêu cầu
               </label>
               <select
                 className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
                 id="support-category"
-                onChange={(event) => setCategory(event.target.value as SupportFeedbackCategory)}
+                onChange={(event) =>
+                  setCategory(event.target.value as SupportFeedbackCategory)
+                }
                 value={category}
               >
                 {categoryOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label className="text-label font-bold text-muted" htmlFor="support-subject">
+              <label
+                className="text-label font-bold text-muted"
+                htmlFor="support-subject"
+              >
                 Tiêu đề
               </label>
               <input
@@ -299,11 +345,16 @@ export function HelpSupportScreen() {
                 required
                 value={subject}
               />
-              <span className="text-right text-xs text-muted">{subject.length}/120</span>
+              <span className="text-right text-xs text-muted">
+                {subject.length}/120
+              </span>
             </div>
 
             <div className="flex flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label className="text-label font-bold text-muted" htmlFor="support-message">
+              <label
+                className="text-label font-bold text-muted"
+                htmlFor="support-message"
+              >
                 Nội dung
               </label>
               <textarea
@@ -316,11 +367,16 @@ export function HelpSupportScreen() {
                 rows={6}
                 value={message}
               />
-              <span className="text-right text-xs text-muted">{message.length}/5000</span>
+              <span className="text-right text-xs text-muted">
+                {message.length}/5000
+              </span>
             </div>
 
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label className="text-label font-bold text-muted" htmlFor="support-contact-email">
+              <label
+                className="text-label font-bold text-muted"
+                htmlFor="support-contact-email"
+              >
                 Email liên hệ
               </label>
               <input
@@ -350,8 +406,12 @@ export function HelpSupportScreen() {
           </form>
 
           <p className="flex items-start gap-2 text-xs leading-5 text-muted">
-            <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            Thông tin được sử dụng để tiếp nhận và xử lý yêu cầu hỗ trợ. Không gửi mật khẩu hoặc mã xác thực trong nội dung phản hồi.
+            <ShieldCheck
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            Thông tin được sử dụng để tiếp nhận và xử lý yêu cầu hỗ trợ. Không
+            gửi mật khẩu hoặc mã xác thực trong nội dung phản hồi.
           </p>
         </Card>
       </section>

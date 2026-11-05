@@ -234,7 +234,7 @@ function createReadingFixtures() {
           practiced_words: 0,
         }),
       finish: vi.fn().mockResolvedValue({
-      // Giữ nguyên dữ liệu kết quả finish hiện tại
+        // Giữ nguyên dữ liệu kết quả finish hiện tại
       }),
       createRetryEvent: vi.fn().mockResolvedValue(undefined),
     },

@@ -1757,7 +1757,9 @@ export function ReadingScreen({
 
       if (!recording || recording.size <= 200) {
         setRetryFeedback("incorrect");
-        setLatestTranscript("Chưa thu được âm thanh. Bé thử bật mic và đọc lại nhé.");
+        setLatestTranscript(
+          "Chưa thu được âm thanh. Bé thử bật mic và đọc lại nhé.",
+        );
         return;
       }
 
@@ -2031,13 +2033,16 @@ export function ReadingScreen({
           sessionId,
           candidate.pageId,
         );
-        const retryPage = await services.readingService.getCurrentPage(sessionId);
+        const retryPage =
+          await services.readingService.getCurrentPage(sessionId);
         if (!mountedRef.current) return;
         if (
           retryPage.page_id !== candidate.pageId ||
           retryPage.page_revision_id !== candidate.pageRevisionId
         ) {
-          throw new Error("The retry page revision no longer matches the session.");
+          throw new Error(
+            "The retry page revision no longer matches the session.",
+          );
         }
         setPageProgress(progress);
         setPage(retryPage);
@@ -2537,7 +2542,8 @@ export function ReadingScreen({
         currentWordText={
           retryMode
             ? (retryCandidates[retryWordPosition]?.text ?? null)
-            : (page.words.find((w) => w.word_id === currentWordId)?.text ?? null)
+            : (page.words.find((w) => w.word_id === currentWordId)?.text ??
+              null)
         }
         exitHref={detailHref}
         isCurrentWordMispronounced={Boolean(

@@ -254,7 +254,6 @@ export function ReadingLayout({
             &ldquo;{currentWordText || latestTranscript}&rdquo;
           </p>
         </div>
-      
       ) : isMicRecording ? (
         isCurrentWordMispronounced ? (
           <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-rose-500 bg-rose-50 px-4 py-3 shadow-sm transition-all animate-in fade-in">

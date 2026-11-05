@@ -557,7 +557,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         ],
       });
     });
-    expect(screen.getByText("Chưa chính xác, bé thử lại nhé!")).toBeInTheDocument();
+    expect(
+      screen.getByText("Chưa chính xác, bé thử lại nhé!"),
+    ).toBeInTheDocument();
 
     speechServiceMock.transcribe.mockResolvedValueOnce({
       text: "mèo",
@@ -663,23 +665,15 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         pageFour.page_id,
       );
     });
-    expect(
-      screen.getByText("Từ cần luyện: “mèo”"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Chưa mở lại được trang 4/),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(screen.getByText(/Chưa mở lại được trang 4/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Thử mở lại trang" }),
     ).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Bật mic" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Bật mic" })).toBeDisabled();
     expect(services.readingService.finish).not.toHaveBeenCalled();
 
-    await user.click(
-      screen.getByRole("button", { name: "Thử mở lại trang" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Thử mở lại trang" }));
     const restoredPage = await screen.findByLabelText("Trang sách 4");
     await waitFor(() => {
       expect(restoredPage).toHaveAttribute(
@@ -687,9 +681,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         pageFour.page_revision_id,
       );
     });
-    expect(
-      screen.getByText("Từ cần luyện: “mèo”"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
     expect(
       screen.queryByText(/Chưa mở lại được trang 4/),
     ).not.toBeInTheDocument();
