@@ -21,10 +21,7 @@ export default async function ChildDetailsPage({
   params,
   searchParams,
 }: ChildDetailsPageProps) {
-  const [{ childId }, query] = await Promise.all([
-    params,
-    searchParams,
-  ]);
+  const [{ childId }, query] = await Promise.all([params, searchParams]);
 
   const created = Array.isArray(query.created)
     ? query.created[0]

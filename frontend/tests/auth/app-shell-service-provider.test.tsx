@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/layout/app-shell";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import {
+  authSessionFixture,
   createAuthServiceFixture,
   withAuthFixture,
 } from "@/test/fixtures/auth-service-fixture";
@@ -60,12 +61,14 @@ describe("AppShell service provider boundary", () => {
       }),
     );
 
+    const authService = createAuthServiceFixture();
     render(
       withAuthFixture(
         <AppServicesProvider>
           <AppShell>Dashboard</AppShell>
         </AppServicesProvider>,
-        createAuthServiceFixture(),
+        authService,
+        { session: authSessionFixture },
       ),
     );
 
@@ -76,5 +79,6 @@ describe("AppShell service provider boundary", () => {
     expect(screen.getByText("Ba mẹ đã lưu")).toBeInTheDocument();
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(apiFetchFixture).toHaveBeenCalledOnce();
+    expect(authService.getCurrentUser).not.toHaveBeenCalled();
   });
 });

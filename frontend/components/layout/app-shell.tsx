@@ -26,10 +26,10 @@ import {
 } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { cn } from "@/lib/utils/cn";
-import type { AuthUserSnapshot } from "@/types/auth";
 import type { ParentProfileDTO } from "@/types/profile";
 
 interface AppShellProps {
@@ -69,16 +69,14 @@ function routeIsActive(pathname: string, href: string): boolean {
 }
 
 export function AppShell({ children }: AppShellProps) {
+  const authRuntime = useAuthRuntime();
   const authService = useAuthService();
   const profileService = useProfileService();
   const pathname = usePathname();
   const router = useRouter();
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const avatarButtonRef = useRef<HTMLButtonElement>(null);
-  const [account, setAccount] = useState<{
-    profile: ParentProfileDTO | null;
-    user: AuthUserSnapshot | null;
-  }>({ profile: null, user: null });
+  const [profile, setProfile] = useState<ParentProfileDTO | null>(null);
   const [accountMenu, setAccountMenu] = useState<{
     isOpen: boolean;
     pathname: string;
@@ -91,36 +89,30 @@ export function AppShell({ children }: AppShellProps) {
   const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
   const isReadingRoute = pathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;
+  const user = authRuntime.session?.user ?? null;
   const displayName = resolveDisplayName(
-    account.profile?.display_name,
-    account.user?.display_name,
-    account.profile?.email ?? account.user?.email,
+    profile?.display_name,
+    user?.display_name,
+    profile?.email ?? user?.email,
   );
-  const email = account.profile?.email ?? account.user?.email ?? null;
+  const email = profile?.email ?? user?.email ?? null;
 
   useEffect(() => {
     let isActive = true;
 
-    async function loadAccount() {
-      const [profileResult, userResult] = await Promise.allSettled([
-        profileService.get(),
-        authService.getCurrentUser(),
-      ]);
-
-      if (!isActive) return;
-
-      setAccount({
-        profile:
-          profileResult.status === "fulfilled" ? profileResult.value : null,
-        user: userResult.status === "fulfilled" ? userResult.value : null,
+    void profileService
+      .get()
+      .then((nextProfile) => {
+        if (isActive) setProfile(nextProfile);
+      })
+      .catch(() => {
+        if (isActive) setProfile(null);
       });
-    }
 
-    void loadAccount();
     return () => {
       isActive = false;
     };
-  }, [authService, profileService]);
+  }, [profileService]);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;
@@ -298,7 +290,7 @@ export function AppShell({ children }: AppShellProps) {
                 <ProfileAvatar
                   ariaLabel="Ảnh đại diện tài khoản"
                   displayName={displayName}
-                  imageUrl={account.profile?.avatar_url}
+                  imageUrl={profile?.avatar_url}
                   size="sm"
                 />
               </button>
@@ -315,7 +307,7 @@ export function AppShell({ children }: AppShellProps) {
                   <ProfileAvatar
                     ariaLabel="Ảnh đại diện tài khoản"
                     displayName={displayName}
-                    imageUrl={account.profile?.avatar_url}
+                    imageUrl={profile?.avatar_url}
                     size="lg"
                   />
                   <p className="max-w-full break-words text-label font-extrabold text-ink">

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/layout/app-shell";
 import {
+  authSessionFixture,
   createAuthServiceFixture,
   withAuthFixture,
 } from "@/test/fixtures/auth-service-fixture";
@@ -43,7 +44,11 @@ describe("parent logout", () => {
   it("shows parent and child profile links in the avatar menu", async () => {
     const service = createAuthServiceFixture();
     const user = userEvent.setup();
-    render(withAuthFixture(<AppShell>Dashboard content</AppShell>, service));
+    render(
+      withAuthFixture(<AppShell>Dashboard content</AppShell>, service, {
+        session: authSessionFixture,
+      }),
+    );
 
     await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
 
