@@ -18,14 +18,8 @@ if not hasattr(PIL.Image, "ANTIALIAS"):
 import cv2
 import jiwer
 import numpy as np
-
-try:
-    import pytesseract
-    from pytesseract import Output
-except ImportError:
-    pytesseract = None  # type: ignore
-    Output = None  # type: ignore
-
+import pytesseract
+from pytesseract import Output
 import torch
 from PIL import Image
 
@@ -104,10 +98,10 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
                 lang="vi",
                 det_limit_side_len=2048,
                 det_db_thresh=0.25,
-                det_db_box_thresh=0.18,      # Bắt trọn vẹn các dòng bị cong vòm ở giữa trang sách
+                det_db_box_thresh=0.18,
                 det_db_unclip_ratio=1.32,
-                det_db_score_mode="slow",    # Chấm điểm theo đa giác thực tế thay vì khung chữ nhật
-                drop_score=0.0,              # Giữ lại toàn bộ các dòng dài cho VietOCR xử lý
+                det_db_score_mode="slow",
+                drop_score=0.0,
                 show_log=False,
             )
 
@@ -142,6 +136,58 @@ def clean_ocr_punctuation(text: str) -> str:
     text = re.sub(r'(^|\s)\?(?=[A-ZÀ-Ỹa-zà-ỹ])', r'\1"', text)
     text = re.sub(r'\.{2,3}3[\?\"]*', '...?"', text)
     return text.strip()
+
+
+def _transfer_punctuation(viet_text: str, paddle_text: str) -> str:
+    """Bảo toàn dấu câu (dấu chấm '.', phẩy ',', hỏi, than...) từ Paddle sang VietOCR."""
+    v_clean = viet_text.strip()
+    p_clean = paddle_text.strip()
+    if not v_clean or not p_clean:
+        return v_clean
+
+    trailing_punct_match = re.search(r"([.,!?:;\"'…]+)$", p_clean)
+    if trailing_punct_match and not re.search(r"[.,!?:;\"'…]$", v_clean):
+        v_clean = v_clean + trailing_punct_match.group(1)
+
+    leading_punct_match = re.match(r"^([\"'“—–-]+)", p_clean)
+    if leading_punct_match and not re.match(r"^[\"'“—–-]", v_clean):
+        v_clean = leading_punct_match.group(1) + v_clean
+
+    return v_clean
+
+
+def _has_trailing_period(dewarped_img: np.ndarray) -> bool:
+    """Kiểm tra quang học xem cuối dòng chữ có đốm mực của dấu chấm câu '.' hay không."""
+    h, w = dewarped_img.shape[:2]
+    if w < 24 or h < 8:
+        return False
+
+    pad = 4 if (w > 16 and h > 16) else 0
+    content = dewarped_img[pad : h - pad, pad : w - pad] if pad else dewarped_img
+    c_h, c_w = content.shape[:2]
+
+    gray = cv2.cvtColor(content, cv2.COLOR_BGR2GRAY)
+    block_sz = max(11, (c_h | 1))
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_sz, 10
+    )
+
+    right_zone_start = int(c_w * 0.85)
+    right_binary = binary[:, right_zone_start:]
+    if right_binary.size == 0:
+        return False
+
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(right_binary)
+    for i in range(1, num_labels):
+        comp_w = stats[i, cv2.CC_STAT_WIDTH]
+        comp_h = stats[i, cv2.CC_STAT_HEIGHT]
+        comp_top = stats[i, cv2.CC_STAT_TOP]
+        comp_area = stats[i, cv2.CC_STAT_AREA]
+
+        if 2 <= comp_w <= 10 and 2 <= comp_h <= 10 and comp_area >= 4:
+            if comp_top >= int(c_h * 0.55):
+                return True
+    return False
 
 
 def is_vietocr_reliable(
@@ -183,7 +229,7 @@ def is_vietocr_reliable(
 
 
 # =============================================================================
-# Đánh giá độ tin cậy từ và dấu thanh tiếng Việt (Word-level Confidence)
+# Đánh giá độ tin cậy từ và dấu thanh tiếng Việt (Chuẩn hóa 3 mức)
 # =============================================================================
 _VIET_STOP_CONSONANTS = ("c", "ch", "p", "t")
 _VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳẩẻểỉỏổởủửỷãẵẫẽễĩõỗỡũữỹ]", re.IGNORECASE)
@@ -191,36 +237,79 @@ _VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳ
 
 def _evaluate_vietnamese_word_confidence(
     viet_word: str,
-    paddle_word: str,
+    matched_paddle_word: str | None,
     base_line_conf: float = 0.90,
 ) -> float:
-    """Đánh giá chi tiết độ tin cậy của từng từ và dấu thanh tiếng Việt."""
+    """Đánh giá độ tin cậy từ chuẩn hóa 3 mức: 1.0 (Xanh lá), 0.75 (Vàng), 0.50 (Đỏ)."""
     v_norm = normalize_word(viet_word)
-    p_norm = normalize_word(paddle_word) if paddle_word else ""
-
     if not v_norm:
         return 0.50
 
-    # Kiểm tra quy tắc âm tiết kết thúc bằng c, ch, p, t chỉ được đi với dấu sắc hoặc nặng
     v_base = strip_accents(v_norm)
+
+    # 1. Vi phạm cấu trúc ngữ âm tiếng Việt -> Mức Đỏ (0.50)
     if any(v_base.endswith(stop) for stop in _VIET_STOP_CONSONANTS):
         if _VIET_ILLEGAL_STOP_ACCENTS.search(v_norm):
-            return 0.50  # Chắc chắn sai dấu ngữ âm
+            return 0.50
 
-    # Trường hợp 1: Cả VietOCR và PaddleOCR đều khớp chính xác từng ký tự và dấu thanh
+    # Nếu Paddle không bắt được token nhưng VietOCR đọc được trên dòng có độ tin cậy tốt
+    if not matched_paddle_word:
+        return 1.0 if base_line_conf >= 0.85 else 0.75
+
+    p_norm = normalize_word(matched_paddle_word)
+    p_base = strip_accents(p_norm)
+
+    # 2. Hai mô hình khớp hoàn toàn cả từ lẫn dấu thanh -> Mức Xanh lá (1.0)
     if p_norm and v_norm.lower() == p_norm.lower():
-        return 1.0  # Chính xác tuyệt đối 100% -> Tô xanh hoàn toàn
+        return 1.0
 
-    # Trường hợp 2: Trùng chữ cái nhưng lệch dấu thanh (Sai dấu)
-    if p_norm and strip_accents(v_norm) == strip_accents(p_norm):
-        return 0.72  # Sai dấu -> Rơi vào mức Vàng/Cần kiểm tra
+    # 3. Trùng chữ cái gốc nhưng khác/lệch dấu thanh -> Mức Vàng (0.75)
+    if p_norm and v_base == p_base:
+        return 0.75
 
-    # Trường hợp 3: Khác biệt từ giữa 2 engine
-    if p_norm:
-        return 0.65  # Mức thấp -> Tô đỏ
+    # 4. Tương đồng chữ cái cao (CER <= 0.35) -> Mức Vàng (0.75)
+    if p_norm and jiwer.cer(v_base, p_base) <= 0.35:
+        return 0.75
 
-    # Trường hợp 4: Chỉ có VietOCR nhận diện được
-    return 0.85
+    # 5. Từ hoàn toàn khác nhau giữa 2 engine -> Mức Đỏ (0.50)
+    return 0.50
+
+
+def _find_best_matching_paddle_token(
+    viet_word: str,
+    paddle_tokens: list[str],
+    current_idx: int,
+    window_size: int = 3,
+) -> str | None:
+    """Tìm token tương ứng tốt nhất từ PaddleOCR trong phạm vi trượt, chống lệch pha chỉ số."""
+    if not paddle_tokens:
+        return None
+
+    v_norm = normalize_word(viet_word)
+    v_base = strip_accents(v_norm)
+
+    start = max(0, current_idx - window_size)
+    end = min(len(paddle_tokens), current_idx + window_size + 1)
+    candidates = paddle_tokens[start:end]
+
+    # Ưu tiên 1: Khớp chính xác cả từ lẫn dấu
+    for candidate in candidates:
+        if normalize_word(candidate).lower() == v_norm.lower():
+            return candidate
+
+    # Ưu tiên 2: Khớp cùng chữ cái gốc
+    for candidate in candidates:
+        if strip_accents(normalize_word(candidate)) == v_base:
+            return candidate
+
+    # Ưu tiên 3: Khớp tương đồng ký tự cao (CER <= 0.35)
+    for candidate in candidates:
+        c_base = strip_accents(normalize_word(candidate))
+        if c_base and v_base and abs(len(c_base) - len(v_base)) <= 1:
+            if jiwer.cer(v_base, c_base) <= 0.35:
+                return candidate
+
+    return None
 
 
 def _order_quad_points(pts: np.ndarray) -> np.ndarray:
@@ -512,7 +601,7 @@ def _extract_curved_lines_from_items(
 
         for v0, v1, v_curve in bands:
             band_h = float(v1 - v0) if split_count > 1 else min(float(crop_h), ref_h * 1.18)
-            strip_h = int(round(max(12.0, band_h * 1.18)))
+            strip_h = int(round(max(12.0, band_h * 1.25)))
             dewarped_img = _dewarp_strip_along_curve(rect_img, v_curve, strip_h)
 
             sample_rxs = np.linspace(0.0, 1.0, 9, dtype=np.float32)
@@ -738,7 +827,7 @@ def _char_weight(ch: str) -> float:
 def _segment_words_optically_1d(
     dewarped_img: np.ndarray, words: list[str]
 ) -> list[tuple[float, float]]:
-    """Xác định biên độ ngang (x0_r, x1_r) của từng từ trên dòng đã được khử cong."""
+    """Xác định biên độ ngang (x0_r, x1_r) của từng từ, gom trọn dấu chấm và tách rời cặp chữ kề nhau."""
     num_words = len(words)
     if num_words == 0:
         return []
@@ -781,13 +870,14 @@ def _segment_words_optically_1d(
         10,
     )
 
-    r0 = max(0, int(c_h * 0.15))
-    r1 = min(c_h, max(r0 + 4, int(c_h * 0.85)))
+    # Quét toàn bộ chiều cao từ 5% đến 96% để gom trọn vẹn cả dấu chấm câu '.' và dấu nặng '.'
+    r0 = max(0, int(c_h * 0.05))
+    r1 = min(c_h, int(c_h * 0.96))
     core_band = binary[r0:r1, :]
     core_h = core_band.shape[0]
 
     v_proj = np.sum(core_band > 0, axis=0).astype(np.float32)
-    ink_thresh = max(1.0, core_h * 0.05)
+    ink_thresh = max(1.0, core_h * 0.03)
     has_ink = v_proj > ink_thresh
 
     ink_cols = np.where(has_ink)[0]
@@ -803,8 +893,8 @@ def _segment_words_optically_1d(
     if num_words == 1:
         return [
             (
-                max(0.0, float(first_ink - 1) / c_w),
-                min(1.0, float(last_ink + 2) / c_w),
+                max(0.0, float(first_ink) / c_w),
+                min(1.0, float(last_ink + 1) / c_w),
             )
         ]
 
@@ -857,6 +947,7 @@ def _segment_words_optically_1d(
             cut_boundaries.append(best_valley)
             prev_end = best_valley[1]
         else:
+            # Khi hai phụ âm gần nhau, tìm đáy thung lũng mực cục bộ
             s_left = max(prev_end + 2, int(expected_x - search_tol * 0.5))
             s_right = min(max_allowed_x, int(expected_x + search_tol * 0.5))
             if s_left < s_right:
@@ -874,13 +965,17 @@ def _segment_words_optically_1d(
     word_raw_intervals.append((curr_s, max(curr_s + 1, last_ink + 1)))
 
     final_spans: list[tuple[float, float]] = []
-    for w_s, w_e in word_raw_intervals:
+    for w_idx, (w_s, w_e) in enumerate(word_raw_intervals):
         sub_ink = np.where(has_ink[w_s:w_e])[0]
         if len(sub_ink) >= 1:
-            tight_s = max(0, w_s + int(sub_ink[0]) - 1)
-            tight_e = min(c_w, w_s + int(sub_ink[-1]) + 2)
+            tight_s = max(w_s, w_s + int(sub_ink[0]))
+            tight_e = min(w_e, w_s + int(sub_ink[-1]) + 1)
         else:
             tight_s, tight_e = w_s, w_e
+
+        # Nếu từ cuối cùng chứa dấu chấm câu '.', mở rộng nhẹ biên phải để ôm trọn dấu
+        if w_idx == len(word_raw_intervals) - 1:
+            tight_e = min(c_w, tight_e + 2)
 
         x0_r = max(0.0, float(tight_s) / c_w)
         x1_r = min(1.0, float(tight_e) / c_w)
@@ -888,6 +983,13 @@ def _segment_words_optically_1d(
             x1_r = min(1.0, x0_r + 0.01)
 
         final_spans.append((x0_r, x1_r))
+
+    # Tách bạch tuyệt đối các nhịp từ, không để đè lấn biên ngang
+    for i in range(len(final_spans) - 1):
+        if final_spans[i][1] >= final_spans[i + 1][0]:
+            mid = (final_spans[i][1] + final_spans[i + 1][0]) / 2.0
+            final_spans[i] = (final_spans[i][0], max(final_spans[i][0] + 0.002, mid - 0.001))
+            final_spans[i + 1] = (min(final_spans[i + 1][1] - 0.002, mid + 0.001), final_spans[i + 1][1])
 
     return final_spans
 
@@ -898,7 +1000,7 @@ def _map_curved_word_boxes(
     orig_width: int,
     orig_height: int,
 ) -> list[list[float]]:
-    """Ánh xạ từng từ bám theo đúng đường cong Parabol v_curve(u) trên trang ảnh gốc."""
+    """Ánh xạ từng từ bám theo đúng đường cong Parabol v_curve(u), bao trọn độ cao của dấu tiếng Việt."""
     if not words:
         return []
 
@@ -913,7 +1015,9 @@ def _map_curved_word_boxes(
     spans = _segment_words_optically_1d(dewarped_img, words)
 
     boxes: list[list[float]] = []
-    half_h = max(4.0, band_h * 0.46)
+
+    # Mở rộng biên độ cao lên 0.65 (tổng chiều cao đạt 130% band_h) để bao trọn dấu mũ, trăng và dấu nặng
+    half_h = max(6.0, band_h * 0.65)
 
     for x0_r, x1_r in spans:
         x_mid_r = (x0_r + x1_r) / 2.0
@@ -938,8 +1042,8 @@ def _map_curved_word_boxes(
 
         word_xmin = float(min(top_l[0], bot_l[0]))
         word_xmax = float(max(top_r[0], bot_r[0]))
-        word_ymin = float((top_l[1] + top_r[1]) / 2.0)
-        word_ymax = float((bot_l[1] + bot_r[1]) / 2.0)
+        word_ymin = float(min(top_l[1], top_r[1]))
+        word_ymax = float(max(bot_l[1], bot_r[1]))
 
         norm_x = word_xmin / orig_width
         norm_y = word_ymin / orig_height
@@ -959,6 +1063,25 @@ def _map_curved_word_boxes(
                 round(norm_h, 6),
             ]
         )
+
+    # Chống đè box: Đảm bảo luôn duy trì khe hở tối thiểu 2.5px giữa 2 từ kề nhau
+    min_gap_norm = max(0.003, 2.5 / float(orig_width))
+    for _ in range(2):
+        for i in range(len(boxes) - 1):
+            curr_r = boxes[i][0] + boxes[i][2]
+            next_l = boxes[i + 1][0]
+            if (curr_r + min_gap_norm) > next_l:
+                mid_x = (curr_r + next_l) / 2.0
+                new_curr_r = mid_x - (min_gap_norm / 2.0)
+                new_next_l = mid_x + (min_gap_norm / 2.0)
+
+                if new_curr_r > boxes[i][0] + 0.002:
+                    boxes[i][2] = round(new_curr_r - boxes[i][0], 6)
+
+                next_r = boxes[i + 1][0] + boxes[i + 1][2]
+                if next_r > new_next_l + 0.002:
+                    boxes[i + 1][0] = round(new_next_l, 6)
+                    boxes[i + 1][2] = round(next_r - new_next_l, 6)
 
     return boxes
 
@@ -1032,9 +1155,6 @@ def _candidate_quality_score(result: dict[str, object]) -> float:
 
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Run Vietnamese Tesseract OCR against preprocessing candidates and select the best."""
-    if pytesseract is None:
-        raise OcrEngineUnavailable("Thư viện pytesseract chưa được cài đặt trong môi trường.")
-
     configured_binary = os.getenv("TESSERACT_CMD")
     if configured_binary:
         configured_binary = configured_binary.strip('"\'')
@@ -1140,12 +1260,11 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     successful_evaluations = 0
     for preprocessing_name, candidate_image, psm in candidates:
         try:
-            output_dict = Output.DICT if Output is not None else "dict"
             result = pytesseract.image_to_data(
                 candidate_image,
                 lang=target_lang,
                 config=f"--oem 1 --psm {psm}",
-                output_type=output_dict,
+                output_type=Output.DICT,
             )
             successful_evaluations += 1
         except Exception:
@@ -1366,6 +1485,7 @@ def _extract_text_and_boxes_dual_engine(
         )
         chosen_text = paddle_text
         chosen_conf = paddle_conf
+        viet_text_used = False
 
         try:
             viet_text = vietocr_engine.predict(line_img_pil)
@@ -1374,8 +1494,13 @@ def _extract_text_and_boxes_dual_engine(
             ):
                 chosen_text = viet_text.strip()
                 chosen_conf = paddle_conf
+                viet_text_used = True
         except Exception:
             pass
+
+        if viet_text_used:
+            # Bảo toàn dấu câu từ PaddleOCR sang VietOCR
+            chosen_text = _transfer_punctuation(chosen_text, paddle_text)
 
         chosen_text = clean_ocr_punctuation(chosen_text)
         if not chosen_text:
@@ -1387,6 +1512,11 @@ def _extract_text_and_boxes_dual_engine(
         if not valid_words:
             continue
 
+        # Kiểm tra quang học dấu chấm câu '.' ở cuối dòng nếu chưa có
+        if not re.search(r"[.,!?:;\"'…]$", valid_words[-1]) and _has_trailing_period(dewarped_img):
+            valid_words[-1] = f"{valid_words[-1]}."
+
+        # Ánh xạ tọa độ các từ trên dòng: bao trọn độ cao của dấu và khử đè lấn box
         line_boxes = _map_curved_word_boxes(
             valid_words, item, orig_width, orig_height
         )
@@ -1394,12 +1524,21 @@ def _extract_text_and_boxes_dual_engine(
         paddle_tokens = [w for w in paddle_text.split() if normalize_word(w)]
 
         for w_idx, raw_token in enumerate(valid_words):
+            matched_p_token = _find_best_matching_paddle_token(
+                raw_token, paddle_tokens, w_idx, window_size=3
+            )
+
+            # Phục hồi dấu chấm / phẩy từ token Paddle nếu từ gốc khớp mà VietOCR thiếu dấu
+            if matched_p_token and re.search(r"([.,!?:;\"'…]+)$", matched_p_token):
+                p_punct = re.search(r"([.,!?:;\"'…]+)$", matched_p_token).group(1)
+                if not raw_token.endswith(p_punct):
+                    raw_token = f"{raw_token.rstrip('.,!?:;\"\'…')}{p_punct}"
+                    valid_words[w_idx] = raw_token
+
             norm_token = normalize_word(raw_token)
-            p_ref = paddle_tokens[w_idx] if w_idx < len(paddle_tokens) else ""
-            
-            # Tính toán confidence chuẩn xác cho từng từ và dấu
+
             word_conf = _evaluate_vietnamese_word_confidence(
-                raw_token, p_ref, base_line_conf=paddle_conf
+                raw_token, matched_p_token, base_line_conf=paddle_conf
             )
 
             words_output.append(

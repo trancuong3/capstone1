@@ -1,7 +1,8 @@
-"""Internal, read-only diagnostics for Supabase Storage and Dual-Engine OCR configuration."""
+"""Internal, read-only diagnostics for Supabase Storage, Dual-Engine OCR, and Gemini configuration."""
 from __future__ import annotations
 
 import importlib.util
+import os
 
 from app.database.config import (
     SUPABASE_ADMIN_KEY,
@@ -24,6 +25,7 @@ def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, 
         "supabase_url_configured": bool(SUPABASE_URL),
         "supabase_storage_bucket_configured": bool(SUPABASE_STORAGE_BUCKET),
         "server_side_key_configured": bool(SUPABASE_ADMIN_KEY),
+        "gemini_api_key_configured": bool(os.getenv("GEMINI_API_KEY")),
         "ocr_engine_available": ocr_available,
         "vietnamese_language_available": ocr_available,
         # Giữ lại các key cũ làm shim tương thích ngược để không làm vỡ các schema API hiện hữu

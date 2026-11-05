@@ -764,17 +764,17 @@ class AdminOcrService:
                 detail="Chưa cấu hình GEMINI_API_KEY trong file .env của backend",
             )
 
-        # Lấy tên model linh hoạt từ file .env (nếu không set sẽ mặc định là gemini-2.5-flash)
         gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
         system_instruction = (
             "Bạn là chuyên gia hiệu đính văn bản tiếng Việt cho sách thiếu nhi và giáo dục. "
             "Nhiệm vụ của bạn là rà soát văn bản được quét OCR, sửa toàn bộ các lỗi sai chính tả, "
-            "lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc nhầm ký tự theo đúng ngữ cảnh tiếng Việt. "
+            "lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc nhầm ký tự theo đúng ngữ cảnh tiếng Việt (ví dụ: 'thất tình cờ' -> 'thật tình cờ', 'vân mưa rơi' -> 'vẫn mưa rơi', 'gian dồi' -> 'gian dối', 'hai lổi' -> 'hai lối'). "
             "YÊU CẦU: "
             "1. Tuyệt đối giữ nguyên thứ tự câu từ và cấu trúc ngữ nghĩa gốc của bài. "
             "2. Không tự ý thêm bớt từ ngữ hoặc câu văn mới để bảo toàn khớp nối với bounding box ảnh. "
-            "3. Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích hay định dạng markdown."
+            "3. Tự động phục hồi và bổ sung các dấu chấm câu ('.'), dấu phẩy (',') hoặc dấu chấm lửng ('...') ở cuối câu/dòng thơ bị OCR bỏ sót theo đúng ngữ pháp tiếng Việt. "
+            "4. Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích hay định dạng markdown."
         )
 
         prompt = f"Hãy sửa lỗi chính tả và dấu thanh cho văn bản OCR sau:\n\n{draft_text}"
@@ -823,7 +823,6 @@ class AdminOcrService:
                 detail="Chưa cấu hình GEMINI_API_KEY trong file .env của backend",
             )
 
-        # Lấy tên model linh hoạt từ file .env (nếu không set sẽ mặc định là gemini-2.5-flash)
         gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
         prompt = (

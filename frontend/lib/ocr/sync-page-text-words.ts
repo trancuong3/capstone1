@@ -72,13 +72,17 @@ export function syncPageTextToWords(
     };
   }
 
-  const words = existingWords.map((word, index) => ({
-    ...word,
-    text: tokens[index],
-    normalized_text: normalizeVietnameseWord(tokens[index]),
-    // Preserve bbox, confidence, index and line index exactly.
-    bbox: [...word.bbox] as [number, number, number, number],
-  }));
+  const words = existingWords.map((word, index) => {
+    const isTokenModified = word.text !== tokens[index];
+    return {
+      ...word,
+      text: tokens[index],
+      normalized_text: normalizeVietnameseWord(tokens[index]),
+      // Khi từ được chỉnh sửa khớp với văn bản mới, nâng confidence lên 1.0 (chính xác)
+      ocr_confidence: isTokenModified ? 1.0 : word.ocr_confidence,
+      bbox: [...word.bbox] as [number, number, number, number],
+    };
+  });
 
   return { status: "synchronized", tokens, words };
 }
