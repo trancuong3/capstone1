@@ -712,7 +712,7 @@ export function AdminOcrReviewScreen({
                     ? `Confidence OCR: ${word.ocr_confidence}.`
                     : "Confidence OCR: chưa rõ.";
                 const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText} Mức ${confidenceLevel}`;
-                const boxTitle = `Từ ${word.word_index + 1}: ${word.text} (Mức ${confLevel}) · ${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
+                const boxTitle = `Từ ${word.word_index + 1}: ${word.text} (Mức ${confidenceLevel}) · ${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
 
                 return (
                   <button
