@@ -52,7 +52,7 @@ export function stripVietnameseAccents(value: string): string {
 
 export function getConfidenceLevel(
   confidence: number | null | undefined,
-): "Cao" | "Vừa" | "Thấp" | "Chưa rõ" {
+): "Cao" | "Trung bình" | "Thấp" | "Chưa rõ" {
   if (
     confidence === null ||
     confidence === undefined ||
@@ -64,7 +64,7 @@ export function getConfidenceLevel(
     return "Cao";
   }
   if (confidence >= 0.6) {
-    return "Vừa";
+    return "Trung bình";
   }
   return "Thấp";
 }
@@ -235,7 +235,9 @@ export function AdminOcrReviewScreen({
       const element =
         wordRefs.current.get(firstUncertain.word_index) ||
         document.getElementById(`ocr-word-${firstUncertain.word_index}`);
-      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof element?.scrollIntoView === "function") {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
   }, [detail, words]);
 
@@ -268,7 +270,9 @@ export function AdminOcrReviewScreen({
       const element =
         wordRefs.current.get(index) ||
         document.getElementById(`ocr-word-${index}`);
-      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof element?.scrollIntoView === "function") {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
 
       const textarea = document.getElementById(
         "ocr-text",
@@ -591,7 +595,7 @@ export function AdminOcrReviewScreen({
           error === "not-found"
             ? "Trang không thuộc sách hoặc dữ liệu quản trị hiện tại."
             : error === "unavailable"
-              ? "Ảnh hoặc revision chưa đáp ứng contract hiện tại. Không sử dụng dữ liệu mẫu thay thế."
+              ? "Ảnh hoặc revision chưa đáp ứng contract hiện tại. Không sử dữ liệu mẫu thay thế."
               : "Vui lòng thử lại sau."
         }
         action={
@@ -693,11 +697,11 @@ export function AdminOcrReviewScreen({
                 const confText =
                   word.ocr_confidence !== null &&
                   word.ocr_confidence !== undefined
-                    ? `Confidence OCR: ${word.ocr_confidence}`
-                    : "Confidence OCR: chưa rõ";
+                    ? `Confidence OCR: ${word.ocr_confidence}.`
+                    : "Confidence OCR: chưa rõ.";
                 const confLevel = getConfidenceLevel(word.ocr_confidence);
-                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText}. Mức ${confLevel}`;
-                const boxTitle = `${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
+                const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${confText} Mức ${confLevel}`;
+                const boxTitle = `Từ ${word.word_index + 1}: ${word.text} (Mức ${confLevel}) · ${word.text} -> ${currentDraftToken ?? "(chưa có)"} (${matchLabel})`;
 
                 return (
                   <button
