@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -27,13 +28,15 @@ from app.database.config import CORS_ALLOWED_ORIGINS
 from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
+from app.services.ocr_engine import warmup_ocr_engines
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Dispose this worker's SQLAlchemy pool cleanly during application shutdown."""
+    """Khởi động worker, nạp trước model OCR vào RAM và giải phóng pool khi shutdown."""
+    threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_warmup_worker").start()
     try:
         yield
     finally:

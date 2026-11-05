@@ -15,8 +15,8 @@ export type PageTextWordSyncResult =
     };
 
 /**
- * Mirrors the backend's normalize_word semantics for Vietnamese text.
- * Display text is kept separately; this value is used only for alignment.
+ * Chuẩn hóa canonical tiếng Việt dùng chung cho so khớp OCR và văn bản nháp.
+ * Đảm bảo 100% xử lý trên Unicode NFC để triệt tiêu lệch mã ký tự.
  */
 export function normalizeVietnameseWord(value: string): string {
   const characters = Array.from(
@@ -35,26 +35,24 @@ export function normalizeVietnameseWord(value: string): string {
     characters.pop();
   }
 
-  return characters.join("").replace(/\s+/gu, " ").trim();
+  return characters.join("").replace(/\s+/gu, " ").trim().normalize("NFC");
 }
 
 /**
- * Tokenizes like the backend: Unicode NFC, whitespace-separated words, and
- * ignores edge punctuation for comparison.
+ * Phân tách chuỗi thành mảng token từ chuẩn hóa Unicode NFC.
  */
 export function tokenizePageText(value: string): string[] {
   const normalized = value.normalize("NFC").trim();
   if (!normalized) return [];
   return normalized
     .split(/\s+/u)
-    .filter((token) => normalizeVietnameseWord(token).length > 0);
+    .filter((token) => normalizeVietnameseWord(token).length > 0)
+    .map((token) => token.normalize("NFC"));
 }
 
 /**
- * Synchronizes page text into OCR word records only when there is a safe
- * one-to-one token mapping. Text edits never recalculate or synthesize boxes.
- * If the word count changes, preserve the existing records and require an
- * explicit reconciliation instead of attaching a stale box to another word.
+ * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token
+ * khớp 1:1, bảo toàn nguyên vẹn ocr_confidence và bbox gốc của từng từ.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -72,13 +70,16 @@ export function syncPageTextToWords(
     };
   }
 
-  const words = existingWords.map((word, index) => ({
-    ...word,
-    text: tokens[index],
-    normalized_text: normalizeVietnameseWord(tokens[index]),
-    // Preserve bbox, confidence, index and line index exactly.
-    bbox: [...word.bbox] as [number, number, number, number],
-  }));
+  const words = existingWords.map((word, index) => {
+    const token = tokens[index];
+    return {
+      ...word,
+      text: token,
+      normalized_text: normalizeVietnameseWord(token),
+      ocr_confidence: word.ocr_confidence,
+      bbox: [...word.bbox] as [number, number, number, number],
+    };
+  });
 
   return { status: "synchronized", tokens, words };
 }
@@ -93,15 +94,15 @@ export type WordsToPageTextSyncResult =
     };
 
 /**
- * Applies direct single-word edits back into the page text without flattening
- * line breaks or other whitespace separators. It refuses word entries that
- * are blank or contain multiple tokens rather than guessing a box mapping.
+ * Đồng bộ danh sách từ đơn trở lại khung văn bản mà không làm vỡ cấu trúc
+ * ngắt dòng.
  */
 export function syncWordsToPageText(
   currentPageText: string,
   words: readonly AdminRevisionWordDTO[],
 ): WordsToPageTextSyncResult {
-  const segments = currentPageText.match(/\s+|\S+/gu) ?? [];
+  const normalizedPageText = currentPageText.normalize("NFC");
+  const segments = normalizedPageText.match(/\s+|\S+/gu) ?? [];
   const pageTokenCount = segments.filter(
     (segment) => !/^\s+$/u.test(segment),
   ).length;
@@ -112,7 +113,7 @@ export function syncWordsToPageText(
   if (pageTokenCount !== words.length || hasInvalidWord) {
     return {
       status: "token-count-mismatch",
-      text: currentPageText,
+      text: normalizedPageText,
       expectedWordCount: words.length,
       actualTokenCount: pageTokenCount,
     };
@@ -123,9 +124,10 @@ export function syncWordsToPageText(
     .map((segment) => {
       if (/^\s+$/u.test(segment)) return segment;
       const nextWord = words[wordIndex++];
-      return nextWord.text.trim();
+      return nextWord.text.trim().normalize("NFC");
     })
-    .join("");
+    .join("")
+    .normalize("NFC");
 
   return { status: "synchronized", text };
 }
