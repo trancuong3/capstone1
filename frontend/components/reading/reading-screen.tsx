@@ -204,6 +204,9 @@ export function ReadingScreen({
     [],
   );
   const retryCandidatesRef = useRef<RetryWordCandidate[]>([]);
+  useEffect(() => {
+    retryCandidatesRef.current = retryCandidates;
+  }, [retryCandidates]);
   const [retryConfirmedWordIds, setRetryConfirmedWordIds] = useState<
     Set<string>
   >(() => new Set());
@@ -2070,7 +2073,7 @@ export function ReadingScreen({
     void beginRetryWord(nextPosition);
   }
 
-  function startRetrySession(candidates: RetryWordCandidate[]): void {
+  function startRetrySession(candidates: RetryWordCandidate[]): boolean {
     // Prefer the exact queue shown in the consent dialog. If an older render
     // supplied an empty array, rebuild from the durable word-id map rather
     // than silently completing the reading session.
@@ -2083,7 +2086,7 @@ export function ReadingScreen({
         "Danh sách từ cần luyện chưa sẵn sàng. Bé vui lòng thử lại nhé.",
       );
       setRetryPrompt(true);
-      return;
+      return false;
     }
 
     retryCandidatesRef.current = [...activeCandidates];
@@ -2096,6 +2099,7 @@ export function ReadingScreen({
     setRetryFeedback("waiting");
     setRetryMode(true);
     void beginRetryWord(0);
+    return true;
   }
 
   async function completeReadingSession() {
@@ -2581,8 +2585,9 @@ export function ReadingScreen({
             isLoading: isBusy,
             label: "Đồng ý, đọc lại",
             onClick: () => {
-              startRetrySession(retryCandidates);
-              setRetryPrompt(false);
+              if (startRetrySession(retryCandidatesRef.current)) {
+                setRetryPrompt(false);
+              }
             },
           }}
           secondaryAction={{
