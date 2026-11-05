@@ -123,6 +123,8 @@ interface PageTranscriptBucket {
 }
 type RetryWordItem = RetryWordRecord;
 
+const RETRY_CAPTURE_WINDOW_MS = 3_000;
+
 export function ReadingScreen({
   initialPageId,
   initialUiState,
@@ -244,6 +246,8 @@ export function ReadingScreen({
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+  const retryRecorderActiveRef = useRef(false);
+  const retryCaptureTimeoutRef = useRef<number | null>(null);
 
   const startListeningRef = useRef<() => Promise<boolean>>(() =>
     Promise.resolve(false),
@@ -354,6 +358,17 @@ export function ReadingScreen({
       isListeningActiveRef.current = false;
       retryModeRef.current = false;
       transcriptionAbortRef.current?.abort();
+      if (
+        typeof window !== "undefined" &&
+        retryCaptureTimeoutRef.current !== null
+      ) {
+        window.clearTimeout(retryCaptureTimeoutRef.current);
+        retryCaptureTimeoutRef.current = null;
+      }
+      if (retryRecorderActiveRef.current) {
+        retryRecorderActiveRef.current = false;
+        speechRecorder.cancel();
+      }
       try {
         recognitionRef.current?.abort?.();
       } catch {
@@ -1145,11 +1160,16 @@ export function ReadingScreen({
   async function handleToggleListening() {
     if (retryModeRef.current) {
       const candidate = retryCandidates[retryWordPosition];
-      if (!candidate) return;
+      if (!candidate || isBusy || retryProcessingRef.current) return;
       if (isMicRecording) {
-        stopRetryRecognition();
+        await stopRetryListeningAndTranscribe(candidate);
       } else {
-        startRetryRecognition(candidate);
+        setIsBusy(true);
+        try {
+          await startRetryRecognition(candidate);
+        } finally {
+          if (mountedRef.current) setIsBusy(false);
+        }
       }
       return;
     }
@@ -1613,18 +1633,191 @@ export function ReadingScreen({
     if (mountedRef.current) setIsMicRecording(false);
   }
 
-  function startRetryRecognition(candidate: RetryWordCandidate): boolean {
+  function clearRetryCaptureTimeout(): void {
+    if (retryCaptureTimeoutRef.current !== null) {
+      window.clearTimeout(retryCaptureTimeoutRef.current);
+      retryCaptureTimeoutRef.current = null;
+    }
+  }
+
+  function scheduleRetryCaptureStop(candidate: RetryWordCandidate): void {
+    if (
+      !retryRecorderActiveRef.current ||
+      retryCaptureTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    retryCaptureTimeoutRef.current = window.setTimeout(() => {
+      retryCaptureTimeoutRef.current = null;
+      if (
+        mountedRef.current &&
+        retryModeRef.current &&
+        retryListeningWantedRef.current
+      ) {
+        void stopRetryListeningAndTranscribe(candidate);
+      }
+    }, RETRY_CAPTURE_WINDOW_MS);
+  }
+
+  function confirmRetryWord(
+    candidate: RetryWordCandidate,
+    transcript: string,
+  ): void {
+    if (retryProcessingRef.current) return;
+
+    retryProcessingRef.current = true;
+    retryListeningWantedRef.current = false;
+    retryShouldRestartRef.current = false;
+    isListeningActiveRef.current = false;
+    stopRetryRecognition();
+    setLatestTranscript(transcript);
+    setRetryFeedback("success");
+
+    setRetryConfirmedWordIds((previous) => {
+      const next = new Set(previous);
+      next.add(candidate.wordId);
+      return next;
+    });
+    retryWordsByIdRef.current.delete(candidate.wordId);
+
+    // This is visual retry feedback only. Preserve the original reading score.
+    setCorrectWordIds((previous) => {
+      const next = new Set(previous);
+      next.add(candidate.wordId);
+      return next;
+    });
+
+    window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      retryProcessingRef.current = false;
+
+      const nextPosition = retryPositionRef.current + 1;
+      if (nextPosition >= retryCandidates.length) {
+        retryModeRef.current = false;
+        retryListeningWantedRef.current = false;
+        setRetryMode(false);
+        stopRetryRecognition();
+        void completeReadingSession();
+        return;
+      }
+
+      setRetryWordPosition(nextPosition);
+      void beginRetryWord(nextPosition);
+    }, 450);
+  }
+
+  async function stopRetryListeningAndTranscribe(
+    candidate: RetryWordCandidate,
+  ): Promise<void> {
+    if (!retryModeRef.current || retryProcessingRef.current) return;
+
+    retryListeningWantedRef.current = false;
+    retryShouldRestartRef.current = false;
+    isListeningActiveRef.current = false;
+    clearRetryCaptureTimeout();
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch {
+        // The browser may already have ended this recognition cycle.
+      }
+    }
+    if (mountedRef.current) setIsMicRecording(false);
+
+    if (!retryRecorderActiveRef.current) {
+      setRetryFeedback("incorrect");
+      return;
+    }
+
+    retryRecorderActiveRef.current = false;
+    setIsBusy(true);
+    try {
+      const recording = await speechRecorder.stop();
+      if (!mountedRef.current || retryProcessingRef.current) return;
+
+      if (!recording || recording.size <= 200) {
+        setRetryFeedback("incorrect");
+        setLatestTranscript("Chưa thu được âm thanh. Bé thử bật mic và đọc lại nhé.");
+        return;
+      }
+
+      // Browser SpeechRecognition is fast for clear results. When it misses an
+      // isolated word, use the captured audio and the same Vietnamese STT
+      // provider as the normal reading flow before deciding the retry result.
+      const transcription = await speechService.transcribe(recording, {
+        languageCode: "vi",
+      });
+      if (!mountedRef.current || retryProcessingRef.current) return;
+
+      const transcript = transcription.text?.trim() ?? "";
+      if (!transcript) {
+        setRetryFeedback("incorrect");
+        setLatestTranscript("ViRead chưa nghe rõ từ này. Bé thử đọc lại nhé.");
+        return;
+      }
+
+      setLatestTranscript(transcript);
+      if (isRetryWordRecognized(candidate.text, [transcript])) {
+        confirmRetryWord(candidate, transcript);
+      } else {
+        setRetryFeedback("incorrect");
+      }
+    } catch (error) {
+      if (mountedRef.current && !retryProcessingRef.current) {
+        setRetryFeedback("incorrect");
+        setLatestTranscript(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Chưa nhận diện rõ từ này. Bé thử đọc lại nhé.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
+  }
+
+  async function startRetryRecognition(
+    candidate: RetryWordCandidate,
+  ): Promise<boolean> {
     if (typeof window === "undefined") return false;
+
+    // Keep a short audio capture alongside browser recognition. The recording
+    // is used only as a fallback when the browser does not recognize the word.
+    if (!retryRecorderActiveRef.current) {
+      try {
+        await speechRecorder.start();
+        retryRecorderActiveRef.current = true;
+      } catch {
+        // Browser recognition may still work when MediaRecorder is unavailable.
+        retryRecorderActiveRef.current = false;
+      }
+    }
 
     const win = window as unknown as WindowWithSpeech;
     const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SpeechRec) {
+      if (retryRecorderActiveRef.current) {
+        retryListeningWantedRef.current = true;
+        retryShouldRestartRef.current = false;
+        isListeningActiveRef.current = true;
+        setIsMicRecording(true);
+        setLatestTranscript(
+          "Bé đọc từ cần luyện, ViRead sẽ kiểm tra trong vài giây nhé.",
+        );
+        scheduleRetryCaptureStop(candidate);
+        return true;
+      }
+
       retryListeningWantedRef.current = false;
       isListeningActiveRef.current = false;
       setIsMicRecording(false);
       setRetryFeedback("incorrect");
       setLatestTranscript(
-        "Trình duyệt chưa hỗ trợ nhận diện giọng nói. Bé hãy thử dùng Chrome nhé.",
+        "Trình duyệt chưa hỗ trợ nhận diện giọng nói và không thể ghi âm. Bé hãy thử dùng Chrome nhé.",
       );
       return false;
     }
@@ -1688,70 +1881,22 @@ export function ReadingScreen({
 
       if (finalTranscripts.length === 0 || retryProcessingRef.current) return;
 
-      retryProcessingRef.current = true;
       setLatestTranscript(finalTranscripts[0]);
 
       // Accept the target as a complete Vietnamese token anywhere in the
-      // utterance (including a short context phrase), not a substring.
-      const isCorrect = isRetryWordRecognized(
-        candidate.text,
-        finalTranscripts,
-      );
-      if (isCorrect) {
-        retryListeningWantedRef.current = false;
-        retryShouldRestartRef.current = false;
-        isListeningActiveRef.current = false;
-        setIsMicRecording(false);
-        setRetryFeedback("success");
-
-        setRetryConfirmedWordIds((previous) => {
-          const next = new Set(previous);
-          next.add(candidate.wordId);
-          return next;
-        });
-        retryWordsByIdRef.current.delete(candidate.wordId);
-
-        // Chỉ cập nhật màu giao diện, không thay đổi kết quả lượt đọc gốc.
-        setCorrectWordIds((previous) => {
-          const next = new Set(previous);
-          next.add(candidate.wordId);
-          return next;
-        });
-
-        window.setTimeout(() => {
-          retryProcessingRef.current = false;
-
-          const nextPosition = retryPositionRef.current + 1;
-
-          if (nextPosition >= retryCandidates.length) {
-            retryModeRef.current = false;
-            retryListeningWantedRef.current = false;
-            setRetryMode(false);
-            stopRetryRecognition();
-            void completeReadingSession();
-            return;
-          }
-
-          setRetryWordPosition(nextPosition);
-          void beginRetryWord(nextPosition);
-        }, 450);
+      // utterance, including a short phrase read around the target word.
+      if (isRetryWordRecognized(candidate.text, finalTranscripts)) {
+        confirmRetryWord(candidate, finalTranscripts[0]);
       } else {
         setRetryFeedback("incorrect");
-
-        // Giữ cơ chế tự nghe lại hiện tại.
         retryShouldRestartRef.current = true;
-        retryProcessingRef.current = false;
       }
     };
 
     recognition.onerror = (event: BrowserSpeechErrorEvent) => {
-      // "aborted" thường xuất hiện khi chủ động dừng phiên nhận diện.
-      // Không xem đây là lỗi và không in log gây nhiễu.
       if (event.error === "aborted") return;
 
       if (event.error === "no-speech") {
-        // Bé chưa nói trong khoảng thời gian của trình duyệt.
-        // Tự mở lại phiên nghe nếu microphone vẫn đang được bật.
         retryShouldRestartRef.current = retryListeningWantedRef.current;
         return;
       }
@@ -1777,9 +1922,13 @@ export function ReadingScreen({
             : event.error === "audio-capture"
               ? "Không tìm thấy microphone. Hãy kiểm tra thiết bị ghi âm."
               : event.error === "network"
-                ? "Kết nối nhận diện giọng nói bị gián đoạn. Hãy kiểm tra Internet."
+                ? "Kết nối nhận diện của trình duyệt bị gián đoạn. ViRead sẽ thử kiểm tra âm thanh đã thu."
                 : "Trình duyệt không hỗ trợ nhận diện tiếng Việt.";
         setLatestTranscript(message);
+
+        if (retryRecorderActiveRef.current) {
+          void stopRetryListeningAndTranscribe(candidate);
+        }
       }
     };
 
@@ -1791,8 +1940,9 @@ export function ReadingScreen({
       if (!mountedRef.current || !retryModeRef.current) return;
 
       if (retryListeningWantedRef.current) {
-        // Chrome thường kết thúc một lượt nhận diện sau câu nói hoặc no-speech.
-        // Tạo phiên mới để tiếp tục nghe từ hiện tại.
+        // Chrome often ends a non-continuous recognition cycle after an
+        // utterance or no-speech event. Restart browser recognition while the
+        // same short MediaRecorder capture remains active.
         window.setTimeout(() => {
           if (
             mountedRef.current &&
@@ -1800,8 +1950,7 @@ export function ReadingScreen({
             retryListeningWantedRef.current &&
             !recognitionRef.current
           ) {
-            retryProcessingRef.current = false;
-            startRetryRecognition(candidate);
+            void startRetryRecognition(candidate);
           }
         }, 250);
         return;
@@ -1815,6 +1964,7 @@ export function ReadingScreen({
       recognitionRef.current = recognition;
       recognition.start();
       setIsMicRecording(true);
+      scheduleRetryCaptureStop(candidate);
       return true;
     } catch (error) {
       if (recognitionRef.current === recognition) {
@@ -1823,6 +1973,9 @@ export function ReadingScreen({
       retryListeningWantedRef.current = false;
       isListeningActiveRef.current = false;
       setIsMicRecording(false);
+      if (retryRecorderActiveRef.current) {
+        void stopRetryListeningAndTranscribe(candidate);
+      }
       console.error("Không thể bắt đầu nhận diện từ cần đọc lại:", error);
       return false;
     }
@@ -1845,7 +1998,8 @@ export function ReadingScreen({
     // Retry candidates can belong to pages visited earlier in a multi-page
     // session. Re-open the candidate's verified page before highlighting it.
     if (
-      page?.page_id !== candidate.pageId ||
+      !page ||
+      page.page_id !== candidate.pageId ||
       page.page_revision_id !== candidate.pageRevisionId
     ) {
       setIsBusy(true);

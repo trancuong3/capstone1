@@ -453,6 +453,115 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).not.toBeInTheDocument();
   });
 
+  it("uses recorded Vietnamese STT to confirm a retry word missed by browser recognition", async () => {
+    class FakeSpeechRecognition {
+      static instances: FakeSpeechRecognition[] = [];
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: Array<{
+              isFinal: boolean;
+              length: number;
+              0: { transcript: string };
+            }>;
+          }) => void)
+        | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+
+      constructor() {
+        FakeSpeechRecognition.instances.push(this);
+      }
+
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: FakeSpeechRecognition,
+    });
+
+    const user = userEvent.setup();
+    renderReading("ready");
+    await user.click(
+      await screen.findByRole("button", { name: "Bắt đầu đọc" }),
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    await screen.findByRole("button", {
+      name: "Dừng nhận diện giọng nói",
+    });
+
+    await waitFor(() => {
+      expect(FakeSpeechRecognition.instances).toHaveLength(1);
+      expect(speechRecorderMock.start).toHaveBeenCalledOnce();
+    });
+
+    act(() => {
+      FakeSpeechRecognition.instances[0].onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            length: 1,
+            0: { transcript: "Bé méo nhỏ đang" },
+          },
+        ],
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Lưu và dừng" }),
+    );
+    await screen.findByRole("button", { name: "Đồng ý, đọc lại" });
+
+    await user.click(screen.getByRole("button", { name: "Đồng ý, đọc lại" }));
+    await user.click(await screen.findByRole("button", { name: "Bật mic" }));
+
+    await waitFor(() => {
+      expect(FakeSpeechRecognition.instances).toHaveLength(2);
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      FakeSpeechRecognition.instances[1].onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            length: 1,
+            0: { transcript: "méo" },
+          },
+        ],
+      });
+    });
+    expect(screen.getByText("Chưa chính xác, bé thử lại nhé!")).toBeInTheDocument();
+
+    speechServiceMock.transcribe.mockResolvedValueOnce({
+      text: "mèo",
+      language_code: "vi",
+      language_probability: 0.98,
+      words: [],
+    });
+    await user.click(await screen.findByRole("button", { name: "Tắt mic" }));
+
+    await waitFor(() => {
+      expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(2);
+      expect(services.readingService.finish).toHaveBeenCalledOnce();
+    });
+  });
+
   it("does not finish twice on compare or socket failure", async () => {
     class FakeSpeechRecognition {
       static instances: FakeSpeechRecognition[] = [];
