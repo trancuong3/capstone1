@@ -85,7 +85,8 @@ jobs:
             frontend/components/settings/account-settings-screen.tsx \
             frontend/components/support/help-support-screen.tsx \
             frontend/lib/api/reading-service.ts \
-            frontend/lib/api/support-service.ts \
+            frontend/lib/api/support-service.ts
+          git add -f -- \
             frontend/tests/layout/account-avatar-menu.test.tsx \
             frontend/tests/reading/reading-async-cleanup.test.tsx \
             frontend/tests/reading/reading-screen.test.tsx \
