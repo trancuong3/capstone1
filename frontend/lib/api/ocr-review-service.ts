@@ -33,10 +33,7 @@ export interface OcrReviewService {
     draftText: string,
     words: readonly AdminRevisionWordDTO[],
   ): Promise<AdminPageRevisionDetailDTO>;
-  aiCorrectText(
-    pageId: string,
-    draftText: string,
-  ): Promise<string>;
+  aiCorrectText(pageId: string, draftText: string): Promise<string>;
   aiGenerateQuestions(
     pageId: string,
     text: string,
