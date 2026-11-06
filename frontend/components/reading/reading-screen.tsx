@@ -960,8 +960,8 @@ export function ReadingScreen({
           console.error("Lỗi chuyển ghi âm thành văn bản:", error);
         }
       }
-        return null;
-      }
+      return null;
+    }
   }
 
   async function stopListeningAndTranscribe(): Promise<string> {
@@ -1684,9 +1684,7 @@ export function ReadingScreen({
     }
   }
 
-  function scheduleRetryCaptureStop(
-    candidate: RetryWordCandidate,
-  ): void {
+  function scheduleRetryCaptureStop(candidate: RetryWordCandidate): void {
     if (
       !retryRecorderActiveRef.current ||
       retryCaptureTimeoutRef.current !== null
@@ -1771,10 +1769,7 @@ export function ReadingScreen({
   async function stopRetryListeningAndTranscribe(
     candidate: RetryWordCandidate,
   ): Promise<void> {
-    if (
-      !retryModeRef.current ||
-      retryProcessingRef.current
-    ) {
+    if (!retryModeRef.current || retryProcessingRef.current) {
       return;
     }
 
@@ -1843,13 +1838,10 @@ export function ReadingScreen({
       }
 
       // Lần 1: STT bình thường, không dùng keyterms.
-      let transcription = await speechService.transcribe(
-        recording,
-        {
-          languageCode: "vi",
-          signal: controller.signal,
-        },
-      );
+      let transcription = await speechService.transcribe(recording, {
+        languageCode: "vi",
+        signal: controller.signal,
+      });
 
       if (
         !mountedRef.current ||
@@ -1862,34 +1854,22 @@ export function ReadingScreen({
 
       let transcript = transcription.text?.trim() ?? "";
 
-      let status = classifyRetryTranscript(
-        candidate.text,
-        transcript,
-      );
+      let status = classifyRetryTranscript(candidate.text, transcript);
 
       // Lần 2: chỉ chạy khi kết quả lần đầu không rõ.
       // Quan trọng: sử dụng lại chính recording cũ.
-      if (
-        status === "UNCERTAIN" ||
-        status === "NOT_RECOGNIZED"
-      ) {
-        console.info(
-          "[RETRY STT] Running same-audio keyterm fallback",
-          {
-            expectedWord: candidate.text,
-            firstTranscript: transcript,
-            firstStatus: status,
-          },
-        );
+      if (status === "UNCERTAIN" || status === "NOT_RECOGNIZED") {
+        console.info("[RETRY STT] Running same-audio keyterm fallback", {
+          expectedWord: candidate.text,
+          firstTranscript: transcript,
+          firstStatus: status,
+        });
 
-        transcription = await speechService.transcribe(
-          recording,
-          {
-            languageCode: "vi",
-            keyterms: [candidate.text],
-            signal: controller.signal,
-          },
-        );
+        transcription = await speechService.transcribe(recording, {
+          languageCode: "vi",
+          keyterms: [candidate.text],
+          signal: controller.signal,
+        });
 
         if (
           !mountedRef.current ||
@@ -1902,10 +1882,7 @@ export function ReadingScreen({
 
         transcript = transcription.text?.trim() ?? "";
 
-        status = classifyRetryTranscript(
-          candidate.text,
-          transcript,
-        );
+        status = classifyRetryTranscript(candidate.text, transcript);
       }
 
       setLatestTranscript(transcript);
@@ -1920,11 +1897,7 @@ export function ReadingScreen({
       if (status === "CORRECT") {
         advancePending = true;
 
-        confirmRetryWord(
-          candidate,
-          transcript,
-          true,
-        );
+        confirmRetryWord(candidate, transcript, true);
 
         return;
       }
@@ -1996,8 +1969,7 @@ export function ReadingScreen({
     // Nếu đây là lần restart do browser tự kết thúc,
     // không tạo bản ghi mới.
     const continuingCapture =
-      retryRecorderActiveRef.current &&
-      retryListeningWantedRef.current;
+      retryRecorderActiveRef.current && retryListeningWantedRef.current;
 
     const attemptId = ++retryAttemptIdRef.current;
 
@@ -2020,10 +1992,7 @@ export function ReadingScreen({
         await speechRecorder.start();
         retryRecorderActiveRef.current = true;
       } catch (error) {
-        console.warn(
-          "[RETRY RECORDER ERROR]",
-          error,
-        );
+        console.warn("[RETRY RECORDER ERROR]", error);
 
         retryRecorderActiveRef.current = false;
       }
@@ -2040,9 +2009,7 @@ export function ReadingScreen({
     }
 
     const win = window as unknown as WindowWithSpeech;
-    const SpeechRec =
-      win.SpeechRecognition ||
-      win.webkitSpeechRecognition;
+    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -2095,11 +2062,7 @@ export function ReadingScreen({
       const finalTranscripts: string[] = [];
 
       // Đọc tất cả kết quả final và các alternative.
-      for (
-        let index = 0;
-        index < event.results.length;
-        index += 1
-      ) {
+      for (let index = 0; index < event.results.length; index += 1) {
         const result = event.results[index];
 
         if (result.isFinal) {
@@ -2108,24 +2071,17 @@ export function ReadingScreen({
             alternativeIndex < result.length;
             alternativeIndex += 1
           ) {
-            const text =
-              result[alternativeIndex]?.transcript?.trim() ?? "";
+            const text = result[alternativeIndex]?.transcript?.trim() ?? "";
 
-            if (
-              text &&
-              !finalTranscripts.includes(text)
-            ) {
+            if (text && !finalTranscripts.includes(text)) {
               finalTranscripts.push(text);
             }
           }
         } else {
-          const text =
-            result[0]?.transcript?.trim() ?? "";
+          const text = result[0]?.transcript?.trim() ?? "";
 
           if (text) {
-            interim = [interim, text]
-              .filter(Boolean)
-              .join(" ");
+            interim = [interim, text].filter(Boolean).join(" ");
           }
         }
       }
@@ -2143,12 +2099,7 @@ export function ReadingScreen({
       setLatestTranscript(finalText);
 
       // Chấp nhận từ mục tiêu xuất hiện trong cụm từ ngắn.
-      if (
-        isRetryWordRecognized(
-          candidate.text,
-          finalTranscripts,
-        )
-      ) {
+      if (isRetryWordRecognized(candidate.text, finalTranscripts)) {
         confirmRetryWord(candidate, finalText);
         return;
       }
@@ -2159,23 +2110,17 @@ export function ReadingScreen({
       retryShouldRestartRef.current = true;
     };
 
-    recognition.onerror = (
-      event: BrowserSpeechErrorEvent,
-    ) => {
+    recognition.onerror = (event: BrowserSpeechErrorEvent) => {
       if (event.error === "aborted") {
         return;
       }
 
       if (event.error === "no-speech") {
-        retryShouldRestartRef.current =
-          retryListeningWantedRef.current;
+        retryShouldRestartRef.current = retryListeningWantedRef.current;
         return;
       }
 
-      console.warn(
-        "[RETRY SPEECH RECOGNITION ERROR]",
-        event.error,
-      );
+      console.warn("[RETRY SPEECH RECOGNITION ERROR]", event.error);
 
       if (
         event.error === "not-allowed" ||
@@ -2198,8 +2143,7 @@ export function ReadingScreen({
         setRetryFeedback("incorrect");
 
         const message =
-          event.error === "not-allowed" ||
-          event.error === "service-not-allowed"
+          event.error === "not-allowed" || event.error === "service-not-allowed"
             ? "Microphone chưa được cấp quyền. Hãy cho phép trình duyệt sử dụng microphone."
             : event.error === "audio-capture"
               ? "Không tìm thấy microphone. Hãy kiểm tra thiết bị ghi âm."
@@ -2216,17 +2160,11 @@ export function ReadingScreen({
         recognitionRef.current = null;
       }
 
-      if (
-        !mountedRef.current ||
-        !retryModeRef.current
-      ) {
+      if (!mountedRef.current || !retryModeRef.current) {
         return;
       }
 
-      if (
-        retryListeningWantedRef.current &&
-        retryShouldRestartRef.current
-      ) {
+      if (retryListeningWantedRef.current && retryShouldRestartRef.current) {
         // Chrome có thể kết thúc một phiên nhận diện
         // dù MediaRecorder vẫn đang thu âm.
         window.setTimeout(() => {
@@ -2262,10 +2200,7 @@ export function ReadingScreen({
 
       return true;
     } catch (error) {
-      if (
-        attemptId !== retryAttemptIdRef.current ||
-        !mountedRef.current
-      ) {
+      if (attemptId !== retryAttemptIdRef.current || !mountedRef.current) {
         return false;
       }
 
@@ -2273,10 +2208,7 @@ export function ReadingScreen({
         recognitionRef.current = null;
       }
 
-      console.warn(
-        "Không thể bắt đầu Browser SpeechRecognition:",
-        error,
-      );
+      console.warn("Không thể bắt đầu Browser SpeechRecognition:", error);
 
       // Browser recognition lỗi nhưng MediaRecorder vẫn chạy:
       // tiếp tục thu âm để backend nhận diện.
@@ -2307,7 +2239,6 @@ export function ReadingScreen({
       return false;
     }
   }
-
 
   async function beginRetryWord(position: number): Promise<void> {
     if (!mountedRef.current) return;
@@ -2530,8 +2461,13 @@ export function ReadingScreen({
       const engine = alignmentEngineRef.current;
 
       if (engine) {
-        const finalSnapshot = engine.finish();
-        applyRealtimeSnapshot(finalSnapshot);
+        const currentSnapshot = engine.getSnapshot();
+        if (
+          currentSnapshot.spokenWords.length > 0 ||
+          currentSnapshot.statusByWordId.size > 0
+        ) {
+          applyRealtimeSnapshot(engine.finish());
+        }
       }
       // 4. Lấy transcript theo từng trang.
       const pageBuckets = [...pageTranscriptsRef.current.values()]
@@ -2895,6 +2831,7 @@ export function ReadingScreen({
         onReadWord={
           retryMode ? () => void handleReadSample() : handleReadCurrentWord
         }
+        onSkipRetryWord={skipRetryWord}
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
         page={page}
