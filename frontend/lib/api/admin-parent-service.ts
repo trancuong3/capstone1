@@ -30,7 +30,10 @@ export interface AdminParentService {
     signal?: AbortSignal,
   ): Promise<AdminParentDetailDTO>;
   create(input: AdminParentCreateInput): Promise<AdminParentDetailDTO>;
-  update(parentId: string, input: AdminParentUpdateInput): Promise<AdminParentDetailDTO>;
+  update(
+    parentId: string,
+    input: AdminParentUpdateInput,
+  ): Promise<AdminParentDetailDTO>;
   deactivate(parentId: string): Promise<{ id: string; active: 0 }>;
 }
 
@@ -74,7 +77,6 @@ const parentDetailResponseSchema = z.object({
     "lookup_failed",
   ]),
 });
-
 
 export function createAdminParentService(): AdminParentService {
   return {

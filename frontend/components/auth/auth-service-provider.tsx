@@ -14,13 +14,9 @@ import {
   type AuthService,
 } from "@/lib/api/auth-service";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
-import type {
-  AuthSessionSnapshot,
-  AuthStateEvent,
-} from "@/types/auth";
+import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 
-export const AuthServiceContext =
-  createContext<AuthService | null>(null);
+export const AuthServiceContext = createContext<AuthService | null>(null);
 
 export interface AuthRuntimeState {
   initializationFailure: AuthFailureReason | null;
@@ -40,10 +36,9 @@ const defaultAuthRuntimeState: AuthRuntimeState = {
   status: "initializing",
 };
 
-export const AuthRuntimeContext =
-  createContext<AuthRuntimeState>(
-    defaultAuthRuntimeState,
-  );
+export const AuthRuntimeContext = createContext<AuthRuntimeState>(
+  defaultAuthRuntimeState,
+);
 
 interface AuthServiceProviderProps {
   children: ReactNode;
@@ -59,46 +54,36 @@ interface AuthServiceProviderProps {
   scenario: string;
 }
 
-export function AuthServiceProvider({
-  children,
-}: AuthServiceProviderProps) {
-  const service = useMemo<AuthService>(
-    () => createSupabaseAuthService(),
-    [],
-  );
+export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
+  const service = useMemo<AuthService>(() => createSupabaseAuthService(), []);
 
-  const [runtime, setRuntime] =
-    useState<AuthRuntimeState>(() => ({
-      ...defaultAuthRuntimeState,
-      mode: "supabase",
-      status: "initializing",
-    }));
+  const [runtime, setRuntime] = useState<AuthRuntimeState>(() => ({
+    ...defaultAuthRuntimeState,
+    mode: "supabase",
+    status: "initializing",
+  }));
 
   useEffect(() => {
     let isActive = true;
 
-    const unsubscribe =
-      service.onAuthStateChange(
-        (event, session) => {
-          if (!isActive) return;
+    const unsubscribe = service.onAuthStateChange((event, session) => {
+      if (!isActive) return;
 
-          setRuntime((current) => ({
-            ...current,
+      setRuntime((current) => ({
+        ...current,
 
-            isPasswordRecovery:
-              event === "PASSWORD_RECOVERY"
-                ? Boolean(session)
-                : event === "SIGNED_IN" ||
-                    event === "SIGNED_OUT"
-                  ? false
-                  : current.isPasswordRecovery,
+        isPasswordRecovery:
+          event === "PASSWORD_RECOVERY"
+            ? Boolean(session)
+            : event === "SIGNED_IN" || event === "SIGNED_OUT"
+              ? false
+              : current.isPasswordRecovery,
 
-            lastEvent: event,
-            mode: "supabase",
-            session,
-          }));
-        },
-      );
+        lastEvent: event,
+        mode: "supabase",
+        session,
+      }));
+    });
 
     void service
       .initialize()
@@ -117,9 +102,7 @@ export function AuthServiceProvider({
         setRuntime((current) => ({
           ...current,
           initializationFailure:
-            error instanceof AuthServiceError
-              ? error.reason
-              : "unexpected",
+            error instanceof AuthServiceError ? error.reason : "unexpected",
           mode: "supabase",
           status: "error",
         }));

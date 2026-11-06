@@ -61,14 +61,9 @@ describe("AdminParentDetailScreen", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(screen.getByText("0900000000")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Be An" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Be An" })).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(getById).toHaveBeenCalledWith(
-      PARENT_ID,
-      expect.any(AbortSignal),
-    );
+    expect(getById).toHaveBeenCalledWith(PARENT_ID, expect.any(AbortSignal));
   });
 
   it("shows missing contact fields without breaking the detail screen", async () => {
@@ -81,9 +76,7 @@ describe("AdminParentDetailScreen", () => {
     renderScreen();
 
     expect(await screen.findAllByText("Chưa cung cấp")).toHaveLength(2);
-    expect(
-      screen.getByRole("heading", { name: "Be An" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Be An" })).toBeInTheDocument();
   });
 
   it("explains when server-side Auth contact lookup is not configured", async () => {
@@ -174,7 +167,8 @@ describe("AdminParentDetailScreen", () => {
         display_name: "Nguyen Van Updated",
       });
     });
-    expect(await screen.findByText("Đã cập nhật hồ sơ Parent.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã cập nhật hồ sơ Parent."),
+    ).toBeInTheDocument();
   });
-
 });

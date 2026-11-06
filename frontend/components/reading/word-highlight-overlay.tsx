@@ -57,9 +57,7 @@ function getWordStatus(
     return "hesitation";
   }
 
-  if (
-    wordId === currentWordId
-  ) {
+  if (wordId === currentWordId) {
     return "current";
   }
 
@@ -109,9 +107,7 @@ export function WordHighlightOverlay({
   hesitationWordIds,
   previewSnapshot,
 }: WordHighlightOverlayProps) {
-  const word = page.words.find(
-    (item) => item.word_id === currentWordId,
-  );
+  const word = page.words.find((item) => item.word_id === currentWordId);
 
   return (
     <>
