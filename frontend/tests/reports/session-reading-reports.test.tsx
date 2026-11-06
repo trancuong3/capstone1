@@ -108,9 +108,12 @@ describe("SessionReadingReports", () => {
     expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Đọc nhầm 1/ }),
-    );
+    const substitutionMetric = await screen.findByText("Đọc nhầm");
+    const substitutionMetricButton = substitutionMetric.closest("button");
+    if (!substitutionMetricButton) {
+      throw new Error("The substitution metric must be an interactive button.");
+    }
+    fireEvent.click(substitutionMetricButton);
     expect(screen.getByText("khỏe → khóe")).toBeInTheDocument();
     expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
