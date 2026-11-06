@@ -108,9 +108,9 @@ describe("SessionReadingReports", () => {
     expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
-    await screen.findByRole("button", { name: /Đọc nhầm 1/ }).then(async button => {
-      await import("@testing-library/react").then(({ fireEvent }) => fireEvent.click(button));
-    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Đọc nhầm 1/ }),
+    );
     expect(screen.getByText("khỏe → khóe")).toBeInTheDocument();
     expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
