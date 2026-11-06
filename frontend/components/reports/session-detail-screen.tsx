@@ -246,11 +246,16 @@ export function SessionDetailScreen({
                     : `${detail.pages_completed} trang`,
                 ],
               ]),
-          ["Độ chính xác", formatPercent(metrics?.accuracy_percent ?? null)],
+          [
+            "Độ chính xác",
+            metrics?.accuracy_percent == null
+              ? "Chưa ghi nhận"
+              : formatPercent(metrics.accuracy_percent),
+          ],
           [
             "Tốc độ đọc",
             metrics?.reading_wpm == null
-              ? "Chưa đủ dữ liệu"
+              ? "Chưa ghi nhận"
               : `${metrics.reading_wpm} từ/phút`,
           ],
           [

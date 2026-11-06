@@ -147,6 +147,11 @@ const RETRY_CAPTURE_MIN_MS = 3_500;
 const RETRY_CAPTURE_SILENCE_MS = 1_500;
 const RETRY_CAPTURE_POLL_MS = 200;
 
+// Measure recorder duration with a monotonic clock from capture callbacks.
+function getRetryCaptureTimeMs(): number {
+  return performance.now();
+}
+
 export function ReadingScreen({
   initialPageId,
   initialUiState,
@@ -187,6 +192,7 @@ export function ReadingScreen({
   const [comparisonResult, setComparisonResult] =
     useState<ComparisonResult | null>(null);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -218,6 +224,9 @@ export function ReadingScreen({
   const failedWordsSetRef = useRef<Set<string>>(new Set());
   const transcriptsListRef = useRef<string[]>([]);
   const alignmentEngineRef = useRef<RealtimeAlignmentEngine | null>(null);
+  const autoCompletePageAfterFinalWordRef = useRef<
+    (snapshot: RealtimeAlignmentSnapshot) => Promise<void>
+  >(async () => undefined);
   const lastPreviewWordIndexRef = useRef(-1);
   const skippedWordIdsRef = useRef<Set<string>>(new Set());
   const repeatedWordIdsRef = useRef<Set<string>>(new Set());
@@ -319,6 +328,7 @@ export function ReadingScreen({
       const trimmed = text.trim();
       if (!trimmed || assistantAudioPlayingRef.current) return;
 
+      setHasPageTranscripts(true);
       transcriptsListRef.current.push(trimmed);
 
       const bucketKey = `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
@@ -841,7 +851,7 @@ export function ReadingScreen({
             }
 
             if (latestFinalText.trim() && !interimText.trim()) {
-              void autoCompletePageAfterFinalWord(engine.getSnapshot());
+              void autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
             }
           };
 
@@ -1321,7 +1331,7 @@ export function ReadingScreen({
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
         const snapshot = alignmentEngineRef.current?.getSnapshot();
-        if (snapshot) await autoCompletePageAfterFinalWord(snapshot);
+        if (snapshot) await autoCompletePageAfterFinalWordRef.current(snapshot);
       } finally {
         if (mountedRef.current) {
           setIsMicRecording(false);
@@ -1364,6 +1374,7 @@ export function ReadingScreen({
       // Xóa dữ liệu transcript của buổi đọc mới.
       transcriptsListRef.current = [];
       pageTranscriptsRef.current.clear();
+      setHasPageTranscripts(false);
       browserTranscriptCollectorRef.current.reset();
       retryWordsByIdRef.current.clear();
       retryCandidatesRef.current = [];
@@ -1661,6 +1672,10 @@ export function ReadingScreen({
       if (mountedRef.current) setIsBusy(false);
     }
   }
+
+  useEffect(() => {
+    autoCompletePageAfterFinalWordRef.current = autoCompletePageAfterFinalWord;
+  });
 
   async function retryPageMatch() {
     if (isBusy) return;
@@ -1986,7 +2001,7 @@ export function ReadingScreen({
       return;
     }
 
-    retryCaptureStartedAtRef.current = Date.now();
+    retryCaptureStartedAtRef.current = getRetryCaptureTimeMs();
     retrySpeechObservedRef.current = false;
     retrySilenceStartedAtRef.current = null;
 
@@ -2001,7 +2016,7 @@ export function ReadingScreen({
         return;
       }
 
-      const now = Date.now();
+      const now = getRetryCaptureTimeMs();
       const elapsed = now - retryCaptureStartedAtRef.current;
       if (speechRecorder.getIsSpeaking()) {
         // In the browser-recognition path, wait for a recognition result before
@@ -3318,11 +3333,7 @@ export function ReadingScreen({
         summary={sessionSummary ?? completion}
         reportError={comparisonError}
         onRetryReports={
-          [...pageTranscriptsRef.current.values()].some((bucket) =>
-            bucket.segments.some((segment) => segment.trim()),
-          )
-            ? () => void retrySavingPageReports()
-            : undefined
+          hasPageTranscripts ? () => void retrySavingPageReports() : undefined
         }
         isRetryingReports={isRetryingReports}
       />

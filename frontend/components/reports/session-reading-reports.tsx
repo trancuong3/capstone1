@@ -189,6 +189,13 @@ function ReportCard({
         )}
       </div>
 
+      <div className="rounded-control border border-border bg-white p-4">
+        <p className="text-sm font-bold text-muted">Lời đọc đã lưu</p>
+        <p className="mt-1 text-base text-ink">
+          {report.transcript.trim() || "Chưa ghi nhận"}
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
         {metrics.map((metric) => (
           <button
@@ -285,6 +292,12 @@ export function SessionReadingReports({
                 sessionId,
                 report.page_revision_id,
               );
+              if (
+                page.page_id !== report.page_id ||
+                page.page_revision_id !== report.page_revision_id
+              ) {
+                throw new Error("The API returned a different historical page revision.");
+              }
               return [
                 reportKey(report.page_id, report.page_revision_id),
                 page,
@@ -369,7 +382,7 @@ export function SessionReadingReports({
       ) : null}
       {state.status === "empty" ? (
         <p className="rounded-control bg-sky p-5 text-label text-muted">
-          Buổi đọc này chưa có báo cáo theo trang.
+          Buổi đọc này chưa có báo cáo đối chiếu được lưu.
         </p>
       ) : null}
       {state.status === "unavailable" ? (
@@ -386,8 +399,10 @@ export function SessionReadingReports({
       {state.status === "ready" ? (
         <>
           {state.partial ? (
-            <StatusMessage tone="warning">
-              Một số nội dung trang chưa tải được; các thống kê đã lưu vẫn còn.
+            <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
+              Một số nội dung trang hoặc revision lịch sử chưa tải được. Không
+              thay bằng trang mới hơn; transcript, alignment và thống kê đã lưu
+              vẫn được giữ bên dưới.
             </StatusMessage>
           ) : null}
           {(() => {
@@ -427,7 +442,7 @@ export function SessionReadingReports({
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" /> Tải lại báo cáo
+          <RefreshCw aria-hidden="true" className="size-5" /> Thử tải lại báo cáo
         </Button>
       ) : null}
     </section>

@@ -111,6 +111,28 @@ describe("SessionReadingReports", () => {
     );
   });
 
+  it("does not substitute a different revision returned for a historical report", async () => {
+    comparisonApi.getReadingPage.mockResolvedValueOnce({
+      ...historicalPage,
+      page_revision_id: "35000000-0000-4000-8000-000000000001",
+    });
+    render(<SessionReadingReports sessionId={SESSION_ID} />);
+
+    expect(
+      await screen.findByText("Báo cáo chỉ tải được một phần"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Không tải được nội dung của đúng revision đã đọc/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Bé khỏe đang đọc.")).not.toBeInTheDocument();
+    expect(comparisonApi.getReadingPage).toHaveBeenCalledWith(
+      PAGE_ID,
+      SESSION_ID,
+      REVISION_ID,
+    );
+  });
+
   it("shows an accurate empty state when the database has no report", async () => {
     comparisonApi.getSessionReports.mockResolvedValueOnce({
       session_id: SESSION_ID,

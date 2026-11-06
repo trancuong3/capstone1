@@ -191,7 +191,7 @@ describe("shared header and footer", () => {
   });
 
   it.each(["/books", "/books/book-1", "/reading/session-1"])(
-    "keeps the immersive header hidden and moves the Parent footer after the content on %s",
+    "keeps shared Parent navigation visible without duplicate navigation on %s",
     (pathname) => {
       navigationMock.pathname = pathname;
       const { container } = render(
@@ -202,7 +202,12 @@ describe("shared header and footer", () => {
           createAuthServiceFixture(),
         ),
       );
-      expect(container.querySelector("header")).toHaveClass("hidden");
+      expect(container.querySelector("header")).not.toHaveClass("hidden");
+      expect(
+        screen.getAllByRole("navigation", {
+          name: "Điều hướng dành cho ba mẹ",
+        }),
+      ).toHaveLength(1);
       expect(screen.getByRole("main")).toHaveTextContent("Không gian đọc");
       expect(screen.getByRole("contentinfo")).toBeInTheDocument();
       expect(screen.getAllByRole("contentinfo")).toHaveLength(1);

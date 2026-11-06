@@ -535,6 +535,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
+    await screen.findByLabelText("Trang sách 5");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      ).toBeEnabled();
+    });
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
@@ -548,6 +554,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(retryConsent);
     await screen.findByText(/Bé đọc lại từ/);
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFour.page_id,
+      );
+    });
     await waitFor(() => {
       expect(speechRecorderMock.prepare).toHaveBeenCalledOnce();
       expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
@@ -649,11 +661,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
     services.readingService.getCurrentPage
       .mockResolvedValueOnce(pageFour)
-      .mockResolvedValueOnce(pageFive)
       .mockResolvedValueOnce(pageFour);
-    services.readingService.navigateToPage
-      .mockResolvedValueOnce(pageProgressFixture)
-      .mockRejectedValueOnce(new Error("temporary retry navigation failure"));
+    services.readingService.navigateToPage.mockRejectedValueOnce(
+      new Error("temporary retry navigation failure"),
+    );
 
     const user = userEvent.setup();
     renderReading("ready");
@@ -683,10 +694,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Trang tiếp theo" }),
-    );
     await screen.findByLabelText("Trang sách 5");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      ).toBeEnabled();
+    });
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
@@ -697,12 +710,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     await screen.findByText(/Bé đọc lại từ/);
     await waitFor(() => {
-      expect(services.readingService.navigateToPage).toHaveBeenNthCalledWith(
-        2,
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
         TEST_SESSION_ID,
         pageFour.page_id,
       );
     });
+    expect(services.readingService.navigateToPage).toHaveBeenCalledOnce();
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
     expect(screen.getByText(/Chưa mở lại được trang 4/)).toBeInTheDocument();
     expect(
@@ -715,6 +728,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(services.readingService.finish).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Thử mở lại trang" }));
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledTimes(2);
+      expect(services.readingService.navigateToPage).toHaveBeenNthCalledWith(
+        2,
+        TEST_SESSION_ID,
+        pageFour.page_id,
+      );
+    });
     const restoredPage = await screen.findByLabelText("Trang sách 4");
     await waitFor(() => {
       expect(restoredPage).toHaveAttribute(
