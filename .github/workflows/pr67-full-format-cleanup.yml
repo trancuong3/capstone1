@@ -1,0 +1,64 @@
+name: PR 67 temporary full frontend formatting cleanup
+
+on:
+  push:
+    branches:
+      - feature/reading-retry-audio-report-history-20261106
+    paths:
+      - .github/workflows/pr67-full-format-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format-cleanup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Format the 16 pre-existing Prettier violations
+        run: |
+          npx prettier --write \
+            "app/(app)/children/new/page.tsx" \
+            "app/(app)/children/page.tsx" \
+            "app/(app)/dashboard/page.tsx" \
+            components/admin/admin-parent-detail-screen.tsx \
+            components/admin/admin-parents-screen.tsx \
+            components/auth/auth-service-provider.tsx \
+            components/reading/book-page-viewer.tsx \
+            components/reading/ReadingReport.tsx \
+            components/reading/word-highlight-overlay.tsx \
+            lib/api/admin-parent-service.ts \
+            lib/api/comparison-service.ts \
+            lib/reading/realtime-alignment.ts \
+            lib/supabase/config.ts \
+            tests/admin/admin-parent-detail-screen.test.tsx \
+            tests/admin/admin-parents-screen.test.tsx \
+            tsconfig.admin-parent-crud.json
+          git diff --check
+      - name: Commit formatting-only changes
+        working-directory: .
+        shell: bash
+        run: |
+          git diff --check
+          if git diff --quiet -- frontend; then
+            echo "The frontend repository already matches Prettier output."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f -u -- frontend/
+          git diff --cached --check
+          git commit -m "style: format remaining frontend baseline files"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
