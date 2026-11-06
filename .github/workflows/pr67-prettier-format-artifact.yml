@@ -8,7 +8,7 @@ on:
       - .github/workflows/pr67-prettier-format-artifact.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   format-export:
@@ -31,6 +31,19 @@ jobs:
           npx prettier --write components/reading/reading-screen.tsx
           npx prettier --write components/reports/session-reading-reports.tsx
           npx prettier --write tests/reports/session-reading-reports.test.tsx
+      - name: Commit only Prettier output
+        shell: bash
+        run: |
+          git diff --check
+          if git diff --quiet -- frontend/components/reading/reading-screen.tsx frontend/components/reports/session-reading-reports.tsx frontend/tests/reports/session-reading-reports.test.tsx; then
+            echo "The three files already match Prettier output."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/components/reading/reading-screen.tsx frontend/components/reports/session-reading-reports.tsx frontend/tests/reports/session-reading-reports.test.tsx
+          git commit -m "style: format PR 67 reading and report files"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
       - name: Export formatted files
         uses: actions/upload-artifact@v4
         with:
