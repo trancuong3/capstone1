@@ -85,12 +85,12 @@ const historicalPage: ReadingPage = {
     word_id: `50000000-0000-4000-8000-00000000000${index + 1}`,
     word_index: index,
     text,
-    bbox: [0.1 + index * 0.15, 0.2, 0.1, 0.05] as [
-      number,
-      number,
-      number,
-      number,
-    ],
+    bbox: [
+      0.1 + index * 0.15,
+      0.2,
+      0.1,
+      0.05,
+    ] as [number, number, number, number],
   })),
 };
 

@@ -3345,7 +3345,9 @@ export function ReadingScreen({
         summary={sessionSummary ?? completion}
         reportError={comparisonError}
         onRetryReports={
-          hasPageTranscripts ? () => void retrySavingPageReports() : undefined
+          hasPageTranscripts
+            ? () => void retrySavingPageReports()
+            : undefined
         }
         isRetryingReports={isRetryingReports}
       />
