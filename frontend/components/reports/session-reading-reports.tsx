@@ -160,9 +160,7 @@ function ReportCard({
         ) : null}
       </div>
 
-      <div
-        className="rounded-card border border-[#e3d7bf] bg-[#fff8ea] p-3 sm:p-5"
-      >
+      <div className="rounded-card border border-[#e3d7bf] bg-[#fff8ea] p-3 sm:p-5">
         {page ? (
           <article
             className="relative mx-auto flex aspect-[3/2] min-h-[280px] w-full max-w-[1008px] flex-col overflow-hidden rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
@@ -170,9 +168,7 @@ function ReportCard({
             data-page-revision-id={page.page_revision_id}
           >
             <header className="flex items-center justify-between gap-2">
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800"
-              >
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
                 <span className="size-2 rounded-full bg-emerald-500" />
                 Nội dung OCR đã xác minh
               </span>
@@ -186,9 +182,7 @@ function ReportCard({
             </p>
           </article>
         ) : (
-          <div
-            className="flex min-h-48 items-center justify-center rounded-control bg-white/70 p-5 text-center text-sm text-muted"
-          >
+          <div className="flex min-h-48 items-center justify-center rounded-control bg-white/70 p-5 text-center text-sm text-muted">
             Không tải được nội dung của đúng revision đã đọc. Báo cáo và thống
             kê vẫn được giữ nguyên.
           </div>

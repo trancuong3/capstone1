@@ -5,9 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import {
-  ComprehensionQuestion,
-} from "@/components/reading/comprehension-question";
+import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
@@ -16,9 +14,7 @@ import {
   BrowserTranscriptCollector,
   resolveTranscriptForSegment,
 } from "@/lib/reading/browser-transcript-collector";
-import {
-  ReadingStatusDialog,
-} from "@/components/reading/reading-status-dialog";
+import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
@@ -335,8 +331,7 @@ export function ReadingScreen({
       setHasPageTranscripts(true);
       transcriptsListRef.current.push(trimmed);
 
-      const bucketKey =
-        `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
+      const bucketKey = `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
       let bucket = pageTranscriptsRef.current.get(bucketKey);
       if (!bucket) {
         bucket = {
@@ -1683,8 +1678,7 @@ export function ReadingScreen({
   }
 
   useEffect(() => {
-    autoCompletePageAfterFinalWordRef.current =
-      autoCompletePageAfterFinalWord;
+    autoCompletePageAfterFinalWordRef.current = autoCompletePageAfterFinalWord;
   });
 
   async function retryPageMatch() {
@@ -3262,9 +3256,7 @@ export function ReadingScreen({
       : "Chưa mở được buổi đọc";
 
     return (
-      <section
-        className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4"
-      >
+      <section className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4">
         <h1 className="text-heading font-extrabold text-ink">{title}</h1>
         <StatusMessage tone="error">
           {notFound
@@ -3345,9 +3337,7 @@ export function ReadingScreen({
         summary={sessionSummary ?? completion}
         reportError={comparisonError}
         onRetryReports={
-          hasPageTranscripts
-            ? () => void retrySavingPageReports()
-            : undefined
+          hasPageTranscripts ? () => void retrySavingPageReports() : undefined
         }
         isRetryingReports={isRetryingReports}
       />
@@ -3361,13 +3351,9 @@ export function ReadingScreen({
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
-      <div
-        className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8"
-      >
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
         {pageProgress ? (
-          <div
-            className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
-          >
+          <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="font-bold text-ink">
                 Phạm vi đọc: Trang {pageProgress.start_page_number}–
@@ -3533,9 +3519,7 @@ export function ReadingScreen({
         comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (
-          <StatusBanner
-            className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2"
-          >
+          <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
           </StatusBanner>
         ) : null}
