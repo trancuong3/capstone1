@@ -1,0 +1,42 @@
+name: PR 67 temporary Prettier formatting export
+
+on:
+  push:
+    branches:
+      - feature/reading-retry-audio-report-history-20261106
+    paths:
+      - .github/workflows/pr67-prettier-format-artifact.yml
+
+permissions:
+  contents: read
+
+jobs:
+  format-export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Format the three CI-reported files
+        working-directory: frontend
+        run: |
+          npx prettier --write components/reading/reading-screen.tsx
+          npx prettier --write components/reports/session-reading-reports.tsx
+          npx prettier --write tests/reports/session-reading-reports.test.tsx
+      - name: Export formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr67-prettier-formatted-files
+          path: |
+            frontend/components/reading/reading-screen.tsx
+            frontend/components/reports/session-reading-reports.tsx
+            frontend/tests/reports/session-reading-reports.test.tsx
+          if-no-files-found: error
