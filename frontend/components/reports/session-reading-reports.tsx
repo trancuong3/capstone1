@@ -1,10 +1,11 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { BookPageContent } from "@/components/reading/book-page-content";
 import {
   getReadingPage,
   getSessionReports,
@@ -12,7 +13,6 @@ import {
   type SavedReadingReport,
 } from "@/lib/api/comparison-service";
 import { isServiceError } from "@/lib/api/service-error";
-import { formatHistoryDateTime } from "@/lib/utils/report-mappers";
 
 type ReportsState =
   | { readonly status: "loading" }
@@ -26,132 +26,219 @@ type ReportsState =
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
+type MetricKey =
+  "correct" | "missing" | "substitution" | "extra" | "repeated" | "hesitation";
+
+interface ReportMetric {
+  readonly key: MetricKey;
+  readonly label: string;
+  readonly count: number;
+  readonly words: readonly string[];
+  readonly color: string;
+}
+
 function reportKey(pageId: string, revisionId: string): string {
   return `${pageId}:${revisionId}`;
 }
 
-function renderAlignmentWords(
-  report: SavedReadingReport,
-  status: "MATCH" | "SUBSTITUTE" | "DELETE" | "INSERT",
-): string[] {
-  return report.alignment
-    .filter((item) => item.status === status)
-    .map((item) => {
-      if (status === "SUBSTITUTE") {
-        return `${item.book_word ?? "?"} → ${item.spoken_word ?? "?"}`;
-      }
-      return status === "DELETE"
-        ? (item.book_word ?? "")
-        : (item.spoken_word ?? item.book_word ?? "");
-    })
+function reportMetrics(report: SavedReadingReport): readonly ReportMetric[] {
+  const correct = report.alignment
+    .filter((item) => item.status === "MATCH")
+    .map((item) => item.book_word ?? item.spoken_word ?? "")
     .filter(Boolean);
+  const missing = report.summary.missing_words;
+  const substitutions = report.summary.substitutions.map(
+    (item) => `${item.book_word} → ${item.spoken_word}`,
+  );
+  const extra = report.summary.extra_words;
+  const repeated = report.summary.repeated_words;
+  const hesitation = report.summary.hesitations.map(
+    (item) =>
+      `${item.after_word} → ${item.before_word} · ${item.pause.toFixed(1)} giây`,
+  );
+
+  return [
+    {
+      key: "correct",
+      label: "Đọc đúng",
+      count: correct.length,
+      words: correct,
+      color: "text-emerald-700",
+    },
+    {
+      key: "missing",
+      label: "Từ bỏ",
+      count: missing.length,
+      words: missing,
+      color: "text-red-700",
+    },
+    {
+      key: "substitution",
+      label: "Đọc nhầm",
+      count: substitutions.length,
+      words: substitutions,
+      color: "text-orange-700",
+    },
+    {
+      key: "extra",
+      label: "Đọc thêm",
+      count: extra.length,
+      words: extra,
+      color: "text-violet-700",
+    },
+    {
+      key: "repeated",
+      label: "Lặp từ",
+      count: report.summary.repeated_count,
+      words: repeated,
+      color: "text-purple-700",
+    },
+    {
+      key: "hesitation",
+      label: "Ngập ngừng",
+      count: report.summary.hesitations.length,
+      words: hesitation,
+      color: "text-blue-700",
+    },
+  ];
 }
 
 function ReportCard({
   report,
   page,
+  reportNumber,
+  reportCount,
+  selectedMetric,
+  onSelectMetric,
+  onPrevious,
+  onNext,
 }: {
   readonly report: SavedReadingReport;
   readonly page?: ReadingPage;
+  readonly reportNumber: number;
+  readonly reportCount: number;
+  readonly selectedMetric: MetricKey | null;
+  readonly onSelectMetric: (key: MetricKey) => void;
+  readonly onPrevious: () => void;
+  readonly onNext: () => void;
 }) {
-  const referenceText =
-    page?.text?.trim() || page?.words.map((word) => word.text).join(" ") || "";
-  const matched = renderAlignmentWords(report, "MATCH");
-  const substitutions = renderAlignmentWords(report, "SUBSTITUTE");
-  const omitted = renderAlignmentWords(report, "DELETE");
-  const extra = renderAlignmentWords(report, "INSERT");
+  const metrics = reportMetrics(report);
+  const activeMetric = metrics.find((metric) => metric.key === selectedMetric);
 
   return (
-    <article className="rounded-card border border-border bg-white p-5 sm:p-6">
-      <header className="flex flex-col gap-1">
-        <h3 className="text-xl font-extrabold text-ink">
-          {page ? `Trang ${page.page_number}` : "Trang chưa tải được"}
-        </h3>
-        <p className="break-all text-sm text-muted">
-          Revision đã đọc: <code>{report.page_revision_id}</code>
-        </p>
-        <p className="text-sm text-muted">
-          Báo cáo được lưu: {formatHistoryDateTime(report.created_at)}
-        </p>
-      </header>
-
-      <dl className="mt-4 grid gap-4">
+    <article className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <dt className="font-bold text-ink">Nội dung trang đã đọc</dt>
-          <dd className="mt-1 whitespace-pre-wrap text-label text-muted">
-            {referenceText ||
-              "Không tải được nội dung của revision lịch sử này. ViRead không thay bằng trang mới hơn."}
-          </dd>
-        </div>
-        <div>
-          <dt className="font-bold text-ink">Lời bé đọc</dt>
-          <dd className="mt-1 whitespace-pre-wrap text-label text-muted">
-            {report.transcript || "Báo cáo không lưu transcript."}
-          </dd>
-        </div>
-      </dl>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <WordGroup
-          title="Đọc đúng"
-          words={matched}
-          empty="Chưa ghi nhận từ đúng."
-        />
-        <WordGroup
-          title="Đọc nhầm hoặc thay từ"
-          words={substitutions}
-          empty="Không ghi nhận từ thay thế."
-        />
-        <WordGroup
-          title="Bỏ sót"
-          words={omitted}
-          empty="Không ghi nhận từ bị bỏ sót."
-        />
-        <WordGroup
-          title="Đọc thêm"
-          words={extra}
-          empty="Không ghi nhận từ đọc thêm."
-        />
-      </div>
-
-      <div className="mt-4 rounded-control bg-sky p-4 text-label text-ink">
-        <p>
-          Kết quả căn chỉnh: {report.alignment.length} mục · Khoảng cách:{" "}
-          {report.distance}
-        </p>
-        <p className="mt-1">
-          Tóm tắt đã lưu: {report.summary.missing_words.length} từ bỏ sót,{" "}
-          {report.summary.extra_words.length} từ đọc thêm,{" "}
-          {report.summary.substitutions.length} từ thay thế,{" "}
-          {report.summary.repeated_count} lần lặp.
-        </p>
-        {report.summary.hesitation_seconds !== null ? (
-          <p className="mt-1">
-            Thời gian ngập ngừng đã lưu: {report.summary.hesitation_seconds}{" "}
-            giây.
+          <h3 className="text-xl font-extrabold text-ink">
+            {page ? `Trang ${page.page_number}` : "Báo cáo trang"}
+          </h3>
+          <p className="text-sm text-muted">
+            {reportNumber} / {reportCount} trang có báo cáo
           </p>
+        </div>
+        {reportCount > 1 ? (
+          <nav aria-label="Chuyển báo cáo trang" className="flex gap-2">
+            <button
+              aria-label="Báo cáo trang trước"
+              className="inline-flex size-11 items-center justify-center rounded-control border border-border bg-white text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={reportNumber <= 1}
+              onClick={onPrevious}
+              type="button"
+            >
+              <ChevronLeft aria-hidden="true" className="size-5" />
+            </button>
+            <button
+              aria-label="Báo cáo trang tiếp theo"
+              className="inline-flex size-11 items-center justify-center rounded-control border border-border bg-white text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={reportNumber >= reportCount}
+              onClick={onNext}
+              type="button"
+            >
+              <ChevronRight aria-hidden="true" className="size-5" />
+            </button>
+          </nav>
         ) : null}
       </div>
-    </article>
-  );
-}
 
-function WordGroup({
-  title,
-  words,
-  empty,
-}: {
-  readonly title: string;
-  readonly words: readonly string[];
-  readonly empty: string;
-}) {
-  return (
-    <section className="rounded-control border border-border p-3">
-      <h4 className="font-bold text-ink">{title}</h4>
-      <p className="mt-1 text-label text-muted">
-        {words.length > 0 ? words.join(", ") : empty}
-      </p>
-    </section>
+      <div className="rounded-card border border-[#e3d7bf] bg-[#fff8ea] p-3 sm:p-5">
+        {page ? (
+          <article
+            className="relative mx-auto flex aspect-[3/2] min-h-[280px] w-full max-w-[1008px] flex-col overflow-hidden rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
+            data-page-id={page.page_id}
+            data-page-revision-id={page.page_revision_id}
+          >
+            <header className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                Nội dung OCR đã xác minh
+              </span>
+              <span className="text-sm font-semibold text-muted">
+                Trang {page.page_number}
+              </span>
+            </header>
+            <BookPageContent comparisonResult={report} page={page} readOnly />
+            <p className="mt-2 text-right text-sm text-muted">
+              {page.page_number}
+            </p>
+          </article>
+        ) : (
+          <div className="flex min-h-48 items-center justify-center rounded-control bg-white/70 p-5 text-center text-sm text-muted">
+            Không tải được nội dung của đúng revision đã đọc. Báo cáo và thống
+            kê vẫn được giữ nguyên.
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+        {metrics.map((metric) => (
+          <button
+            aria-expanded={selectedMetric === metric.key}
+            className={`min-h-20 rounded-control border p-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+              selectedMetric === metric.key
+                ? "border-primary bg-sky"
+                : "border-border bg-white hover:bg-surface"
+            }`}
+            key={metric.key}
+            onClick={() => onSelectMetric(metric.key)}
+            type="button"
+          >
+            <span className={`block text-sm font-semibold ${metric.color}`}>
+              {metric.label}
+            </span>
+            <span className="mt-1 block text-2xl font-extrabold text-ink">
+              {metric.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {activeMetric ? (
+        <section
+          aria-live="polite"
+          className="rounded-card border border-border bg-white p-4"
+        >
+          <h4 className={`font-extrabold ${activeMetric.color}`}>
+            {activeMetric.label} · {activeMetric.count}
+          </h4>
+          {activeMetric.words.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {activeMetric.words.map((word, index) => (
+                <li
+                  className="rounded-full bg-surface px-3 py-1.5 text-sm font-semibold text-ink"
+                  key={`${word}-${index}`}
+                >
+                  {word}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-muted">
+              Không có từ nào trong mục này.
+            </p>
+          )}
+        </section>
+      ) : null}
+    </article>
   );
 }
 
@@ -161,12 +248,16 @@ export function SessionReadingReports({
   readonly sessionId: string;
 }) {
   const [requestKey, setRequestKey] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null);
   const [state, setState] = useState<ReportsState>({ status: "loading" });
 
   useEffect(() => {
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
+      setSelectedIndex(0);
+      setSelectedMetric(null);
       try {
         const result = await getSessionReports(sessionId);
         if (!active) return;
@@ -175,8 +266,19 @@ export function SessionReadingReports({
           return;
         }
 
+        // Keep the newest saved comparison for each page revision instead of
+        // showing repeated attempts as a long list of separate reports.
+        const latestReports = new Map<string, SavedReadingReport>();
+        for (const report of [...result.reports].sort((left, right) =>
+          right.created_at.localeCompare(left.created_at),
+        )) {
+          const key = reportKey(report.page_id, report.page_revision_id);
+          if (!latestReports.has(key)) latestReports.set(key, report);
+        }
+        const reportsToShow = [...latestReports.values()];
+
         const pageEntries = await Promise.all(
-          result.reports.map(async (report) => {
+          reportsToShow.map(async (report) => {
             try {
               const page = await getReadingPage(
                 report.page_id,
@@ -198,12 +300,31 @@ export function SessionReadingReports({
             (entry): entry is readonly [string, ReadingPage] => entry !== null,
           ),
         );
+        const reports = [...reportsToShow].sort((left, right) => {
+          const leftPage = pages.get(
+            reportKey(left.page_id, left.page_revision_id),
+          );
+          const rightPage = pages.get(
+            reportKey(right.page_id, right.page_revision_id),
+          );
+          if (
+            leftPage &&
+            rightPage &&
+            leftPage.page_number !== rightPage.page_number
+          ) {
+            return leftPage.page_number - rightPage.page_number;
+          }
+          if (leftPage && !rightPage) return -1;
+          if (!leftPage && rightPage) return 1;
+          return left.created_at.localeCompare(right.created_at);
+        });
+
         setState({
           status: "ready",
-          reports: result.reports,
+          reports,
           pages,
           partial:
-            pages.size !== result.reports.length ||
+            pages.size !== reports.length ||
             result.total > result.reports.length,
         });
       } catch (error) {
@@ -223,28 +344,32 @@ export function SessionReadingReports({
     };
   }, [requestKey, sessionId]);
 
+  function selectMetric(key: MetricKey): void {
+    setSelectedMetric((current) => (current === key ? null : key));
+  }
+
   return (
     <section
-      className="flex flex-col gap-4"
       aria-labelledby="session-reading-reports-title"
+      className="flex flex-col gap-4"
     >
       <h2
-        id="session-reading-reports-title"
         className="text-2xl font-extrabold text-ink"
+        id="session-reading-reports-title"
       >
-        Báo cáo đọc theo từng trang
+        Báo cáo đọc
       </h2>
       {state.status === "loading" ? (
         <div
           aria-busy="true"
           className="rounded-card border border-border p-5 text-muted"
         >
-          Đang tải báo cáo đã lưu...
+          Đang tải báo cáo...
         </div>
       ) : null}
       {state.status === "empty" ? (
         <p className="rounded-control bg-sky p-5 text-label text-muted">
-          Buổi đọc này chưa có báo cáo đối chiếu được lưu.
+          Buổi đọc này chưa có báo cáo theo trang.
         </p>
       ) : null}
       {state.status === "unavailable" ? (
@@ -261,33 +386,48 @@ export function SessionReadingReports({
       {state.status === "ready" ? (
         <>
           {state.partial ? (
-            <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
-              Một số trang hoặc nội dung revision lịch sử chưa tải được. Các báo
-              cáo đã lưu vẫn được giữ bên dưới.
+            <StatusMessage tone="warning">
+              Một số nội dung trang chưa tải được; các thống kê đã lưu vẫn còn.
             </StatusMessage>
           ) : null}
-          <ol className="flex flex-col gap-4">
-            {state.reports.map((report) => (
-              <li key={report.report_id}>
-                <ReportCard
-                  report={report}
-                  page={state.pages.get(
-                    reportKey(report.page_id, report.page_revision_id),
-                  )}
-                />
-              </li>
-            ))}
-          </ol>
+          {(() => {
+            const activeIndex = Math.min(
+              selectedIndex,
+              state.reports.length - 1,
+            );
+            const report = state.reports[activeIndex];
+            return report ? (
+              <ReportCard
+                onNext={() => {
+                  setSelectedIndex((index) =>
+                    Math.min(index + 1, state.reports.length - 1),
+                  );
+                  setSelectedMetric(null);
+                }}
+                onPrevious={() => {
+                  setSelectedIndex((index) => Math.max(index - 1, 0));
+                  setSelectedMetric(null);
+                }}
+                onSelectMetric={selectMetric}
+                page={state.pages.get(
+                  reportKey(report.page_id, report.page_revision_id),
+                )}
+                report={report}
+                reportCount={state.reports.length}
+                reportNumber={activeIndex + 1}
+                selectedMetric={selectedMetric}
+              />
+            ) : null;
+          })()}
         </>
       ) : null}
       {state.status !== "loading" && state.status !== "empty" ? (
         <Button
-          className="sm:self-start"
+          className="h-12 sm:self-start"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" /> Thử tải lại báo
-          cáo
+          <RefreshCw aria-hidden="true" className="size-5" /> Tải lại báo cáo
         </Button>
       ) : null}
     </section>

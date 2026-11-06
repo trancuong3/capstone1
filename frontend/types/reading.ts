@@ -243,6 +243,7 @@ export interface ReadingCompletionSummaryUI {
   readonly transcripts?: readonly string[] | null;
   readonly correct_words?: readonly string[] | null;
   readonly mispronounced_words?: readonly string[] | null;
+  readonly skipped_words?: readonly string[] | null;
   readonly score?: number | null;
 }
 

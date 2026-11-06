@@ -27,6 +27,7 @@ function stopTracks(stream: MediaStream) {
 export function useSpeechRecorder(): SpeechRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const streamGenerationRef = useRef(0);
   const chunksRef = useRef<Blob[]>([]);
   const isRecordingRef = useRef(false);
   const isSpeakingRef = useRef(false);
@@ -122,6 +123,9 @@ export function useSpeechRecorder(): SpeechRecorder {
 
   const cancel = useCallback(
     (options?: { retainStream?: boolean }) => {
+      // Invalidate getUserMedia/start work that is still awaiting permission.
+      // Otherwise it could start recording after playback has already begun.
+      streamGenerationRef.current += 1;
       const recorder = recorderRef.current;
 
       if (recorder) {
@@ -152,15 +156,26 @@ export function useSpeechRecorder(): SpeechRecorder {
       throw new Error("Microphone access is not supported in this browser.");
     }
 
-    streamRef.current = await navigator.mediaDevices.getUserMedia({
+    const generation = streamGenerationRef.current;
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
     });
+
+    if (generation !== streamGenerationRef.current) {
+      stopTracks(stream);
+      const error = new Error("Microphone start was cancelled.");
+      error.name = "AbortError";
+      throw error;
+    }
+
+    streamRef.current = stream;
   }, []);
 
   const start = useCallback(
     async (options?: { retainStream?: boolean }) => {
       const retainStream = options?.retainStream === true;
       cancel({ retainStream: Boolean(streamRef.current) });
+      const generation = streamGenerationRef.current;
 
       if (typeof MediaRecorder === "undefined") {
         throw new Error(
@@ -172,6 +187,11 @@ export function useSpeechRecorder(): SpeechRecorder {
 
       try {
         await prepare();
+        if (generation !== streamGenerationRef.current) {
+          const error = new Error("Microphone start was cancelled.");
+          error.name = "AbortError";
+          throw error;
+        }
         const stream = streamRef.current;
         if (!stream) throw new Error("Microphone is unavailable.");
         retainStreamOnStopRef.current = retainStream;
@@ -285,6 +305,7 @@ export function useSpeechRecorder(): SpeechRecorder {
 
         setIsRecording(true);
       } catch (error) {
+        if (generation !== streamGenerationRef.current) throw error;
         finish(null, undefined, retainStream);
         throw error;
       }

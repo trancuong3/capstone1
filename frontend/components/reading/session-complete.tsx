@@ -20,6 +20,7 @@ import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
+import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { StatusMessage } from "@/components/common/status-message";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
@@ -54,16 +55,17 @@ export function SessionComplete({
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? spokenWords;
   const mispronouncedWords = summary.mispronounced_words ?? [];
+  const skippedWords = summary.skipped_words ?? [];
+  const scoredWordCount =
+    correctWords.length + mispronouncedWords.length + skippedWords.length;
+  const hasWordAssessment =
+    summary.correct_words !== undefined ||
+    summary.mispronounced_words !== undefined ||
+    summary.skipped_words !== undefined;
   const score =
-    summary.score !== undefined && summary.score !== null
-      ? summary.score
-      : correctWords.length + mispronouncedWords.length > 0
-        ? Math.round(
-            (correctWords.length /
-              (correctWords.length + mispronouncedWords.length)) *
-              100,
-          )
-        : null;
+    hasWordAssessment && scoredWordCount > 0
+      ? Math.round((correctWords.length / scoredWordCount) * 100)
+      : (summary.score ?? null);
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -107,10 +109,16 @@ export function SessionComplete({
                       : "💪 Bé cố gắng thêm ở lượt đọc tới nhé"}
                 </h3>
                 <p className="text-xs text-muted mt-0.5">
-                  Đúng {correctWords.length} từ
+                  Đúng {correctWords.length}/{scoredWordCount} từ
                   {mispronouncedWords.length > 0
                     ? ` · Cần chú ý ${mispronouncedWords.length} từ`
-                    : " · Không sai từ nào"}
+                    : ""}
+                  {skippedWords.length > 0
+                    ? ` · Bỏ sót ${skippedWords.length} từ`
+                    : ""}
+                  {mispronouncedWords.length === 0 && skippedWords.length === 0
+                    ? " · Không sai hoặc bỏ sót từ nào"
+                    : ""}
                 </p>
               </div>
             </div>
@@ -231,6 +239,10 @@ export function SessionComplete({
           </button>
         </div>
 
+        <div className="rounded-card border border-line bg-white p-4 shadow-sm sm:p-5">
+          <SessionReadingReports sessionId={sessionId} />
+        </div>
+
         {showWordList && (
           <div
             className="rounded-card bg-cream p-5 sm:p-6 border border-purple-border/50 shadow-sm animate-in fade-in slide-in-from-top-2"
@@ -250,7 +262,8 @@ export function SessionComplete({
 
             {spokenWords.length > 0 ||
             correctWords.length > 0 ||
-            mispronouncedWords.length > 0 ? (
+            mispronouncedWords.length > 0 ||
+            skippedWords.length > 0 ? (
               <div className="space-y-4">
                 {correctWords.length > 0 && (
                   <div>
@@ -296,6 +309,31 @@ export function SessionComplete({
                           <XCircle
                             aria-hidden="true"
                             className="size-4 text-rose-600 flex-shrink-0"
+                          />
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {skippedWords.length > 0 && (
+                  <div className="rounded-card border border-amber-200 bg-amber-50/60 p-4">
+                    <p className="text-xs font-black uppercase tracking-wider text-amber-800 mb-2 flex items-center gap-1.5">
+                      <AlertCircle className="size-4 text-amber-700" />
+                      <span>
+                        Các từ bé chưa đọc đến ({skippedWords.length} từ):
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1">
+                      {skippedWords.map((word, idx) => (
+                        <span
+                          key={`${word}-${idx}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-amber-900 shadow-sm border border-amber-200"
+                        >
+                          <AlertCircle
+                            aria-hidden="true"
+                            className="size-4 text-amber-700 flex-shrink-0"
                           />
                           {word}
                         </span>
