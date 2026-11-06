@@ -268,6 +268,35 @@ class HistoryService:
             # Unknown states and invalid timelines must never be guessed.
             raise HTTPException(status_code=501, detail="Session contract is not available yet") from None
 
+    @staticmethod
+    def safe_event_metadata(event) -> dict[str, object]:
+        """Expose only the retry fields needed by a parent-facing history view."""
+        if event.Type != "WORD_RETRY" or not isinstance(event.Metadata, dict):
+            return {}
+
+        source = event.Metadata
+        result: dict[str, object] = {}
+        attempt = source.get("retry_attempt")
+        if type(attempt) is int and 1 <= attempt <= 10000:
+            result["retry_attempt"] = attempt
+
+        original_status = source.get("original_status")
+        if isinstance(original_status, str) and original_status in (
+            "OMISSION",
+            "MISPRONUNCIATION",
+        ):
+            result["original_status"] = original_status
+
+        target_word = source.get("target_word")
+        if isinstance(target_word, str) and target_word.strip():
+            result["target_word"] = target_word.strip()[:100]
+
+        recognized_text = source.get("recognized_text")
+        if isinstance(recognized_text, str) and recognized_text.strip():
+            result["recognized_text"] = recognized_text.strip()[:200]
+
+        return result
+
     async def list(self, child_id: UUID, actor_id: UUID, cursor: str | None, limit: int):
         await self.require_child(child_id, actor_id)
         page = 1
@@ -303,7 +332,7 @@ class HistoryService:
                     type=event.Type, start_ms=event.StartMs, end_ms=event.EndMs,
                     confidence=event.Confidence, status=event.Status,
                     # Never expose arbitrary diagnostic/device/account metadata.
-                    metadata={},
+                    metadata=self.safe_event_metadata(event),
                 )
                 if dto.session_id != session_id or (dto.end_ms is not None and dto.end_ms < dto.start_ms):
                     continue

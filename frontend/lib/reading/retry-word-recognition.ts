@@ -2,15 +2,12 @@
  * Helpers for isolated Vietnamese retry-word recognition.
  *
  * Không xóa dấu thanh tiếng Việt và không chuyển "đ" thành "d".
- * Một từ chỉ được xác nhận đúng khi transcript khớp chính xác
- * với từ mục tiêu sau khi chuẩn hóa Unicode và dấu câu.
+ * Một từ chỉ được xác nhận đúng khi transcript có từ mục tiêu như một token
+ * hoàn chỉnh. Dấu thanh tiếng Việt vẫn được giữ nguyên.
  */
 
 export type RetryRecognitionStatus =
-  | "CORRECT"
-  | "INCORRECT"
-  | "UNCERTAIN"
-  | "NOT_RECOGNIZED";
+  "CORRECT" | "INCORRECT" | "UNCERTAIN" | "NOT_RECOGNIZED";
 
 /**
  * Chuẩn hóa một từ tiếng Việt.
@@ -21,35 +18,28 @@ export type RetryRecognitionStatus =
  *
  * Chỉ loại bỏ dấu câu ở đầu và cuối từ.
  */
-export function normalizeVietnameseRetryToken(
-  value: string,
-): string {
+export function normalizeVietnameseRetryToken(value: string): string {
   return value
     .normalize("NFC")
     .toLocaleLowerCase("vi-VN")
+    .trim()
     .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
     .normalize("NFC")
     .trim();
 }
 
 /**
- * Đánh giá kết quả nhận diện một từ.
+ * Đánh giá từ đích trong một transcript ngắn.
  *
- * Quy tắc:
- * 1. Khớp chính xác một từ: CORRECT.
- * 2. Nhận diện một từ khác: INCORRECT.
- * 3. Transcript chứa nhiều từ: UNCERTAIN.
- * 4. Không có transcript: NOT_RECOGNIZED.
- *
- * Không chấp nhận trường hợp transcript chứa từ mục tiêu
- * ở giữa một câu dài.
+ * Cụm từ ngắn được chấp nhận khi từ đích xuất hiện như một token riêng.
+ * Transcript dài hơn cần được coi là không chắc chắn vì có thể là hội thoại
+ * không liên quan. Không dùng nội dung keyterm làm bằng chứng nhận diện.
  */
 export function classifyRetryTranscript(
   expectedWord: string,
   transcript: string | null | undefined,
 ): RetryRecognitionStatus {
-  const expected =
-    normalizeVietnameseRetryToken(expectedWord);
+  const expected = normalizeVietnameseRetryToken(expectedWord);
 
   if (!expected || /\s/u.test(expected)) {
     return "UNCERTAIN";
@@ -61,8 +51,14 @@ export function classifyRetryTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  const tokens = rawTranscript
-    .split(/\s+/u)
+  const normalizedTranscript = rawTranscript
+    .normalize("NFC")
+    .toLocaleLowerCase("vi-VN")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+  const tokens = normalizedTranscript
+    .split(" ")
     .map(normalizeVietnameseRetryToken)
     .filter(Boolean);
 
@@ -70,12 +66,7 @@ export function classifyRetryTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  // Chế độ luyện một từ, không chấp nhận cả cụm từ.
-  if (tokens.length !== 1) {
-    return "UNCERTAIN";
-  }
-
-  return tokens[0] === expected
-    ? "CORRECT"
-    : "INCORRECT";
+  if (tokens.length > 4) return "UNCERTAIN";
+  if (tokens.includes(expected)) return "CORRECT";
+  return "INCORRECT";
 }

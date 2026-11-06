@@ -27,11 +27,26 @@ interface ReadingLayoutProps {
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   retryMode?: boolean;
-  retryCompleted?: boolean;
   onSkipRetryWord?: () => void;
   retryWordPosition?: number;
   retryWordCount?: number;
-  retryFeedback?: "waiting" | "incorrect" | "success";
+  retryFeedback?:
+    | "waiting"
+    | "preparing-microphone"
+    | "playing-instruction"
+    | "playing-sample"
+    | "listening"
+    | "processing"
+    | "correct"
+    | "incorrect"
+    | "not-recognized"
+    | "microphone-unavailable"
+    | "speech-unavailable"
+    | "audio-unavailable"
+    | "save-error";
+  onRetryRead?: () => void;
+  onRetryMicrophonePermission?: () => void;
+  onRetrySave?: () => void;
   retryContextPhrase?: string | null;
   isPlayingSample?: boolean;
   isReadingWord?: boolean;
@@ -40,7 +55,6 @@ interface ReadingLayoutProps {
   mispronouncedWordIds?: Set<string>;
   onFinish: () => void;
   onHelp: () => void;
-  onManualPage: () => void;
   onPause: () => void;
   onReadSample?: () => void;
   onReadWord?: () => void;
@@ -68,11 +82,13 @@ export function ReadingLayout({
   isMicRecording = false,
   isPageTransitioning = false,
   retryMode = false,
-  retryCompleted = false,
   onSkipRetryWord,
   retryWordPosition = 0,
   retryWordCount = 0,
   retryFeedback = "waiting",
+  onRetryRead,
+  onRetryMicrophonePermission,
+  onRetrySave,
   isPlayingSample = false,
   isReadingWord = false,
   isSpeaking = false,
@@ -80,7 +96,6 @@ export function ReadingLayout({
   mispronouncedWordIds,
   onFinish,
   onHelp,
-  onManualPage,
   onPause,
   onReadSample,
   onReadWord,
@@ -148,13 +163,33 @@ export function ReadingLayout({
             </p>
 
             <p className="truncate text-lg font-black text-ink">
-              {retryFeedback === "incorrect"
-                ? "Chưa nghe rõ, bé thử lại nhé!"
-                : retryFeedback === "success"
-                  ? "Chính xác rồi!"
-                  : isMicRecording
-                    ? "Microphone đang bật, bé hãy đọc từ này nhé!"
-                    : "Bé hãy đọc riêng từ bên dưới nhé."}
+              {retryFeedback === "preparing-microphone"
+                ? "Đang chuẩn bị microphone..."
+                : retryFeedback === "playing-instruction"
+                  ? "ViRead đang hướng dẫn bé..."
+                  : retryFeedback === "playing-sample"
+                    ? "ViRead đang đọc mẫu..."
+                    : retryFeedback === "listening"
+                      ? isMicRecording
+                        ? "Đang nghe bé đọc từ này..."
+                        : "Đang bật microphone..."
+                      : retryFeedback === "processing"
+                        ? "Đang kiểm tra giọng đọc..."
+                        : retryFeedback === "correct"
+                          ? "Chính xác rồi!"
+                          : retryFeedback === "incorrect"
+                            ? "Từ này chưa đúng. Bé thử lại nhé!"
+                            : retryFeedback === "not-recognized"
+                              ? "ViRead chưa nghe rõ từ này."
+                              : retryFeedback === "microphone-unavailable"
+                                ? "Microphone chưa sẵn sàng."
+                                : retryFeedback === "speech-unavailable"
+                                  ? "Dịch vụ nhận diện đang tạm dừng."
+                                  : retryFeedback === "audio-unavailable"
+                                    ? "Chưa phát được lời hướng dẫn."
+                                    : retryFeedback === "save-error"
+                                      ? "Chưa lưu được kết quả đọc lại."
+                                      : "Bé hãy đọc riêng từ bên dưới nhé."}
             </p>
 
             <p className="mt-1 text-lg font-extrabold text-primary">
@@ -175,6 +210,41 @@ export function ReadingLayout({
               className="shrink-0 rounded-full border border-line bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-55"
             >
               Bỏ qua từ này
+            </button>
+          ) : null}
+          {retryFeedback === "microphone-unavailable" &&
+          onRetryMicrophonePermission ? (
+            <button
+              type="button"
+              disabled={controlsDisabled}
+              onClick={onRetryMicrophonePermission}
+              className="shrink-0 rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Thử bật mic
+            </button>
+          ) : null}
+          {(retryFeedback === "incorrect" ||
+            retryFeedback === "not-recognized" ||
+            retryFeedback === "audio-unavailable" ||
+            retryFeedback === "speech-unavailable") &&
+          onRetryRead ? (
+            <button
+              type="button"
+              disabled={controlsDisabled}
+              onClick={onRetryRead}
+              className="shrink-0 rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Nghe lại và thử
+            </button>
+          ) : null}
+          {retryFeedback === "save-error" && onRetrySave ? (
+            <button
+              type="button"
+              disabled={controlsDisabled}
+              onClick={onRetrySave}
+              className="shrink-0 rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Thử lưu lại
             </button>
           ) : null}
         </div>
@@ -314,10 +384,8 @@ export function ReadingLayout({
         isListening={isMicRecording}
         isPlayingSample={isPlayingSample}
         retryMode={retryMode}
-        retryCompleted={retryCompleted}
         onFinish={onFinish}
         onHelp={onHelp}
-        onManualPage={onManualPage}
         onPause={onPause}
         onReadSample={onReadSample}
         onToggleListening={onToggleListening}

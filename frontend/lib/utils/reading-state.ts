@@ -6,7 +6,6 @@ const readingStates = new Set<ReadingUiState>([
   "camera-denied",
   "microphone-denied",
   "page-confidence-low",
-  "manual-page",
   "paused",
   "reconnecting",
   "stt-error",

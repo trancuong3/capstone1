@@ -22,6 +22,7 @@ export interface CreateRetryEventInput {
     retry_attempt?: number;
     original_status?: "OMISSION" | "MISPRONUNCIATION";
     recognized_text?: string;
+    target_word?: string;
   };
 }
 

@@ -108,7 +108,6 @@ Kiểm tra cấu trúc:
 | `11:41`   | Đang đọc                  | Reading `reading`                                    |
 | `15:452`  | Tạm dừng                  | Reading `paused`                                     |
 | `15:524`  | Page confidence thấp      | Reading `page-confidence-low`                        |
-| `17:755`  | Chọn trang thủ công       | Reading `manual-page`                                |
 | `15:586`  | Kết nối lại               | Reading `reconnecting`                               |
 | `15:648`  | Camera denied             | Reading `camera-denied`                              |
 | `16:661`  | Microphone denied         | Reading `microphone-denied`                          |
@@ -196,7 +195,7 @@ README là nguồn hướng dẫn đầy đủ. Các URL chính:
 - Auth: `/login?state=loading|invalid-credentials|safe-error`; `/register?state=loading|email-used|validation-error|safe-error`; forgot submitted; reset invalid/expired/success.
 - Parent: `/dashboard?state=loading|empty|error`; profile form states; children loading/empty/not-found/error.
 - Books: `/books?state=loading|empty|error`; search/filter/no-result; detail not-found/unavailable/error.
-- Reading: `/reading/mock-session-001?state=ready|reading|camera-denied|microphone-denied|page-confidence-low|manual-page|paused|reconnecting|stt-error|tts-error|page-turn|question|complete`.
+- Reading: `/reading/mock-session-001?state=ready|reading|camera-denied|microphone-denied|page-confidence-low|paused|reconnecting|stt-error|tts-error|page-turn|question|complete`. Khi chưa nhận diện rõ, bé có thể thử lại camera; màn hình không cho chọn trang thủ công.
 - Sessions/Reports: loading, empty, error, no prior period, nullable metric, insufficient evidence và not-found qua `state`.
 - Admin: loading/empty/error/forbidden, upload/lifecycle failures, health degraded/unavailable; PROCESSING/NEEDS_REVIEW/VERIFIED dùng fixture page ID rõ ràng.
 

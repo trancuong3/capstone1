@@ -92,6 +92,51 @@ class HistoryCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(detail.events[0].status, status)
             self.assertEqual(detail.events[0].metadata, {})
 
+    async def test_retry_history_exposes_only_parent_safe_fields(self):
+        repo = history_repo()
+        repo.events.return_value = [
+            event_row(
+                Type="WORD_RETRY",
+                Status="CONFIRMED",
+                WordId=QUESTION,
+                Metadata={
+                    "retry_attempt": 2,
+                    "original_status": "MISPRONUNCIATION",
+                    "target_word": "khỏe",
+                    "recognized_text": "Bé đọc khỏe rồi",
+                    "device_id": "private-device",
+                    "access_token": "private-token",
+                },
+            ),
+            event_row(
+                Type="WORD_RETRY",
+                Status="FAILED",
+                Metadata={
+                    "retry_attempt": 1,
+                    "original_status": "OMISSION",
+                    "recognized_text": "me",
+                    "diagnostics": {"raw": "private"},
+                },
+            ),
+        ]
+
+        detail = await HistoryService(repo).get(SESSION, ACTOR)
+
+        self.assertEqual(
+            detail.events[0].metadata,
+            {
+                "retry_attempt": 2,
+                "original_status": "MISPRONUNCIATION",
+                "target_word": "khỏe",
+                "recognized_text": "Bé đọc khỏe rồi",
+            },
+        )
+        self.assertEqual(detail.events[1].metadata["retry_attempt"], 1)
+        serialized = str([event.model_dump() for event in detail.events])
+        self.assertNotIn("private-device", serialized)
+        self.assertNotIn("private-token", serialized)
+        self.assertNotIn("diagnostics", serialized)
+
     async def test_unknown_and_invalid_events_do_not_hide_the_session(self):
         for event in (event_row(Type="UNKNOWN"), event_row(Status="UNKNOWN"),
                       event_row(EndMs=0), event_row(StartMs=-1), event_row(SessionId=BOOK)):

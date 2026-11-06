@@ -183,7 +183,6 @@ ID sách ACTIVE + VERIFIED mẫu: `20000000-0000-4000-8000-000000000001`.
 /reading/mock-session-001?state=camera-denied
 /reading/mock-session-001?state=microphone-denied
 /reading/mock-session-001?state=page-confidence-low
-/reading/mock-session-001?state=manual-page
 /reading/mock-session-001?state=paused
 /reading/mock-session-001?state=reconnecting
 /reading/mock-session-001?state=reconnecting&reconnect=timeout

@@ -19,7 +19,7 @@ import {
 import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { ButtonLink } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
@@ -31,6 +31,8 @@ interface SessionCompleteProps {
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
   reportError?: string | null;
+  onRetryReports?: () => void;
+  isRetryingReports?: boolean;
 }
 
 export function SessionComplete({
@@ -39,6 +41,8 @@ export function SessionComplete({
   sessionId,
   summary,
   reportError = null,
+  onRetryReports,
+  isRetryingReports = false,
 }: SessionCompleteProps) {
   const [showWordList, setShowWordList] = useState(false);
   const rangeWasPartial =
@@ -136,9 +140,22 @@ export function SessionComplete({
         )}
 
         {reportError ? (
-          <StatusMessage title="Báo cáo đọc chưa sẵn sàng" tone="warning">
-            {reportError}
-          </StatusMessage>
+          <div className="flex flex-col gap-3">
+            <StatusMessage title="Báo cáo đọc chưa sẵn sàng" tone="warning">
+              {reportError} Báo cáo đã lưu vẫn được giữ; có thể thử lại các
+              trang còn thiếu.
+            </StatusMessage>
+            {onRetryReports ? (
+              <Button
+                className="sm:self-start"
+                disabled={isRetryingReports}
+                onClick={onRetryReports}
+                variant="secondary"
+              >
+                {isRetryingReports ? "Đang thử lưu..." : "Thử lưu báo cáo lại"}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
 
         <div

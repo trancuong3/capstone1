@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionEventList } from "@/components/reports/session-event-list";
+import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -307,6 +308,9 @@ export function SessionDetailScreen({
             ))}
           </div>
         </dl>
+      </Card>
+      <Card className="bg-white">
+        <SessionReadingReports sessionId={sessionId} />
       </Card>
       <Card className="bg-white">
         <h2 className="text-2xl font-extrabold text-ink">
