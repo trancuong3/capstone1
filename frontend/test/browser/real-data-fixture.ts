@@ -292,6 +292,14 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         state.historyStatus,
       );
     if (path.startsWith("/reading/history/")) return respond(route, {}, 404);
+    const savedReportsMatch = path.match(/^\\/reading\\/sessions\\/([^/]+)\\/reports$/);
+    if (savedReportsMatch) {
+      return respond(
+        route,
+        { session_id: savedReportsMatch[1], total: 0, reports: [] },
+        state.reportStatus,
+      );
+    }
     if (path.startsWith("/system/progress/") && path.endsWith("/periods"))
       return respond(
         route,
