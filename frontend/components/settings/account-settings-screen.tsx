@@ -33,7 +33,8 @@ type Notice = { tone: "success" | "error"; message: string };
 
 function verificationLabel(profile: ParentProfileDTO): string {
   if (profile.pending_email) return "Đang chờ xác nhận email mới";
-  if (profile.contact_info_status !== "available") return "Không thể tải thông tin";
+  if (profile.contact_info_status !== "available")
+    return "Không thể tải thông tin";
   if (profile.email_verified === true) return "Đã xác minh";
   if (profile.email_verified === false) return "Chưa xác minh";
   return "Không thể tải thông tin";
@@ -72,7 +73,11 @@ function PasswordField({
           value={value}
         />
         <button
-          aria-label={visible ? "Ẩn " + label.toLowerCase() : "Hiện " + label.toLowerCase()}
+          aria-label={
+            visible
+              ? "Ẩn " + label.toLowerCase()
+              : "Hiện " + label.toLowerCase()
+          }
           className="flex size-10 shrink-0 items-center justify-center rounded-control text-muted hover:bg-sky hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           onClick={onToggle}
           type="button"
@@ -136,11 +141,17 @@ export function AccountSettingsScreen() {
     setNotice(null);
 
     if (!currentPassword.trim()) {
-      setNotice({ tone: "error", message: "Ba mẹ vui lòng nhập mật khẩu hiện tại." });
+      setNotice({
+        tone: "error",
+        message: "Ba mẹ vui lòng nhập mật khẩu hiện tại.",
+      });
       return;
     }
     if (newPassword.length < 8) {
-      setNotice({ tone: "error", message: "Mật khẩu mới cần có ít nhất 8 ký tự." });
+      setNotice({
+        tone: "error",
+        message: "Mật khẩu mới cần có ít nhất 8 ký tự.",
+      });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -156,13 +167,15 @@ export function AccountSettingsScreen() {
       setConfirmPassword("");
       setNotice({
         tone: "success",
-        message: "Mật khẩu đã được cập nhật. Phiên đăng nhập hiện tại vẫn được giữ nguyên.",
+        message:
+          "Mật khẩu đã được cập nhật. Phiên đăng nhập hiện tại vẫn được giữ nguyên.",
       });
     } catch (error) {
       setNotice({
         tone: "error",
         message:
-          error instanceof AuthServiceError && error.reason === "invalid-credentials"
+          error instanceof AuthServiceError &&
+          error.reason === "invalid-credentials"
             ? "Mật khẩu hiện tại chưa chính xác."
             : "Chưa thể đổi mật khẩu. Ba mẹ vui lòng kiểm tra kết nối và thử lại.",
       });
@@ -194,7 +207,8 @@ export function AccountSettingsScreen() {
     } catch {
       setNotice({
         tone: "error",
-        message: "Chưa gửi được liên kết đặt mật khẩu. Ba mẹ vui lòng thử lại sau.",
+        message:
+          "Chưa gửi được liên kết đặt mật khẩu. Ba mẹ vui lòng thử lại sau.",
       });
     } finally {
       setIsRequestingRecovery(false);
@@ -208,7 +222,9 @@ export function AccountSettingsScreen() {
         aria-label="Đang tải cài đặt tài khoản"
         className="mx-auto flex w-full max-w-[960px] flex-col gap-6"
       >
-        <span className="sr-only" role="status">Đang tải…</span>
+        <span className="sr-only" role="status">
+          Đang tải…
+        </span>
         <Skeleton className="h-12 w-2/3" />
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -224,9 +240,14 @@ export function AccountSettingsScreen() {
           title="Cài đặt tài khoản"
         />
         <StatusMessage tone="error" title="Không thể tải thông tin">
-          ViRead chưa thể tải dữ liệu tài khoản. Ba mẹ vui lòng thử tải lại trang hoặc đăng nhập lại.
+          ViRead chưa thể tải dữ liệu tài khoản. Ba mẹ vui lòng thử tải lại
+          trang hoặc đăng nhập lại.
         </StatusMessage>
-        <Button className="sm:w-auto sm:self-start" onClick={() => setRetryKey((key) => key + 1)} variant="secondary">
+        <Button
+          className="sm:w-auto sm:self-start"
+          onClick={() => setRetryKey((key) => key + 1)}
+          variant="secondary"
+        >
           Thử tải lại
         </Button>
       </section>
@@ -236,7 +257,9 @@ export function AccountSettingsScreen() {
   const { profile, user } = state;
   const email = profile.email ?? user.email;
   const displayName =
-    profile.display_name?.trim() || user.display_name?.trim() || "Chưa cập nhật";
+    profile.display_name?.trim() ||
+    user.display_name?.trim() ||
+    "Chưa cập nhật";
   const isEmailPasswordAccount = user.providers?.includes("email") ?? false;
   const emailStatus = verificationLabel(profile);
 
@@ -254,41 +277,58 @@ export function AccountSettingsScreen() {
             <UserRound aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">Thông tin tài khoản</h2>
-            <p className="text-sm text-muted">Thông tin lấy từ Supabase Auth và hồ sơ phụ huynh.</p>
+            <h2 className="text-lg font-extrabold text-ink">
+              Thông tin tài khoản
+            </h2>
+            <p className="text-sm text-muted">
+              Thông tin lấy từ Supabase Auth và hồ sơ phụ huynh.
+            </p>
           </div>
         </div>
 
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-control bg-canvas p-4">
             <dt className="text-label font-bold text-muted">Tên hiển thị</dt>
-            <dd className="mt-1 break-words text-body font-bold text-ink">{displayName}</dd>
+            <dd className="mt-1 break-words text-body font-bold text-ink">
+              {displayName}
+            </dd>
           </div>
           <div className="rounded-control bg-canvas p-4">
             <dt className="text-label font-bold text-muted">Email tài khoản</dt>
-            <dd className="mt-1 break-all text-body font-bold text-ink">{email || "Không thể tải thông tin"}</dd>
+            <dd className="mt-1 break-all text-body font-bold text-ink">
+              {email || "Không thể tải thông tin"}
+            </dd>
             <p className="mt-1 text-label text-muted">{emailStatus}</p>
             {profile.pending_email ? (
               <p className="mt-2 break-all text-sm text-amber-700">
-                Email mới đang chờ xác nhận: <strong>{profile.pending_email}</strong>
+                Email mới đang chờ xác nhận:{" "}
+                <strong>{profile.pending_email}</strong>
               </p>
             ) : null}
           </div>
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Vai trò tài khoản</dt>
+            <dt className="text-label font-bold text-muted">
+              Vai trò tài khoản
+            </dt>
             <dd className="mt-1 text-body font-bold text-ink">
               {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
             </dd>
           </div>
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Trạng thái email</dt>
+            <dt className="text-label font-bold text-muted">
+              Trạng thái email
+            </dt>
             <dd className="mt-1 flex items-center gap-2 text-body font-bold text-ink">
               <ShieldCheck aria-hidden="true" className="size-5 text-primary" />
               {emailStatus}
             </dd>
           </div>
         </dl>
-        <ButtonLink className="sm:w-auto sm:self-start" href="/profile" variant="secondary">
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/profile"
+          variant="secondary"
+        >
           Quản lý hồ sơ <ArrowRight aria-hidden="true" className="size-5" />
         </ButtonLink>
       </Card>
@@ -300,14 +340,22 @@ export function AccountSettingsScreen() {
           </div>
           <div>
             <h2 className="text-lg font-extrabold text-ink">Đổi mật khẩu</h2>
-            <p className="text-sm text-muted">Cập nhật mật khẩu để bảo vệ tài khoản ViRead của bạn.</p>
+            <p className="text-sm text-muted">
+              Cập nhật mật khẩu để bảo vệ tài khoản ViRead của bạn.
+            </p>
           </div>
         </div>
 
-        {notice ? <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage> : null}
+        {notice ? (
+          <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage>
+        ) : null}
 
         {isEmailPasswordAccount ? (
-          <form className="flex flex-col gap-4" noValidate onSubmit={handlePasswordChange}>
+          <form
+            className="flex flex-col gap-4"
+            noValidate
+            onSubmit={handlePasswordChange}
+          >
             <PasswordField
               autoComplete="current-password"
               id="current-password"
@@ -335,15 +383,23 @@ export function AccountSettingsScreen() {
               value={confirmPassword}
               visible={showConfirmPassword}
             />
-            <p className="text-sm text-muted">Mật khẩu mới cần có ít nhất 8 ký tự.</p>
-            <Button className="sm:w-auto sm:self-start sm:px-8" disabled={isChangingPassword} isLoading={isChangingPassword} type="submit">
+            <p className="text-sm text-muted">
+              Mật khẩu mới cần có ít nhất 8 ký tự.
+            </p>
+            <Button
+              className="sm:w-auto sm:self-start sm:px-8"
+              disabled={isChangingPassword}
+              isLoading={isChangingPassword}
+              type="submit"
+            >
               Lưu mật khẩu mới
             </Button>
           </form>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-body text-muted">
-              Tài khoản này chưa có phương thức đăng nhập bằng mật khẩu. Ba mẹ có thể yêu cầu liên kết đặt mật khẩu qua email.
+              Tài khoản này chưa có phương thức đăng nhập bằng mật khẩu. Ba mẹ
+              có thể yêu cầu liên kết đặt mật khẩu qua email.
             </p>
             <Button
               className="sm:w-auto sm:self-start sm:px-8"
@@ -364,8 +420,12 @@ export function AccountSettingsScreen() {
             <Mail aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">Email và xác minh</h2>
-            <p className="text-sm text-muted">Quản lý email hiện tại và yêu cầu xác minh email mới.</p>
+            <h2 className="text-lg font-extrabold text-ink">
+              Email và xác minh
+            </h2>
+            <p className="text-sm text-muted">
+              Quản lý email hiện tại và yêu cầu xác minh email mới.
+            </p>
           </div>
         </div>
         <p className="text-body text-muted">
@@ -373,7 +433,10 @@ export function AccountSettingsScreen() {
             ? "Yêu cầu đổi email đang chờ xác minh. Email hiện tại vẫn là địa chỉ đã được xác nhận trước đó."
             : "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh."}
         </p>
-        <Link className="font-bold text-primary underline-offset-4 hover:underline" href="/profile">
+        <Link
+          className="font-bold text-primary underline-offset-4 hover:underline"
+          href="/profile"
+        >
           Mở hồ sơ phụ huynh
         </Link>
       </Card>
@@ -384,12 +447,21 @@ export function AccountSettingsScreen() {
             <CalendarClock aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">Quản lý lịch nhắc đọc sách</h2>
-            <p className="text-sm text-muted">Điều chỉnh lịch đọc và các thông báo nhắc nhở cho bé.</p>
+            <h2 className="text-lg font-extrabold text-ink">
+              Quản lý lịch nhắc đọc sách
+            </h2>
+            <p className="text-sm text-muted">
+              Điều chỉnh lịch đọc và các thông báo nhắc nhở cho bé.
+            </p>
           </div>
         </div>
-        <ButtonLink className="sm:w-auto sm:self-start" href="/reading-management" variant="secondary">
-          Quản lý lịch nhắc đọc sách <ArrowRight aria-hidden="true" className="size-5" />
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/reading-management"
+          variant="secondary"
+        >
+          Quản lý lịch nhắc đọc sách{" "}
+          <ArrowRight aria-hidden="true" className="size-5" />
         </ButtonLink>
       </Card>
     </section>

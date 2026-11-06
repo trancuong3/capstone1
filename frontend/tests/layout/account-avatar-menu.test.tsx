@@ -19,13 +19,25 @@ describe("AccountAvatarMenu", () => {
 
     await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
 
-    expect(screen.getByRole("button", { name: "Mở menu tài khoản" })).toHaveTextContent("N");
+    expect(
+      screen.getByRole("button", { name: "Mở menu tài khoản" }),
+    ).toHaveTextContent("N");
     expect(screen.getByText("Nguyễn Minh Anh")).toBeInTheDocument();
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Hồ sơ ba mẹ" })).toHaveAttribute("href", "/profile");
-    expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveAttribute("href", "/children");
-    expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" })).toHaveAttribute("href", "/help-support");
+    expect(
+      screen.getByRole("menuitem", { name: "Hồ sơ ba mẹ" }),
+    ).toHaveAttribute("href", "/profile");
+    expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveAttribute(
+      "href",
+      "/children",
+    );
+    expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" }),
+    ).toHaveAttribute("href", "/help-support");
   });
 
   it("falls back to the email initial and closes with Escape while restoring focus", async () => {
@@ -76,7 +88,9 @@ describe("AccountAvatarMenu", () => {
     await user.keyboard("{End}");
     expect(logout).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" })).toHaveFocus();
+    expect(
+      screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" }),
+    ).toHaveFocus();
   });
 
   it("closes when clicking outside and invokes the existing sign-out callback", async () => {

@@ -154,7 +154,9 @@ export function AccountAvatarMenu({
                 <p className="mt-0.5 break-all text-xs text-muted">{email}</p>
               ) : null}
               {role ? (
-                <p className="mt-1 text-xs font-semibold text-primary">{role}</p>
+                <p className="mt-1 text-xs font-semibold text-primary">
+                  {role}
+                </p>
               ) : null}
             </div>
           </div>

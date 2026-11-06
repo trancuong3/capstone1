@@ -27,6 +27,8 @@ interface ReadingLayoutProps {
   isMicRecording?: boolean;
   isPageTransitioning?: boolean;
   retryMode?: boolean;
+  retryCompleted?: boolean;
+  onSkipRetryWord?: () => void;
   retryWordPosition?: number;
   retryWordCount?: number;
   retryFeedback?: "waiting" | "incorrect" | "success";
@@ -66,6 +68,8 @@ export function ReadingLayout({
   isMicRecording = false,
   isPageTransitioning = false,
   retryMode = false,
+  retryCompleted = false,
+  onSkipRetryWord,
   retryWordPosition = 0,
   retryWordCount = 0,
   retryFeedback = "waiting",
@@ -135,19 +139,7 @@ export function ReadingLayout({
         />
       </CameraPreview>
 
-      {countdown !== null ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border-2 border-primary bg-primary/10 px-4 py-3.5 shadow-sm animate-in fade-in">
-          <span className="text-xs font-black uppercase tracking-wider text-primary">
-            Chuẩn bị đọc:
-          </span>
-          <span className="flex size-9 items-center justify-center rounded-full bg-primary text-xl font-black text-white animate-bounce shadow">
-            {countdown > 0 ? countdown : "🎉"}
-          </span>
-          <span className="text-base font-extrabold text-ink">
-            {countdown > 0 ? "Bé sẵn sàng đọc to nhé..." : "Bắt đầu đọc nào!"}
-          </span>
-        </div>
-      ) : retryMode ? (
+      {retryMode ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm animate-in fade-in">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-extrabold uppercase tracking-wider text-primary">
@@ -178,10 +170,11 @@ export function ReadingLayout({
             ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {onToggleListening ? (
               <button
                 type="button"
+                disabled={controlsDisabled}
                 onClick={onToggleListening}
                 aria-pressed={isMicRecording}
                 className={`rounded-full px-3.5 py-2 text-xs font-bold transition-colors ${
@@ -197,13 +190,36 @@ export function ReadingLayout({
             {currentWordText && onReadWord ? (
               <button
                 type="button"
+                disabled={controlsDisabled}
                 onClick={onReadWord}
                 className="rounded-full bg-primary px-3.5 py-2 text-xs font-bold text-white hover:bg-primary/90"
               >
                 🔊 Nghe mẫu
               </button>
             ) : null}
+            {onSkipRetryWord ? (
+              <button
+                type="button"
+                disabled={controlsDisabled}
+                onClick={onSkipRetryWord}
+                className="rounded-full border border-line bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-surface"
+              >
+                Bỏ qua từ này
+              </button>
+            ) : null}
           </div>
+        </div>
+      ) : countdown !== null ? (
+        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border-2 border-primary bg-primary/10 px-4 py-3.5 shadow-sm animate-in fade-in">
+          <span className="text-xs font-black uppercase tracking-wider text-primary">
+            Chuẩn bị đọc:
+          </span>
+          <span className="flex size-9 items-center justify-center rounded-full bg-primary text-xl font-black text-white animate-bounce shadow">
+            {countdown > 0 ? countdown : "🎉"}
+          </span>
+          <span className="text-base font-extrabold text-ink">
+            {countdown > 0 ? "Bé sẵn sàng đọc to nhé..." : "Bắt đầu đọc nào!"}
+          </span>
         </div>
       ) : isPlayingSample ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-blue-500 bg-blue-50/90 px-4 py-3 shadow-sm animate-in fade-in">
@@ -238,7 +254,6 @@ export function ReadingLayout({
             &ldquo;{currentWordText || latestTranscript}&rdquo;
           </p>
         </div>
-      
       ) : isMicRecording ? (
         isCurrentWordMispronounced ? (
           <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border-2 border-rose-500 bg-rose-50 px-4 py-3 shadow-sm transition-all animate-in fade-in">
@@ -335,6 +350,8 @@ export function ReadingLayout({
         onPause={onPause}
         onReadSample={onReadSample}
         onToggleListening={onToggleListening}
+        retryMode={retryMode}
+        retryCompleted={retryCompleted}
       />
       <ReadingProgress
         isListening={isListening}
