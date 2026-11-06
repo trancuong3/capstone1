@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SessionReadingReports } from "@/components/reports/session-reading-reports";
+import {
+  SessionReadingReports,
+} from "@/components/reports/session-reading-reports";
 import type {
   ReadingPage,
   SavedReadingReport,
@@ -83,7 +85,12 @@ const historicalPage: ReadingPage = {
     word_id: `50000000-0000-4000-8000-00000000000${index + 1}`,
     word_index: index,
     text,
-    bbox: [0.1 + index * 0.15, 0.2, 0.1, 0.05] as [number, number, number, number],
+    bbox: [0.1 + index * 0.15, 0.2, 0.1, 0.05] as [
+      number,
+      number,
+      number,
+      number,
+    ],
   })),
 };
 
@@ -97,7 +104,9 @@ beforeEach(() => {
 });
 
 describe("SessionReadingReports", () => {
-  it("loads every saved report and the exact page revision that was read", async () => {
+  it(
+    "loads every saved report and the exact page revision that was read",
+    async () => {
     render(<SessionReadingReports sessionId={SESSION_ID} />);
 
     expect(
@@ -111,7 +120,9 @@ describe("SessionReadingReports", () => {
     const substitutionMetric = await screen.findByText("Đọc nhầm");
     const substitutionMetricButton = substitutionMetric.closest("button");
     if (!substitutionMetricButton) {
-      throw new Error("The substitution metric must be an interactive button.");
+      throw new Error(
+        "The substitution metric must be an interactive button.",
+      );
     }
     fireEvent.click(substitutionMetricButton);
     expect(screen.getByText("khỏe → khóe")).toBeInTheDocument();
@@ -124,7 +135,9 @@ describe("SessionReadingReports", () => {
     );
   });
 
-  it("does not substitute a different revision returned for a historical report", async () => {
+  it(
+    "does not substitute a different revision returned for a historical report",
+    async () => {
     comparisonApi.getReadingPage.mockResolvedValueOnce({
       ...historicalPage,
       page_revision_id: "35000000-0000-4000-8000-000000000001",
@@ -146,7 +159,9 @@ describe("SessionReadingReports", () => {
     );
   });
 
-  it("shows an accurate empty state when the database has no report", async () => {
+  it(
+    "shows an accurate empty state when the database has no report",
+    async () => {
     comparisonApi.getSessionReports.mockResolvedValueOnce({
       session_id: SESSION_ID,
       total: 0,
@@ -160,7 +175,9 @@ describe("SessionReadingReports", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps reports visible when historical page text is only partially available", async () => {
+  it(
+    "keeps reports visible when historical page text is only partially available",
+    async () => {
     comparisonApi.getReadingPage.mockRejectedValueOnce(
       new Error("not available"),
     );

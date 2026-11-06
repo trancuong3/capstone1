@@ -3257,7 +3257,9 @@ export function ReadingScreen({
       : "Chưa mở được buổi đọc";
 
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4">
+      <section
+        className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4"
+      >
         <h1 className="text-heading font-extrabold text-ink">{title}</h1>
         <StatusMessage tone="error">
           {notFound
@@ -3352,9 +3354,13 @@ export function ReadingScreen({
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
+      <div
+        className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8"
+      >
         {pageProgress ? (
-          <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            className="flex flex-col gap-3 rounded-card border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div className="min-w-0">
               <p className="font-bold text-ink">
                 Phạm vi đọc: Trang {pageProgress.start_page_number}–
@@ -3520,7 +3526,9 @@ export function ReadingScreen({
         comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (
-          <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
+          <StatusBanner
+            className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2"
+          >
             Đang chuyển trang và liên kết lại từ đang đọc…
           </StatusBanner>
         ) : null}
