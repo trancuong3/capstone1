@@ -52,11 +52,31 @@ class FakeAudio {
   }
 }
 
+class FakeSpeechSynthesisUtterance {
+  lang = "";
+  rate = 1;
+  pitch = 1;
+  voice: SpeechSynthesisVoice | null = null;
+  onstart: ((event: SpeechSynthesisEvent) => void) | null = null;
+  onboundary: ((event: SpeechSynthesisEvent) => void) | null = null;
+  onend: ((event: SpeechSynthesisEvent) => void) | null = null;
+  onerror: ((event: SpeechSynthesisErrorEvent) => void) | null = null;
+
+  constructor(readonly text: string) {}
+}
+
 let previousAudio: PropertyDescriptor | undefined;
 let previousCreateObjectURL: PropertyDescriptor | undefined;
 let previousRevokeObjectURL: PropertyDescriptor | undefined;
+let previousSpeechSynthesis: PropertyDescriptor | undefined;
+let previousSpeechSynthesisUtterance: PropertyDescriptor | undefined;
 const createObjectURL = vi.fn(() => "blob:reading-audio");
 const revokeObjectURL = vi.fn();
+const speechSynthesisMock = {
+  getVoices: vi.fn(() => [{ lang: "vi-VN" } as SpeechSynthesisVoice]),
+  speak: vi.fn(),
+  cancel: vi.fn(),
+};
 
 beforeEach(() => {
   FakeAudio.instances = [];
@@ -73,7 +93,20 @@ beforeEach(() => {
     URL,
     "revokeObjectURL",
   );
+  previousSpeechSynthesis = Object.getOwnPropertyDescriptor(
+    window,
+    "speechSynthesis",
+  );
+  previousSpeechSynthesisUtterance = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "SpeechSynthesisUtterance",
+  );
   vi.stubGlobal("Audio", FakeAudio);
+  vi.stubGlobal("SpeechSynthesisUtterance", FakeSpeechSynthesisUtterance);
+  Object.defineProperty(window, "speechSynthesis", {
+    configurable: true,
+    value: speechSynthesisMock,
+  });
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
     value: createObjectURL,
@@ -84,6 +117,9 @@ beforeEach(() => {
   });
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
+  speechSynthesisMock.getVoices.mockClear();
+  speechSynthesisMock.speak.mockReset();
+  speechSynthesisMock.cancel.mockReset();
 });
 
 afterEach(() => {
@@ -98,6 +134,20 @@ afterEach(() => {
     Object.defineProperty(URL, "revokeObjectURL", previousRevokeObjectURL);
   } else {
     Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+  if (previousSpeechSynthesis) {
+    Object.defineProperty(window, "speechSynthesis", previousSpeechSynthesis);
+  } else {
+    Reflect.deleteProperty(window, "speechSynthesis");
+  }
+  if (previousSpeechSynthesisUtterance) {
+    Object.defineProperty(
+      globalThis,
+      "SpeechSynthesisUtterance",
+      previousSpeechSynthesisUtterance,
+    );
+  } else {
+    Reflect.deleteProperty(globalThis, "SpeechSynthesisUtterance");
   }
   vi.unstubAllGlobals();
 });
@@ -129,6 +179,9 @@ describe("useSpeechPlayer", () => {
   });
 
   it("rejects decode and play failures instead of reporting successful playback", async () => {
+    speechSynthesisMock.speak.mockImplementation(() => {
+      throw new Error("Browser speech is unavailable");
+    });
     const { result } = renderHook(() => useSpeechPlayer());
     let playback!: Promise<void>;
 
@@ -137,7 +190,7 @@ describe("useSpeechPlayer", () => {
     });
     await waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
     act(() => FakeAudio.instances[0].fail());
-    await expect(playback).rejects.toThrow("Không thể phát âm thanh");
+    await expect(playback).rejects.toThrow("Browser speech is unavailable");
     expect(revokeObjectURL).toHaveBeenCalledOnce();
 
     FakeAudio.instances = [];
@@ -146,8 +199,92 @@ describe("useSpeechPlayer", () => {
     act(() => {
       playback = result.current.play("mèo");
     });
-    await expect(playback).rejects.toThrow("Autoplay was denied");
+    await expect(playback).rejects.toThrow("Browser speech is unavailable");
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the device's Vietnamese voice when server TTS is unavailable", async () => {
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new Error("402 paid_plan_required"),
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    const onPlay = vi.fn();
+    const onTimeUpdate = vi.fn();
+    const onEnded = vi.fn();
+    const playback = result.current.play("Bé đọc chữ khỏe nhé.", {
+      onPlay,
+      onTimeUpdate,
+      onEnded,
+    });
+
+    await waitFor(() =>
+      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
+    );
+    const utterance = speechSynthesisMock.speak.mock
+      .calls[0][0] as FakeSpeechSynthesisUtterance;
+    expect(utterance.lang).toBe("vi-VN");
+    expect(utterance.voice?.lang).toBe("vi-VN");
+    expect(result.current.isPlaying).toBe(true);
+
+    act(() => {
+      utterance.onstart?.({} as SpeechSynthesisEvent);
+      utterance.onboundary?.({ charIndex: 4 } as SpeechSynthesisEvent);
+      utterance.onend?.({} as SpeechSynthesisEvent);
+    });
+    await playback;
+
+    expect(onPlay).toHaveBeenCalledOnce();
+    expect(onTimeUpdate).toHaveBeenCalled();
+    expect(onEnded).toHaveBeenCalledOnce();
+    expect(result.current.isPlaying).toBe(false);
+  });
+
+  it("reuses the device voice briefly after a server TTS failure", async () => {
+    speechServiceMock.synthesize.mockRejectedValue(
+      new Error("502 TTS unavailable"),
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    const first = result.current.play("mèo");
+
+    await waitFor(() =>
+      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
+    );
+    const firstUtterance = speechSynthesisMock.speak.mock
+      .calls[0][0] as FakeSpeechSynthesisUtterance;
+    await act(async () => {
+      firstUtterance.onend?.({} as SpeechSynthesisEvent);
+      await first;
+    });
+
+    const second = result.current.play("khỏe");
+    await waitFor(() =>
+      expect(speechSynthesisMock.speak).toHaveBeenCalledTimes(2),
+    );
+    const secondUtterance = speechSynthesisMock.speak.mock
+      .calls[1][0] as FakeSpeechSynthesisUtterance;
+    await act(async () => {
+      secondUtterance.onend?.({} as SpeechSynthesisEvent);
+      await second;
+    });
+
+    expect(speechServiceMock.synthesize).toHaveBeenCalledOnce();
+  });
+
+  it("cancels browser speech and rejects when stopped", async () => {
+    speechServiceMock.synthesize.mockRejectedValueOnce(
+      new Error("402 paid_plan_required"),
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playback = result.current.play("khỏe").catch((error: Error) => error);
+
+    await waitFor(() =>
+      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
+    );
+    act(() => result.current.stop());
+
+    expect(await playback).toMatchObject({ name: "AbortError" });
+    expect(speechSynthesisMock.cancel).toHaveBeenCalledOnce();
+    expect(result.current.isPlaying).toBe(false);
   });
 
   it("stops a previous word before the next word starts", async () => {
