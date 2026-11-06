@@ -83,6 +83,12 @@ describe("Report components with typed data and real API adapters", () => {
         return Response.json(bookFixture);
       if (path === `/profiles/children/${TEST_CHILD_ID}`)
         return Response.json(childFixture);
+      if (path === `/reading/sessions/${TEST_SESSION_ID}/reports`)
+        return Response.json({
+          session_id: TEST_SESSION_ID,
+          total: 0,
+          reports: [],
+        });
       throw new Error("Unexpected isolated report route");
     });
     render(
@@ -95,10 +101,15 @@ describe("Report components with typed data and real API adapters", () => {
     expect(
       screen.getByRole("heading", { name: "Sự kiện trong buổi đọc" }),
     ).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Buổi đọc này chưa có báo cáo đối chiếu được lưu.",
+      ),
+    ).toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe(
       `/reading/history/${TEST_SESSION_ID}`,
     );
-    expect(apiFetchFixture).toHaveBeenCalledTimes(3);
+    expect(apiFetchFixture).toHaveBeenCalledTimes(4);
   });
 
   it("reports unavailable practice without audio playback, API writes or evidence claims", async () => {

@@ -22,6 +22,7 @@ export interface CreateRetryEventInput {
     retry_attempt?: number;
     original_status?: "OMISSION" | "MISPRONUNCIATION";
     recognized_text?: string;
+    target_word?: string;
   };
 }
 
@@ -137,6 +138,7 @@ const completionSummarySchema = z.object({
   transcripts: z.array(z.string()).nullable().optional(),
   correct_words: z.array(z.string()).nullable().optional(),
   mispronounced_words: z.array(z.string()).nullable().optional(),
+  skipped_words: z.array(z.string()).nullable().optional(),
   score: z.number().min(0).max(100).nullable().optional(),
 });
 

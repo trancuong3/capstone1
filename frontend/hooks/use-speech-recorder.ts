@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,10 +6,12 @@ export interface SpeechRecorder {
   readonly isRecording: boolean;
   readonly isSpeaking: boolean;
   readonly audioLevel: number;
-  start(): Promise<void>;
+  prepare(): Promise<void>;
+  start(options?: { retainStream?: boolean }): Promise<void>;
   stop(): Promise<Blob | null>;
-  cancel(): void;
+  cancel(options?: { retainStream?: boolean }): void;
   getStream(): MediaStream | null;
+  getIsSpeaking(): boolean;
 }
 
 const preferredMimeTypes = [
@@ -26,16 +27,17 @@ function stopTracks(stream: MediaStream) {
 export function useSpeechRecorder(): SpeechRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const streamGenerationRef = useRef(0);
   const chunksRef = useRef<Blob[]>([]);
   const isRecordingRef = useRef(false);
+  const isSpeakingRef = useRef(false);
+  const retainStreamOnStopRef = useRef(false);
 
-  const resolveStopRef = useRef<
-    ((recording: Blob | null) => void) | null
-  >(null);
+  const resolveStopRef = useRef<((recording: Blob | null) => void) | null>(
+    null,
+  );
 
-  const rejectStopRef = useRef<
-    ((reason: Error) => void) | null
-  >(null);
+  const rejectStopRef = useRef<((reason: Error) => void) | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -46,7 +48,7 @@ export function useSpeechRecorder(): SpeechRecorder {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
 
-  const cleanupAudioNodes = useCallback(() => {
+  const cleanupAudioNodes = useCallback((retainStream: boolean) => {
     isRecordingRef.current = false;
 
     if (animFrameRef.current !== null) {
@@ -70,14 +72,15 @@ export function useSpeechRecorder(): SpeechRecorder {
 
     audioContextRef.current = null;
     analyserRef.current = null;
-    streamRef.current = null;
+    if (!retainStream) streamRef.current = null;
 
+    isSpeakingRef.current = false;
     setIsSpeaking(false);
     setAudioLevel(0);
   }, []);
 
   const finish = useCallback(
-    (recording: Blob | null, error?: Error) => {
+    (recording: Blob | null, error?: Error, retainStream = false) => {
       const recorder = recorderRef.current;
 
       recorderRef.current = null;
@@ -86,12 +89,21 @@ export function useSpeechRecorder(): SpeechRecorder {
         recorder.ondataavailable = null;
         recorder.onstop = null;
         recorder.onerror = null;
-        stopTracks(recorder.stream);
+      }
+
+      if (!retainStream) {
+        const streams = new Set(
+          [recorder?.stream, streamRef.current].filter(
+            (stream): stream is MediaStream => Boolean(stream),
+          ),
+        );
+        for (const stream of streams) stopTracks(stream);
       }
 
       chunksRef.current = [];
 
-      cleanupAudioNodes();
+      cleanupAudioNodes(retainStream);
+      retainStreamOnStopRef.current = retainStream;
       setIsRecording(false);
 
       const resolve = resolveStopRef.current;
@@ -109,170 +121,197 @@ export function useSpeechRecorder(): SpeechRecorder {
     [cleanupAudioNodes],
   );
 
-  const cancel = useCallback(() => {
-    const recorder = recorderRef.current;
+  const cancel = useCallback(
+    (options?: { retainStream?: boolean }) => {
+      // Invalidate getUserMedia/start work that is still awaiting permission.
+      // Otherwise it could start recording after playback has already begun.
+      streamGenerationRef.current += 1;
+      const recorder = recorderRef.current;
 
-    if (recorder) {
-      recorder.ondataavailable = null;
-      recorder.onstop = null;
-      recorder.onerror = null;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.onerror = null;
 
-      if (recorder.state !== "inactive") {
-        recorder.stop();
+        if (recorder.state !== "inactive") {
+          recorder.stop();
+        }
       }
-    }
 
-    finish(null);
-  }, [finish]);
+      finish(null, undefined, options?.retainStream === true);
+    },
+    [finish],
+  );
 
-  const start = useCallback(async () => {
-    cancel();
-
+  const prepare = useCallback(async () => {
     if (
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === "undefined"
+      streamRef.current
+        ?.getTracks()
+        .some((track) => track.readyState === "live")
     ) {
-      throw new Error(
-        "Microphone recording is not supported in this browser.",
-      );
+      return;
     }
 
-    chunksRef.current = [];
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Microphone access is not supported in this browser.");
+    }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
+    const generation = streamGenerationRef.current;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+    });
 
-      streamRef.current = stream;
-      isRecordingRef.current = true;
-
-      const mimeType = preferredMimeTypes.find((candidate) =>
-        MediaRecorder.isTypeSupported(candidate),
-      );
-
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onerror = () => {
-        finish(null, new Error("Microphone recording failed."));
-      };
-
-      // Chỉ sử dụng MỘT MediaRecorder cho toàn bộ phiên ghi âm.
-      recorder.start(250);
-      recorderRef.current = recorder;
-
-      // Audio analyser chỉ dùng để hiển thị trạng thái giọng nói.
-      interface WindowWithAudio {
-        AudioContext?: typeof AudioContext;
-        webkitAudioContext?: typeof AudioContext;
-      }
-
-      const winAudio =
-        typeof window !== "undefined"
-          ? (window as unknown as WindowWithAudio)
-          : null;
-
-      const AudioCtx =
-        winAudio?.AudioContext || winAudio?.webkitAudioContext;
-
-      if (AudioCtx) {
-        try {
-          const ctx = new AudioCtx();
-          audioContextRef.current = ctx;
-
-          if (ctx.state === "suspended") {
-            void ctx.resume();
-          }
-
-          const source = ctx.createMediaStreamSource(stream);
-          sourceRef.current = source;
-
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 256;
-          analyser.smoothingTimeConstant = 0.5;
-
-          source.connect(analyser);
-          analyserRef.current = analyser;
-
-          const dataArray = new Uint8Array(
-            analyser.frequencyBinCount,
-          );
-
-          let speakingFrames = 0;
-          let silentFrames = 0;
-
-          const checkAudio = () => {
-            if (
-              !analyserRef.current ||
-              !isRecordingRef.current
-            ) {
-              return;
-            }
-
-            analyserRef.current.getByteFrequencyData(dataArray);
-
-            let sum = 0;
-
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-
-            const avg = sum / dataArray.length;
-            const normalized = Math.min(
-              100,
-              Math.round((avg / 128) * 100),
-            );
-
-            setAudioLevel(normalized);
-
-            if (avg > 10) {
-              speakingFrames++;
-              silentFrames = 0;
-
-              if (speakingFrames >= 2) {
-                setIsSpeaking(true);
-              }
-            } else {
-              silentFrames++;
-
-              if (silentFrames >= 5) {
-                speakingFrames = 0;
-                setIsSpeaking(false);
-              }
-            }
-
-            animFrameRef.current =
-              requestAnimationFrame(checkAudio);
-          };
-
-          animFrameRef.current =
-            requestAnimationFrame(checkAudio);
-        } catch {
-          // AudioContext có thể không được trình duyệt hỗ trợ.
-        }
-      }
-
-      setIsRecording(true);
-    } catch (error) {
-      const stream = streamRef.current;
-
-      if (stream) {
-        stopTracks(stream);
-      }
-
-      finish(null);
-
+    if (generation !== streamGenerationRef.current) {
+      stopTracks(stream);
+      const error = new Error("Microphone start was cancelled.");
+      error.name = "AbortError";
       throw error;
     }
-  }, [cancel, finish]);
+
+    streamRef.current = stream;
+  }, []);
+
+  const start = useCallback(
+    async (options?: { retainStream?: boolean }) => {
+      const retainStream = options?.retainStream === true;
+      cancel({ retainStream: Boolean(streamRef.current) });
+      const generation = streamGenerationRef.current;
+
+      if (typeof MediaRecorder === "undefined") {
+        throw new Error(
+          "Microphone recording is not supported in this browser.",
+        );
+      }
+
+      chunksRef.current = [];
+
+      try {
+        await prepare();
+        if (generation !== streamGenerationRef.current) {
+          const error = new Error("Microphone start was cancelled.");
+          error.name = "AbortError";
+          throw error;
+        }
+        const stream = streamRef.current;
+        if (!stream) throw new Error("Microphone is unavailable.");
+        retainStreamOnStopRef.current = retainStream;
+        isRecordingRef.current = true;
+
+        const mimeType = preferredMimeTypes.find((candidate) =>
+          MediaRecorder.isTypeSupported(candidate),
+        );
+
+        const recorder = mimeType
+          ? new MediaRecorder(stream, { mimeType })
+          : new MediaRecorder(stream);
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onerror = () => {
+          finish(null, new Error("Microphone recording failed."), retainStream);
+        };
+
+        // Chỉ sử dụng MỘT MediaRecorder cho toàn bộ phiên ghi âm.
+        recorder.start(250);
+        recorderRef.current = recorder;
+
+        // Audio analyser chỉ dùng để hiển thị trạng thái giọng nói.
+        interface WindowWithAudio {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        }
+
+        const winAudio =
+          typeof window !== "undefined"
+            ? (window as unknown as WindowWithAudio)
+            : null;
+
+        const AudioCtx = winAudio?.AudioContext || winAudio?.webkitAudioContext;
+
+        if (AudioCtx) {
+          try {
+            const ctx = new AudioCtx();
+            audioContextRef.current = ctx;
+
+            if (ctx.state === "suspended") {
+              void ctx.resume();
+            }
+
+            const source = ctx.createMediaStreamSource(stream);
+            sourceRef.current = source;
+
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.5;
+
+            source.connect(analyser);
+            analyserRef.current = analyser;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            let speakingFrames = 0;
+            let silentFrames = 0;
+
+            const checkAudio = () => {
+              if (!analyserRef.current || !isRecordingRef.current) {
+                return;
+              }
+
+              analyserRef.current.getByteFrequencyData(dataArray);
+
+              let sum = 0;
+
+              for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+              }
+
+              const avg = sum / dataArray.length;
+              const normalized = Math.min(100, Math.round((avg / 128) * 100));
+
+              setAudioLevel(normalized);
+
+              if (avg > 10) {
+                speakingFrames++;
+                silentFrames = 0;
+
+                if (speakingFrames >= 2 && !isSpeakingRef.current) {
+                  isSpeakingRef.current = true;
+                  setIsSpeaking(true);
+                }
+              } else {
+                silentFrames++;
+
+                if (silentFrames >= 5) {
+                  speakingFrames = 0;
+                  if (isSpeakingRef.current) {
+                    isSpeakingRef.current = false;
+                    setIsSpeaking(false);
+                  }
+                }
+              }
+
+              animFrameRef.current = requestAnimationFrame(checkAudio);
+            };
+
+            animFrameRef.current = requestAnimationFrame(checkAudio);
+          } catch {
+            // AudioContext có thể không được trình duyệt hỗ trợ.
+          }
+        }
+
+        setIsRecording(true);
+      } catch (error) {
+        if (generation !== streamGenerationRef.current) throw error;
+        finish(null, undefined, retainStream);
+        throw error;
+      }
+    },
+    [cancel, finish, prepare],
+  );
 
   const stop = useCallback((): Promise<Blob | null> => {
     const recorder = recorderRef.current;
@@ -280,13 +319,12 @@ export function useSpeechRecorder(): SpeechRecorder {
     if (!recorder || recorder.state === "inactive") {
       const finalBlob = chunksRef.current.length
         ? new Blob(chunksRef.current, {
-            type: recorder?.mimeType ||
-              chunksRef.current[0]?.type ||
-              "audio/webm",
+            type:
+              recorder?.mimeType || chunksRef.current[0]?.type || "audio/webm",
           })
         : null;
 
-      finish(finalBlob);
+      finish(finalBlob, undefined, retainStreamOnStopRef.current);
 
       return Promise.resolve(finalBlob);
     }
@@ -299,13 +337,11 @@ export function useSpeechRecorder(): SpeechRecorder {
         const finalBlob = chunksRef.current.length
           ? new Blob(chunksRef.current, {
               type:
-                recorder.mimeType ||
-                chunksRef.current[0]?.type ||
-                "audio/webm",
+                recorder.mimeType || chunksRef.current[0]?.type || "audio/webm",
             })
           : null;
 
-        finish(finalBlob);
+        finish(finalBlob, undefined, retainStreamOnStopRef.current);
       };
 
       try {
@@ -316,6 +352,7 @@ export function useSpeechRecorder(): SpeechRecorder {
           error instanceof Error
             ? error
             : new Error("Microphone recording failed."),
+          retainStreamOnStopRef.current,
         );
       }
     });
@@ -324,14 +361,17 @@ export function useSpeechRecorder(): SpeechRecorder {
   useEffect(() => cancel, [cancel]);
 
   const getStream = useCallback(() => streamRef.current, []);
+  const getIsSpeaking = useCallback(() => isSpeakingRef.current, []);
 
   return {
     isRecording,
     isSpeaking,
     audioLevel,
+    prepare,
     start,
     stop,
     cancel,
     getStream,
+    getIsSpeaking,
   };
 }

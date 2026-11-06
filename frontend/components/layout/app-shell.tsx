@@ -225,12 +225,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
-      <header
-        className={cn(
-          "shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8",
-          isImmersiveRoute && "hidden",
-        )}
-      >
+      <header className="shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(

@@ -32,20 +32,22 @@ test.describe("Group 4 responsive reading session mock", () => {
     await expect(page.getByText("Mình đang nghe bé đọc")).toBeVisible();
   });
 
-  test("low page confidence falls back to verified manual selection", async ({
+  test("low page confidence offers camera retry and safe exit", async ({
     page,
   }) => {
     await page.goto(`${sessionRoute}?state=page-confidence-low`);
+    const dialog = page.getByRole("dialog", {
+      name: "Mình chưa nhìn rõ trang sách",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Thử lại" })).toBeVisible();
     await expect(
-      page.getByRole("dialog", { name: "Mình chưa nhìn rõ trang sách" }),
+      page.getByRole("button", { name: "Chọn trang", exact: true }),
+    ).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Kết thúc an toàn" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Bé muốn nghỉ hôm nay?" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Chọn trang", exact: true }).click();
-    await page.getByRole("button", { name: "Chọn trang 5" }).click();
-    await page.getByRole("button", { name: "Đúng trang này" }).click();
-    await expect(page.getByLabel("Trang sách 5")).toHaveAttribute(
-      "data-page-revision-id",
-      "40000000-0000-4000-8000-000000000015",
-    );
   });
 
   test("camera and microphone denial remain recoverable mock states", async ({
@@ -148,7 +150,7 @@ test.describe("Group 4 responsive reading session mock", () => {
   for (const state of [
     "ready",
     "reading",
-    "manual-page",
+    "page-confidence-low",
     "question",
     "complete",
   ]) {
@@ -176,7 +178,7 @@ test.describe("Group 4 responsive reading session mock", () => {
   test("reading and dialogs reflow at 1024px and 768px", async ({ page }) => {
     for (const width of [1024, 768]) {
       await page.setViewportSize({ height: 1000, width });
-      for (const state of ["reading", "manual-page", "reconnecting"]) {
+      for (const state of ["reading", "page-confidence-low", "reconnecting"]) {
         await page.goto(`${sessionRoute}?state=${state}`);
         await expect(page.locator("h1:visible").first()).toBeVisible();
         const size = await page.evaluate(() => ({

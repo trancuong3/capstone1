@@ -1,12 +1,4 @@
-import {
-  Check,
-  CircleHelp,
-  List,
-  Mic,
-  Pause,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
+import { Check, CircleHelp, Mic, Pause, Volume2, VolumeX } from "lucide-react";
 
 import { Button } from "@/components/common/button";
 
@@ -16,12 +8,10 @@ interface ReadingControlsProps {
   isPlayingSample?: boolean;
   onFinish: () => void;
   onHelp: () => void;
-  onManualPage: () => void;
   onPause: () => void;
   onReadSample?: () => void;
   onToggleListening?: () => void;
   retryMode?: boolean;
-  retryCompleted?: boolean;
 }
 
 export function ReadingControls({
@@ -30,12 +20,10 @@ export function ReadingControls({
   isPlayingSample = false,
   onFinish,
   onHelp,
-  onManualPage,
   onPause,
   onReadSample,
   onToggleListening,
   retryMode = false,
-  retryCompleted = false,
 }: ReadingControlsProps) {
   const finishDisabled = disabled;
 
@@ -113,19 +101,14 @@ export function ReadingControls({
       </Button>
 
       <Button
-        aria-label="Chọn trang hoặc nhận trợ giúp"
+        aria-label="Nhờ gia sư giúp đọc"
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
         disabled={disabled || retryMode}
-        onClick={onManualPage}
+        onClick={onHelp}
         variant="quiet"
       >
-        <span className="relative">
-          <CircleHelp aria-hidden="true" className="size-6 sm:hidden" />
-          <List aria-hidden="true" className="hidden size-6 sm:block" />
-        </span>
-
-        <span className="sm:hidden truncate">Giúp</span>
-        <span className="hidden sm:inline truncate">Chọn trang</span>
+        <CircleHelp aria-hidden="true" className="size-6 shrink-0" />
+        <span className="truncate">Gia sư</span>
       </Button>
 
       <Button

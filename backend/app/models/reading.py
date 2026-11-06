@@ -27,6 +27,18 @@ class ReadingSession(Base):
 
 class ReadingEvent(Base):
     __tablename__ = "readingevents"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('OMISSION', 'REPETITION', 'LONG_PAUSE', 'MISPRONUNCIATION', "
+            "'SUBSTITUTION', 'SELF_CORRECTION', 'READ_EXAMPLE', 'WORD_RETRY')",
+            name="readingevents_type_check",
+        ),
+        CheckConstraint(
+            "status IN ('DETECTED', 'IGNORED_BY_GATE', 'FEEDBACK_GIVEN', "
+            "'CANDIDATE', 'CONFIRMED', 'FAILED', 'UNCERTAIN', 'DISMISSED')",
+            name="readingevents_status_check",
+        ),
+    )
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     SessionId = Column("sessionid", UUID(as_uuid=True), ForeignKey("readingsessions.id", ondelete="CASCADE"), nullable=False)

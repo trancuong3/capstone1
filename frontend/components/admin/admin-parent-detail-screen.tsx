@@ -11,7 +11,13 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -70,7 +76,11 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ display_name: "", email: "", phone: "" });
+  const [editForm, setEditForm] = useState({
+    display_name: "",
+    email: "",
+    phone: "",
+  });
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -146,7 +156,8 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
     const update: { display_name: string; email?: string; phone?: string } = {
       display_name: displayName,
     };
-    if (email && email !== (parent.email ?? "").trim().toLowerCase()) update.email = email;
+    if (email && email !== (parent.email ?? "").trim().toLowerCase())
+      update.email = email;
     if (phone && phone !== (parent.phone ?? "").trim()) update.phone = phone;
 
     setSaving(true);
@@ -183,7 +194,11 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
         actions={
           <>
             {parent ? (
-              <Button className="sm:w-auto" onClick={openEdit} variant="secondary">
+              <Button
+                className="sm:w-auto"
+                onClick={openEdit}
+                variant="secondary"
+              >
                 <Pencil aria-hidden className="size-5" />
                 Sửa Parent
               </Button>
@@ -201,10 +216,19 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       />
 
       {actionNotice ? (
-        <div className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold" role="status">{actionNotice}</div>
+        <div
+          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold"
+          role="status"
+        >
+          {actionNotice}
+        </div>
       ) : null}
       {actionError ? (
-        <div className="mb-4"><StatusMessage tone="error" title={actionError}>Vui lòng thử lại.</StatusMessage></div>
+        <div className="mb-4">
+          <StatusMessage tone="error" title={actionError}>
+            Vui lòng thử lại.
+          </StatusMessage>
+        </div>
       ) : null}
       {loading ? (
         <AdminLoading label="Đang tải thông tin phụ huynh…" />
@@ -370,20 +394,67 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
       <Modal
         isOpen={editOpen}
-        onClose={() => { if (!saving) { setEditOpen(false); setEditError(null); } }}
+        onClose={() => {
+          if (!saving) {
+            setEditOpen(false);
+            setEditError(null);
+          }
+        }}
         title="Sửa hồ sơ Parent"
       >
         <form className="grid gap-4" noValidate onSubmit={submitEdit}>
-          {editError ? <StatusMessage tone="error" title={editError}>Kiểm tra thông tin và thử lại.</StatusMessage> : null}
-          <TextField label="Tên hiển thị" autoComplete="name" value={editForm.display_name} onChange={(event) => setEditForm({ ...editForm, display_name: event.target.value })} required disabled={saving} />
-          <TextField label="Email" type="email" autoComplete="email" value={editForm.email} onChange={(event) => setEditForm({ ...editForm, email: event.target.value })} disabled={saving} />
-          <TextField label="Số điện thoại" type="tel" autoComplete="tel" value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })} disabled={saving} />
+          {editError ? (
+            <StatusMessage tone="error" title={editError}>
+              Kiểm tra thông tin và thử lại.
+            </StatusMessage>
+          ) : null}
+          <TextField
+            label="Tên hiển thị"
+            autoComplete="name"
+            value={editForm.display_name}
+            onChange={(event) =>
+              setEditForm({ ...editForm, display_name: event.target.value })
+            }
+            required
+            disabled={saving}
+          />
+          <TextField
+            label="Email"
+            type="email"
+            autoComplete="email"
+            value={editForm.email}
+            onChange={(event) =>
+              setEditForm({ ...editForm, email: event.target.value })
+            }
+            disabled={saving}
+          />
+          <TextField
+            label="Số điện thoại"
+            type="tel"
+            autoComplete="tel"
+            value={editForm.phone}
+            onChange={(event) =>
+              setEditForm({ ...editForm, phone: event.target.value })
+            }
+            disabled={saving}
+          />
           <p className="text-sm text-muted">
-            Các trường liên hệ được cập nhật qua backend và Supabase Auth. Để giữ nguyên email hoặc số điện thoại, hãy để nguyên giá trị hiện tại.
+            Các trường liên hệ được cập nhật qua backend và Supabase Auth. Để
+            giữ nguyên email hoặc số điện thoại, hãy để nguyên giá trị hiện tại.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button className="sm:w-auto" disabled={saving} onClick={() => setEditOpen(false)} type="button" variant="secondary">Hủy</Button>
-            <Button className="sm:w-auto" isLoading={saving} type="submit">Lưu thay đổi</Button>
+            <Button
+              className="sm:w-auto"
+              disabled={saving}
+              onClick={() => setEditOpen(false)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button className="sm:w-auto" isLoading={saving} type="submit">
+              Lưu thay đổi
+            </Button>
           </div>
         </form>
       </Modal>

@@ -174,7 +174,6 @@ export type ReadingUiState =
   | "camera-denied"
   | "microphone-denied"
   | "page-confidence-low"
-  | "manual-page"
   | "paused"
   | "reconnecting"
   | "stt-error"
@@ -244,6 +243,7 @@ export interface ReadingCompletionSummaryUI {
   readonly transcripts?: readonly string[] | null;
   readonly correct_words?: readonly string[] | null;
   readonly mispronounced_words?: readonly string[] | null;
+  readonly skipped_words?: readonly string[] | null;
   readonly score?: number | null;
 }
 
@@ -253,10 +253,11 @@ export type ReadingEventType =
   | "LONG_PAUSE"
   | "SUBSTITUTION"
   | "SELF_CORRECTION"
-  | "READ_EXAMPLE";
+  | "READ_EXAMPLE"
+  | "WORD_RETRY";
 
 export type ReadingEventStatus =
-  "CANDIDATE" | "CONFIRMED" | "UNCERTAIN" | "DISMISSED";
+  "CANDIDATE" | "CONFIRMED" | "FAILED" | "UNCERTAIN" | "DISMISSED";
 
 export interface ReadingEventDTO {
   readonly id: UUID;

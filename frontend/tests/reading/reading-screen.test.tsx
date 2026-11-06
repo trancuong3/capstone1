@@ -21,6 +21,7 @@ let previousSpeechRecognition: PropertyDescriptor | undefined;
 const {
   servicesHook,
   speechRecorderMock,
+  speechPlayerMock,
   speechServiceMock,
   compareTranscriptMock,
 } = vi.hoisted(() => ({
@@ -29,10 +30,17 @@ const {
     isRecording: false,
     isSpeaking: false,
     audioLevel: 0,
+    prepare: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
     cancel: vi.fn(),
     getStream: vi.fn(),
+    getIsSpeaking: vi.fn(),
+  },
+  speechPlayerMock: {
+    isPlaying: false,
+    play: vi.fn(),
+    stop: vi.fn(),
   },
   speechServiceMock: {
     synthesize: vi.fn(),
@@ -45,6 +53,9 @@ vi.mock("@/hooks/use-reading-services", () => ({
 }));
 vi.mock("@/hooks/use-speech-recorder", () => ({
   useSpeechRecorder: () => speechRecorderMock,
+}));
+vi.mock("@/hooks/use-speech-player", () => ({
+  useSpeechPlayer: () => speechPlayerMock,
 }));
 vi.mock("@/lib/api/speech-service", () => ({
   createSpeechService: () => speechServiceMock,
@@ -302,11 +313,16 @@ beforeEach(() => {
   services = createReadingFixtures();
   servicesHook.mockReset().mockReturnValue(services);
   speechRecorderMock.start.mockReset().mockResolvedValue(undefined);
+  speechRecorderMock.prepare.mockReset().mockResolvedValue(undefined);
   speechRecorderMock.stop
     .mockReset()
     .mockResolvedValue(new Blob(["x".repeat(256)], { type: "audio/webm" }));
   speechRecorderMock.cancel.mockReset();
   speechRecorderMock.getStream.mockReset().mockReturnValue(null);
+  speechRecorderMock.getIsSpeaking.mockReset().mockReturnValue(false);
+  speechPlayerMock.isPlaying = false;
+  speechPlayerMock.play.mockReset().mockResolvedValue(undefined);
+  speechPlayerMock.stop.mockReset();
   speechServiceMock.synthesize.mockReset();
   speechServiceMock.transcribe.mockReset().mockRejectedValue(
     new ServiceError({
@@ -519,6 +535,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
+    await screen.findByLabelText("Trang sách 5");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      ).toBeEnabled();
+    });
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
@@ -532,14 +554,27 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(retryConsent);
     await screen.findByText(/Bé đọc lại từ/);
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bật mic" })).toBeEnabled();
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFour.page_id,
+      );
+    });
+    await waitFor(() => {
+      expect(speechRecorderMock.prepare).toHaveBeenCalledOnce();
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+      expect(speechPlayerMock.play).toHaveBeenNthCalledWith(
+        1,
+        "Bé hãy đọc lại từ mèo nhé.",
+      );
+      expect(speechPlayerMock.play).toHaveBeenNthCalledWith(2, "mèo");
+    });
     expect(
       screen.queryByRole("button", {
         name: "Bé đọc với nhận diện giọng nói",
       }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Chuẩn bị đọc:/)).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Bật mic" }));
 
     await waitFor(() => {
       expect(FakeSpeechRecognition.instances).toHaveLength(2);
@@ -558,9 +593,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         ],
       });
     });
-    expect(
-      screen.getByText("Chưa nghe rõ, bé thử lại nhé!"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Đang nghe bé đọc từ này...")).toBeInTheDocument();
     speechServiceMock.transcribe.mockResolvedValueOnce({
       text: "mèo",
       language_code: "vi",
@@ -577,6 +610,19 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(2);
       expect(services.readingService.finish).toHaveBeenCalledOnce();
     });
+    expect(services.readingService.createRetryEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "CONFIRMED",
+        pageId: pageFour.page_id,
+        pageRevisionId: pageFour.page_revision_id,
+        wordId: pageFour.words[1].word_id,
+        metadata: expect.objectContaining({
+          original_status: "OMISSION",
+          recognized_text: "mèo",
+          target_word: "mèo",
+        }),
+      }),
+    );
   });
 
   it("preserves a retry candidate and offers page recovery when its original revision cannot be reopened", async () => {
@@ -615,11 +661,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
     services.readingService.getCurrentPage
       .mockResolvedValueOnce(pageFour)
-      .mockResolvedValueOnce(pageFive)
       .mockResolvedValueOnce(pageFour);
-    services.readingService.navigateToPage
-      .mockResolvedValueOnce(pageProgressFixture)
-      .mockRejectedValueOnce(new Error("temporary retry navigation failure"));
+    services.readingService.navigateToPage.mockRejectedValueOnce(
+      new Error("temporary retry navigation failure"),
+    );
 
     const user = userEvent.setup();
     renderReading("ready");
@@ -649,10 +694,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Trang tiếp theo" }),
-    );
     await screen.findByLabelText("Trang sách 5");
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      ).toBeEnabled();
+    });
     await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
@@ -663,12 +710,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     await screen.findByText(/Bé đọc lại từ/);
     await waitFor(() => {
-      expect(services.readingService.navigateToPage).toHaveBeenNthCalledWith(
-        2,
+      expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
         TEST_SESSION_ID,
         pageFour.page_id,
       );
     });
+    expect(services.readingService.navigateToPage).toHaveBeenCalledOnce();
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
     expect(screen.getByText(/Chưa mở lại được trang 4/)).toBeInTheDocument();
     expect(
@@ -681,6 +728,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(services.readingService.finish).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Thử mở lại trang" }));
+    await waitFor(() => {
+      expect(services.readingService.navigateToPage).toHaveBeenCalledTimes(2);
+      expect(services.readingService.navigateToPage).toHaveBeenNthCalledWith(
+        2,
+        TEST_SESSION_ID,
+        pageFour.page_id,
+      );
+    });
     const restoredPage = await screen.findByLabelText("Trang sách 4");
     await waitFor(() => {
       expect(restoredPage).toHaveAttribute(
@@ -973,20 +1028,25 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(services.readingService.finish).not.toHaveBeenCalled();
   });
 
-  it("binds manual page selection to the revision returned by the service", async () => {
+  it("offers camera retry and safe exit without a manual page picker", async () => {
     const user = userEvent.setup();
-    renderReading("manual-page");
-    await screen.findByRole("dialog", { name: "Bé đang đọc trang nào?" });
-    await user.click(screen.getByRole("button", { name: "Chọn trang 5" }));
-    await user.click(screen.getByRole("button", { name: "Đúng trang này" }));
-    expect(await screen.findByLabelText("Trang sách 5")).toHaveAttribute(
-      "data-page-revision-id",
-      pageFive.page_revision_id,
-    );
-    expect(services.pageMatchService.selectPage).toHaveBeenCalledWith(
+    renderReading("page-confidence-low");
+    await screen.findByRole("dialog", {
+      name: "Mình chưa nhìn rõ trang sách",
+    });
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Kết thúc an toàn" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Chọn trang")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Bé đang đọc trang nào?" }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(services.pageMatchService.retryCurrentPage).toHaveBeenCalledWith(
       TEST_SESSION_ID,
-      pageFive.page_id,
     );
+    expect(await screen.findByLabelText("Trang sách 4")).toBeInTheDocument();
   });
 
   it("rebinds the highlighted word to the new immutable page revision", async () => {

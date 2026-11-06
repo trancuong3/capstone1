@@ -37,9 +37,9 @@ export function Modal({
     }
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
+    dialogRef.current?.focus({ preventScroll: true });
 
-    return () => previouslyFocused?.focus();
+    return () => previouslyFocused?.focus({ preventScroll: true });
   }, [isOpen]);
 
   if (!isOpen) {

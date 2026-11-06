@@ -61,10 +61,12 @@ const detailSchema = summarySchema.extend({
         "SELF_CORRECTION",
         "READ_EXAMPLE",
         "MISPRONUNCIATION",
+        "WORD_RETRY",
       ]),
       status: z.enum([
         "CANDIDATE",
         "CONFIRMED",
+        "FAILED",
         "UNCERTAIN",
         "DISMISSED",
         "DETECTED",

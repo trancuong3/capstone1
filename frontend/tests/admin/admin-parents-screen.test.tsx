@@ -57,8 +57,9 @@ describe("AdminParentsScreen", () => {
       await screen.findByRole("heading", { name: "Nguyen Van A" }),
     ).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByText(/ID: 22222222-2222-4222-8222-222222222222/))
-      .toBeInTheDocument();
+    expect(
+      screen.getByText(/ID: 22222222-2222-4222-8222-222222222222/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Xem chi tiết/i })).toHaveAttribute(
       "href",
       "/admin/parents/22222222-2222-4222-8222-222222222222",
@@ -84,7 +85,9 @@ describe("AdminParentsScreen", () => {
     expect(
       await screen.findByText("Không thể tải danh sách phụ huynh"),
     ).toBeInTheDocument();
-    expect(screen.queryByText("internal server detail")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("internal server detail"),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
 
@@ -104,7 +107,9 @@ describe("AdminParentsScreen", () => {
 
     renderScreen();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Thêm Parent/i }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Thêm Parent/i }),
+    );
     fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
       target: { value: "Nguyen Van B" },
     });
@@ -135,21 +140,25 @@ describe("AdminParentsScreen", () => {
       created_at: "2026-10-01T00:00:00Z",
       children_count: 2,
     };
-    list.mockResolvedValueOnce({
-      items: [parent],
-      total: 1,
-      limit: 10,
-      offset: 0,
-    }).mockResolvedValue({
-      items: [],
-      total: 0,
-      limit: 10,
-      offset: 0,
-    });
+    list
+      .mockResolvedValueOnce({
+        items: [parent],
+        total: 1,
+        limit: 10,
+        offset: 0,
+      })
+      .mockResolvedValue({
+        items: [],
+        total: 0,
+        limit: 10,
+        offset: 0,
+      });
     deactivate.mockResolvedValueOnce({ id: parent.id, active: 0 });
 
     renderScreen();
-    expect(await screen.findByRole("heading", { name: "Nguyen Van A" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Nguyen Van A" }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Xóa" }));
     expect(await screen.findByText(/Đây là xóa mềm/i)).toBeInTheDocument();
@@ -158,7 +167,11 @@ describe("AdminParentsScreen", () => {
     await waitFor(() => {
       expect(deactivate).toHaveBeenCalledWith(parent.id);
     });
-    expect(await screen.findByText("Chưa có hồ sơ phụ huynh")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Nguyen Van A" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("Chưa có hồ sơ phụ huynh"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Nguyen Van A" }),
+    ).not.toBeInTheDocument();
   });
 });

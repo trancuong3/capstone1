@@ -18,9 +18,7 @@ export default async function NewChildPage({
 }: NewChildPageProps) {
   const query = await searchParams;
 
-  const from = Array.isArray(query.from)
-    ? query.from[0]
-    : query.from;
+  const from = Array.isArray(query.from) ? query.from[0] : query.from;
 
   return (
     <AppServicesProvider>

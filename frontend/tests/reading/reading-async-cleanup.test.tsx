@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import type { ReadingServices } from "@/hooks/use-reading-services";
@@ -292,10 +298,12 @@ describe("Reading action cleanup with a typed service boundary", () => {
     );
     const retry = await screen.findByRole("button", { name: "Thử nghe lại" });
     fireEvent.click(retry);
-    expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
-      TEST_SESSION_ID,
-      pageFour.words[0].word_id,
-    );
+    await waitFor(() => {
+      expect(services.tutorService.requestReadExample).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFour.words[0].word_id,
+      );
+    });
     view.unmount();
     await act(async () => {
       settle(tutorAction);

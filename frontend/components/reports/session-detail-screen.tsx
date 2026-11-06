@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, BookOpenText, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionEventList } from "@/components/reports/session-event-list";
+import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -245,11 +246,16 @@ export function SessionDetailScreen({
                     : `${detail.pages_completed} trang`,
                 ],
               ]),
-          ["Độ chính xác", formatPercent(metrics?.accuracy_percent ?? null)],
+          [
+            "Độ chính xác",
+            metrics?.accuracy_percent == null
+              ? "Chưa ghi nhận"
+              : formatPercent(metrics.accuracy_percent),
+          ],
           [
             "Tốc độ đọc",
             metrics?.reading_wpm == null
-              ? "Chưa đủ dữ liệu"
+              ? "Chưa ghi nhận"
               : `${metrics.reading_wpm} từ/phút`,
           ],
           [
@@ -268,102 +274,73 @@ export function SessionDetailScreen({
         ))}
       </div>
       <Card className="bg-white">
-        <div className="flex items-start gap-3">
-          <BookOpenText
-            aria-hidden="true"
-            className="mt-1 size-6 text-primary"
-          />
-          <div>
+        <SessionReadingReports sessionId={sessionId} />
+      </Card>
+      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
+        <summary className="cursor-pointer font-extrabold text-primary">
+          Thông tin khác của buổi đọc
+        </summary>
+        <div className="mt-4 flex flex-col gap-4">
+          <Card className="bg-white">
             <h2 className="text-2xl font-extrabold text-ink">
-              Revision đã dùng trong buổi đọc
+              Sự kiện trong buổi đọc
             </h2>
-            <p className="mt-1 text-label text-muted">
-              ID đã chọn trong phiên và ID tham chiếu ghi nhận trong sự kiện;
-              không thay bằng revision hiện tại của trang.
-            </p>
-          </div>
+            {availability.events === "unsupported" ||
+            availability.events === "partial" ? (
+              <StatusMessage tone="info">
+                Có sự kiện đã lưu nhưng{" "}
+                {availability.events === "partial" ? "một phần" : "định dạng"}{" "}
+                chưa được hỗ trợ. Không tự coi đây là lỗi đọc đã xác nhận.
+              </StatusMessage>
+            ) : null}
+            {detail.events.length > 0 || availability.events === "absent" ? (
+              <SessionEventList events={detail.events} />
+            ) : null}
+          </Card>
+          <Card className="bg-white">
+            <h2 className="text-2xl font-extrabold text-ink">
+              Câu hỏi đọc hiểu
+            </h2>
+            {availability.comprehension === "unsupported" ||
+            availability.comprehension === "partial" ? (
+              <StatusMessage tone="info">
+                Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ
+                trợ.{" "}
+                {availability.comprehension === "partial"
+                  ? "Nội dung đọc được vẫn hiển thị bên dưới."
+                  : "Chưa thể hiển thị nội dung của nhóm này."}
+              </StatusMessage>
+            ) : null}
+            {detail.comprehension.length === 0 &&
+            availability.comprehension === "absent" ? (
+              <p className="rounded-control bg-sky p-5 text-body text-muted">
+                Buổi đọc này không có câu hỏi đọc hiểu.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {detail.comprehension.map(({ answer, question }) => (
+                  <li
+                    className="rounded-control border border-border p-4"
+                    key={question.id}
+                  >
+                    <p className="font-extrabold text-ink">{question.prompt}</p>
+                    <p className="mt-2 text-label text-muted">
+                      Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
+                    </p>
+                    <p className="mt-2 text-label text-muted">
+                      {answer
+                        ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
+                        : question.answered
+                          ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
+                          : "Chưa có câu trả lời"}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </div>
-        <dl className="grid gap-4 text-label sm:grid-cols-2">
-          <div>
-            <dt className="font-extrabold text-ink">Đã chọn</dt>
-            {detail.selected_page_revision_ids.length === 0 ? (
-              <dd className="mt-1 text-muted">Chưa ghi nhận</dd>
-            ) : null}
-            {detail.selected_page_revision_ids.map((id) => (
-              <dd className="mt-1 break-all text-muted" key={id}>
-                <code>{id}</code>
-              </dd>
-            ))}
-          </div>
-          <div>
-            <dt className="font-extrabold text-ink">Tham chiếu</dt>
-            {detail.reference_page_revision_ids.length === 0 ? (
-              <dd className="mt-1 text-muted">Chưa ghi nhận</dd>
-            ) : null}
-            {detail.reference_page_revision_ids.map((id) => (
-              <dd className="mt-1 break-all text-muted" key={id}>
-                <code>{id}</code>
-              </dd>
-            ))}
-          </div>
-        </dl>
-      </Card>
-      <Card className="bg-white">
-        <h2 className="text-2xl font-extrabold text-ink">
-          Sự kiện trong buổi đọc
-        </h2>
-        {availability.events === "unsupported" ||
-        availability.events === "partial" ? (
-          <StatusMessage tone="info">
-            Có sự kiện đã lưu nhưng{" "}
-            {availability.events === "partial" ? "một phần" : "định dạng"} chưa
-            được hỗ trợ. Không tự coi đây là lỗi đọc đã xác nhận.
-          </StatusMessage>
-        ) : null}
-        {detail.events.length > 0 || availability.events === "absent" ? (
-          <SessionEventList events={detail.events} />
-        ) : null}
-      </Card>
-      <Card className="bg-white">
-        <h2 className="text-2xl font-extrabold text-ink">Câu hỏi đọc hiểu</h2>
-        {availability.comprehension === "unsupported" ||
-        availability.comprehension === "partial" ? (
-          <StatusMessage tone="info">
-            Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ
-            trợ.{" "}
-            {availability.comprehension === "partial"
-              ? "Nội dung đọc được vẫn hiển thị bên dưới."
-              : "Chưa thể hiển thị nội dung của nhóm này."}
-          </StatusMessage>
-        ) : null}
-        {detail.comprehension.length === 0 &&
-        availability.comprehension === "absent" ? (
-          <p className="rounded-control bg-sky p-5 text-body text-muted">
-            Buổi đọc này không có câu hỏi đọc hiểu.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {detail.comprehension.map(({ answer, question }) => (
-              <li
-                className="rounded-control border border-border p-4"
-                key={question.id}
-              >
-                <p className="font-extrabold text-ink">{question.prompt}</p>
-                <p className="mt-2 text-label text-muted">
-                  Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
-                </p>
-                <p className="mt-2 text-label text-muted">
-                  {answer
-                    ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
-                    : question.answered
-                      ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
-                      : "Chưa có câu trả lời"}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+      </details>
     </section>
   );
 }

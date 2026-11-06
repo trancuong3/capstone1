@@ -10,7 +10,13 @@ import {
   Trash2,
   UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
@@ -56,7 +62,9 @@ const emptyForm: ParentForm = { display_name: "", email: "", phone: "" };
 
 export function AdminParentsScreen() {
   const { parents } = useAdminServices();
-  const [items, setItems] = useState<readonly AdminParentProfileItemDTO[] | null>(null);
+  const [items, setItems] = useState<
+    readonly AdminParentProfileItemDTO[] | null
+  >(null);
   const [total, setTotal] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -71,7 +79,8 @@ export function AdminParentsScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<AdminParentProfileItemDTO | null>(null);
+  const [pendingDelete, setPendingDelete] =
+    useState<AdminParentProfileItemDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -158,7 +167,10 @@ export function AdminParentsScreen() {
       setFormError("Vui lòng nhập tên hiển thị.");
       return;
     }
-    if (formMode === "create" && (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    if (
+      formMode === "create" &&
+      (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    ) {
       setFormError("Vui lòng nhập email hợp lệ.");
       return;
     }
@@ -175,12 +187,16 @@ export function AdminParentsScreen() {
           email,
           ...(phone ? { phone } : {}),
         });
-        setNotice("Đã gửi lời mời tạo tài khoản Parent. Tài khoản cần hoàn tất quy trình xác minh theo cấu hình Supabase.");
+        setNotice(
+          "Đã gửi lời mời tạo tài khoản Parent. Tài khoản cần hoàn tất quy trình xác minh theo cấu hình Supabase.",
+        );
       } else if (formMode === "edit" && formParentId) {
-        const update: { display_name: string; email?: string; phone?: string } = {
-          display_name: displayName,
-        };
-        if (email && email !== originalForm.email.trim().toLowerCase()) update.email = email;
+        const update: { display_name: string; email?: string; phone?: string } =
+          {
+            display_name: displayName,
+          };
+        if (email && email !== originalForm.email.trim().toLowerCase())
+          update.email = email;
         if (phone && phone !== originalForm.phone.trim()) update.phone = phone;
         await parents.update(formParentId, update);
         setNotice("Đã cập nhật hồ sơ Parent.");
@@ -200,7 +216,9 @@ export function AdminParentsScreen() {
     setDeleteError(null);
     try {
       await parents.deactivate(pendingDelete.id);
-      setNotice("Đã ẩn Parent khỏi danh sách. Tài khoản Supabase Auth và dữ liệu liên quan vẫn được giữ.");
+      setNotice(
+        "Đã ẩn Parent khỏi danh sách. Tài khoản Supabase Auth và dữ liệu liên quan vẫn được giữ.",
+      );
       setPendingDelete(null);
       if (items?.length === 1 && offset > 0) {
         setOffset(Math.max(0, offset - PAGE_SIZE));
@@ -229,7 +247,11 @@ export function AdminParentsScreen() {
               <Plus aria-hidden className="size-5" />
               Thêm Parent
             </Button>
-            <Button className="sm:w-auto" onClick={() => void load()} variant="secondary">
+            <Button
+              className="sm:w-auto"
+              onClick={() => void load()}
+              variant="secondary"
+            >
               <RefreshCw aria-hidden className="size-5" />
               Tải lại
             </Button>
@@ -238,14 +260,21 @@ export function AdminParentsScreen() {
       />
 
       {notice ? (
-        <div className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold" role="status">
+        <div
+          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold"
+          role="status"
+        >
           {notice}
         </div>
       ) : null}
       {actionError ? (
         <div className="mb-4">
           <StatusMessage tone="error" title={actionError}>
-            <button className="font-extrabold underline" onClick={() => void load()} type="button">
+            <button
+              className="font-extrabold underline"
+              onClick={() => void load()}
+              type="button"
+            >
               Tải lại dữ liệu
             </button>
           </StatusMessage>
@@ -254,25 +283,30 @@ export function AdminParentsScreen() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
-          <p className="text-sm font-bold text-muted">
-            Tổng Parent
-          </p>
+          <p className="text-sm font-bold text-muted">Tổng Parent</p>
           <div className="flex items-center gap-3">
             <UsersRound aria-hidden className="size-8 text-primary" />
-            <p className="text-3xl font-black">{total.toLocaleString("vi-VN")}</p>
+            <p className="text-3xl font-black">
+              {total.toLocaleString("vi-VN")}
+            </p>
           </div>
         </Card>
         <Card className="bg-white">
           <p className="text-sm font-bold text-muted">Phạm vi danh sách</p>
           <p className="text-lg font-black">
-            {total === 0 ? "Chưa có dữ liệu" : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
+            {total === 0
+              ? "Chưa có dữ liệu"
+              : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
           </p>
           <p className="text-sm text-muted">Sắp xếp theo ngày tạo mới nhất</p>
         </Card>
       </div>
 
       <Card className="mb-6 bg-white">
-        <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={submitSearch}>
+        <form
+          className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          onSubmit={submitSearch}
+        >
           <div className="min-w-0 flex-1">
             <TextField
               label="Tìm phụ huynh theo tên hiển thị"
@@ -286,14 +320,25 @@ export function AdminParentsScreen() {
             Tìm kiếm
           </Button>
           {search ? (
-            <Button className="sm:w-auto" onClick={() => { setSearchInput(""); setSearch(""); setOffset(0); }} type="button" variant="secondary">
+            <Button
+              className="sm:w-auto"
+              onClick={() => {
+                setSearchInput("");
+                setSearch("");
+                setOffset(0);
+              }}
+              type="button"
+              variant="secondary"
+            >
               Xóa lọc
             </Button>
           ) : null}
         </form>
       </Card>
 
-      {formLoading ? <AdminLoading label="Đang tải dữ liệu Parent để chỉnh sửa…" /> : null}
+      {formLoading ? (
+        <AdminLoading label="Đang tải dữ liệu Parent để chỉnh sửa…" />
+      ) : null}
 
       {items === null ? (
         <AdminLoading label="Đang tải danh sách phụ huynh từ database…" />
@@ -309,26 +354,46 @@ export function AdminParentsScreen() {
           }
         >
           {error === "auth" ? (
-            <Link className="font-extrabold underline" href="/admin/login">Đăng nhập lại</Link>
+            <Link className="font-extrabold underline" href="/admin/login">
+              Đăng nhập lại
+            </Link>
           ) : error === "forbidden" ? (
             "Chỉ tài khoản có role admin mới được phép xem dữ liệu này."
           ) : (
-            <button className="font-extrabold underline" onClick={() => void load()} type="button">Thử lại</button>
+            <button
+              className="font-extrabold underline"
+              onClick={() => void load()}
+              type="button"
+            >
+              Thử lại
+            </button>
           )}
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          title={search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"}
+          title={
+            search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"
+          }
           description={
             search
               ? "Thử tên khác hoặc xóa bộ lọc tìm kiếm."
               : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."
           }
-          action={search ? (
-            <Button className="sm:w-auto" onClick={() => { setSearchInput(""); setSearch(""); setOffset(0); }} variant="secondary">
-              Xóa bộ lọc
-            </Button>
-          ) : undefined}
+          action={
+            search ? (
+              <Button
+                className="sm:w-auto"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  setOffset(0);
+                }}
+                variant="secondary"
+              >
+                Xóa bộ lọc
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <>
@@ -343,29 +408,46 @@ export function AdminParentsScreen() {
                     <h2 className="break-words text-xl font-black text-ink">
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
                     </h2>
-                    <p className="mt-1 break-all text-xs text-muted">ID: {parent.id}</p>
+                    <p className="mt-1 break-all text-xs text-muted">
+                      ID: {parent.id}
+                    </p>
                   </div>
                   <dl className="grid grid-cols-2 gap-3 sm:min-w-64">
                     <div className="rounded-control bg-canvas px-4 py-3">
                       <dt className="text-xs font-bold text-muted">Ngày tạo</dt>
-                      <dd className="mt-1 font-bold">{formatDate(parent.created_at)}</dd>
+                      <dd className="mt-1 font-bold">
+                        {formatDate(parent.created_at)}
+                      </dd>
                     </div>
                     <div className="rounded-control bg-canvas px-4 py-3">
                       <dt className="text-xs font-bold text-muted">Hồ sơ bé</dt>
-                      <dd className="mt-1 font-bold">{parent.children_count}</dd>
+                      <dd className="mt-1 font-bold">
+                        {parent.children_count}
+                      </dd>
                     </div>
                   </dl>
                   <div className="flex flex-wrap gap-2 sm:w-auto">
-                    <ButtonLink className="sm:w-auto" href={`/admin/parents/${encodeURIComponent(parent.id)}`} variant="secondary">
+                    <ButtonLink
+                      className="sm:w-auto"
+                      href={`/admin/parents/${encodeURIComponent(parent.id)}`}
+                      variant="secondary"
+                    >
                       Xem chi tiết
                       <ChevronRight aria-hidden className="size-5" />
                     </ButtonLink>
-                    <Button className="sm:w-auto" onClick={() => void openEdit(parent.id)} variant="secondary">
+                    <Button
+                      className="sm:w-auto"
+                      onClick={() => void openEdit(parent.id)}
+                      variant="secondary"
+                    >
                       <Pencil aria-hidden className="size-5" /> Sửa
                     </Button>
                     <Button
                       className="sm:w-auto"
-                      onClick={() => { setPendingDelete(parent); setDeleteError(null); }}
+                      onClick={() => {
+                        setPendingDelete(parent);
+                        setDeleteError(null);
+                      }}
                       variant="secondary"
                     >
                       <Trash2 aria-hidden className="size-5" /> Xóa
@@ -376,12 +458,26 @@ export function AdminParentsScreen() {
             ))}
           </div>
           <div className="mt-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <p className="text-sm text-muted">Trang {currentPage} / {totalPages}</p>
+            <p className="text-sm text-muted">
+              Trang {currentPage} / {totalPages}
+            </p>
             <div className="flex gap-3">
-              <Button className="sm:w-auto" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} type="button" variant="secondary">
+              <Button
+                className="sm:w-auto"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                type="button"
+                variant="secondary"
+              >
                 <ChevronLeft aria-hidden className="size-5" /> Trang trước
               </Button>
-              <Button className="sm:w-auto" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)} type="button" variant="secondary">
+              <Button
+                className="sm:w-auto"
+                disabled={offset + PAGE_SIZE >= total}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+                type="button"
+                variant="secondary"
+              >
                 Trang sau <ChevronRight aria-hidden className="size-5" />
               </Button>
             </div>
@@ -391,46 +487,120 @@ export function AdminParentsScreen() {
 
       <Modal
         isOpen={formMode !== null}
-        onClose={() => { if (!saving) { setFormMode(null); setFormError(null); } }}
+        onClose={() => {
+          if (!saving) {
+            setFormMode(null);
+            setFormError(null);
+          }
+        }}
         title={formMode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
       >
         <form className="grid gap-4" noValidate onSubmit={submitParentForm}>
-          {formError ? <StatusMessage tone="error" title={formError}>Kiểm tra thông tin và thử lại.</StatusMessage> : null}
-          <TextField label="Tên hiển thị" autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} required disabled={saving} />
-          <TextField label="Email" type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required={formMode === "create"} disabled={saving} />
-          <TextField label="Số điện thoại" type="tel" autoComplete="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} disabled={saving} />
+          {formError ? (
+            <StatusMessage tone="error" title={formError}>
+              Kiểm tra thông tin và thử lại.
+            </StatusMessage>
+          ) : null}
+          <TextField
+            label="Tên hiển thị"
+            autoComplete="name"
+            value={form.display_name}
+            onChange={(event) =>
+              setForm({ ...form, display_name: event.target.value })
+            }
+            required
+            disabled={saving}
+          />
+          <TextField
+            label="Email"
+            type="email"
+            autoComplete="email"
+            value={form.email}
+            onChange={(event) =>
+              setForm({ ...form, email: event.target.value })
+            }
+            required={formMode === "create"}
+            disabled={saving}
+          />
+          <TextField
+            label="Số điện thoại"
+            type="tel"
+            autoComplete="tel"
+            value={form.phone}
+            onChange={(event) =>
+              setForm({ ...form, phone: event.target.value })
+            }
+            disabled={saving}
+          />
           <p className="text-sm text-muted">
-            Tài khoản được tạo qua lời mời Supabase Auth. Đổi email/số điện thoại được xử lý bởi backend; không thay đổi role Parent.
+            Tài khoản được tạo qua lời mời Supabase Auth. Đổi email/số điện
+            thoại được xử lý bởi backend; không thay đổi role Parent.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button className="sm:w-auto" disabled={saving} onClick={() => setFormMode(null)} type="button" variant="secondary">Hủy</Button>
-            <Button className="sm:w-auto" isLoading={saving} type="submit">{formMode === "create" ? "Tạo Parent" : "Lưu thay đổi"}</Button>
+            <Button
+              className="sm:w-auto"
+              disabled={saving}
+              onClick={() => setFormMode(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button className="sm:w-auto" isLoading={saving} type="submit">
+              {formMode === "create" ? "Tạo Parent" : "Lưu thay đổi"}
+            </Button>
           </div>
         </form>
       </Modal>
 
       <Modal
         isOpen={pendingDelete !== null}
-        onClose={() => { if (!deleting) { setPendingDelete(null); setDeleteError(null); } }}
+        onClose={() => {
+          if (!deleting) {
+            setPendingDelete(null);
+            setDeleteError(null);
+          }
+        }}
         title="Xóa Parent"
       >
         {pendingDelete ? (
           <div className="grid gap-4">
             <p>
               Bạn có chắc muốn ẩn Parent{" "}
-              <strong>{pendingDelete.display_name?.trim() || pendingDelete.id}</strong>{" "}
+              <strong>
+                {pendingDelete.display_name?.trim() || pendingDelete.id}
+              </strong>{" "}
               khỏi danh sách quản trị?
             </p>
             <p className="text-sm text-muted">
-              Đây là xóa mềm: trạng thái active sẽ chuyển thành 0. Hồ sơ, tài khoản Supabase Auth,
-              hồ sơ bé và lịch sử học tập sẽ được giữ nguyên.
+              Đây là xóa mềm: trạng thái active sẽ chuyển thành 0. Hồ sơ, tài
+              khoản Supabase Auth, hồ sơ bé và lịch sử học tập sẽ được giữ
+              nguyên.
             </p>
-            {deleteError ? <StatusMessage tone="error" title={deleteError}>Hãy kiểm tra cấu hình và thử lại.</StatusMessage> : null}
+            {deleteError ? (
+              <StatusMessage tone="error" title={deleteError}>
+                Hãy kiểm tra cấu hình và thử lại.
+              </StatusMessage>
+            ) : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <Button className="sm:w-auto" disabled={deleting} onClick={() => { setPendingDelete(null); setDeleteError(null); }} type="button" variant="secondary">
+              <Button
+                className="sm:w-auto"
+                disabled={deleting}
+                onClick={() => {
+                  setPendingDelete(null);
+                  setDeleteError(null);
+                }}
+                type="button"
+                variant="secondary"
+              >
                 Hủy
               </Button>
-              <Button className="sm:w-auto" isLoading={deleting} onClick={() => void confirmDeleteParent()} type="button">
+              <Button
+                className="sm:w-auto"
+                isLoading={deleting}
+                onClick={() => void confirmDeleteParent()}
+                type="button"
+              >
                 Xóa Parent
               </Button>
             </div>

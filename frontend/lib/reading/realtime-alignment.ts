@@ -1,11 +1,6 @@
-
 import type { ReadingPageWordDTO } from "@/types/reading";
 
-export type RealtimeWordStatus =
-  | "MATCH"
-  | "SUBSTITUTE"
-  | "DELETE"
-  | "REPEATED";
+export type RealtimeWordStatus = "MATCH" | "SUBSTITUTE" | "DELETE" | "REPEATED";
 
 export interface RealtimeWordState {
   wordId: string;
@@ -81,8 +76,7 @@ export function normalizeRealtimeWord(text: string): string {
  * Tách transcript thành các từ.
  */
 export function tokenizeRealtimeText(text: string): string[] {
-  const tokens =
-    text.normalize("NFC").match(/[\p{L}\p{N}]+/gu) ?? [];
+  const tokens = text.normalize("NFC").match(/[\p{L}\p{N}]+/gu) ?? [];
 
   return tokens
     .map((token) => normalizeRealtimeWord(token))
@@ -101,10 +95,7 @@ export class RealtimeAlignmentEngine {
    */
   private pendingToken: { token: string; spokenIndex: number } | null = null;
 
-  private readonly statusByWordId = new Map<
-    string,
-    RealtimeWordState
-  >();
+  private readonly statusByWordId = new Map<string, RealtimeWordState>();
 
   private readonly repeatedWordIds = new Set<string>();
   private readonly hesitationWordIds = new Set<string>();
@@ -264,10 +255,7 @@ export class RealtimeAlignmentEngine {
     };
   }
 
-  private findAheadFrom(
-    cursor: number,
-    token: string,
-  ): number {
+  private findAheadFrom(cursor: number, token: string): number {
     const endIndex = Math.min(
       cursor + this.lookahead,
       this.bookWords.length - 1,
@@ -331,10 +319,7 @@ export class RealtimeAlignmentEngine {
         }
 
         this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
-        this.spokenToBookIndex.set(
-          pending.spokenIndex,
-          this.currentBookIndex,
-        );
+        this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
         this.currentBookIndex += 1;
 
         this.processTokenAtCurrentPosition(token, spokenIndex);
@@ -343,10 +328,7 @@ export class RealtimeAlignmentEngine {
 
       // Hai từ liên tiếp đều không khớp: xác nhận từ trước là đọc sai.
       this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
-      this.spokenToBookIndex.set(
-        pending.spokenIndex,
-        this.currentBookIndex,
-      );
+      this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
       this.currentBookIndex += 1;
 
       this.processTokenAtCurrentPosition(token, spokenIndex);
@@ -424,10 +406,7 @@ export class RealtimeAlignmentEngine {
     this.pendingToken = { token, spokenIndex };
   }
 
-  private processConfirmedMatch(
-    spokenIndex: number,
-    bookIndex: number,
-  ): void {
+  private processConfirmedMatch(spokenIndex: number, bookIndex: number): void {
     const bookWord = this.bookWords[bookIndex];
     if (!bookWord) return;
 
@@ -456,10 +435,7 @@ export class RealtimeAlignmentEngine {
     }
 
     this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
-    this.spokenToBookIndex.set(
-      pending.spokenIndex,
-      this.currentBookIndex,
-    );
+    this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
     this.currentBookIndex += 1;
   }
 
@@ -469,11 +445,7 @@ export class RealtimeAlignmentEngine {
       this.bookWords.length - 1,
     );
 
-    for (
-      let index = this.currentBookIndex + 1;
-      index <= endIndex;
-      index += 1
-    ) {
+    for (let index = this.currentBookIndex + 1; index <= endIndex; index += 1) {
       if (this.bookWords[index].normalizedText === token) {
         return index;
       }
@@ -486,10 +458,7 @@ export class RealtimeAlignmentEngine {
    * Nếu từ vừa nói giống từ sách ngay trước con trỏ,
    * xem đó là một lần đọc lặp.
    */
-  private tryMarkRepeatedWord(
-    token: string,
-    spokenIndex: number,
-  ): boolean {
+  private tryMarkRepeatedWord(token: string, spokenIndex: number): boolean {
     const previousIndex = this.currentBookIndex - 1;
 
     if (previousIndex < 0) return false;
@@ -540,45 +509,43 @@ export class RealtimeAlignmentEngine {
    * Timestamp phải thuộc cùng một đoạn transcript đã xử lý,
    * theo đúng thứ tự từ được nói.
    */
-  
-addHesitations(
-  words: RealtimeSpokenWord[],
-  spokenIndexOffset = 0,
-): RealtimeAlignmentSnapshot {
-  const sortedWords = [...words].sort(
-    (a, b) => a.start - b.start,
-  );
 
-  for (let index = 1; index < sortedWords.length; index += 1) {
-    const previous = sortedWords[index - 1];
-    const current = sortedWords[index];
+  addHesitations(
+    words: RealtimeSpokenWord[],
+    spokenIndexOffset = 0,
+  ): RealtimeAlignmentSnapshot {
+    const sortedWords = [...words].sort((a, b) => a.start - b.start);
 
-    const pause = current.start - previous.end;
+    for (let index = 1; index < sortedWords.length; index += 1) {
+      const previous = sortedWords[index - 1];
+      const current = sortedWords[index];
 
-    if (pause < this.hesitationThreshold) continue;
+      const pause = current.start - previous.end;
 
-    const beforeSpokenIndex = spokenIndexOffset + index;
-    const bookIndex = this.spokenToBookIndex.get(beforeSpokenIndex);
+      if (pause < this.hesitationThreshold) continue;
 
-    const beforeWordId =
-      bookIndex !== undefined
-        ? this.bookWords[bookIndex]?.wordId ?? null
-        : null;
+      const beforeSpokenIndex = spokenIndexOffset + index;
+      const bookIndex = this.spokenToBookIndex.get(beforeSpokenIndex);
 
-    if (beforeWordId) {
-      this.hesitationWordIds.add(beforeWordId);
+      const beforeWordId =
+        bookIndex !== undefined
+          ? (this.bookWords[bookIndex]?.wordId ?? null)
+          : null;
+
+      if (beforeWordId) {
+        this.hesitationWordIds.add(beforeWordId);
+      }
+
+      this.hesitations.push({
+        afterSpokenIndex: beforeSpokenIndex - 1,
+        beforeSpokenIndex,
+        pause: Number(pause.toFixed(2)),
+        beforeWordId,
+      });
     }
 
-    this.hesitations.push({
-      afterSpokenIndex: beforeSpokenIndex - 1,
-      beforeSpokenIndex,
-      pause: Number(pause.toFixed(2)),
-      beforeWordId,
-    });
+    return this.getSnapshot();
   }
-
-  return this.getSnapshot();
-}
 
   /**
    * Gọi khi kết thúc đọc một trang.
@@ -615,8 +582,7 @@ addHesitations(
   }
 
   getSnapshot(): RealtimeAlignmentSnapshot {
-    const currentWord =
-      this.bookWords[this.currentBookIndex] ?? null;
+    const currentWord = this.bookWords[this.currentBookIndex] ?? null;
 
     return {
       currentWordId: currentWord?.wordId ?? null,

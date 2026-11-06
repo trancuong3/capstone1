@@ -14,10 +14,5 @@
     "app/admin/(protected)/parents/page.tsx",
     "app/admin/(protected)/parents/[parentId]/page.tsx"
   ],
-  "exclude": [
-    "node_modules",
-    ".next",
-    "test",
-    "tests"
-  ]
+  "exclude": ["node_modules", ".next", "test", "tests"]
 }
