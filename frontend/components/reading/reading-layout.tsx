@@ -137,19 +137,7 @@ export function ReadingLayout({
           comparisonResult={comparisonResult}
         />
       </CameraPreview>
-      {countdown !== null ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border-2 border-primary bg-primary/10 px-4 py-3.5 shadow-sm animate-in fade-in">
-          <span className="text-xs font-black uppercase tracking-wider text-primary">
-            Chuẩn bị đọc:
-          </span>
-          <span className="flex size-9 items-center justify-center rounded-full bg-primary text-xl font-black text-white animate-bounce shadow">
-            {countdown > 0 ? countdown : "🎉"}
-          </span>
-          <span className="text-base font-extrabold text-ink">
-            {countdown > 0 ? "Bé sẵn sàng đọc to nhé..." : "Bắt đầu đọc nào!"}
-          </span>
-        </div>
-      ) : retryMode ? (
+      {retryMode ? (
         <div
           className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm animate-in fade-in"
           aria-live="polite"
@@ -179,6 +167,16 @@ export function ReadingLayout({
               </p>
             ) : null}
           </div>
+          {onSkipRetryWord ? (
+            <button
+              type="button"
+              disabled={controlsDisabled}
+              onClick={onSkipRetryWord}
+              className="shrink-0 rounded-full border border-line bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              Bỏ qua từ này
+            </button>
+          ) : null}
         </div>
       ) : countdown !== null ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border-2 border-primary bg-primary/10 px-4 py-3.5 shadow-sm animate-in fade-in">

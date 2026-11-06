@@ -432,7 +432,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
     await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
-
     await waitFor(() => {
       expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
       expect(compareTranscriptMock).toHaveBeenCalledOnce();
@@ -533,9 +532,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(retryConsent);
     await screen.findByText(/Bé đọc lại từ/);
     expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Bật mic" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Bật mic" })).toBeEnabled();
     expect(
       screen.queryByRole("button", {
         name: "Bé đọc với nhận diện giọng nói",
@@ -678,6 +675,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       screen.getByRole("button", { name: "Thử mở lại trang" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Bật mic" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Bỏ qua từ này" }),
+    ).toBeDisabled();
     expect(services.readingService.finish).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Thử mở lại trang" }));
@@ -692,7 +692,16 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(
       screen.queryByText(/Chưa mở lại được trang 4/),
     ).not.toBeInTheDocument();
-    expect(services.readingService.finish).not.toHaveBeenCalled();
+    const skipWordButton = screen.getByRole("button", {
+      name: "Bỏ qua từ này",
+    });
+    expect(skipWordButton).toBeEnabled();
+    expect(screen.getByText(/Bé đọc lại từ ·/)).toHaveTextContent("1/1");
+    await user.click(skipWordButton);
+
+    await waitFor(() => {
+      expect(services.readingService.finish).toHaveBeenCalledOnce();
+    });
   });
 
   it("does not finish twice on compare or socket failure", async () => {
@@ -827,7 +836,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
-    await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
 
     await waitFor(() => {
       expect(services.readingService.finish).toHaveBeenCalledOnce();

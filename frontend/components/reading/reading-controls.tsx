@@ -1,4 +1,3 @@
-
 import {
   Check,
   CircleHelp,
@@ -38,8 +37,7 @@ export function ReadingControls({
   retryMode = false,
   retryCompleted = false,
 }: ReadingControlsProps) {
-  const finishDisabled =
-    disabled;
+  const finishDisabled = disabled;
 
   return (
     <nav
@@ -103,24 +101,16 @@ export function ReadingControls({
         {isListening ? (
           <span className="relative flex size-6 items-center justify-center shrink-0">
             <span className="absolute inline-flex size-4 animate-ping rounded-full bg-red-400 opacity-75" />
-            <Mic
-              aria-hidden="true"
-              className="relative size-6 text-white"
-            />
+            <Mic aria-hidden="true" className="relative size-6 text-white" />
           </span>
         ) : (
           <Mic aria-hidden="true" className="size-6 shrink-0" />
         )}
 
         <span className="truncate">
-          {isListening
-            ? "Dừng mic"
-            : retryMode
-              ? "Bật mic"
-              : "Bé đọc"}
+          {isListening ? "Dừng mic" : retryMode ? "Bật mic" : "Bé đọc"}
         </span>
       </Button>
-
 
       <Button
         aria-label="Chọn trang hoặc nhận trợ giúp"
@@ -139,19 +129,13 @@ export function ReadingControls({
       </Button>
 
       <Button
-        aria-label={
-          retryMode
-            ? "Hoàn thành đọc lại"
-            : "Kết thúc buổi đọc"
-        }
+        aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
         className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
         disabled={finishDisabled}
         onClick={onFinish}
       >
         <Check aria-hidden="true" className="size-6 shrink-0" />
-        <span className="truncate">
-          {retryMode ? "Hoàn thành" : "Xong"}
-        </span>
+        <span className="truncate">{retryMode ? "Hoàn thành" : "Xong"}</span>
       </Button>
     </nav>
   );
