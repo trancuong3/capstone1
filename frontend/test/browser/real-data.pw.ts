@@ -245,6 +245,49 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   expect(api.unexpected).toEqual([]);
 });
 
+test("Admin OCR draft → Gemini correction → save → verify preserves bounding boxes", async ({
+  page,
+}) => {
+  const api = await installApiFixture(page);
+  await setRole(page, "admin");
+  await page.goto(`/admin/books/${ids.book}/pages/${ids.page}`);
+  await expect(
+    page.getByRole("heading", { name: "Kiểm tra OCR · R2" }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: /Tạo bản nháp để sửa nội dung/ })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Kiểm tra OCR · R3" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
+  expect(api.draftCreateSourceRevisionId).toBe(ids.revision);
+
+  await page.getByRole("button", { name: /AI sửa chính tả/ }).click();
+  await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã sửa");
+  expect(api.aiCorrectionText).toBe("Văn bản đã lưu");
+  const firstBox = page.getByRole("button", { name: /Từ 1: Văn\./ });
+  await expect(firstBox).toBeVisible();
+  const bboxStyle = await firstBox.getAttribute("style");
+  expect(bboxStyle).toContain("left: 10%");
+  expect(bboxStyle).toContain("top: 20%");
+  expect(bboxStyle).toContain("width: 14%");
+  expect(bboxStyle).toContain("height: 5%");
+
+  await page.getByRole("button", { name: /Lưu bản nháp/ }).click();
+  await expect(page.getByText("Đã lưu bản nháp vào database.")).toBeVisible();
+  expect(api.draftSaveRequest?.draft_text).toBe("Văn bản đã sửa");
+  const savedWords = api.draftSaveRequest?.words as
+    Array<Record<string, unknown>> | undefined;
+  expect(savedWords?.[0]?.bbox).toEqual([0.1, 0.2, 0.14, 0.05]);
+
+  await page.getByRole("button", { name: /Xác minh trang/ }).click();
+  await expect(page.getByText(/Đã xác minh revision/)).toBeVisible();
+  expect(api.verifyRequest?.corrected_text).toBe("Văn bản đã sửa");
+  expect(api.unexpected).toEqual([]);
+});
+
 test("Admin book creation requires separate name and title and sends normalized metadata", async ({
   page,
 }) => {

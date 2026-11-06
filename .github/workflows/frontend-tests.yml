@@ -36,6 +36,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Admin OCR lifecycle and atomic correction tests
+        run: npm test -- tests/admin/admin-ocr-review-screen.test.tsx
+
+      - name: Lint Admin OCR changes
+        run: >-
+          npx eslint
+          components/admin/admin-ocr-review-screen.tsx
+          lib/api/api-client.ts
+          lib/api/ocr-review-service.ts
+          lib/api/revision-service.ts
+          tests/admin/admin-ocr-review-screen.test.tsx
+          test/browser/real-data-fixture.ts
+          test/browser/real-data.pw.ts
+
+      - name: Run Admin OCR draft browser workflow
+        run: >-
+          npx playwright test
+          --config=playwright.real-data.config.ts
+          --grep "Admin OCR draft"
+
       - name: Run Parent CRUD and API client tests
         run: >-
           npm test --

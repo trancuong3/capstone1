@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import math
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 
 from app.schemas.admin_book import AdminBookWriteRequest as AdminBookCreateRequest
 
 
+def normalize_ocr_bbox(value: object) -> tuple[float, float, float, float]:
+    if isinstance(value, dict):
+        keys = ("x", "y", "width", "height")
+        if any(key not in value for key in keys):
+            raise ValueError("bbox dictionary must include x, y, width and height")
+        value = tuple(value[key] for key in keys)
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError("bbox must contain exactly four coordinates")
+    if any(isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)) for coordinate in value):
+        raise ValueError("bbox coordinates must be finite numbers")
+    try:
+        x, y, width, height = (float(coordinate) for coordinate in value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("bbox coordinates must be finite numbers") from exc
+    if not all(math.isfinite(coordinate) for coordinate in (x, y, width, height)):
+        raise ValueError("bbox coordinates must be finite numbers")
+    if (
+        any(coordinate < 0 or coordinate > 1 for coordinate in (x, y, width, height))
+        or width <= 0
+        or height <= 0
+        or x + width > 1
+        or y + height > 1
+    ):
+        raise ValueError("bbox must have positive size and remain inside the image")
+    return x, y, width, height
 
 
 class AdminOcrWordInput(BaseModel):
@@ -15,6 +41,11 @@ class AdminOcrWordInput(BaseModel):
     normalized_text: str = Field(min_length=1, max_length=500)
     bbox: tuple[float, float, float, float]
     ocr_confidence: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("bbox", mode="before")
+    @classmethod
+    def bbox_must_be_normalized(cls, value: object) -> tuple[float, float, float, float]:
+        return normalize_ocr_bbox(value)
 
     @field_validator("text", "normalized_text")
     @classmethod
@@ -26,17 +57,17 @@ class AdminOcrWordInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_normalized_box(self):
-        x, y, width, height = self.bbox
-        if any(value < 0 or value > 1 for value in self.bbox):
-            raise ValueError("bbox values must be normalized between 0 and 1")
-        if width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001:
-            raise ValueError("bbox must have positive size and remain inside the image")
+        normalize_ocr_bbox(self.bbox)
         return self
 
 
 class AdminOcrDraftRequest(BaseModel):
     draft_text: str = Field(max_length=500_000)
     words: list[AdminOcrWordInput] = Field(max_length=30_000)
+
+
+class AdminOcrCreateDraftRequest(BaseModel):
+    expected_source_revision_id: UUID
 
 
 class AdminOcrVerifyRequest(BaseModel):

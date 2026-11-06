@@ -3,12 +3,16 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas.admin_book import AdminBookWriteRequest
-from app.schemas.admin_ocr import AdminOcrDraftRequest, AdminOcrVerifyRequest
+from app.schemas.admin_ocr import (
+    AdminOcrCreateDraftRequest,
+    AdminOcrDraftRequest,
+    AdminOcrVerifyRequest,
+)
 from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.services.admin_book_service import AdminBookService
@@ -18,7 +22,18 @@ router = APIRouter()
 
 
 class AdminOcrAiCorrectRequest(BaseModel):
-    draft_text: str = Field(..., min_length=1)
+    draft_text: str = Field(..., min_length=1, max_length=500_000)
+
+    @field_validator("draft_text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("draft_text must not be blank")
+        return value
+
+
+class AdminOcrAiCorrectResponse(BaseModel):
+    corrected_text: str
 
 
 class AdminOcrGenerateQuestionsRequest(BaseModel):
@@ -64,10 +79,13 @@ async def reupload_admin_page_image(
 @router.post("/admin/pages/{page_id}/revisions/draft", response_model=AdminRevisionDetailRead, status_code=201)
 async def create_admin_page_edit_draft(
     page_id: UUID,
+    payload: AdminOcrCreateDraftRequest,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).create_edit_draft(actor_id, page_id)
+    return await AdminOcrService(db).create_edit_draft(
+        actor_id, page_id, payload.expected_source_revision_id
+    )
 
 
 @router.put("/admin/pages/{page_id}/revisions/{revision_id}/draft", response_model=AdminRevisionDetailRead)
@@ -109,7 +127,10 @@ async def reprocess_admin_page(
     return await AdminOcrService(db).reprocess(actor_id, page_id)
 
 
-@router.post("/admin/pages/{page_id}/ai-correct")
+@router.post(
+    "/admin/pages/{page_id}/ai-correct",
+    response_model=AdminOcrAiCorrectResponse,
+)
 async def ai_correct_page_text(
     page_id: UUID,
     payload: AdminOcrAiCorrectRequest,

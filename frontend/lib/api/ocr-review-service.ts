@@ -54,12 +54,18 @@ export const adminRevisionDetailSchema = z.object({
       line_index: z.number().int().nonnegative(),
       text: z.string(),
       normalized_text: z.string(),
-      bbox: z.tuple([
-        z.number().min(0).max(1),
-        z.number().min(0).max(1),
-        z.number().min(0).max(1),
-        z.number().min(0).max(1),
-      ]),
+      bbox: z
+        .tuple([
+          z.number().min(0).max(1),
+          z.number().min(0).max(1),
+          z.number().min(0).max(1),
+          z.number().min(0).max(1),
+        ])
+        .refine(
+          ([x, y, width, height]) =>
+            width > 0 && height > 0 && x + width <= 1 && y + height <= 1,
+          "Bounding box must have positive size and remain within the image.",
+        ),
       ocr_confidence: z.number().min(0).max(1).nullable(),
     }),
   ),

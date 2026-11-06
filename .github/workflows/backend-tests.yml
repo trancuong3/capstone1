@@ -44,6 +44,7 @@ jobs:
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_KEY: test-publishable-key
       READING_REPORT_TEST_DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test
+      ADMIN_OCR_TEST_DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test
       TESSERACT_CMD: /usr/bin/tesseract
 
     steps:

@@ -144,7 +144,7 @@ class RetiredPageWriteProtectionTests(unittest.IsolatedAsyncioTestCase):
         service.repo.revision = AsyncMock()
 
         with self.assertRaises(HTTPException) as caught:
-            await service.create_edit_draft(ACTOR, PAGE)
+            await service.create_edit_draft(ACTOR, PAGE, REVISION)
 
         self.assertEqual(caught.exception.status_code, 409)
         service.repo.revision.assert_not_awaited()

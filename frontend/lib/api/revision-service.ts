@@ -10,7 +10,10 @@ import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 
 export interface RevisionService {
   list(pageId: string): Promise<readonly AdminRevisionSummaryUI[]>;
-  createDraft(pageId: string): Promise<AdminPageRevisionDetailDTO>;
+  createDraft(
+    pageId: string,
+    expectedSourceRevisionId: string,
+  ): Promise<AdminPageRevisionDetailDTO>;
   verify(
     pageId: string,
     request: AdminRevisionVerifyRequestDTO,
@@ -40,12 +43,17 @@ export function createRevisionService(): RevisionService {
           }),
         ),
       ),
-    createDraft: (pageId) =>
+    createDraft: (pageId, expectedSourceRevisionId) =>
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/draft`,
         adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
         undefined,
-        { method: "POST" },
+        {
+          method: "POST",
+          body: {
+            expected_source_revision_id: expectedSourceRevisionId,
+          },
+        },
       ),
     verify: (pageId, request) =>
       requestApi(
