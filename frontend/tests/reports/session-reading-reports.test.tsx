@@ -79,7 +79,12 @@ const historicalPage: ReadingPage = {
   width: 600,
   height: 800,
   text: "Bé khỏe đang đọc.",
-  words: [],
+  words: ["Bé", "khỏe", "đang", "đọc"].map((text, index) => ({
+    word_id: `50000000-0000-4000-8000-00000000000${index + 1}`,
+    word_index: index,
+    text,
+    bbox: [0.1 + index * 0.15, 0.2, 0.1, 0.05] as [number, number, number, number],
+  })),
 };
 
 beforeEach(() => {
@@ -98,9 +103,14 @@ describe("SessionReadingReports", () => {
     expect(
       await screen.findByRole("heading", { name: "Trang 7" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Bé khỏe đang đọc.")).toBeInTheDocument();
-    expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
     expect(screen.getByText("Bé", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("khỏe", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Đọc nhầm 1/ }).then(async button => {
+      await import("@testing-library/react").then(({ fireEvent }) => fireEvent.click(button));
+    });
     expect(screen.getByText("khỏe → khóe")).toBeInTheDocument();
     expect(screen.getByText("đang", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("đọc", { exact: true })).toBeInTheDocument();
@@ -158,7 +168,7 @@ describe("SessionReadingReports", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
     expect(
-      screen.getByText(/không thay bằng trang mới hơn/),
+      screen.getByText(/không thay bằng trang mới hơn/i),
     ).toBeInTheDocument();
   });
 

@@ -296,7 +296,9 @@ export function SessionReadingReports({
                 page.page_id !== report.page_id ||
                 page.page_revision_id !== report.page_revision_id
               ) {
-                throw new Error("The API returned a different historical page revision.");
+                throw new Error(
+                  "The API returned a different historical page revision.",
+                );
               }
               return [
                 reportKey(report.page_id, report.page_revision_id),
@@ -400,8 +402,8 @@ export function SessionReadingReports({
         <>
           {state.partial ? (
             <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
-              Một số nội dung trang hoặc revision lịch sử chưa tải được. Không
-              thay bằng trang mới hơn; transcript, alignment và thống kê đã lưu
+              Một số nội dung trang hoặc revision lịch sử chưa tải được; không
+              thay bằng trang mới hơn. Transcript, alignment và thống kê đã lưu
               vẫn được giữ bên dưới.
             </StatusMessage>
           ) : null}

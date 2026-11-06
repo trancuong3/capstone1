@@ -851,7 +851,9 @@ export function ReadingScreen({
             }
 
             if (latestFinalText.trim() && !interimText.trim()) {
-              void autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
+              void autoCompletePageAfterFinalWordRef.current(
+                engine.getSnapshot(),
+              );
             }
           };
 
@@ -1331,7 +1333,9 @@ export function ReadingScreen({
         await stopListeningAndTranscribe();
         if (mountedRef.current) setIsMicRecording(false);
         const snapshot = alignmentEngineRef.current?.getSnapshot();
-        if (snapshot) await autoCompletePageAfterFinalWordRef.current(snapshot);
+        if (snapshot) {
+          await autoCompletePageAfterFinalWordRef.current(snapshot);
+        }
       } finally {
         if (mountedRef.current) {
           setIsMicRecording(false);
@@ -1674,7 +1678,8 @@ export function ReadingScreen({
   }
 
   useEffect(() => {
-    autoCompletePageAfterFinalWordRef.current = autoCompletePageAfterFinalWord;
+    autoCompletePageAfterFinalWordRef.current =
+      autoCompletePageAfterFinalWord;
   });
 
   async function retryPageMatch() {
