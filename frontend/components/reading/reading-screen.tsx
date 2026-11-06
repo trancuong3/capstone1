@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
+import {
+  ComprehensionQuestion,
+} from "@/components/reading/comprehension-question";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
@@ -14,7 +16,9 @@ import {
   BrowserTranscriptCollector,
   resolveTranscriptForSegment,
 } from "@/lib/reading/browser-transcript-collector";
-import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
+import {
+  ReadingStatusDialog,
+} from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
@@ -331,7 +335,8 @@ export function ReadingScreen({
       setHasPageTranscripts(true);
       transcriptsListRef.current.push(trimmed);
 
-      const bucketKey = `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
+      const bucketKey =
+        `${pageSnapshot.page_id}:${pageSnapshot.page_revision_id}`;
       let bucket = pageTranscriptsRef.current.get(bucketKey);
       if (!bucket) {
         bucket = {

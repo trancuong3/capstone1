@@ -182,9 +182,7 @@ test("History: paging → completed detail with missing end → return to the sa
   await expect(
     page.getByRole("heading", { name: "Buổi đọc đã hoàn thành" }),
   ).toBeVisible();
-  await page
-    .getByText("Thông tin khác của buổi đọc", { exact: true })
-    .click();
+  await page.getByText("Thông tin khác của buổi đọc", { exact: true }).click();
   await expect(
     page.getByText("Chưa có dữ liệu thời lượng", { exact: true }),
   ).toBeVisible();
@@ -247,9 +245,7 @@ test("History: unsupported optional data and retry remain distinct from no data"
   await expect(
     page.getByRole("heading", { name: "Buổi đọc đã hoàn thành" }),
   ).toBeVisible();
-  await page
-    .getByText("Thông tin khác của buổi đọc", { exact: true })
-    .click();
+  await page.getByText("Thông tin khác của buổi đọc", { exact: true }).click();
   await expect(page.getByText(/Có sự kiện đã lưu/)).toBeVisible();
   await expect(
     page.getByText("Buổi đọc này chưa có sự kiện để hiển thị."),

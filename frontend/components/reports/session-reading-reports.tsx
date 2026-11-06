@@ -407,10 +407,7 @@ export function SessionReadingReports({
       {state.status === "ready" ? (
         <>
           {state.partial ? (
-            <StatusMessage
-              title="Báo cáo chỉ tải được một phần"
-              tone="warning"
-            >
+            <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
               Một số nội dung trang hoặc revision lịch sử chưa tải được; không
               thay bằng trang mới hơn. Transcript, alignment và thống kê đã lưu
               vẫn được giữ bên dưới.
