@@ -146,12 +146,12 @@ class AdminOcrCorrectionJobManager:
         except asyncio.CancelledError:
             self._set_cancelled(job)
         except HTTPException as exc:
-            job.error = exc.detail if isinstance(exc.detail, str) else "AI OCR cục bộ thất bại."
+            job.error = exc.detail if isinstance(exc.detail, str) else "AI OCR thất bại."
             job.status = "FAILED"
             job.updated_at = datetime.now(timezone.utc)
         except Exception:
-            logger.error("Local OCR job failed")
-            job.error = "Không thể hoàn tất AI OCR cục bộ. Nội dung hiện tại vẫn được giữ nguyên."
+            logger.error("Admin OCR correction job failed")
+            job.error = "Không thể hoàn tất AI OCR. Nội dung hiện tại vẫn được giữ nguyên."
             job.status = "FAILED"
             job.updated_at = datetime.now(timezone.utc)
 

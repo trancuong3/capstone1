@@ -37,12 +37,10 @@ from app.services.ocr_engine import (
     normalize_text_tokens,
     normalize_word,
 )
-from app.services.admin_ocr_local import (
-    LocalCorrectionError,
-    LocalOcrConfig,
-    LocalOcrCorrector,
-)
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text
+from app.services.ocr_ai.config import OcrCorrectionConfig
+from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
+from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
 logger = logging.getLogger(__name__)
@@ -58,9 +56,14 @@ ALLOWED_FORMATS = {
 
 @dataclass(frozen=True)
 class PreparedLocalOcrCorrection:
-    """Validated, short-lived input for local OCR work; never persisted."""
+    """Validated, short-lived input for OCR correction; never persisted.
 
-    config: LocalOcrConfig
+    The historical name remains import-compatible with the local-only
+    implementation. Its configuration is still backend-only and never reaches
+    the browser or database.
+    """
+
+    config: OcrCorrectionConfig
     draft_text: str
     image_path: str
     word_boxes: tuple[tuple[float, float, float, float], ...]
@@ -1194,7 +1197,7 @@ class AdminOcrService:
         draft_text: str,
         words: list[AdminOcrWordInput],
     ) -> PreparedLocalOcrCorrection:
-        """Authorize and validate a correction before dispatching a local job."""
+        """Authorize and validate a correction before dispatching a job."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
         if page is None:
@@ -1218,18 +1221,21 @@ class AdminOcrService:
             )
 
         try:
-            config = LocalOcrConfig.from_environment()
-        except LocalCorrectionError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            config = OcrCorrectionConfig.from_environment()
+        except OcrConfigurationError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Cấu hình AI OCR trên máy chủ chưa hợp lệ.",
+            ) from exc
 
-        if len(normalized_draft.encode("utf-8")) > config.chunking.max_document_bytes:
+        if len(normalized_draft.encode("utf-8")) > config.local.chunking.max_document_bytes:
             raise HTTPException(
                 status_code=422,
                 detail="OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES",
             )
         word_boxes = [tuple(item["bbox"]) for item in validated_words]
         try:
-            plan = chunk_ocr_text(normalized_draft, config.chunking)
+            plan = chunk_ocr_text(normalized_draft, config.local.chunking)
         except ChunkingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if len(word_boxes) != len(plan.tokens):
@@ -1264,14 +1270,25 @@ class AdminOcrService:
             ) from exc
 
         try:
-            return await LocalOcrCorrector(prepared.config).correct(
+            return await OcrCorrectionOrchestrator(prepared.config).correct(
                 prepared.draft_text,
                 image_bytes,
                 list(prepared.word_boxes),
                 on_progress=on_progress,
             )
-        except LocalCorrectionError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        except OcrOrchestrationError as exc:
+            if exc.code in {"INVALID_CHUNK_PLAN", "WORD_BOX_MISMATCH"}:
+                status_code = 422
+            elif exc.code == "DOCUMENT_TIMEOUT":
+                status_code = 504
+            elif exc.code in {"SOURCE_IMAGE_UNAVAILABLE", "CHUNK_IMAGE_UNAVAILABLE"}:
+                status_code = 502
+            else:
+                status_code = 503
+            raise HTTPException(
+                status_code=status_code,
+                detail="Không thể hoàn tất AI OCR; bản nháp hiện tại vẫn được giữ nguyên.",
+            ) from exc
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath
