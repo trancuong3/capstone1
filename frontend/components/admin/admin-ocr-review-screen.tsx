@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AdminLoading,
@@ -133,6 +134,8 @@ export function AdminOcrReviewScreen({
   pageId: string;
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
+  const searchParams = useSearchParams();
+  const preferredRevisionId = searchParams.get("revisionId");
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [image, setImage] = useState<AdminPageImageUI | null>(null);
   const [history, setHistory] = useState<
@@ -224,12 +227,26 @@ export function AdminOcrReviewScreen({
         if (requestId === requestIdRef.current) setError("unavailable");
         return;
       }
-      const nextDetail = await ocr.getRevision(pageId, active.page_revision_id);
+      const preferredRevision = preferredRevisionId
+        ? nextHistory.find(
+            (item) => item.page_revision_id === preferredRevisionId,
+          )
+        : undefined;
+      const selectedRevision = preferredRevision ?? active;
+      const nextDetail = await ocr.getRevision(
+        pageId,
+        selectedRevision.page_revision_id,
+      );
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);
       setHistory(nextHistory);
       applyDetail(nextDetail);
+      if (preferredRevisionId && !preferredRevision) {
+        setNotice(
+          "Revision trong báo cáo không còn trong lịch sử trang. Đang hiển thị revision mới nhất.",
+        );
+      }
     } catch (cause) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setError(
@@ -240,7 +257,16 @@ export function AdminOcrReviewScreen({
             : "safe",
       );
     }
-  }, [applyDetail, bookId, books, ocr, pageId, pages, revisions]);
+  }, [
+    applyDetail,
+    bookId,
+    books,
+    ocr,
+    pageId,
+    pages,
+    preferredRevisionId,
+    revisions,
+  ]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 import threading
 import time
@@ -24,23 +26,49 @@ from sqlalchemy.exc import (
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
-from app.database.config import CORS_ALLOWED_ORIGINS
+from app.database.config import APP_ENVIRONMENT, CORS_ALLOWED_ORIGINS
 from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 from app.services.ocr_engine import warmup_ocr_engines
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
+from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Khởi động worker, nạp trước model OCR vào RAM và giải phóng pool khi shutdown."""
-    threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_warmup_worker").start()
+    """Start OCR warmup and the durable PostgreSQL book-quality worker."""
+    threading.Thread(
+        target=warmup_ocr_engines,
+        daemon=True,
+        name="ocr_warmup_worker",
+    ).start()
+
+    worker_disabled = os.getenv(
+        "BOOK_QUALITY_SCAN_WORKER_ENABLED", "true"
+    ).strip().lower() in {"0", "false", "no", "off"}
+    stop_book_quality_worker = asyncio.Event()
+    book_quality_task = None
+    if APP_ENVIRONMENT != "test" and not worker_disabled:
+        book_quality_task = asyncio.create_task(
+            run_book_quality_worker(stop_book_quality_worker),
+            name="book_quality_scan_worker",
+        )
+
     try:
         yield
     finally:
+        if book_quality_task is not None:
+            stop_book_quality_worker.set()
+            try:
+                await asyncio.wait_for(book_quality_task, timeout=10)
+            except TimeoutError:
+                # The worker releases its lease on cancellation; an interrupted
+                # page is resumed from its durable per-page state on the next poll.
+                book_quality_task.cancel()
+                await asyncio.gather(book_quality_task, return_exceptions=True)
         await admin_ocr_correction_jobs.shutdown()
         await engine.dispose()
 
