@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 
@@ -1025,7 +1025,7 @@ export function AdminBookContentQualityScreen() {
                 ))}
               </div>
               <p className="mt-3 text-xs text-muted">
-                Trang có AI hoàn tất: {selectedScan.ai_completed_pages}. "Đã kiểm tra" phản ánh rule checks; AI unavailable/failed được tách riêng và không được coi là phân tích AI thành công.
+                Trang có AI hoàn tất: {selectedScan.ai_completed_pages}. &quot;Đã kiểm tra&quot; phản ánh rule checks; AI unavailable/failed được tách riêng và không được coi là phân tích AI thành công.
               </p>
               {selectedScan.error_summary ? (
                 <p className="mt-2 text-sm text-danger">{selectedScan.error_summary}</p>

@@ -66,7 +66,12 @@ export function ParentBookReportsScreen() {
   }, [offset, reportService]);
 
   useEffect(() => {
-    void load();
+    // Defer the fetch kickoff so the effect does not synchronously schedule
+    // state updates during the effect phase.
+    const timer = globalThis.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => globalThis.clearTimeout(timer);
   }, [load]);
 
   const first = total > 0 ? offset + 1 : 0;
