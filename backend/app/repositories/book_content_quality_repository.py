@@ -26,6 +26,32 @@ class BookContentQualityRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def add_scan_run(self, scan_run: BookQualityScanRun) -> None:
+        """Persist the scan-run parent before a report references its ID."""
+        self.db.add(scan_run)
+        await self.db.flush([scan_run])
+
+    async def add_report(self, report: BookContentReport) -> None:
+        """Persist a report before inserting its history and finding links."""
+        self.db.add(report)
+        await self.db.flush([report])
+
+    async def add_report_history(
+        self, history: BookContentReportHistory
+    ) -> None:
+        """Persist history only after its report row exists in this transaction."""
+        self.db.add(history)
+        await self.db.flush([history])
+
+    async def commit(self) -> None:
+        await self.db.commit()
+
+    async def rollback(self) -> None:
+        await self.db.rollback()
+
+    async def refresh(self, entity: object) -> None:
+        await self.db.refresh(entity)
+
     async def role(self, actor_id: UUID) -> str | None:
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
 

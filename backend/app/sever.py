@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import (
     DBAPIError,
+    IntegrityError,
     InterfaceError,
     OperationalError,
     TimeoutError as SQLAlchemyTimeoutError,
@@ -27,6 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
 from app.database.config import APP_ENVIRONMENT, CORS_ALLOWED_ORIGINS
+from app.database.integrity import postgres_integrity_error_metadata
 from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
@@ -269,7 +271,23 @@ async def database_api_exception_handler(
     request: Request,
     exc: DBAPIError,
 ) -> JSONResponse:
-    """Map known transient pooler/connection failures to a safe retryable response."""
+    """Map transient failures and safely diagnose PostgreSQL constraint errors."""
+    if isinstance(exc, IntegrityError):
+        request_id = getattr(request.state, "request_id", uuid4().hex)
+        metadata = postgres_integrity_error_metadata(exc)
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="database_integrity_violation",
+            stage="database_constraint",
+            exception=exc,
+            request_id=request_id,
+            method=request.method,
+            route=_route_template(request),
+            **metadata,
+        )
+        return await unhandled_exception_handler(request, exc)
+
     original = exc.orig
     sqlstate = getattr(original, "sqlstate", None)
     message = str(original)

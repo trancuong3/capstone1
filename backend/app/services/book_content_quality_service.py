@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from app.database.integrity import is_book_report_idempotency_violation
+
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
@@ -210,6 +212,7 @@ class BookContentQualityService:
                 )
 
         run = await self.repository.active_scan_for_book(book_id)
+        is_new_scan_run = run is None
         if run is None:
             run = BookQualityScanRun(
                 Id=uuid4(),
@@ -218,7 +221,6 @@ class BookContentQualityService:
                 TriggerType="PARENT_REPORT",
                 Status="QUEUED",
             )
-            self.repository.db.add(run)
 
         actor_name = (profile.DisplayName or "Phụ huynh")[:160]
         report = BookContentReport(
@@ -242,39 +244,61 @@ class BookContentQualityService:
             ScanRunId=run.Id,
             Status="OPEN",
         )
-        self.repository.db.add(report)
-        self.repository.db.add(
-            BookContentReportHistory(
-                Id=uuid4(),
-                ReportId=report.Id,
-                ActorId=actor_id,
-                ActorNameSnapshot=actor_name,
-                FromStatus=None,
-                ToStatus="OPEN",
-                Note="Báo cáo được tạo.",
-            )
+        history_entry = BookContentReportHistory(
+            Id=uuid4(),
+            ReportId=report.Id,
+            ActorId=actor_id,
+            ActorNameSnapshot=actor_name,
+            FromStatus=None,
+            ToStatus="OPEN",
+            Note="Báo cáo được tạo.",
         )
-        await self.repository.db.flush()
-        if run.Id is not None:
-            # If a scan is already underway, connect existing results as well as
-            # future findings from the worker.
-            await self.repository.link_existing_findings_to_report(
-                report_id=report.Id,
-                scan_id=run.Id,
-            )
+
         try:
-            await self.repository.db.commit()
-            await self.repository.db.refresh(report)
-        except IntegrityError:
-            await self.repository.db.rollback()
-            duplicate = await self.repository.report_by_idempotency_key(
-                actor_id, payload.idempotency_key
+            # Keep all writes in one transaction and establish FK dependencies
+            # explicitly; do not rely on incidental unit-of-work ordering.
+            if is_new_scan_run:
+                await self.repository.add_scan_run(run)
+            await self.repository.add_report(report)
+            await self.repository.add_report_history(history_entry)
+
+            if run.Id is not None:
+                # Link existing findings only after the report row exists. These
+                # links remain atomic with the report and initial history.
+                await self.repository.link_existing_findings_to_report(
+                    report_id=report.Id,
+                    scan_id=run.Id,
+                )
+
+            await self.repository.commit()
+            await self.repository.refresh(report)
+        except IntegrityError as exc:
+            # Flush can fail before commit. Always reset the failed transaction.
+            duplicate_idempotency_conflict = (
+                is_book_report_idempotency_violation(exc)
             )
-            if duplicate is None:
-                raise
-            report = duplicate
-        except Exception:
-            await self.repository.db.rollback()
+            await self.repository.rollback()
+
+            # Only the named reporter/idempotency unique constraint is an
+            # idempotent retry. Never hide an unrelated FK/CHECK/UNIQUE error.
+            if duplicate_idempotency_conflict:
+                duplicate = await self.repository.report_by_idempotency_key(
+                    actor_id, payload.idempotency_key
+                )
+                if duplicate is not None:
+                    detail = await self.repository.report_detail(duplicate.Id)
+                    if detail is None:
+                        raise HTTPException(
+                            status_code=404, detail="Resource not found"
+                        )
+                    history = await self.repository.report_history(duplicate.Id)
+                    return await self._report_detail_response(
+                        detail[0], detail[1], history
+                    )
+            raise
+        except BaseException:
+            # Includes failures from every flush, finding-link insert and commit.
+            await self.repository.rollback()
             raise
 
         history = await self.repository.report_history(report.Id)
