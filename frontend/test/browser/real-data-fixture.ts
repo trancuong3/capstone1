@@ -164,7 +164,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers": "authorization,content-type,accept",
-    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
     await route.fulfill({
@@ -263,14 +263,28 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     }
     if (
       request.method() === "POST" &&
-      path === `/books/admin/pages/${ids.page}/ai-correct`
+      path === `/books/admin/pages/${ids.page}/ai-correct/jobs`
     ) {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.aiCorrectionText =
         typeof body.draft_text === "string" ? body.draft_text : null;
       if (!state.draftCreateSourceRevisionId || !state.aiCorrectionText)
         return respond(route, { detail: "No editable draft" }, 409);
-      return respond(route, { corrected_text: "Văn bản đã sửa" });
+      return respond(
+        route,
+        {
+          job_id: "99999999-9999-4999-8999-999999999999",
+          page_id: ids.page,
+          status: "SUCCEEDED",
+          completed_chunks: 1,
+          total_chunks: 1,
+          result: "Văn bản đã sửa",
+          error: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+        202,
+      );
     }
     if (
       request.method() === "PUT" &&

@@ -424,7 +424,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     }
   });
 
-  it("applies local AI output atomically while preserving geometry and confidence", async () => {
+  it("previews local AI changes and applies them only after confirmation", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
@@ -449,9 +449,15 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
 
+    const textarea = screen.getByLabelText("Nội dung trang");
     expect(
-      await screen.findByDisplayValue("Nội dung mới đã sửa"),
+      await screen.findByRole("heading", { name: "Rà soát đề xuất AI" }),
     ).toBeInTheDocument();
+    expect(textarea).toHaveValue(source.draft_text);
+    await user.click(
+      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+    );
+    expect(textarea).toHaveValue("Nội dung mới đã sửa");
     const wordInputs = screen.getAllByLabelText("Văn bản từ");
     expect(
       wordInputs.map((input) => (input as HTMLInputElement).value),
@@ -466,7 +472,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
       ),
     ).toEqual(originalBoxes);
-    expect(screen.getByText(/AI OCR cục bộ đã sửa lỗi/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Đã áp dụng .* thay đổi AI vào bản nháp/),
+    ).toBeInTheDocument();
   });
 
   it("keeps the original text and words when local AI returns a token-count mismatch", async () => {
@@ -527,10 +535,56 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.getAllByLabelText("Văn bản từ")[0]).toBeDisabled();
     resolveCorrection?.("Nội dung AI đã sửa");
 
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Rà soát đề xuất AI" }),
+      ).toBeInTheDocument(),
+    );
+    expect(textarea).toHaveValue(source.draft_text);
+    await user.click(
+      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+    );
     await waitFor(() => expect(textarea).toHaveValue("Nội dung AI đã sửa"));
+  });
+
+  it("cancels a running local AI job while preserving the current draft", async () => {
+    const services = createAdminServiceFixture();
+    const source = makeEditableDetail();
+    services.ocr.getRevision.mockResolvedValue(source);
+    services.ocr.aiCorrectText.mockImplementation(
+      (_pageId, _draftText, _words, onProgress, signal) => {
+        onProgress?.({
+          status: "RUNNING",
+          completed_chunks: 1,
+          total_chunks: 3,
+        });
+        return new Promise<string>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new Error("AI_OCR_CANCELLED")),
+            { once: true },
+          );
+        });
+      },
+    );
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const textarea = await screen.findByLabelText("Nội dung trang");
+    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
     expect(
-      screen.getByText(/AI OCR cục bộ đã sửa lỗi chính tả/),
+      await screen.findByText(/đang xử lý đoạn 1\/3/i),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Hủy xử lý/ }));
+
+    expect(await screen.findByText(/Đã hủy tác vụ AI OCR/)).toBeInTheDocument();
+    expect(textarea).toHaveValue(source.draft_text);
+    expect(services.ocr.saveDraft).not.toHaveBeenCalled();
   });
 
   it("creates a draft only from the selected current verified revision", async () => {

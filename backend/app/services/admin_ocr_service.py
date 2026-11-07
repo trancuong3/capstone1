@@ -8,9 +8,10 @@ import math
 import os
 import time
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
@@ -41,6 +42,7 @@ from app.services.admin_ocr_local import (
     LocalOcrConfig,
     LocalOcrCorrector,
 )
+from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,17 @@ ALLOWED_FORMATS = {
     "PNG": ("image/png", "png"),
     "WEBP": ("image/webp", "webp"),
 }
+
+
+@dataclass(frozen=True)
+class PreparedLocalOcrCorrection:
+    """Validated, short-lived input for local OCR work; never persisted."""
+
+    config: LocalOcrConfig
+    draft_text: str
+    image_path: str
+    word_boxes: tuple[tuple[float, float, float, float], ...]
+    total_chunks: int
 
 
 class AdminOcrService:
@@ -1168,6 +1181,20 @@ class AdminOcrService:
         draft_text: str,
         words: list[AdminOcrWordInput],
     ) -> dict[str, object]:
+        prepared = await self.prepare_ai_correction(
+            actor_id, page_id, draft_text, words
+        )
+        corrected_text = await self.run_prepared_ai_correction(prepared)
+        return {"corrected_text": corrected_text}
+
+    async def prepare_ai_correction(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        draft_text: str,
+        words: list[AdminOcrWordInput],
+    ) -> PreparedLocalOcrCorrection:
+        """Authorize and validate a correction before dispatching a local job."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
         if page is None:
@@ -1200,27 +1227,51 @@ class AdminOcrService:
                 status_code=422,
                 detail="OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES",
             )
-
+        word_boxes = [tuple(item["bbox"]) for item in validated_words]
         try:
-            image_bytes = await run_in_threadpool(download_object, page.ImagePath)
+            plan = chunk_ocr_text(normalized_draft, config.chunking)
+        except ChunkingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if len(word_boxes) != len(plan.tokens):
+            raise HTTPException(
+                status_code=422,
+                detail="Số lượng từ và vùng OCR không khớp; văn bản hiện tại được giữ nguyên.",
+            )
+        return PreparedLocalOcrCorrection(
+            config=config,
+            draft_text=normalized_draft,
+            image_path=page.ImagePath,
+            word_boxes=tuple(word_boxes),
+            total_chunks=len(plan.chunks),
+        )
+
+    @staticmethod
+    async def run_prepared_ai_correction(
+        prepared: PreparedLocalOcrCorrection,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> str:
+        try:
+            image_bytes = await run_in_threadpool(
+                download_object, prepared.image_path
+            )
         except Exception as exc:
             logger.warning(
-                "Unable to load source page image for local OCR verification",
-                extra={"page_id": str(page_id)},
+                "Unable to load source page image for local OCR verification"
             )
             raise HTTPException(
                 status_code=502,
                 detail="Không thể tải ảnh trang để đối chiếu OCR; văn bản hiện tại vẫn được giữ nguyên.",
             ) from exc
 
-        word_boxes = [tuple(item["bbox"]) for item in validated_words]
         try:
-            corrected_text = await LocalOcrCorrector(config).correct(
-                normalized_draft, image_bytes, word_boxes
+            return await LocalOcrCorrector(prepared.config).correct(
+                prepared.draft_text,
+                image_bytes,
+                list(prepared.word_boxes),
+                on_progress=on_progress,
             )
         except LocalCorrectionError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-        return {"corrected_text": corrected_text}
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath

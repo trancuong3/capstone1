@@ -3,10 +3,13 @@
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   RefreshCw,
   RotateCcw,
   Save,
   Sparkles,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -23,6 +26,10 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
+  AiCorrectionCancelledError,
+  type AiCorrectionProgress,
+} from "@/lib/api/ocr-review-service";
+import {
   normalizeVietnameseWord,
   syncPageTextToWords,
   syncWordsToPageText,
@@ -37,6 +44,11 @@ import type {
 } from "@/types/admin";
 
 type LoadError = "not-found" | "unavailable" | "safe";
+type AiTokenChange = {
+  readonly index: number;
+  readonly original: string;
+  readonly proposed: string;
+};
 
 export type WordDisplayStatus = "exact" | "partial" | "mismatch";
 
@@ -133,6 +145,14 @@ export function AdminOcrReviewScreen({
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiAcceptedChanges, setAiAcceptedChanges] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [aiDiffPage, setAiDiffPage] = useState(0);
+  const [aiProgress, setAiProgress] = useState<AiCorrectionProgress | null>(
+    null,
+  );
   const [busy, setBusy] = useState<
     "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | null
   >(null);
@@ -143,12 +163,16 @@ export function AdminOcrReviewScreen({
   const mountedRef = useRef(false);
   const wordRefs = useRef(new Map<number, HTMLElement>());
   const autoScrolledRevisionRef = useRef<string | null>(null);
+  const aiCorrectionAbortRef = useRef<AbortController | null>(null);
 
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     draftEditVersionRef.current += 1;
     setDetail(next);
     setDraftText(next.draft_text ?? "");
     setWordSyncError(null);
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
+    setAiDiffPage(0);
     setWords(
       next.words.map((word) => ({
         ...word,
@@ -166,6 +190,7 @@ export function AdminOcrReviewScreen({
       mountedRef.current = false;
       requestIdRef.current += 1;
       revisionChoiceRequestIdRef.current += 1;
+      aiCorrectionAbortRef.current?.abort();
     };
   }, []);
 
@@ -292,6 +317,9 @@ export function AdminOcrReviewScreen({
 
   function handleDraftTextChange(value: string) {
     draftEditVersionRef.current += 1;
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
+    setAiDiffPage(0);
     const normalizedText = value.normalize("NFC");
     setDraftText(normalizedText);
     const result = syncPageTextToWords(normalizedText, words);
@@ -307,6 +335,8 @@ export function AdminOcrReviewScreen({
 
   function updateWord(index: number, patch: Partial<AdminRevisionWordDTO>) {
     draftEditVersionRef.current += 1;
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
     const nextWords = words.map((word) =>
       word.word_index === index
         ? {
@@ -338,6 +368,8 @@ export function AdminOcrReviewScreen({
 
   function updateBbox(index: number, coordinate: number, value: number) {
     draftEditVersionRef.current += 1;
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
     setWords((current) =>
       current.map((word) => {
         if (word.word_index !== index) return word;
@@ -400,12 +432,27 @@ export function AdminOcrReviewScreen({
     const requestedRevisionId = detail.page_revision_id;
     const requestedText = draftText;
     const requestedVersion = draftEditVersionRef.current;
-    const expectedTokenCount = tokenizePageText(requestedText).length;
+    const requestedTokens = tokenizePageText(requestedText);
+    const expectedTokenCount = requestedTokens.length;
+    const controller = new AbortController();
+    aiCorrectionAbortRef.current = controller;
     setBusy("ai_correct");
+    setAiProgress(null);
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
+    setAiDiffPage(0);
     setNotice(null);
     try {
       const correctedText = (
-        await ocr.aiCorrectText(pageId, requestedText, words)
+        await ocr.aiCorrectText(
+          pageId,
+          requestedText,
+          words,
+          (progress) => {
+            if (mountedRef.current) setAiProgress(progress);
+          },
+          controller.signal,
+        )
       ).normalize("NFC");
       if (
         !mountedRef.current ||
@@ -425,12 +472,19 @@ export function AdminOcrReviewScreen({
         );
         return;
       }
-      draftEditVersionRef.current += 1;
-      setDraftText(correctedText);
-      setWords([...result.words]);
-      setWordSyncError(null);
+      const changes = result.tokens.flatMap((token, index) =>
+        token === requestedTokens[index] ? [] : [{ index, token }],
+      );
+      if (changes.length === 0) {
+        setNotice(
+          "AI không đề xuất thay đổi nào. Bản nháp hiện tại được giữ nguyên.",
+        );
+        return;
+      }
+      setAiSuggestion(correctedText);
+      setAiAcceptedChanges(new Set(changes.map((change) => change.index)));
       setNotice(
-        "AI OCR cục bộ đã sửa lỗi chính tả và phục hồi dấu thanh thành công!",
+        `AI đưa ra ${changes.length} thay đổi để rà soát. Bản nháp chưa bị thay đổi; chọn áp dụng sau khi kiểm tra.`,
       );
     } catch (cause) {
       if (
@@ -440,17 +494,56 @@ export function AdminOcrReviewScreen({
       ) {
         return;
       }
-      const safeMessage = isServiceError(cause)
-        ? cause.message
-        : "văn bản và tọa độ hiện tại được giữ nguyên.";
-      setNotice(
-        safeMessage.startsWith("Không thể")
-          ? safeMessage
-          : "Không thể sửa OCR bằng AI cục bộ: " + safeMessage,
-      );
+      if (
+        controller.signal.aborted ||
+        cause instanceof AiCorrectionCancelledError
+      ) {
+        setNotice("Đã hủy tác vụ AI OCR. Bản nháp hiện tại được giữ nguyên.");
+      } else {
+        const safeMessage = isServiceError(cause)
+          ? cause.message
+          : cause instanceof Error
+            ? cause.message
+            : "văn bản và tọa độ hiện tại được giữ nguyên.";
+        setNotice(
+          safeMessage.startsWith("Không thể") ||
+            safeMessage.startsWith("AI OCR")
+            ? safeMessage
+            : "Không thể sửa OCR bằng AI cục bộ: " + safeMessage,
+        );
+      }
     } finally {
-      if (mountedRef.current) setBusy(null);
+      aiCorrectionAbortRef.current = null;
+      if (mountedRef.current) {
+        setBusy(null);
+        setAiProgress(null);
+      }
     }
+  }
+
+  function cancelAiCorrection() {
+    aiCorrectionAbortRef.current?.abort();
+  }
+
+  function applySelectedAiChanges() {
+    if (!aiSuggestion || aiAcceptedChanges.size === 0) return;
+    const sourceRanges = [...draftText.matchAll(/\S+/gu)];
+    const proposedTokens = tokenizePageText(aiSuggestion);
+    let nextText = draftText;
+    const selected = [...aiAcceptedChanges].sort((left, right) => right - left);
+    for (const index of selected) {
+      const source = sourceRanges[index];
+      const proposed = proposedTokens[index];
+      if (!source || typeof source.index !== "number" || !proposed) continue;
+      nextText =
+        nextText.slice(0, source.index) +
+        proposed +
+        nextText.slice(source.index + source[0].length);
+    }
+    handleDraftTextChange(nextText);
+    setNotice(
+      `Đã áp dụng ${selected.length} thay đổi AI vào bản nháp. Hãy rà soát rồi lưu bản nháp để giữ lại.`,
+    );
   }
 
   async function resumePendingDraft(
@@ -755,6 +848,33 @@ export function AdminOcrReviewScreen({
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
 
+  const aiSuggestionTokens = useMemo(
+    () => (aiSuggestion === null ? [] : tokenizePageText(aiSuggestion)),
+    [aiSuggestion],
+  );
+  const aiChanges = useMemo<AiTokenChange[]>(() => {
+    if (
+      aiSuggestion === null ||
+      aiSuggestionTokens.length !== draftTokens.length
+    )
+      return [];
+    return draftTokens.flatMap((original, index) => {
+      const proposed = aiSuggestionTokens[index];
+      return proposed !== undefined && proposed !== original
+        ? [{ index, original, proposed }]
+        : [];
+    });
+  }, [aiSuggestion, aiSuggestionTokens, draftTokens]);
+  const aiDiffPageSize = 40;
+  const aiDiffPageCount = Math.max(
+    1,
+    Math.ceil(aiChanges.length / aiDiffPageSize),
+  );
+  const visibleAiChanges = aiChanges.slice(
+    aiDiffPage * aiDiffPageSize,
+    (aiDiffPage + 1) * aiDiffPageSize,
+  );
+
   const matchCounts = useMemo(() => {
     const counts = { exact: 0, partial: 0, mismatch: 0 };
     for (let i = 0; i < words.length; i++) {
@@ -1058,8 +1178,45 @@ export function AdminOcrReviewScreen({
               Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động
               cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu,
               Vàng: nghi sai dấu, Đỏ: không khớp). AI sửa lỗi chạy qua Ollama
-              cục bộ và không tự chuyển sang dịch vụ AI bên ngoài.
+              cục bộ, không gửi văn bản lên dịch vụ AI đám mây. Đề xuất giữ
+              nguyên số từ để bảo toàn bounding box; lỗi cần tách/gộp từ cần
+              được rà soát thủ công.
             </p>
+            {busy === "ai_correct" ? (
+              <div
+                aria-live="polite"
+                className="mt-4 grid gap-3 rounded-control border border-purple-300 bg-purple-50 p-4 text-sm text-purple-950"
+                role="status"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="font-bold">
+                    {aiProgress?.status === "QUEUED"
+                      ? "AI OCR đang chờ máy xử lý"
+                      : aiProgress
+                        ? `AI OCR đang xử lý đoạn ${aiProgress.completed_chunks}/${aiProgress.total_chunks}`
+                        : "Đang chuẩn bị tác vụ AI OCR cục bộ…"}
+                  </span>
+                  <Button
+                    className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
+                    onClick={cancelAiCorrection}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <X aria-hidden className="size-4" /> Hủy xử lý
+                  </Button>
+                </div>
+                <progress
+                  aria-label="Tiến độ AI OCR"
+                  className="h-2 w-full accent-purple-700"
+                  max={aiProgress?.total_chunks ?? 1}
+                  value={aiProgress?.completed_chunks ?? 0}
+                />
+                <span className="text-xs text-purple-900">
+                  Kết quả chỉ là gợi ý. Bản nháp sẽ không đổi cho đến khi bạn áp
+                  dụng.
+                </span>
+              </div>
+            ) : null}
             {wordSyncError ? (
               <p
                 aria-live="polite"
@@ -1068,6 +1225,158 @@ export function AdminOcrReviewScreen({
               >
                 {wordSyncError}
               </p>
+            ) : null}
+            {aiSuggestion !== null ? (
+              <section
+                aria-labelledby="ai-correction-review-title"
+                className="mt-4 grid gap-4 rounded-control border border-purple-300 bg-purple-50 p-4"
+                role="region"
+              >
+                <div>
+                  <h3
+                    className="text-lg font-extrabold text-purple-950"
+                    id="ai-correction-review-title"
+                  >
+                    Rà soát đề xuất AI
+                  </h3>
+                  <p className="mt-1 text-sm text-purple-900">
+                    Có {aiChanges.length} thay đổi từ. Các bbox được giữ nguyên;
+                    đề xuất chưa được lưu.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    className="min-h-9 w-auto px-3"
+                    onClick={() =>
+                      setAiAcceptedChanges(
+                        new Set(aiChanges.map((change) => change.index)),
+                      )
+                    }
+                    type="button"
+                    variant="secondary"
+                  >
+                    Chọn tất cả
+                  </Button>
+                  <Button
+                    className="min-h-9 w-auto px-3"
+                    onClick={() => setAiAcceptedChanges(new Set())}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Bỏ chọn tất cả
+                  </Button>
+                  <Button
+                    className="min-h-9 w-auto px-3"
+                    onClick={() => {
+                      setAiSuggestion(null);
+                      setAiAcceptedChanges(new Set());
+                      setAiDiffPage(0);
+                      setNotice(
+                        "Đã bỏ đề xuất AI. Bản nháp hiện tại được giữ nguyên.",
+                      );
+                    }}
+                    type="button"
+                    variant="quiet"
+                  >
+                    Bỏ đề xuất
+                  </Button>
+                </div>
+                <div
+                  aria-live="polite"
+                  className="text-xs font-bold text-muted"
+                >
+                  Trang {Math.min(aiDiffPage + 1, aiDiffPageCount)} /{" "}
+                  {aiDiffPageCount}
+                  {aiChanges.length > aiDiffPageSize
+                    ? ` · hiển thị tối đa ${aiDiffPageSize} thay đổi mỗi trang`
+                    : ""}
+                </div>
+                <ul className="grid gap-2">
+                  {visibleAiChanges.map((change) => (
+                    <li
+                      className="rounded-control border border-purple-200 bg-white p-3"
+                      key={change.index}
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          checked={aiAcceptedChanges.has(change.index)}
+                          className="mt-1 size-4 accent-purple-700"
+                          onChange={(event) => {
+                            setAiAcceptedChanges((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.add(change.index);
+                              else next.delete(change.index);
+                              return next;
+                            });
+                          }}
+                          type="checkbox"
+                        />
+                        <span className="min-w-0 text-sm">
+                          <span className="block text-xs text-muted">
+                            Từ {change.index + 1}
+                          </span>
+                          <span className="break-words">
+                            <del className="text-red-800">
+                              {change.original}
+                            </del>
+                            <span
+                              aria-hidden="true"
+                              className="px-2 text-muted"
+                            >
+                              →
+                            </span>
+                            <strong className="text-green-800">
+                              {change.proposed}
+                            </strong>
+                          </span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                {aiDiffPageCount > 1 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <Button
+                      className="min-h-9 w-auto px-3"
+                      disabled={aiDiffPage === 0}
+                      onClick={() =>
+                        setAiDiffPage((page) => Math.max(0, page - 1))
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      <ChevronLeft aria-hidden className="size-4" /> Trang trước
+                    </Button>
+                    <Button
+                      className="min-h-9 w-auto px-3"
+                      disabled={aiDiffPage + 1 >= aiDiffPageCount}
+                      onClick={() =>
+                        setAiDiffPage((page) =>
+                          Math.min(aiDiffPageCount - 1, page + 1),
+                        )
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      Trang sau <ChevronRight aria-hidden className="size-4" />
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-purple-200 pt-3">
+                  <span className="text-sm text-purple-950">
+                    Đã chọn {aiAcceptedChanges.size} / {aiChanges.length}
+                  </span>
+                  <Button
+                    className="sm:w-auto"
+                    disabled={aiAcceptedChanges.size === 0}
+                    onClick={applySelectedAiChanges}
+                    type="button"
+                  >
+                    <CheckCircle2 aria-hidden className="size-4" /> Áp dụng thay
+                    đổi đã chọn
+                  </Button>
+                </div>
+              </section>
             ) : null}
             <div className="mt-4 flex flex-wrap gap-3">
               {verified ? (

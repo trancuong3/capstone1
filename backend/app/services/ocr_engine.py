@@ -845,8 +845,9 @@ def _extract_text_and_boxes_dual_engine(
             x2 = int(round((bx + bw) * orig_width))
             y2 = int(round((by + bh) * orig_height))
             cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
-        debug_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "debug_ocr_boxes.png"))
-        cv2.imwrite(debug_path, debug_vis)
+        debug_path = os.getenv("OCR_DEBUG_BOXES_PATH", "").strip()
+        if debug_path:
+            cv2.imwrite(os.path.abspath(debug_path), debug_vis)
     except Exception:
         pass
 

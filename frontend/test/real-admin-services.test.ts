@@ -612,6 +612,52 @@ describe("real Admin adapters", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
   });
 
+  it("starts local AI correction jobs and accepts only a validated suggestion", async () => {
+    const word = {
+      word_index: 0,
+      line_index: 0,
+      text: "Chu",
+      normalized_text: "chu",
+      bbox: [0.1, 0.2, 0.2, 0.05] as const,
+      ocr_confidence: 0.82,
+    };
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        {
+          job_id: "77777777-7777-4777-8777-777777777777",
+          page_id: pageId,
+          status: "SUCCEEDED",
+          completed_chunks: 1,
+          total_chunks: 1,
+          result: "Chú",
+          error: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+        { status: 202 },
+      ),
+    );
+    const onProgress = vi.fn();
+    const corrected = await createOcrReviewService().aiCorrectText(
+      pageId,
+      "Chu",
+      [word],
+      onProgress,
+    );
+
+    expect(corrected).toBe("Chú");
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "SUCCEEDED", total_chunks: 1 }),
+    );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain(`/books/admin/pages/${pageId}/ai-correct/jobs`);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      draft_text: "Chu",
+      words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
+    });
+  });
+
   it("updates metadata and lifecycle through the real book API adapters", async () => {
     const books = createAdminBookService();
     fetchMock.mockResolvedValueOnce(

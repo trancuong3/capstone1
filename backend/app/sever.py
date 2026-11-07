@@ -29,6 +29,7 @@ from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 from app.services.ocr_engine import warmup_ocr_engines
+from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await admin_ocr_correction_jobs.shutdown()
         await engine.dispose()
 
 

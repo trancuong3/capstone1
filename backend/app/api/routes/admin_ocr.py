@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,11 @@ from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, 
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
+from app.services.admin_ocr_jobs import (
+    AdminOcrCorrectionJob,
+    OcrCorrectionQueueFull,
+    admin_ocr_correction_jobs,
+)
 
 router = APIRouter()
 
@@ -25,6 +32,7 @@ router = APIRouter()
 class AdminOcrAiCorrectRequest(BaseModel):
     draft_text: str = Field(..., min_length=1, max_length=500_000)
     words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
+    idempotency_key: UUID | None = None
 
     @field_validator("draft_text")
     @classmethod
@@ -36,6 +44,32 @@ class AdminOcrAiCorrectRequest(BaseModel):
 
 class AdminOcrAiCorrectResponse(BaseModel):
     corrected_text: str
+
+
+class AdminOcrAiCorrectionJobRead(BaseModel):
+    job_id: UUID
+    page_id: UUID
+    status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
+    completed_chunks: int = Field(ge=0)
+    total_chunks: int = Field(ge=1)
+    result: str | None = None
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+def _job_read(job: AdminOcrCorrectionJob) -> AdminOcrAiCorrectionJobRead:
+    return AdminOcrAiCorrectionJobRead(
+        job_id=job.job_id,
+        page_id=job.page_id,
+        status=job.status,
+        completed_chunks=job.completed_chunks,
+        total_chunks=job.total_chunks,
+        result=job.result,
+        error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 
@@ -139,3 +173,75 @@ async def ai_correct_page_text(
     return await AdminOcrService(db).ai_correct_text(
         actor_id, page_id, payload.draft_text, payload.words
     )
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-correct/jobs",
+    response_model=AdminOcrAiCorrectionJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_ai_correct_page_job(
+    page_id: UUID,
+    payload: AdminOcrAiCorrectRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    service = AdminOcrService(db)
+    prepared = await service.prepare_ai_correction(
+        actor_id, page_id, payload.draft_text, payload.words
+    )
+
+    async def run_correction(on_progress):
+        return await AdminOcrService.run_prepared_ai_correction(
+            prepared, on_progress
+        )
+
+    try:
+        job = admin_ocr_correction_jobs.submit(
+            page_id=page_id,
+            actor_id=actor_id,
+            total_chunks=prepared.total_chunks,
+            operation=run_correction,
+            idempotency_key=payload.idempotency_key,
+        )
+    except OcrCorrectionQueueFull as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="AI OCR đang xử lý quá nhiều yêu cầu. Hãy đợi tác vụ hiện tại hoàn tất rồi thử lại.",
+            headers={"Retry-After": "5"},
+        ) from exc
+    return _job_read(job)
+
+
+@router.get(
+    "/admin/pages/{page_id}/ai-correct/jobs/{job_id}",
+    response_model=AdminOcrAiCorrectionJobRead,
+)
+async def get_ai_correct_page_job(
+    page_id: UUID,
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await AdminOcrService(db).require_admin(actor_id)
+    job = admin_ocr_correction_jobs.get(job_id, actor_id, page_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="AI OCR job not found")
+    return _job_read(job)
+
+
+@router.delete(
+    "/admin/pages/{page_id}/ai-correct/jobs/{job_id}",
+    response_model=AdminOcrAiCorrectionJobRead,
+)
+async def cancel_ai_correct_page_job(
+    page_id: UUID,
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await AdminOcrService(db).require_admin(actor_id)
+    job = admin_ocr_correction_jobs.cancel(job_id, actor_id, page_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="AI OCR job not found")
+    return _job_read(job)
