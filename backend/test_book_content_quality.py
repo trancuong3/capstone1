@@ -94,8 +94,20 @@ class OllamaEvidenceValidationTests(unittest.TestCase):
             chunk = source[start:end]
             self.assertTrue(chunk)
             self.assertLessEqual(len(chunk.encode("utf-8")), 3072)
+        for previous, current in zip(ranges, ranges[1:]):
+            self.assertLessEqual(
+                current[0],
+                previous[1],
+                "Chunk ranges must overlap or meet; source characters cannot be skipped",
+            )
+            self.assertGreater(current[0], previous[0])
+
         self.assertTrue(
-            any(source[start:end].startswith("Kết") for start, end in ranges)
+            any(
+                "Kết thúc." in source[start:end]
+                for start, end in ranges
+            ),
+            "The final source phrase must be present in at least one chunk",
         )
 
     def test_chunks_are_bounded_for_four_byte_unicode(self):
