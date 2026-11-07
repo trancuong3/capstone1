@@ -100,6 +100,41 @@ function unavailable() {
   });
 }
 
+function createBookContentQualityServiceFixture() {
+  return {
+    listReports: vi
+      .fn<AdminServices["bookContentQuality"]["listReports"]>()
+      .mockRejectedValue(unavailable()),
+    getReport: vi
+      .fn<AdminServices["bookContentQuality"]["getReport"]>()
+      .mockRejectedValue(unavailable()),
+    updateReportStatus: vi
+      .fn<AdminServices["bookContentQuality"]["updateReportStatus"]>()
+      .mockRejectedValue(unavailable()),
+    listBooks: vi
+      .fn<AdminServices["bookContentQuality"]["listBooks"]>()
+      .mockRejectedValue(unavailable()),
+    getBook: vi
+      .fn<AdminServices["bookContentQuality"]["getBook"]>()
+      .mockRejectedValue(unavailable()),
+    enqueueScan: vi
+      .fn<AdminServices["bookContentQuality"]["enqueueScan"]>()
+      .mockRejectedValue(unavailable()),
+    listScans: vi
+      .fn<AdminServices["bookContentQuality"]["listScans"]>()
+      .mockRejectedValue(unavailable()),
+    getScan: vi
+      .fn<AdminServices["bookContentQuality"]["getScan"]>()
+      .mockRejectedValue(unavailable()),
+    updateFinding: vi
+      .fn<AdminServices["bookContentQuality"]["updateFinding"]>()
+      .mockRejectedValue(unavailable()),
+    retryPage: vi
+      .fn<AdminServices["bookContentQuality"]["retryPage"]>()
+      .mockRejectedValue(unavailable()),
+  } satisfies AdminServices["bookContentQuality"];
+}
+
 function createMetadataQualityServiceFixture() {
   const get = vi
     .fn<AdminServices["metadataQuality"]["get"]>()
@@ -134,6 +169,7 @@ export function createAdminServiceFixture() {
         .fn<AdminServices["auth"]["signOut"]>()
         .mockResolvedValue(undefined),
     },
+    bookContentQuality: createBookContentQualityServiceFixture(),
     metadataQuality: createMetadataQualityServiceFixture(),
     books: {
       list: vi
