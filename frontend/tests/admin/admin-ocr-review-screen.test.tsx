@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +10,7 @@ import {
   ADMIN_BOOK_ID,
   ADMIN_PAGE_ID,
   ADMIN_R1_ID,
+  ADMIN_R2_ID,
   adminR1Fixture,
   adminR2Fixture,
   createAdminServiceFixture,
@@ -17,6 +18,23 @@ import {
 } from "@/test/fixtures/admin-service-fixture";
 
 describe("AdminOcrReviewScreen safety boundaries", () => {
+  function makeEditableDetail(): AdminPageRevisionDetailDTO {
+    const tokens = ["Nội", "dung", "revision", "hiện", "hành"];
+    return {
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: tokens.join(" "),
+      words: tokens.map((text, index) => ({
+        word_index: index,
+        line_index: index < 3 ? 0 : 1,
+        text,
+        normalized_text: text.toLocaleLowerCase("vi"),
+        bbox: [0.1 + index * 0.15, 0.1, 0.1, 0.04] as const,
+        ocr_confidence: 0.7 + index * 0.05,
+      })),
+    };
+  }
+
   it("classifies confidence values at the documented boundaries", () => {
     expect(getConfidenceLevel(0.95)).toBe("Cao");
     expect(getConfidenceLevel(0.81)).toBe("Cao");
@@ -404,5 +422,232 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
       }
     }
+  });
+
+  it("applies local AI output atomically while preserving geometry and confidence", async () => {
+    const services = createAdminServiceFixture();
+    const source = makeEditableDetail();
+    services.ocr.getRevision.mockResolvedValue(source);
+    services.ocr.aiCorrectText.mockResolvedValue("Nội dung mới đã sửa");
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    await screen.findByDisplayValue(source.draft_text ?? "");
+    const boxLabels = [
+      "Từ 0 bbox x",
+      "Từ 0 bbox y",
+      "Từ 0 bbox w",
+      "Từ 0 bbox h",
+    ];
+    const originalBoxes = boxLabels.map(
+      (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
+    );
+    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+
+    expect(
+      await screen.findByDisplayValue("Nội dung mới đã sửa"),
+    ).toBeInTheDocument();
+    const wordInputs = screen.getAllByLabelText("Văn bản từ");
+    expect(
+      wordInputs.map((input) => (input as HTMLInputElement).value),
+    ).toEqual(["Nội", "dung", "mới", "đã", "sửa"]);
+    expect(
+      screen.getByRole("button", {
+        name: /Từ 1: Nội\. Confidence OCR: 0\.7/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      boxLabels.map(
+        (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
+      ),
+    ).toEqual(originalBoxes);
+    expect(screen.getByText(/AI OCR cục bộ đã sửa lỗi/)).toBeInTheDocument();
+  });
+
+  it("keeps the original text and words when local AI returns a token-count mismatch", async () => {
+    const services = createAdminServiceFixture();
+    const source = makeEditableDetail();
+    services.ocr.getRevision.mockResolvedValue(source);
+    services.ocr.aiCorrectText.mockResolvedValue("Nội dung mới đã sửa quá");
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const textarea = await screen.findByLabelText("Nội dung trang");
+    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+
+    expect(
+      await screen.findByText(
+        /Không thể áp dụng kết quả AI vì số từ không khớp/,
+      ),
+    ).toBeInTheDocument();
+    expect(textarea).toHaveValue(source.draft_text);
+    expect(
+      screen
+        .getAllByLabelText("Văn bản từ")
+        .map((input) => (input as HTMLInputElement).value),
+    ).toEqual(source.words.map((word) => word.text));
+    expect(
+      screen.queryByText(/AI OCR cục bộ đã sửa lỗi chính tả/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("locks draft edits while local AI correction is in progress", async () => {
+    const services = createAdminServiceFixture();
+    const source = makeEditableDetail();
+    services.ocr.getRevision.mockResolvedValue(source);
+    let resolveCorrection: ((value: string) => void) | undefined;
+    services.ocr.aiCorrectText.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveCorrection = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const textarea = await screen.findByLabelText("Nội dung trang");
+    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
+    expect(textarea).toBeDisabled();
+    expect(screen.getAllByLabelText("Văn bản từ")[0]).toBeDisabled();
+    resolveCorrection?.("Nội dung AI đã sửa");
+
+    await waitFor(() => expect(textarea).toHaveValue("Nội dung AI đã sửa"));
+    expect(
+      screen.getByText(/AI OCR cục bộ đã sửa lỗi chính tả/),
+    ).toBeInTheDocument();
+  });
+
+  it("creates a draft only from the selected current verified revision", async () => {
+    const services = createAdminServiceFixture();
+    const createdDraft: AdminPageRevisionDetailDTO = {
+      ...makeEditableDetail(),
+      page_revision_id: "84000000-0000-4000-8000-000000000003",
+      revision_no: 3,
+      verification_status: "NEEDS_REVIEW",
+      ocr_metadata: { source_revision_id: ADMIN_R2_ID },
+    };
+    services.revisions.createDraft.mockResolvedValue(createdDraft);
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+    await user.click(
+      screen.getByRole("button", { name: /Tạo bản nháp để sửa nội dung/ }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+    ).toBeInTheDocument();
+    expect(services.revisions.createDraft).toHaveBeenCalledWith(
+      ADMIN_PAGE_ID,
+      ADMIN_R2_ID,
+    );
+  });
+
+  it("reopens a matching pending draft instead of creating a duplicate", async () => {
+    const services = createAdminServiceFixture();
+    const pendingRevisionId = "84000000-0000-4000-8000-000000000003";
+    const pendingDraft: AdminPageRevisionDetailDTO = {
+      ...makeEditableDetail(),
+      page_revision_id: pendingRevisionId,
+      revision_no: 3,
+      verification_status: "NEEDS_REVIEW",
+      ocr_metadata: { source_revision_id: ADMIN_R2_ID },
+    };
+    services.revisions.list.mockResolvedValue([
+      {
+        page_revision_id: pendingRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        created_at: pendingDraft.created_at,
+        is_current_verified: false,
+      },
+      {
+        page_revision_id: ADMIN_R2_ID,
+        revision_no: 2,
+        verification_status: "VERIFIED",
+        created_at: adminR2Fixture.created_at,
+        is_current_verified: true,
+      },
+      {
+        page_revision_id: ADMIN_R1_ID,
+        revision_no: 1,
+        verification_status: "VERIFIED",
+        created_at: adminR1Fixture.created_at,
+        is_current_verified: false,
+      },
+    ]);
+    services.ocr.getRevision.mockImplementation(async (_pageId, revisionId) => {
+      if (revisionId === pendingRevisionId) return pendingDraft;
+      if (revisionId === ADMIN_R1_ID) return adminR1Fixture;
+      if (revisionId === ADMIN_R2_ID) return adminR2Fixture;
+      throw new Error("Unexpected revision requested");
+    });
+
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ });
+    await user.click(screen.getByRole("button", { name: /R2/ }));
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+    await user.click(
+      screen.getByRole("button", { name: /Tạo bản nháp để sửa nội dung/ }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+    ).toBeInTheDocument();
+    expect(services.revisions.createDraft).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("disables draft creation when a historical verified revision is selected", async () => {
+    const services = createAdminServiceFixture();
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+    await user.click(screen.getByRole("button", { name: /R1/ }));
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R1/ });
+
+    const createButton = screen.getByRole("button", {
+      name: /Tạo bản nháp để sửa nội dung/,
+    });
+    expect(createButton).toBeDisabled();
+    expect(services.revisions.createDraft).not.toHaveBeenCalled();
   });
 });

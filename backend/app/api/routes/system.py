@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
-import urllib.error
-import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Literal
 from uuid import UUID
@@ -19,6 +16,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.reading import HistoryRepository, HistoryService
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
 from app.schemas import (
     AuditLogCreate,
     AuditLogResponse,
@@ -453,51 +451,27 @@ class AdminSystemService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Audit contract is not available yet") from None
 
-    async def probe_gemini(self) -> tuple[Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"], str]:
-        """Kiểm tra nhẹ kết nối tới Google AI Studio (Gemini API) với chi phí 0 token."""
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return "UNAVAILABLE", "Chưa cấu hình GEMINI_API_KEY trong file .env."
-
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-        def _check() -> tuple[Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"], str]:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}?key={api_key}"
-            req = urllib.request.Request(url, headers={"User-Agent": "ViRead-HealthCheck/1.0"})
-            try:
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    if resp.status == 200:
-                        return "HEALTHY", f"Google AI Studio sẵn sàng (Model: {model})."
-                    return "DEGRADED", f"Google AI Studio phản hồi mã trạng thái {resp.status}."
-            except urllib.error.HTTPError as err:
-                if err.code in (400, 401, 403):
-                    return "UNAVAILABLE", "Khóa GEMINI_API_KEY không hợp lệ hoặc không có quyền truy cập."
-                if err.code == 404:
-                    return "DEGRADED", f"Model '{model}' không tồn tại hoặc không khả dụng trên tài khoản này."
-                if err.code == 429:
-                    return "DEGRADED", "Vượt quá giới hạn lượt gọi (Rate limit / Quota) của Google AI Studio."
-                return "DEGRADED", f"Lỗi Google AI Studio (HTTP {err.code}): {err.reason}."
-            except (urllib.error.URLError, TimeoutError, OSError) as err:
-                return "UNAVAILABLE", f"Không thể kết nối đến máy chủ Google AI Studio: {err}."
-            except Exception as err:
-                return "UNAVAILABLE", f"Lỗi kiểm tra Gemini: {err}."
-
-        try:
-            return await asyncio.to_thread(_check)
-        except Exception as err:
-            return "UNAVAILABLE", f"Không thể kiểm tra dịch vụ Gemini: {err}."
-
     async def health(self):
-        # Probes API, Database, Gemini, and Voice Provider (TTS / STT)
+        # Probes the API, database, local OCR model, and voice providers.
         try:
             database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
         except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
             database_ready = False
 
         try:
-            gemini_status, gemini_message = await self.probe_gemini()
+            local_ocr_status, local_ocr_message = await LocalOcrCorrector.probe(
+                LocalOcrConfig.from_environment()
+            )
+        except LocalCorrectionError:
+            local_ocr_status, local_ocr_message = (
+                "UNAVAILABLE",
+                "Cấu hình AI OCR cục bộ chưa hợp lệ.",
+            )
         except Exception:
-            gemini_status, gemini_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ Gemini."
+            local_ocr_status, local_ocr_message = (
+                "UNAVAILABLE",
+                "Không thể kiểm tra AI OCR cục bộ.",
+            )
 
         try:
             tts_status, tts_message = await self.voice_provider.probe_tts()
@@ -509,7 +483,6 @@ class AdminSystemService:
         except Exception:
             stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
 
-        # Giữ lại probe_gemini cho các endpoint nội bộ nhưng không làm lệch danh sách health của hạ tầng cốt lõi
         checked_at = datetime.now(timezone.utc)
         items = [
             AdminHealthItemRead(
@@ -529,6 +502,13 @@ class AdminSystemService:
                     if database_ready
                     else "Chưa kiểm tra được kết nối database. Vui lòng thử lại."
                 ),
+            ),
+            AdminHealthItemRead(
+                id="local_ocr",
+                label="AI OCR cục bộ",
+                status=local_ocr_status,
+                checked_at=checked_at,
+                safe_message=local_ocr_message,
             ),
             AdminHealthItemRead(
                 id="tts",

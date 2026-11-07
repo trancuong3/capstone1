@@ -41,6 +41,60 @@ const safeBackendMessages: Record<string, string> = {
     "Không tạo được URL xem trước ảnh từ Supabase Storage.",
   "Page has no revision yet":
     "Trang này chưa có revision nào. Hãy upload ảnh và chạy OCR cho trang ở sách.",
+  "Page not found": "Không tìm thấy trang cần chỉnh sửa.",
+  "Cannot edit a retired page":
+    "Trang này đã ngừng sử dụng nên không thể tạo bản nháp mới.",
+  "Page has no current verified revision":
+    "Trang chưa có revision đã xác minh để tạo bản nháp.",
+  "The verified revision changed; reload the page before creating a draft":
+    "Revision đã xác minh vừa thay đổi. Hãy tải lại trang trước khi tạo bản nháp.",
+  "A revision is already awaiting review; finish or reload it before creating another draft":
+    "Đã có revision đang chờ duyệt. Hãy hoàn tất hoặc tải lại revision đó trước khi tạo bản nháp mới.",
+  "Current verified revision is not available":
+    "Không tìm thấy revision hiện hành đã xác minh.",
+  "Current verified revision has no editable word data":
+    "Revision hiện hành thiếu dữ liệu từ và tọa độ OCR để tạo bản nháp an toàn.",
+  "Current verified text and word data are inconsistent":
+    "Văn bản và dữ liệu từ OCR của revision hiện hành không khớp.",
+  "Stored word coordinates cannot be copied safely":
+    "Tọa độ OCR đã lưu không hợp lệ; hãy kiểm tra revision nguồn trước khi sửa.",
+  "Stored OCR word ordering cannot be copied safely":
+    "Thứ tự từ OCR đã lưu không hợp lệ; hãy kiểm tra revision nguồn trước khi sửa.",
+  "Stored OCR confidence cannot be copied safely":
+    "Độ tin cậy OCR đã lưu không hợp lệ; hãy kiểm tra revision nguồn trước khi sửa.",
+  "A concurrent edit created this revision number; retry":
+    "Một Admin khác vừa tạo revision. Hãy tải lại lịch sử rồi thử lại.",
+  "A concurrent OCR revision was created; reload and retry":
+    "Revision đã thay đổi trong lúc xử lý. Hãy tải lại trang rồi thử lại.",
+  "Admin access required":
+    "Tài khoản hiện tại không có quyền Admin để chỉnh sửa OCR.",
+  "Stored bounding box does not match the OCR contract":
+    "Tọa độ OCR đã lưu không hợp lệ; dữ liệu hiện tại được giữ nguyên.",
+  "The source page image is unavailable for visual OCR verification.":
+    "Không tìm thấy ảnh gốc để đối chiếu OCR; nội dung hiện tại được giữ nguyên.",
+  "AI OCR chỉ chấp nhận địa chỉ HTTP loopback trên máy chủ.":
+    "AI OCR chỉ kết nối tới Ollama cục bộ trên máy chủ.",
+  "Cấu hình AI OCR cục bộ chưa hợp lệ.": "Cấu hình Ollama cục bộ chưa hợp lệ.",
+  "AI OCR chỉ sử dụng địa chỉ HTTP loopback trên máy chủ.":
+    "AI OCR chỉ kết nối tới Ollama cục bộ trên máy chủ.",
+  "Ollama cục bộ chưa phản hồi.":
+    "Ollama cục bộ chưa sẵn sàng. Hãy kiểm tra dịch vụ Ollama.",
+  "Model AI OCR cục bộ chưa được cài đặt.":
+    "Model AI OCR cục bộ chưa được cài đặt trong Ollama.",
+  "Không thể kết nối tới Ollama cục bộ.":
+    "Không thể kết nối tới Ollama trên máy chủ này.",
+  "Ollama hoặc model OCR cục bộ chưa sẵn sàng; văn bản hiện tại được giữ nguyên.":
+    "Ollama hoặc model OCR cục bộ chưa sẵn sàng. Văn bản hiện tại được giữ nguyên.",
+  "Không thể kết nối Ollama trên máy này; văn bản hiện tại được giữ nguyên.":
+    "Không thể kết nối tới Ollama cục bộ. Văn bản hiện tại được giữ nguyên.",
+  "AI OCR cục bộ hết thời gian xử lý; văn bản hiện tại được giữ nguyên.":
+    "AI OCR cục bộ hết thời gian xử lý. Văn bản hiện tại được giữ nguyên.",
+  "AI OCR cục bộ vượt quá thời gian xử lý tối đa; văn bản hiện tại được giữ nguyên.":
+    "AI OCR cục bộ vượt thời gian tối đa. Văn bản hiện tại được giữ nguyên.",
+  "Model OCR cục bộ trả kết quả không đầy đủ hoặc sai cấu trúc; nội dung hiện tại được giữ nguyên.":
+    "Model AI OCR trả kết quả không hợp lệ. Nội dung hiện tại được giữ nguyên.",
+  "Draft text and OCR word data are inconsistent":
+    "Văn bản nháp và danh sách từ OCR không khớp.",
   "Stored image reference is invalid":
     "Tham chiếu ảnh trong DB không hợp lệ với bucket hiện tại (thường là dữ liệu legacy).",
   "Image metadata does not match the admin contract":
@@ -224,13 +278,9 @@ export async function requestApi<T>(
   const parsed = schema.safeParse(payload);
 
   if (!parsed.success) {
-    console.error(
-      `[API schema validation failed] ${requestOptions.method ?? "GET"} ${path}`,
-      {
-        issues: parsed.error.issues,
-        response: payload,
-      },
-    );
+    console.error("[API schema validation failed]", {
+      issueCount: parsed.error.issues.length,
+    });
 
     throw failure(response.status, requestId);
   }

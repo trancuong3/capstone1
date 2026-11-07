@@ -43,7 +43,7 @@ export function AdminHealthScreen() {
       <AdminPageHeader
         eyebrow="Operational review"
         title="Tình trạng vận hành"
-        description="Backend kiểm tra trạng thái kết nối FastAPI, Database, Gemini AI, TTS và STT"
+        description="Backend kiểm tra FastAPI, Database, AI OCR cục bộ, TTS và STT"
         actions={
           <Button
             disabled={!snapshot && !error}

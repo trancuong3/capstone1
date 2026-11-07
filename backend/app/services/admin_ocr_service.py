@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import logging
 import math
 import os
-import re
 import time
 import unicodedata
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
@@ -26,7 +22,12 @@ from starlette.concurrency import run_in_threadpool
 from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
-from app.schemas.admin_ocr import AdminOcrDraftRequest, AdminOcrVerifyRequest
+from app.schemas.admin_ocr import (
+    AdminOcrDraftRequest,
+    AdminOcrVerifyRequest,
+    AdminOcrWordInput,
+    normalize_ocr_bbox,
+)
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.services.ocr_engine import (
     OcrEngineUnavailable,
@@ -34,6 +35,11 @@ from app.services.ocr_engine import (
     extract_text_and_boxes,
     normalize_text_tokens,
     normalize_word,
+)
+from app.services.admin_ocr_local import (
+    LocalCorrectionError,
+    LocalOcrConfig,
+    LocalOcrCorrector,
 )
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
@@ -214,22 +220,29 @@ class AdminOcrService:
             norm = normalize_word(text_value)
             if not norm:
                 continue
-            bbox = item["bbox"]
-            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-                raise HTTPException(status_code=422, detail="OCR engine returned an invalid bounding box")
-            x, y, width, height = (float(value) for value in bbox)
-            if (any(value < 0 or value > 1 for value in (x, y, width, height))
-                or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
-                raise HTTPException(status_code=422, detail="OCR engine returned a bounding box outside the image")
+            try:
+                bbox = normalize_ocr_bbox(item["bbox"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="OCR engine returned an invalid bounding box",
+                ) from exc
+            word_index = int(item.get("word_index", len(normalized)))
+            line_index = int(item["line_index"])
+            if word_index != len(normalized) or line_index < 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="OCR engine returned invalid word or line indexes",
+                )
             confidence = AdminOcrService._normalize_confidence(
                 item.get("ocr_confidence")
             )
             normalized.append({
-                "word_index": len(normalized),
-                "line_index": max(0, int(item["line_index"])),
+                "word_index": word_index,
+                "line_index": line_index,
                 "text": text_value,
                 "normalized_text": norm,
-                "bbox": [x, y, width, height],
+                "bbox": list(bbox),
                 "ocr_confidence": confidence,
             })
         if not normalized:
@@ -746,11 +759,13 @@ class AdminOcrService:
         rows = await self.repo.words(revision.Id)
         words = []
         for row in rows:
-            box = row.BoundingBox
-            if isinstance(box, dict):
-                box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
-            if not isinstance(box, list) or len(box) != 4:
-                raise HTTPException(status_code=409, detail="Stored bounding box does not match the OCR contract")
+            try:
+                box = normalize_ocr_bbox(row.BoundingBox)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stored bounding box does not match the OCR contract",
+                ) from exc
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
@@ -790,7 +805,12 @@ class AdminOcrService:
             item["bbox"] = list(item["bbox"])
         return raw
 
-    async def create_edit_draft(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
+    async def create_edit_draft(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        expected_source_revision_id: UUID,
+    ) -> AdminRevisionDetailRead:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
@@ -799,8 +819,22 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Cannot edit a retired page")
         if page.CurrentVerifiedRevisionId is None:
             raise HTTPException(status_code=409, detail="Page has no current verified revision")
+        if page.CurrentVerifiedRevisionId != expected_source_revision_id:
+            raise HTTPException(
+                status_code=409,
+                detail="The verified revision changed; reload the page before creating a draft",
+            )
+        latest_revisions = await self.repo.revisions(page_id)
+        if (
+            latest_revisions
+            and latest_revisions[0].VerificationStatus != "VERIFIED"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="A revision is already awaiting review; finish or reload it before creating another draft",
+            )
 
-        source = await self.repo.revision(page_id, page.CurrentVerifiedRevisionId, lock=True)
+        source = await self.repo.revision(page_id, expected_source_revision_id, lock=True)
         if source is None or source.VerificationStatus != "VERIFIED" or not (source.VerifiedText or "").strip():
             raise HTTPException(status_code=409, detail="Current verified revision is not available")
         source_words = await self.repo.words(source.Id)
@@ -808,20 +842,34 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Current verified revision has no editable word data")
 
         candidates = []
-        for row in source_words:
-            box = row.BoundingBox
-            if isinstance(box, dict):
-                box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
-            if not isinstance(box, (list, tuple)) or len(bbox) != 4:
-                raise HTTPException(status_code=409, detail="Stored word coordinates cannot be copied safely")
+        for expected_index, row in enumerate(source_words):
+            try:
+                box = normalize_ocr_bbox(row.BoundingBox)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stored word coordinates cannot be copied safely",
+                ) from exc
+            if row.WordIndex != expected_index or row.LineIndex < 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stored OCR word ordering cannot be copied safely",
+                )
+            confidence = self._normalize_confidence(row.OCRConfidence)
+            if row.OCRConfidence is not None and confidence is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Stored OCR confidence cannot be copied safely",
+                )
             candidates.append({
+                "word_index": row.WordIndex,
                 "text": unicodedata.normalize("NFC", row.Text),
                 "line_index": row.LineIndex,
-                "bbox": bbox,
-                "ocr_confidence": row.OCRConfidence,
+                "bbox": box,
+                "ocr_confidence": confidence,
             })
         words = self._word_data(candidates)
-        text_value = unicodedata.normalize("NFC", source.VerifiedText.strip())
+        text_value = unicodedata.normalize("NFC", source.VerifiedText)
         if normalize_text_tokens(text_value) != [str(item["normalized_text"]) for item in words]:
             raise HTTPException(status_code=409, detail="Current verified text and word data are inconsistent")
 
@@ -842,8 +890,8 @@ class AdminOcrService:
             ).hexdigest(),
             ProcessingMeta={"source_revision_id": str(source.Id), "creation_reason": "manual_edit"},
         )
-        self.repo.stage_revision_bundle(revision, words)
         try:
+            self.repo.stage_revision_bundle(revision, words)
             await self.db.commit()
             await self.db.refresh(revision)
             await self.db.refresh(page)
@@ -1114,140 +1162,64 @@ class AdminOcrService:
         )
 
     async def ai_correct_text(
-        self, actor_id: UUID, page_id: UUID, draft_text: str
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        draft_text: str,
+        words: list[AdminOcrWordInput],
     ) -> dict[str, object]:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        if not draft_text.strip():
+            raise HTTPException(status_code=422, detail="Draft text must not be blank")
 
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-        if not gemini_api_key:
+        normalized_draft = unicodedata.normalize("NFC", draft_text)
+        validated_words = self._validated_words(words)
+        if normalize_text_tokens(normalized_draft) != [
+            str(item["normalized_text"]) for item in validated_words
+        ]:
             raise HTTPException(
-                status_code=500,
-                detail="Chưa cấu hình GEMINI_API_KEY trong file .env của backend",
+                status_code=422,
+                detail="Draft text and OCR word data are inconsistent",
+            )
+        if not page.ImagePath:
+            raise HTTPException(
+                status_code=409,
+                detail="The source page image is unavailable for visual OCR verification.",
             )
 
-        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        try:
+            config = LocalOcrConfig.from_environment()
+        except LocalCorrectionError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-        image_bytes: bytes | None = None
-        mime_type = "image/jpeg"
-        if page.ImagePath:
-            try:
-                image_bytes = await run_in_threadpool(download_object, page.ImagePath)
-                ext = page.ImagePath.rsplit(".", 1)[-1].lower() if "." in page.ImagePath else "jpeg"
-                mime_type = "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/jpeg"
-            except Exception as exc:
-                logger.warning("Không thể tải ảnh gốc cho AI vision: %s", exc)
+        if len(normalized_draft.encode("utf-8")) > config.chunking.max_document_bytes:
+            raise HTTPException(
+                status_code=422,
+                detail="OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES",
+            )
 
-        normalized_draft = unicodedata.normalize("NFC", draft_text.strip())
-        input_tokens = normalize_text_tokens(normalized_draft)
-        expected_word_count = len(input_tokens)
+        try:
+            image_bytes = await run_in_threadpool(download_object, page.ImagePath)
+        except Exception as exc:
+            logger.warning(
+                "Unable to load source page image for local OCR verification",
+                extra={"page_id": str(page_id)},
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Không thể tải ảnh trang để đối chiếu OCR; văn bản hiện tại vẫn được giữ nguyên.",
+            ) from exc
 
-        system_instruction = (
-            "Bạn là chuyên gia hiệu đính văn bản tiếng Việt cho sách và tài liệu OCR.\n"
-            "Nhiệm vụ của bạn là rà soát văn bản OCR dựa trên HÌNH ẢNH TRANG ĐƯỢC ĐÍNH KÈM.\n\n"
-            "YÊU CẦU BẮT BUỘC:\n"
-            "1. ĐỐI CHIẾU THỊ GIÁC: Nhìn kỹ hình ảnh trang để đối soát từng chữ in. Tuyệt đối KHÔNG tự ý suy đoán, "
-            "thay đổi từ ngữ gốc (ví dụ: trên ảnh in 'hướng nhân' thì bắt buộc giữ nguyên 'hướng nhân'; "
-            "trên ảnh in 'đêm ôm mong' thì bắt buộc giữ nguyên 'đêm ôm mong').\n"
-            "2. BẢO TOÀN SỐ LƯỢNG TỪ: Văn bản kết quả PHẢI CÓ CHÍNH XÁC 100% SỐ LƯỢNG TỪ bằng với văn bản OCR đầu vào "
-            f"({expected_word_count} từ). Tuyệt đối không thêm từ, bớt từ, gộp từ, tách từ.\n"
-            "3. CHỈ SỬA LỖI DẤU VÀ KÝ TỰ NHẬN DẠNG: Sửa các lỗi sai dấu thanh (huyền, sắc, hỏi, ngã, nặng) hoặc nhầm ký tự quang học "
-            "(ví dụ: 'để' -> 'đế', 'đên' -> 'đến', 'Phậi' -> 'Phật', 'nhở' -> 'nhớ') đúng theo chữ in trong ảnh.\n"
-            "4. GIỮ NGUYÊN CẤU TRÚC DÒNG: Giữ nguyên thứ tự các dòng và ngắt dòng (\\n) của văn bản gốc.\n"
-            "5. KHÔNG TỰ THÊM DẤU CHẤM CÂU: Tuyệt đối KHÔNG tự ý chèn thêm dấu chấm câu ('.') hay dấu phẩy ở cuối dòng nếu ảnh không có.\n"
-            "6. Chỉ trả về duy nhất văn bản tiếng Việt đã được sửa, không kèm lời giải thích hay định dạng markdown."
-        )
-
-        prompt = (
-            f"Dưới đây là văn bản OCR nháp hiện tại gồm đúng {expected_word_count} từ:\n\n"
-            f"{normalized_draft}\n\n"
-            f"Hãy đối chiếu từng từ với hình ảnh trang sách đính kèm và sửa đúng chính tả, dấu thanh. "
-            f"QUAN TRỌNG: Kết quả BẮT BUỘC phải có đúng {expected_word_count} từ, không được thêm hay bớt bất kỳ từ nào!"
-        )
-
-        def _call_gemini_with_prompt(user_prompt: str) -> str:
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
-            parts: list[dict[str, Any]] = []
-            if image_bytes:
-                parts.append({
-                    "inlineData": {
-                        "mimeType": mime_type,
-                        "data": base64.b64encode(image_bytes).decode("utf-8"),
-                    }
-                })
-            parts.append({"text": user_prompt})
-
-            payload = {
-                "contents": [{"parts": parts}],
-                "systemInstruction": {"parts": [{"text": system_instruction}]},
-                "generationConfig": {"temperature": 0.1},
-            }
-            body = json.dumps(payload).encode("utf-8")
-
-            max_retries = 3
-            for attempt in range(1, max_retries + 1):
-                req = urllib.request.Request(
-                    endpoint,
-                    data=body,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=45) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                        candidates = data.get("candidates", [])
-                        if not candidates:
-                            raise HTTPException(status_code=502, detail="Gemini không phản hồi kết quả.")
-                        raw_result = candidates[0]["content"]["parts"][0]["text"].strip()
-                        if raw_result.startswith("```"):
-                            raw_result = re.sub(r"^```[a-zA-Z]*\n?", "", raw_result)
-                            raw_result = re.sub(r"\n?```$", "", raw_result).strip()
-                        return unicodedata.normalize("NFC", raw_result)
-                except urllib.error.HTTPError as err:
-                    if err.code in (429, 500, 502, 503, 504) and attempt < max_retries:
-                        time.sleep(1.5 * attempt)
-                        continue
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"Lỗi kết nối Google AI Studio (HTTP {err.code}): {err.reason}",
-                    ) from err
-                except (urllib.error.URLError, TimeoutError) as net_err:
-                    if attempt < max_retries:
-                        time.sleep(1.5 * attempt)
-                        continue
-                    raise HTTPException(
-                        status_code=502,
-                        detail="Mất kết nối tới Google AI Studio; vui lòng kiểm tra đường truyền mạng.",
-                    ) from net_err
-
-            raise HTTPException(status_code=502, detail="Không thể nhận phản hồi từ Gemini sau 3 lần thử.")
-
-        def _execute_ai_correction() -> str:
-            result_text = _call_gemini_with_prompt(prompt)
-            output_tokens = normalize_text_tokens(result_text)
-
-            if len(output_tokens) != expected_word_count:
-                retry_prompt = (
-                    f"CẢNH BÁO: Lần trả lời trước có {len(output_tokens)} từ, không khớp với {expected_word_count} từ gốc!\n"
-                    f"Bạn BẮT BUỘC phải giữ nguyên chính xác {expected_word_count} từ.\n\n"
-                    f"Văn bản OCR gốc ({expected_word_count} từ):\n{normalized_draft}"
-                )
-                result_text = _call_gemini_with_prompt(retry_prompt)
-                output_tokens = normalize_text_tokens(result_text)
-
-            if len(output_tokens) != expected_word_count:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"AI đã tự ý thay đổi số lượng từ ({len(output_tokens)} từ thay vì {expected_word_count} từ). "
-                        "Hệ thống đã từ chối để bảo vệ vị trí bounding box. Vui lòng thử lại hoặc chỉnh sửa trực tiếp."
-                    ),
-                )
-            return result_text
-
-        corrected_text = await run_in_threadpool(_execute_ai_correction)
+        word_boxes = [tuple(item["bbox"]) for item in validated_words]
+        try:
+            corrected_text = await LocalOcrCorrector(config).correct(
+                normalized_draft, image_bytes, word_boxes
+            )
+        except LocalCorrectionError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         return {"corrected_text": corrected_text}
 
     async def image_url(self, page: BookPage) -> str:

@@ -8,7 +8,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-fixed-port.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

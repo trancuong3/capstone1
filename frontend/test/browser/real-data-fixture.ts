@@ -9,6 +9,7 @@ export const ids = {
   page: "55555555-5555-4555-8555-555555555555",
   revision: "66666666-6666-4666-8666-666666666666",
   oldRevision: "77777777-7777-4777-8777-777777777777",
+  draftRevision: "88888888-8888-4888-8888-888888888888",
 };
 const timestamp = "2026-10-08T00:00:00Z";
 export const child = {
@@ -86,6 +87,10 @@ export interface BrowserApiState {
     max_grade: number;
     lifecycle_status: "ACTIVE";
   } | null;
+  draftCreateSourceRevisionId: string | null;
+  aiCorrectionText: string | null;
+  draftSaveRequest: Record<string, unknown> | null;
+  verifyRequest: Record<string, unknown> | null;
 }
 
 export async function setRole(page: Page, role: "parent" | "admin") {
@@ -150,12 +155,16 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     requests: [],
     createBookRequest: null,
     createdBook: null,
+    draftCreateSourceRevisionId: null,
+    aiCorrectionText: null,
+    draftSaveRequest: null,
+    verifyRequest: null,
   };
   await seedBrowserSession(page);
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers": "authorization,content-type,accept",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
     await route.fulfill({
@@ -164,6 +173,36 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       contentType: "application/json",
       body: JSON.stringify(json),
     });
+  }
+  function draftDetail() {
+    const words = ["Văn", "bản", "đã", "lưu"].map((text, index) => ({
+      word_index: index,
+      line_index: 0,
+      text,
+      normalized_text: text.toLocaleLowerCase("vi"),
+      bbox: [0.1 + index * 0.16, 0.2, 0.14, 0.05],
+      ocr_confidence: 0.8,
+    }));
+    const saved = state.draftSaveRequest;
+    const verified = state.verifyRequest;
+    const savedWords = (saved?.words ?? words) as typeof words;
+    const correctedWords = (verified?.words ?? savedWords) as typeof words;
+    return {
+      page_id: ids.page,
+      page_revision_id: ids.draftRevision,
+      revision_no: 3,
+      verification_status: verified ? "VERIFIED" : "NEEDS_REVIEW",
+      lifecycle_status: "ACTIVE",
+      draft_text:
+        (verified?.corrected_text as string | undefined) ??
+        (saved?.draft_text as string | undefined) ??
+        "Văn bản đã lưu",
+      words: correctedWords,
+      ocr_metadata: { source_revision_id: ids.revision },
+      created_at: timestamp,
+      verified_at: verified ? timestamp : null,
+      verified_by: verified ? ids.parent : null,
+    };
   }
   await page.context().route("**/*", async (route) => {
     const request = route.request();
@@ -208,6 +247,52 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         lifecycle_status: "ACTIVE",
       };
       return respond(route, state.createdBook);
+    }
+    if (
+      request.method() === "POST" &&
+      path === `/books/admin/pages/${ids.page}/revisions/draft`
+    ) {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.draftCreateSourceRevisionId =
+        typeof body.expected_source_revision_id === "string"
+          ? body.expected_source_revision_id
+          : null;
+      if (state.draftCreateSourceRevisionId !== ids.revision)
+        return respond(route, { detail: "Invalid source revision" }, 409);
+      return respond(route, draftDetail());
+    }
+    if (
+      request.method() === "POST" &&
+      path === `/books/admin/pages/${ids.page}/ai-correct`
+    ) {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.aiCorrectionText =
+        typeof body.draft_text === "string" ? body.draft_text : null;
+      if (!state.draftCreateSourceRevisionId || !state.aiCorrectionText)
+        return respond(route, { detail: "No editable draft" }, 409);
+      return respond(route, { corrected_text: "Văn bản đã sửa" });
+    }
+    if (
+      request.method() === "PUT" &&
+      path ===
+        `/books/admin/pages/${ids.page}/revisions/${ids.draftRevision}/draft`
+    ) {
+      state.draftSaveRequest = request.postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      if (!state.draftCreateSourceRevisionId)
+        return respond(route, { detail: "No editable draft" }, 409);
+      return respond(route, draftDetail());
+    }
+    if (
+      request.method() === "POST" &&
+      path === `/books/admin/pages/${ids.page}/verify`
+    ) {
+      state.verifyRequest = request.postDataJSON() as Record<string, unknown>;
+      if (state.verifyRequest.page_revision_id !== ids.draftRevision)
+        return respond(route, { detail: "Invalid draft revision" }, 409);
+      return respond(route, draftDetail());
     }
     if (request.method() !== "GET") {
       state.unexpected.push(`write:${request.method()}:${url.pathname}`);
@@ -404,12 +489,25 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (path === `/books/admin/pages/${ids.page}/revisions`)
       return respond(route, [
+        ...(state.draftCreateSourceRevisionId
+          ? [
+              {
+                page_revision_id: ids.draftRevision,
+                revision_no: 3,
+                verification_status: state.verifyRequest
+                  ? "VERIFIED"
+                  : "NEEDS_REVIEW",
+                created_at: timestamp,
+                is_current_verified: Boolean(state.verifyRequest),
+              },
+            ]
+          : []),
         {
           page_revision_id: ids.revision,
           revision_no: 2,
           verification_status: "VERIFIED",
           created_at: timestamp,
-          is_current_verified: true,
+          is_current_verified: !state.verifyRequest,
         },
         {
           page_revision_id: ids.oldRevision,
@@ -420,6 +518,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         },
       ]);
     if (path.startsWith(`/books/admin/pages/${ids.page}/revisions/`)) {
+      if (path.endsWith(ids.draftRevision) && state.draftCreateSourceRevisionId)
+        return respond(route, draftDetail());
       const old = path.endsWith(ids.oldRevision);
       return respond(route, {
         ...processing,
