@@ -216,9 +216,6 @@ export function createAdminServiceFixture() {
       aiCorrectText: vi
         .fn<AdminServices["ocr"]["aiCorrectText"]>()
         .mockResolvedValue("Nội dung đã sửa bằng AI"),
-      aiGenerateQuestions: vi
-        .fn<AdminServices["ocr"]["aiGenerateQuestions"]>()
-        .mockResolvedValue([]),
     },
     revisions: {
       list: vi

@@ -5,21 +5,8 @@ import type {
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
 
-export const aiQuestionSchema = z.object({
-  question: z.string(),
-  options: z.array(z.string()),
-  correct_answer: z.string(),
-  explanation: z.string().optional().default(""),
-});
-
-export type AdminAiQuestionDTO = z.infer<typeof aiQuestionSchema>;
-
 export const aiCorrectResponseSchema = z.object({
   corrected_text: z.string(),
-});
-
-export const aiGenerateQuestionsResponseSchema = z.object({
-  questions: z.array(aiQuestionSchema),
 });
 
 export interface OcrReviewService {
@@ -33,12 +20,11 @@ export interface OcrReviewService {
     draftText: string,
     words: readonly AdminRevisionWordDTO[],
   ): Promise<AdminPageRevisionDetailDTO>;
-  aiCorrectText(pageId: string, draftText: string): Promise<string>;
-  aiGenerateQuestions(
+  aiCorrectText(
     pageId: string,
-    text: string,
-    count?: number,
-  ): Promise<AdminAiQuestionDTO[]>;
+    draftText: string,
+    words: readonly AdminRevisionWordDTO[],
+  ): Promise<string>;
 }
 
 export const adminRevisionDetailSchema = z.object({
@@ -79,7 +65,10 @@ export function createOcrReviewService(): OcrReviewService {
   return {
     getRevision: (pageId, revisionId) =>
       requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}`,
+        "/books/admin/pages/" +
+          encodeURIComponent(pageId) +
+          "/revisions/" +
+          encodeURIComponent(revisionId),
         adminRevisionDetailSchema.refine(
           (item) =>
             item.page_id === pageId && item.page_revision_id === revisionId,
@@ -87,7 +76,11 @@ export function createOcrReviewService(): OcrReviewService {
       ),
     saveDraft: (pageId, revisionId, draftText, words) =>
       requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(revisionId)}/draft`,
+        "/books/admin/pages/" +
+          encodeURIComponent(pageId) +
+          "/revisions/" +
+          encodeURIComponent(revisionId) +
+          "/draft",
         adminRevisionDetailSchema.refine(
           (item) =>
             item.page_id === pageId && item.page_revision_id === revisionId,
@@ -108,30 +101,25 @@ export function createOcrReviewService(): OcrReviewService {
           },
         },
       ),
-    aiCorrectText: (pageId, draftText) =>
+    aiCorrectText: (pageId, draftText, words) =>
       requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/ai-correct`,
+        "/books/admin/pages/" + encodeURIComponent(pageId) + "/ai-correct",
         aiCorrectResponseSchema,
         undefined,
         {
           method: "POST",
           body: {
             draft_text: draftText,
+            words: words.map((word) => ({
+              word_index: word.word_index,
+              line_index: word.line_index,
+              text: word.text,
+              normalized_text: word.normalized_text,
+              bbox: [...word.bbox],
+              ocr_confidence: word.ocr_confidence,
+            })),
           },
         },
       ).then((res) => res.corrected_text),
-    aiGenerateQuestions: (pageId, text, count = 10) =>
-      requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/generate-questions`,
-        aiGenerateQuestionsResponseSchema,
-        undefined,
-        {
-          method: "POST",
-          body: {
-            text,
-            count,
-          },
-        },
-      ).then((res) => res.questions),
   };
 }

@@ -424,7 +424,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     }
   });
 
-  it("applies Gemini output atomically while preserving geometry and confidence", async () => {
+  it("applies local AI output atomically while preserving geometry and confidence", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
@@ -466,10 +466,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
       ),
     ).toEqual(originalBoxes);
-    expect(screen.getByText(/Gemini AI đã sửa lỗi/)).toBeInTheDocument();
+    expect(screen.getByText(/AI OCR cục bộ đã sửa lỗi/)).toBeInTheDocument();
   });
 
-  it("keeps the original text and words when Gemini returns a token-count mismatch", async () => {
+  it("keeps the original text and words when local AI returns a token-count mismatch", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
@@ -497,11 +497,11 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         .map((input) => (input as HTMLInputElement).value),
     ).toEqual(source.words.map((word) => word.text));
     expect(
-      screen.queryByText(/Gemini AI đã sửa lỗi chính tả/),
+      screen.queryByText(/AI OCR cục bộ đã sửa lỗi chính tả/),
     ).not.toBeInTheDocument();
   });
 
-  it("does not let a stale Gemini response overwrite newer Admin edits", async () => {
+  it("locks draft edits while local AI correction is in progress", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
@@ -523,16 +523,14 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const textarea = await screen.findByLabelText("Nội dung trang");
     await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
     await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
-    await user.clear(textarea);
-    await user.type(textarea, "Nội dung người dùng tự sửa");
+    expect(textarea).toBeDisabled();
+    expect(screen.getAllByLabelText("Văn bản từ")[0]).toBeDisabled();
     resolveCorrection?.("Nội dung AI đã sửa");
 
-    await waitFor(() =>
-      expect(textarea).toHaveValue("Nội dung người dùng tự sửa"),
-    );
+    await waitFor(() => expect(textarea).toHaveValue("Nội dung AI đã sửa"));
     expect(
-      screen.queryByText(/Gemini AI đã sửa lỗi chính tả/),
-    ).not.toBeInTheDocument();
+      screen.getByText(/AI OCR cục bộ đã sửa lỗi chính tả/),
+    ).toBeInTheDocument();
   });
 
   it("creates a draft only from the selected current verified revision", async () => {
@@ -564,6 +562,72 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ADMIN_PAGE_ID,
       ADMIN_R2_ID,
     );
+  });
+
+  it("reopens a matching pending draft instead of creating a duplicate", async () => {
+    const services = createAdminServiceFixture();
+    const pendingRevisionId = "84000000-0000-4000-8000-000000000003";
+    const pendingDraft: AdminPageRevisionDetailDTO = {
+      ...makeEditableDetail(),
+      page_revision_id: pendingRevisionId,
+      revision_no: 3,
+      verification_status: "NEEDS_REVIEW",
+      ocr_metadata: { source_revision_id: ADMIN_R2_ID },
+    };
+    services.revisions.list.mockResolvedValue([
+      {
+        page_revision_id: pendingRevisionId,
+        revision_no: 3,
+        verification_status: "NEEDS_REVIEW",
+        created_at: pendingDraft.created_at,
+        is_current_verified: false,
+      },
+      {
+        page_revision_id: ADMIN_R2_ID,
+        revision_no: 2,
+        verification_status: "VERIFIED",
+        created_at: adminR2Fixture.created_at,
+        is_current_verified: true,
+      },
+      {
+        page_revision_id: ADMIN_R1_ID,
+        revision_no: 1,
+        verification_status: "VERIFIED",
+        created_at: adminR1Fixture.created_at,
+        is_current_verified: false,
+      },
+    ]);
+    services.ocr.getRevision.mockImplementation(async (_pageId, revisionId) => {
+      if (revisionId === pendingRevisionId) return pendingDraft;
+      if (revisionId === ADMIN_R1_ID) return adminR1Fixture;
+      if (revisionId === ADMIN_R2_ID) return adminR2Fixture;
+      throw new Error("Unexpected revision requested");
+    });
+
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ });
+    await user.click(screen.getByRole("button", { name: /R2/ }));
+    await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
+    await user.click(
+      screen.getByRole("button", { name: /Tạo bản nháp để sửa nội dung/ }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /Kiểm tra OCR · R3/ }),
+    ).toBeInTheDocument();
+    expect(services.revisions.createDraft).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("disables draft creation when a historical verified revision is selected", async () => {

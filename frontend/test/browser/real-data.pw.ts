@@ -245,7 +245,7 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   expect(api.unexpected).toEqual([]);
 });
 
-test("Admin OCR draft → Gemini correction → save → verify preserves bounding boxes", async ({
+test("Admin OCR draft → local AI correction → save → verify preserves bounding boxes", async ({
   page,
 }) => {
   const api = await installApiFixture(page);

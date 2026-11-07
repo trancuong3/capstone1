@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 import re
 import shutil
 import tempfile
@@ -10,6 +11,13 @@ import unicodedata
 from typing import Any
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+# The Windows setup script keeps the pinned Vietnamese model inside this
+# checkout instead of writing into Program Files. Tesseract expects the parent
+# directory of `tessdata` here; preserve any explicit machine/user override.
+_backend_root = Path(__file__).resolve().parents[2]
+if (_backend_root / "tessdata" / "vie.traineddata").is_file():
+    os.environ.setdefault("TESSDATA_PREFIX", str(_backend_root))
 
 import PIL.Image
 
@@ -616,9 +624,28 @@ def _map_curved_word_boxes(
     return boxes
 
 
+def _resolve_tesseract_command() -> str | None:
+    configured_binary = os.getenv("TESSERACT_CMD") or shutil.which("tesseract")
+    if not configured_binary:
+        install_directories = [
+            os.getenv("ProgramFiles"),
+            os.getenv("ProgramFiles(x86)"),
+        ]
+        configured_binary = next(
+            (
+                str(Path(directory) / "Tesseract-OCR" / "tesseract.exe")
+                for directory in install_directories
+                if directory
+                and (Path(directory) / "Tesseract-OCR" / "tesseract.exe").is_file()
+            ),
+            None,
+        )
+    return configured_binary
+
+
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
-    configured_binary = os.getenv("TESSERACT_CMD")
+    configured_binary = _resolve_tesseract_command()
     if configured_binary:
         pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
 

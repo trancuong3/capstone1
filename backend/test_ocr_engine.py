@@ -28,6 +28,19 @@ def sample_png_bytes(width: int = 400, height: int = 200) -> bytes:
 
 
 class DualEngineOcrTests(unittest.TestCase):
+    def test_tesseract_uses_configured_binary_or_discovers_installation(self):
+        configured_path = r"C:\tools\tesseract.exe"
+        discovered_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+        with patch.dict(os.environ, {"TESSERACT_CMD": configured_path}):
+            result = ocr_engine._resolve_tesseract_command()
+        self.assertEqual(result, configured_path)
+
+        with patch.dict(os.environ, {"TESSERACT_CMD": ""}):
+            with patch.object(ocr_engine.shutil, "which", return_value=discovered_path):
+                result = ocr_engine._resolve_tesseract_command()
+        self.assertEqual(result, discovered_path)
+
     def test_normalize_word_canonical_vietnamese(self):
         """Kiểm tra chuẩn hóa token tiếng Việt canonical."""
         self.assertEqual(ocr_engine.normalize_word("  Chú,  "), "chú")

@@ -2,7 +2,7 @@
 
 ReadAlong Vision là dự án hỗ trợ ba mẹ đồng hành cùng bé trong quá trình đọc sách. Repository hiện chứa frontend responsive bằng Next.js/TypeScript và backend bước đầu bằng FastAPI.
 
-> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. AI và xử lý media chưa được kết nối thật.
+> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho một số dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. Sửa OCR trong khu vực Admin chạy bằng Ollama trên máy cục bộ, không có fallback gửi nội dung lên AI đám mây.
 
 ## Bắt đầu nhanh
 
@@ -15,18 +15,35 @@ cd capstone1
 
 Vì repository đang ở chế độ private, tài khoản GitHub của bạn phải được chủ repository mời làm collaborator.
 
-### 2. Cài đặt và chạy frontend
+### 2. Cài đặt công cụ và dependencies (Windows)
+
+Cần Python 3.12 x64, Node.js 22.13 trở lên và Windows Package Manager (`winget`). Từ thư mục gốc repository, chạy một lần:
 
 ```powershell
-cd frontend
-npm ci
-Copy-Item .env.example .env.local
-npm run dev
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\requirements.ps1
 ```
 
-Điền `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` vào `.env.local`. Không đưa service-role key hoặc database password vào frontend.
+Script tạo `backend/.venv`, cài toàn bộ Python packages từ `requirements.txt`, chạy `npm ci`, cài Tesseract OCR 5.x nếu máy chưa có, bổ sung dữ liệu OCR tiếng Việt đã ghim checksum, cài Ollama tương thích và tải model `qwen3-vl:4b-instruct-q4_K_M`. Lần cài đầu cần Internet và vài GB dung lượng trống; riêng bộ cài Ollama khoảng 1.6 GB, model AI khoảng 3.3 GB. Script giữ nguyên mọi file `.env` đang có và chỉ tạo từ mẫu khi chưa tồn tại.
 
-`NEXT_PUBLIC_API_URL` là tùy chọn. Để trống biến này thì Profile/Child tiếp tục dùng typed mock; chỉ đặt, ví dụ `http://localhost:8000`, khi cần thử FastAPI cục bộ.
+File `requirements.txt` ở repo root là manifest Python gọn trỏ tới toàn bộ danh sách đã khóa tại `backend/requirements.txt`. Vì Ollama và Tesseract là chương trình hệ thống chứ không phải Python packages, hãy dùng `requirements.ps1` để cài đầy đủ môi trường trên Windows.
+
+Script không thể tự cấp thông tin Supabase/Database. Thành viên cần lấy cấu hình dev từ người quản lý dự án và điền vào `backend/.env` cùng `frontend/.env.local`; không dùng key production và không commit các file này.
+
+### 3. Chạy frontend và backend
+
+```powershell
+# Terminal 1: Backend, từ thư mục gốc repository
+Set-Location .\backend
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.sever:app --host 127.0.0.1 --port 8000 --reload
+
+# Terminal 2: Frontend, từ thư mục gốc repository
+Set-Location .\frontend
+npm run dev -- --port 3000
+```
+
+Điền `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` vào `frontend/.env.local`. Không đưa service-role key hoặc database password vào frontend. `NEXT_PUBLIC_API_URL` mặc định trỏ đến `http://127.0.0.1:8000`.
 
 Mở http://localhost:3000 trong trình duyệt.
 
@@ -159,7 +176,7 @@ Xem quy trình đầy đủ trong [CONTRIBUTING.md](CONTRIBUTING.md).
 - Hoàn thiện, bảo vệ và kết nối backend API dữ liệu nghiệp vụ; Profile CRUD mới ở mức khởi đầu. Route guard phía server và cookie refresh proxy đã được triển khai cho luồng Auth frontend.
 - Hoàn tất di chuyển profile legacy và validate khóa ngoại Auth; storage và các bảng nghiệp vụ thật vẫn chưa được tích hợp vào frontend.
 - Camera/microphone processing và realtime WebSocket.
-- OCR, page matching, STT, TTS, scoring và AI thật.
+- STT, TTS, scoring, page matching hoàn chỉnh và các tính năng AI khác ngoài sửa OCR cục bộ cho Admin.
 - Persistence giữa các lần tải lại trang.
 
 ## Quyền sử dụng

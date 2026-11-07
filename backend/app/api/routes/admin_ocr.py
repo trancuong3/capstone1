@@ -12,6 +12,7 @@ from app.schemas.admin_ocr import (
     AdminOcrCreateDraftRequest,
     AdminOcrDraftRequest,
     AdminOcrVerifyRequest,
+    AdminOcrWordInput,
 )
 from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.repositories.admin_book_repository import AdminBookRepository
@@ -23,6 +24,7 @@ router = APIRouter()
 
 class AdminOcrAiCorrectRequest(BaseModel):
     draft_text: str = Field(..., min_length=1, max_length=500_000)
+    words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
 
     @field_validator("draft_text")
     @classmethod
@@ -35,10 +37,6 @@ class AdminOcrAiCorrectRequest(BaseModel):
 class AdminOcrAiCorrectResponse(BaseModel):
     corrected_text: str
 
-
-class AdminOcrGenerateQuestionsRequest(BaseModel):
-    text: str = Field(..., min_length=1)
-    count: int = Field(default=10, ge=1, le=20)
 
 
 @router.post("/admin/catalog", response_model=AdminBookMetadataResponse, status_code=201)
@@ -137,16 +135,7 @@ async def ai_correct_page_text(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Sửa lỗi chính tả và phục hồi dấu thanh văn bản OCR qua Gemini API."""
-    return await AdminOcrService(db).ai_correct_text(actor_id, page_id, payload.draft_text)
-
-
-@router.post("/admin/pages/{page_id}/generate-questions")
-async def ai_generate_page_questions(
-    page_id: UUID,
-    payload: AdminOcrGenerateQuestionsRequest,
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """Tạo bộ khoảng 10 câu hỏi đọc hiểu cho trẻ em từ nội dung trang qua Gemini API."""
-    return await AdminOcrService(db).ai_generate_questions(actor_id, page_id, payload.text, payload.count)
+    """Correct OCR text with the configured loopback-only local model."""
+    return await AdminOcrService(db).ai_correct_text(
+        actor_id, page_id, payload.draft_text, payload.words
+    )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the isolated Admin OCR lifecycle and Gemini verification suite."""
+"""Run the isolated Admin OCR lifecycle and local provider verification suite."""
 
 from __future__ import annotations
 
@@ -90,6 +90,8 @@ def main() -> int:
             "NEXT_PUBLIC_SUPABASE_URL": "https://example.supabase.co",
             "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
             "NEXT_PUBLIC_API_URL": "http://127.0.0.1:8000",
+            "LOCAL_OCR_BASE_URL": "http://127.0.0.1:1",
+            "LOCAL_OCR_MODEL": "qwen3-vl:4b-instruct-q4_K_M",
         }
     )
     admin_database = env.get("ADMIN_OCR_TEST_DATABASE_URL")

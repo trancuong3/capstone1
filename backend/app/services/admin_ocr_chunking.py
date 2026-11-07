@@ -51,16 +51,23 @@ class OcrChunkPlan:
 
 @dataclass(frozen=True)
 class ChunkingConfig:
-    max_chars: int = 5000
-    max_chunks: int = 64
-    context_chars: int = 320
+    max_bytes: int = 3072
+    max_words: int = 48
+    max_chunks: int = 128
+    context_bytes: int = 160
+    max_document_bytes: int = 196608
 
     @classmethod
     def from_environment(cls) -> "ChunkingConfig":
-        max_chars = _read_int("GEMINI_OCR_CHUNK_MAX_CHARS", 5000, 100, 50_000)
-        max_chunks = _read_int("GEMINI_OCR_MAX_CHUNKS", 64, 1, 500)
-        context_chars = _read_int("GEMINI_OCR_CONTEXT_MAX_CHARS", 320, 0, 4000)
-        return cls(max_chars=max_chars, max_chunks=max_chunks, context_chars=context_chars)
+        return cls(
+            max_bytes=_read_int("LOCAL_OCR_MAX_CHUNK_BYTES", 3072, 256, 8192),
+            max_words=_read_int("LOCAL_OCR_MAX_CHUNK_WORDS", 48, 8, 512),
+            max_chunks=_read_int("LOCAL_OCR_MAX_CHUNKS", 128, 1, 256),
+            context_bytes=_read_int("LOCAL_OCR_CONTEXT_BYTES", 160, 0, 4096),
+            max_document_bytes=_read_int(
+                "LOCAL_OCR_MAX_DOCUMENT_BYTES", 196608, 1024, 500000
+            ),
+        )
 
 
 def _read_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -100,49 +107,49 @@ def _boundary_kind(text: str, tokens: tuple[OcrToken, ...], left_index: int) -> 
 def _context_before(text: str, start: int, limit: int) -> str:
     if limit <= 0 or start <= 0:
         return ""
-    excerpt = text[max(0, start - limit):start]
-    return excerpt.lstrip()
+    raw = text[:start].encode("utf-8")
+    return raw[-limit:].decode("utf-8", errors="ignore").lstrip()
 
 
 def _context_after(text: str, end: int, limit: int) -> str:
     if limit <= 0 or end >= len(text):
         return ""
-    excerpt = text[end:min(len(text), end + limit)]
-    return excerpt.rstrip()
+    raw = text[end:].encode("utf-8")
+    return raw[:limit].decode("utf-8", errors="ignore").rstrip()
 
 
 def chunk_ocr_text(
     value: str,
     config: ChunkingConfig | None = None,
 ) -> OcrChunkPlan:
-    """Split NFC text at whitespace token boundaries and retain source offsets."""
+    """Split NFC text under strict UTF-8 byte and token budgets."""
     config = config or ChunkingConfig.from_environment()
     text = unicodedata.normalize("NFC", value)
+    if len(text.encode("utf-8")) > config.max_document_bytes:
+        raise ChunkingError("OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES")
     tokens = _tokens(text)
     if not tokens:
         raise ChunkingError("OCR text must contain at least one token")
-    if config.max_chars < 1 or config.max_chunks < 1 or config.context_chars < 0:
+    if min(config.max_bytes, config.max_words, config.max_chunks, config.max_document_bytes) < 1 or config.context_bytes < 0:
         raise ChunkingError("Chunking limits are invalid")
 
     ranges: list[tuple[int, int]] = []
     start_index = 0
     while start_index < len(tokens):
         possible_end = start_index
-        while possible_end < len(tokens):
-            candidate_length = tokens[possible_end].end - tokens[start_index].start
-            if candidate_length > config.max_chars:
+        while possible_end < len(tokens) and possible_end - start_index < config.max_words:
+            candidate_bytes = len(
+                text[tokens[start_index].start : tokens[possible_end].end].encode("utf-8")
+            )
+            if candidate_bytes > config.max_bytes:
                 break
             possible_end += 1
 
         if possible_end == start_index:
-            raise ChunkingError(
-                f"Token {start_index} exceeds GEMINI_OCR_CHUNK_MAX_CHARS"
-            )
+            raise ChunkingError("A source word exceeds LOCAL_OCR_MAX_CHUNK_BYTES")
         if possible_end == len(tokens):
             end_index = possible_end
         else:
-            # Prefer the furthest natural boundary that fits; fall back from
-            # paragraph to line, sentence, then the last safe whitespace.
             chosen = None
             for priority in (4, 3, 2):
                 for boundary in range(possible_end, start_index, -1):
@@ -155,7 +162,7 @@ def chunk_ocr_text(
 
         ranges.append((start_index, end_index))
         if len(ranges) > config.max_chunks:
-            raise ChunkingError("OCR text exceeds GEMINI_OCR_MAX_CHUNKS")
+            raise ChunkingError("OCR text exceeds LOCAL_OCR_MAX_CHUNKS")
         start_index = end_index
 
     chunks: list[OcrTextChunk] = []
@@ -170,14 +177,11 @@ def chunk_ocr_text(
                 end_token_index=end_index,
                 expected_word_count=end_index - start_index,
                 target_text=text[start_char:end_char],
-                previous_context=_context_before(
-                    text, start_char, config.context_chars
-                ),
-                next_context=_context_after(text, end_char, config.context_chars),
+                previous_context=_context_before(text, start_char, config.context_bytes),
+                next_context=_context_after(text, end_char, config.context_bytes),
                 tokens=chunk_tokens,
             )
         )
-
     return OcrChunkPlan(text=text, tokens=tokens, chunks=tuple(chunks))
 
 
@@ -185,7 +189,7 @@ def reconstruct_ocr_text(
     plan: OcrChunkPlan,
     corrected_tokens_by_chunk: dict[int, tuple[str, ...] | list[str]],
 ) -> str:
-    """Replace token spans only; all original whitespace and line breaks survive."""
+    """Replace spelling only; retain every source punctuation and whitespace span."""
     expected_ids = {chunk.chunk_id for chunk in plan.chunks}
     if set(corrected_tokens_by_chunk) != expected_ids:
         raise ChunkingError("Corrected chunks are missing or duplicated")
@@ -199,8 +203,39 @@ def reconstruct_ocr_text(
             normalized = unicodedata.normalize("NFC", value)
             if not normalized or any(character.isspace() for character in normalized):
                 raise ChunkingError("Each corrected token must contain one non-empty token")
-            if punctuation_signature(token.text) != punctuation_signature(normalized):
-                raise ChunkingError("Gemini correction must preserve source punctuation")
+            prefix_end = 0
+            while (
+                prefix_end < len(token.text)
+                and unicodedata.category(token.text[prefix_end]).startswith("P")
+            ):
+                prefix_end += 1
+            suffix_start = len(token.text)
+            while (
+                suffix_start > prefix_end
+                and unicodedata.category(token.text[suffix_start - 1]).startswith("P")
+            ):
+                suffix_start -= 1
+            source_core = token.text[prefix_end:suffix_start]
+            if punctuation_signature(source_core):
+                # Leave tokens with internal punctuation untouched; its position
+                # cannot be safely inferred after a spelling change.
+                normalized = token.text
+            elif source_core:
+                corrected_core = "".join(
+                    character
+                    for character in normalized
+                    if not unicodedata.category(character).startswith("P")
+                )
+                if not corrected_core:
+                    raise ChunkingError("Correction removed the source word")
+                normalized = (
+                    token.text[:prefix_end]
+                    + corrected_core
+                    + token.text[suffix_start:]
+                )
+            else:
+                # Punctuation-only tokens are retained verbatim.
+                normalized = token.text
             if token.index in replacements:
                 raise ChunkingError("A source token was corrected more than once")
             replacements[token.index] = normalized

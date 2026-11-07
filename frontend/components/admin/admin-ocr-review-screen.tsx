@@ -405,7 +405,7 @@ export function AdminOcrReviewScreen({
     setNotice(null);
     try {
       const correctedText = (
-        await ocr.aiCorrectText(pageId, requestedText)
+        await ocr.aiCorrectText(pageId, requestedText, words)
       ).normalize("NFC");
       if (
         !mountedRef.current ||
@@ -430,7 +430,7 @@ export function AdminOcrReviewScreen({
       setWords([...result.words]);
       setWordSyncError(null);
       setNotice(
-        "Gemini AI đã sửa lỗi chính tả và phục hồi dấu thanh thành công!",
+        "AI OCR cục bộ đã sửa lỗi chính tả và phục hồi dấu thanh thành công!",
       );
     } catch (cause) {
       if (
@@ -446,11 +446,48 @@ export function AdminOcrReviewScreen({
       setNotice(
         safeMessage.startsWith("Không thể")
           ? safeMessage
-          : "Không thể sửa OCR bằng Gemini: " + safeMessage,
+          : "Không thể sửa OCR bằng AI cục bộ: " + safeMessage,
       );
     } finally {
       if (mountedRef.current) setBusy(null);
     }
+  }
+
+  async function resumePendingDraft(
+    revisionHistory: readonly AdminRevisionSummaryUI[],
+    expectedSourceRevisionId: string,
+    requestedPageRequestId: number,
+  ): Promise<boolean> {
+    const pending = revisionHistory.find(
+      (revision) => revision.verification_status === "NEEDS_REVIEW",
+    );
+    if (!pending) return false;
+
+    const existingDraft = await ocr.getRevision(
+      pageId,
+      pending.page_revision_id,
+    );
+    if (
+      !mountedRef.current ||
+      requestedPageRequestId !== requestIdRef.current
+    ) {
+      return true;
+    }
+
+    if (
+      existingDraft.ocr_metadata.source_revision_id !== expectedSourceRevisionId
+    ) {
+      setNotice(
+        "Trang đã có bản nháp chờ duyệt từ revision khác. Hãy chọn revision NEEDS_REVIEW trong lịch sử trước khi tiếp tục.",
+      );
+      return true;
+    }
+
+    applyDetail(existingDraft);
+    setNotice(
+      "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
+    );
+    return true;
   }
 
   async function createEditDraft() {
@@ -471,6 +508,17 @@ export function AdminOcrReviewScreen({
     setBusy("edit");
     setNotice(null);
     try {
+      if (
+        history &&
+        (await resumePendingDraft(
+          history,
+          expectedSourceRevisionId,
+          requestedPageRequestId,
+        ))
+      ) {
+        return;
+      }
+
       const created = await revisions.createDraft(
         pageId,
         expectedSourceRevisionId,
@@ -491,6 +539,29 @@ export function AdminOcrReviewScreen({
         "Đã tạo revision nháp từ nội dung đã xác minh. Hãy sửa, lưu bản nháp và xác minh để áp dụng cho lượt đọc mới.",
       );
     } catch (cause) {
+      if (isServiceError(cause) && cause.status === 409) {
+        try {
+          const latestHistory = await revisions.list(pageId);
+          if (
+            !mountedRef.current ||
+            requestedPageRequestId !== requestIdRef.current
+          ) {
+            return;
+          }
+          setHistory(latestHistory);
+          if (
+            await resumePendingDraft(
+              latestHistory,
+              expectedSourceRevisionId,
+              requestedPageRequestId,
+            )
+          ) {
+            return;
+          }
+        } catch {
+          // Keep the original conflict notice if the refresh also fails.
+        }
+      }
       setNotice(
         isServiceError(cause)
           ? "Không thể tạo bản nháp: " + cause.message
@@ -501,49 +572,105 @@ export function AdminOcrReviewScreen({
     }
   }
   async function saveDraft() {
-    if (!detail || detail.verification_status !== "NEEDS_REVIEW") return;
+    if (
+      !detail ||
+      detail.verification_status !== "NEEDS_REVIEW" ||
+      busy !== null
+    ) {
+      return;
+    }
+    const requestedRevisionId = detail.page_revision_id;
+    const requestedVersion = draftEditVersionRef.current;
     setBusy("save");
     setNotice(null);
     try {
       const saved = await ocr.saveDraft(
         pageId,
-        detail.page_revision_id,
+        requestedRevisionId,
         draftText,
         words,
       );
+      if (
+        !mountedRef.current ||
+        requestedVersion !== draftEditVersionRef.current ||
+        detail?.page_revision_id !== requestedRevisionId
+      ) {
+        return;
+      }
       applyDetail(saved);
       setNotice("Đã lưu bản nháp vào database.");
-      setHistory(await revisions.list(pageId));
-    } catch {
+      try {
+        setHistory(await revisions.list(pageId));
+      } catch {
+        setNotice("Đã lưu bản nháp, nhưng chưa tải lại được lịch sử revision.");
+      }
+    } catch (cause) {
+      if (
+        !mountedRef.current ||
+        requestedVersion !== draftEditVersionRef.current ||
+        detail?.page_revision_id !== requestedRevisionId
+      ) {
+        return;
+      }
       setNotice(
-        "Không thể lưu bản nháp. Kiểm tra các từ, bbox và quyền Admin.",
+        isServiceError(cause)
+          ? "Không thể lưu bản nháp: " + cause.message
+          : "Không thể lưu bản nháp. Văn bản hiện tại được giữ nguyên.",
       );
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
   async function verifyRevision() {
-    if (!detail || detail.verification_status !== "NEEDS_REVIEW") return;
+    if (
+      !detail ||
+      detail.verification_status !== "NEEDS_REVIEW" ||
+      busy !== null
+    ) {
+      return;
+    }
+    const requestedRevisionId = detail.page_revision_id;
+    const requestedVersion = draftEditVersionRef.current;
     setBusy("verify");
     setNotice(null);
     try {
       const verifiedResult = await revisions.verify(pageId, {
-        page_revision_id: detail.page_revision_id,
+        page_revision_id: requestedRevisionId,
         corrected_text: draftText,
         words,
       });
+      if (
+        !mountedRef.current ||
+        requestedVersion !== draftEditVersionRef.current ||
+        detail?.page_revision_id !== requestedRevisionId
+      ) {
+        return;
+      }
       applyDetail(verifiedResult);
-      setHistory(await revisions.list(pageId));
       setNotice(
         "Đã xác minh revision. Revision này có thể làm ground truth cho session mới nếu trang đang ACTIVE.",
       );
-    } catch {
+      try {
+        setHistory(await revisions.list(pageId));
+      } catch {
+        setNotice("Đã xác minh revision, nhưng chưa tải lại được lịch sử.");
+      }
+    } catch (cause) {
+      if (
+        !mountedRef.current ||
+        requestedVersion !== draftEditVersionRef.current ||
+        detail?.page_revision_id !== requestedRevisionId
+      ) {
+        return;
+      }
       setNotice(
-        "Không thể xác minh. Hãy đồng bộ văn bản với danh sách từ, kiểm tra bbox và thử lại.",
+        isServiceError(cause)
+          ? "Không thể xác minh: " + cause.message
+          : "Không thể xác minh. Hãy đồng bộ văn bản với danh sách từ, kiểm tra bbox và thử lại.",
       );
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
@@ -917,7 +1044,11 @@ export function AdminOcrReviewScreen({
               <textarea
                 aria-describedby="ocr-help"
                 className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
-                disabled={verified || detail.lifecycle_status !== "ACTIVE"}
+                disabled={
+                  verified ||
+                  detail.lifecycle_status !== "ACTIVE" ||
+                  busy !== null
+                }
                 id="ocr-text"
                 onChange={(event) => handleDraftTextChange(event.target.value)}
                 value={draftText}
@@ -926,7 +1057,8 @@ export function AdminOcrReviewScreen({
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động
               cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu,
-              Vàng: nghi sai dấu, Đỏ: không khớp).
+              Vàng: nghi sai dấu, Đỏ: không khớp). AI sửa lỗi chạy qua Ollama
+              cục bộ và không tự chuyển sang dịch vụ AI bên ngoài.
             </p>
             {wordSyncError ? (
               <p
@@ -1009,7 +1141,7 @@ export function AdminOcrReviewScreen({
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="h-11 w-auto border-green-600 bg-green-50 text-green-800 hover:bg-green-100"
-                  disabled={verified || words.length === 0}
+                  disabled={verified || busy !== null || words.length === 0}
                   onClick={reconcileAllMatchedWords}
                   type="button"
                   variant="secondary"
@@ -1019,7 +1151,7 @@ export function AdminOcrReviewScreen({
                 </Button>
                 <Button
                   className="h-11 w-auto"
-                  disabled={verified}
+                  disabled={verified || busy !== null}
                   onClick={syncTextFromWords}
                   variant="secondary"
                 >
@@ -1086,7 +1218,7 @@ export function AdminOcrReviewScreen({
                       Văn bản từ
                       <input
                         className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
-                        disabled={verified}
+                        disabled={verified || busy !== null}
                         onChange={(event) =>
                           updateWord(word.word_index, {
                             text: event.target.value,
@@ -1109,7 +1241,7 @@ export function AdminOcrReviewScreen({
                             <input
                               aria-label={`Từ ${word.word_index} bbox ${label}`}
                               className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
-                              disabled={verified}
+                              disabled={verified || busy !== null}
                               max={1}
                               min={0}
                               onChange={(event) =>
@@ -1144,6 +1276,7 @@ export function AdminOcrReviewScreen({
                       : "rounded-control border border-border p-3 text-left"
                   }
                   key={revision.page_revision_id}
+                  disabled={busy !== null}
                   onClick={() => void chooseRevision(revision.page_revision_id)}
                   type="button"
                 >

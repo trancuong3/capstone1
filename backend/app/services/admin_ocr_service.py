@@ -25,6 +25,7 @@ from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import (
     AdminOcrDraftRequest,
     AdminOcrVerifyRequest,
+    AdminOcrWordInput,
     normalize_ocr_bbox,
 )
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
@@ -35,10 +36,10 @@ from app.services.ocr_engine import (
     normalize_text_tokens,
     normalize_word,
 )
-from app.services.admin_ocr_gemini import (
-    GeminiCorrectionError,
-    GeminiOcrConfig,
-    GeminiOcrCorrector,
+from app.services.admin_ocr_local import (
+    LocalCorrectionError,
+    LocalOcrConfig,
+    LocalOcrCorrector,
 )
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
@@ -1161,7 +1162,11 @@ class AdminOcrService:
         )
 
     async def ai_correct_text(
-        self, actor_id: UUID, page_id: UUID, draft_text: str
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        draft_text: str,
+        words: list[AdminOcrWordInput],
     ) -> dict[str, object]:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
@@ -1169,23 +1174,38 @@ class AdminOcrService:
             raise HTTPException(status_code=404, detail="Page not found")
         if not draft_text.strip():
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
+
+        normalized_draft = unicodedata.normalize("NFC", draft_text)
+        validated_words = self._validated_words(words)
+        if normalize_text_tokens(normalized_draft) != [
+            str(item["normalized_text"]) for item in validated_words
+        ]:
+            raise HTTPException(
+                status_code=422,
+                detail="Draft text and OCR word data are inconsistent",
+            )
         if not page.ImagePath:
             raise HTTPException(
                 status_code=409,
                 detail="The source page image is unavailable for visual OCR verification.",
             )
 
-        normalized_draft = unicodedata.normalize("NFC", draft_text)
         try:
-            config = GeminiOcrConfig.from_environment()
-        except GeminiCorrectionError as exc:
+            config = LocalOcrConfig.from_environment()
+        except LocalCorrectionError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        if len(normalized_draft.encode("utf-8")) > config.chunking.max_document_bytes:
+            raise HTTPException(
+                status_code=422,
+                detail="OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES",
+            )
 
         try:
             image_bytes = await run_in_threadpool(download_object, page.ImagePath)
         except Exception as exc:
             logger.warning(
-                "Unable to load source page image for OCR verification",
+                "Unable to load source page image for local OCR verification",
                 extra={"page_id": str(page_id)},
             )
             raise HTTPException(
@@ -1193,21 +1213,15 @@ class AdminOcrService:
                 detail="Không thể tải ảnh trang để đối chiếu OCR; văn bản hiện tại vẫn được giữ nguyên.",
             ) from exc
 
-        extension = page.ImagePath.rsplit(".", 1)[-1].lower() if "." in page.ImagePath else ""
-        mime_type = {
-            "png": "image/png",
-            "webp": "image/webp",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-        }.get(extension, "image/jpeg")
-        corrector = GeminiOcrCorrector(config)
+        word_boxes = [tuple(item["bbox"]) for item in validated_words]
         try:
-            corrected_text = await corrector.correct(
-                normalized_draft, image_bytes, mime_type
+            corrected_text = await LocalOcrCorrector(config).correct(
+                normalized_draft, image_bytes, word_boxes
             )
-        except GeminiCorrectionError as exc:
+        except LocalCorrectionError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         return {"corrected_text": corrected_text}
+
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath
         await self.db.rollback()

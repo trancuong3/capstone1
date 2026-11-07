@@ -3,7 +3,7 @@ import os
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
@@ -233,9 +233,23 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
             probe_tts=AsyncMock(return_value=("HEALTHY", "ElevenLabs TTS kết nối bình thường")),
             probe_stt=AsyncMock(return_value=("HEALTHY", "ElevenLabs STT kết nối bình thường")),
         )
-        result = await AdminSystemService(repo, voice).health()
+        with (
+            patch(
+                "app.api.routes.system.LocalOcrConfig.from_environment",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "app.api.routes.system.LocalOcrCorrector.probe",
+                new=AsyncMock(return_value=("HEALTHY", "Ollama cục bộ sẵn sàng")),
+            ) as local_probe,
+        ):
+            result = await AdminSystemService(repo, voice).health()
         self.assertEqual(result.overall_status, "HEALTHY")
-        self.assertEqual([item.id for item in result.services], ["api", "database", "tts", "stt"])
+        self.assertEqual(
+            [item.id for item in result.services],
+            ["api", "database", "local_ocr", "tts", "stt"],
+        )
+        local_probe.assert_awaited_once()
         repo.probe_database.assert_awaited_once()
         voice.probe_tts.assert_awaited_once()
         voice.probe_stt.assert_awaited_once()
@@ -267,10 +281,11 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
         )
         result = await AdminSystemService(repo, voice).health()
         self.assertEqual(result.overall_status, "DEGRADED")
-        self.assertEqual(result.services[2].id, "tts")
-        self.assertEqual(result.services[2].status, "UNAVAILABLE")
-        self.assertEqual(result.services[3].id, "stt")
-        self.assertEqual(result.services[3].status, "HEALTHY")
+        self.assertEqual(result.services[2].id, "local_ocr")
+        self.assertEqual(result.services[3].id, "tts")
+        self.assertEqual(result.services[3].status, "UNAVAILABLE")
+        self.assertEqual(result.services[4].id, "stt")
+        self.assertEqual(result.services[4].status, "HEALTHY")
 
 
 

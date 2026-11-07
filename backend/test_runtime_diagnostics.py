@@ -26,6 +26,7 @@ class RuntimeConfigurationDiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["supabase_url_configured"])
         self.assertTrue(result["supabase_storage_bucket_configured"])
         self.assertTrue(result["server_side_key_configured"])
+        self.assertTrue(result["local_ocr_config_valid"])
         self.assertTrue(result["ocr_engine_available"])
         self.assertTrue(result["vietnamese_language_available"])
         # Kiểm tra tính tương thích ngược của các shim keys cũ
@@ -45,6 +46,7 @@ class RuntimeConfigurationDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(result["ocr_engine_available"])
         self.assertIsNone(result["vietnamese_language_available"])
         self.assertIsNone(result["tesseract_executable_available"])
+        self.assertTrue(result["local_ocr_config_valid"])
 
 
 if __name__ == "__main__":
