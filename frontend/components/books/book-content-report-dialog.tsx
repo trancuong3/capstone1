@@ -99,7 +99,9 @@ export function BookContentReportDialog({
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-primary">ViRead · Góp ý chất lượng</p>
+            <p className="text-sm font-bold text-primary">
+              ViRead · Góp ý chất lượng
+            </p>
             <h2
               className="mt-1 text-xl font-extrabold text-ink"
               id="book-content-report-title"
@@ -108,7 +110,9 @@ export function BookContentReportDialog({
             </h2>
             <p className="mt-2 text-sm text-muted">
               {bookTitle}
-              {pageNumber !== null ? ` · Trang ${pageNumber}` : " · Toàn bộ sách"}
+              {pageNumber !== null
+                ? ` · Trang ${pageNumber}`
+                : " · Toàn bộ sách"}
             </p>
           </div>
           <button
@@ -147,7 +151,8 @@ export function BookContentReportDialog({
               <div className="sm:col-span-2">
                 <dt className="text-muted">Yêu cầu kiểm tra</dt>
                 <dd className="break-all font-mono text-ink">
-                  {created.scan_run_id ?? "Đã lưu báo cáo; chưa có mã scan trả về"}
+                  {created.scan_run_id ??
+                    "Đã lưu báo cáo; chưa có mã scan trả về"}
                 </dd>
               </div>
             </dl>
@@ -242,7 +247,10 @@ export function BookContentReportDialog({
             </div>
 
             {error ? (
-              <p className="rounded-control bg-red-50 p-3 text-sm font-semibold text-danger" role="alert">
+              <p
+                className="rounded-control bg-red-50 p-3 text-sm font-semibold text-danger"
+                role="alert"
+              >
                 {error}
               </p>
             ) : null}
@@ -256,7 +264,10 @@ export function BookContentReportDialog({
               >
                 Hủy
               </Button>
-              <Button disabled={submitting || !description.trim()} type="submit">
+              <Button
+                disabled={submitting || !description.trim()}
+                type="submit"
+              >
                 {submitting ? "Đang gửi báo cáo…" : "Gửi báo cáo"}
               </Button>
             </div>

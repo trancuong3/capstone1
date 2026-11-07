@@ -21,7 +21,10 @@ export interface BookContentReportService {
     bookId: string,
     request: CreateBookContentReportRequest,
   ): Promise<BookContentReportDetailDTO>;
-  listMine(query?: { limit?: number; offset?: number }): Promise<BookContentReportPageDTO>;
+  listMine(query?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<BookContentReportPageDTO>;
   getMine(reportId: string): Promise<BookContentReportDetailDTO>;
 }
 

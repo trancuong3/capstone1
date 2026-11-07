@@ -176,15 +176,31 @@ export const bookQualityBookDetailSchema = z.object({
 });
 
 export type BookContentIssueType = z.infer<typeof bookContentIssueTypeSchema>;
-export type BookContentReportStatus = z.infer<typeof bookContentReportStatusSchema>;
-export type BookQualityFindingStatus = z.infer<typeof bookQualityFindingStatusSchema>;
+export type BookContentReportStatus = z.infer<
+  typeof bookContentReportStatusSchema
+>;
+export type BookQualityFindingStatus = z.infer<
+  typeof bookQualityFindingStatusSchema
+>;
 export type BookContentReportDTO = z.infer<typeof bookContentReportSchema>;
-export type BookContentReportDetailDTO = z.infer<typeof bookContentReportDetailSchema>;
-export type BookContentReportPageDTO = z.infer<typeof bookContentReportPageSchema>;
+export type BookContentReportDetailDTO = z.infer<
+  typeof bookContentReportDetailSchema
+>;
+export type BookContentReportPageDTO = z.infer<
+  typeof bookContentReportPageSchema
+>;
 export type BookQualityFindingDTO = z.infer<typeof bookQualityFindingSchema>;
 export type BookQualityScanDTO = z.infer<typeof bookQualityScanSchema>;
-export type BookQualityScanDetailDTO = z.infer<typeof bookQualityScanDetailSchema>;
-export type BookQualityBookSummaryDTO = z.infer<typeof bookQualityBookSummarySchema>;
+export type BookQualityScanDetailDTO = z.infer<
+  typeof bookQualityScanDetailSchema
+>;
+export type BookQualityBookSummaryDTO = z.infer<
+  typeof bookQualityBookSummarySchema
+>;
 export type BookQualityBookPageDTO = z.infer<typeof bookQualityBookPageSchema>;
-export type BookQualityBookDetailDTO = z.infer<typeof bookQualityBookDetailSchema>;
-export type BookQualityReportAdminPageDTO = z.infer<typeof bookQualityReportAdminPageSchema>;
+export type BookQualityBookDetailDTO = z.infer<
+  typeof bookQualityBookDetailSchema
+>;
+export type BookQualityReportAdminPageDTO = z.infer<
+  typeof bookQualityReportAdminPageSchema
+>;

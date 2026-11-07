@@ -40,7 +40,9 @@ export function ParentBookReportsScreen() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(null);
+  const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(
+    null,
+  );
   const limit = 20;
 
   const load = useCallback(async () => {
@@ -149,7 +151,10 @@ export function ParentBookReportsScreen() {
               </p>
               {item.reported_text ? (
                 <p className="mt-2 text-sm text-muted">
-                  Nội dung nghi ngờ: <span className="font-semibold text-ink">{item.reported_text}</span>
+                  Nội dung nghi ngờ:{" "}
+                  <span className="font-semibold text-ink">
+                    {item.reported_text}
+                  </span>
                 </p>
               ) : null}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
@@ -165,7 +170,8 @@ export function ParentBookReportsScreen() {
               </div>
               {item.scan_run_id ? (
                 <p className="mt-2 break-all text-xs text-muted">
-                  Mã yêu cầu kiểm tra toàn sách: <span className="font-mono">{item.scan_run_id}</span>
+                  Mã yêu cầu kiểm tra toàn sách:{" "}
+                  <span className="font-mono">{item.scan_run_id}</span>
                 </p>
               ) : null}
             </article>

@@ -4,10 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 
-import {
-  AdminLoading,
-  AdminPageHeader,
-} from "@/components/admin/admin-ui";
+import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
@@ -153,19 +150,25 @@ function FindingCard({
       <p className="mt-2 text-sm leading-6 text-muted">{finding.explanation}</p>
       {finding.suggested_correction ? (
         <p className="mt-2 text-sm text-ink">
-          Đề xuất: <span className="font-semibold">{finding.suggested_correction}</span>
+          Đề xuất:{" "}
+          <span className="font-semibold">{finding.suggested_correction}</span>
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
         <span>
-          Nguồn: {finding.detection_source === "RULE" ? "Quy tắc xác định" : "Ollama · chỉ phân tích văn bản"}
+          Nguồn:{" "}
+          {finding.detection_source === "RULE"
+            ? "Quy tắc xác định"
+            : "Ollama · chỉ phân tích văn bản"}
         </span>
         {finding.model_name ? <span>Model: {finding.model_name}</span> : null}
         {finding.confidence !== null ? (
           <span>Confidence: {(finding.confidence * 100).toFixed(0)}%</span>
         ) : null}
         {finding.page_revision_id ? (
-          <span className="font-mono">Revision: {finding.page_revision_id}</span>
+          <span className="font-mono">
+            Revision: {finding.page_revision_id}
+          </span>
         ) : null}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -220,7 +223,9 @@ export function AdminBookContentQualityScreen() {
   const [search, setSearch] = useState("");
   const [createdAfter, setCreatedAfter] = useState("");
   const [createdBefore, setCreatedBefore] = useState("");
-  const [statusFilter, setStatusFilter] = useState<BookContentReportStatus | "">("");
+  const [statusFilter, setStatusFilter] = useState<
+    BookContentReportStatus | ""
+  >("");
   const [issueFilter, setIssueFilter] = useState<BookContentIssueType | "">("");
   const [bookFilter, setBookFilter] = useState("");
   const [reportOffset, setReportOffset] = useState(0);
@@ -500,7 +505,10 @@ export function AdminBookContentQualityScreen() {
               ["REPORTED_PAGES", "Trang được báo cáo"],
             ] as const
           ).map(([key, label]) => (
-            <div className="rounded-card border border-border bg-white p-4" key={key}>
+            <div
+              className="rounded-card border border-border bg-white p-4"
+              key={key}
+            >
               <p className="text-sm text-muted">{label}</p>
               <p className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
                 {reportSummary?.[key] ?? "—"}
@@ -513,7 +521,9 @@ export function AdminBookContentQualityScreen() {
       <section className="rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">Báo cáo từ phụ huynh</h2>
+            <h2 className="text-xl font-extrabold text-ink">
+              Báo cáo từ phụ huynh
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Lọc, xem snapshot lịch sử và cập nhật trạng thái xử lý.
             </p>
@@ -527,7 +537,10 @@ export function AdminBookContentQualityScreen() {
           <label className="block text-sm font-semibold text-ink">
             Tìm kiếm
             <span className="relative mt-1 block">
-              <Search aria-hidden className="absolute left-3 top-3 size-4 text-muted" />
+              <Search
+                aria-hidden
+                className="absolute left-3 top-3 size-4 text-muted"
+              />
               <input
                 className="min-h-11 w-full rounded-control border border-border pl-9 pr-3"
                 onChange={(event) => {
@@ -569,13 +582,17 @@ export function AdminBookContentQualityScreen() {
               className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
               onChange={(event) => {
                 setReportOffset(0);
-                setStatusFilter(event.target.value as BookContentReportStatus | "");
+                setStatusFilter(
+                  event.target.value as BookContentReportStatus | "",
+                );
               }}
               value={statusFilter}
             >
               <option value="">Tất cả</option>
               {Object.entries(reportStatusLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+                <option key={value} value={value}>
+                  {label}
+                </option>
               ))}
             </select>
           </label>
@@ -591,7 +608,9 @@ export function AdminBookContentQualityScreen() {
             >
               <option value="">Tất cả</option>
               {Object.entries(issueLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+                <option key={value} value={value}>
+                  {label}
+                </option>
               ))}
             </select>
           </label>
@@ -607,7 +626,9 @@ export function AdminBookContentQualityScreen() {
             >
               <option value="">Tất cả sách</option>
               {(books?.items ?? []).map((book) => (
-                <option key={book.book_id} value={book.book_id}>{book.book_title}</option>
+                <option key={book.book_id} value={book.book_id}>
+                  {book.book_title}
+                </option>
               ))}
             </select>
           </label>
@@ -627,17 +648,23 @@ export function AdminBookContentQualityScreen() {
         ) : (
           <div className="mt-4 grid gap-3">
             {reports.items.map((report) => (
-              <article className="rounded-control border border-border p-4" key={report.id}>
+              <article
+                className="rounded-control border border-border p-4"
+                key={report.id}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="font-bold text-ink">{report.book_title}</h3>
                     <p className="mt-1 text-sm text-muted">
                       {issueLabels[report.issue_type]}
-                      {report.page_number !== null ? ` · Trang ${report.page_number}` : " · Toàn bộ sách"}
+                      {report.page_number !== null
+                        ? ` · Trang ${report.page_number}`
+                        : " · Toàn bộ sách"}
                     </p>
                     <p className="mt-1 text-xs text-muted">
                       Người gửi: {report.reporter_name || "Tài khoản phụ huynh"}
-                      {" · "}{formatDate(report.created_at)}
+                      {" · "}
+                      {formatDate(report.created_at)}
                     </p>
                   </div>
                   <span className="rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover">
@@ -649,11 +676,16 @@ export function AdminBookContentQualityScreen() {
                 </p>
                 {report.reported_text ? (
                   <p className="mt-2 text-sm text-muted">
-                    Đoạn nghi ngờ: <span className="font-semibold text-ink">{report.reported_text}</span>
+                    Đoạn nghi ngờ:{" "}
+                    <span className="font-semibold text-ink">
+                      {report.reported_text}
+                    </span>
                   </p>
                 ) : null}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-                  <span className="break-all font-mono text-xs text-muted">{report.id}</span>
+                  <span className="break-all font-mono text-xs text-muted">
+                    {report.id}
+                  </span>
                   <Button
                     className="h-10 w-auto px-3 text-sm"
                     disabled={busyKey === `report:${report.id}`}
@@ -677,14 +709,18 @@ export function AdminBookContentQualityScreen() {
               <Button
                 className="h-10 w-auto px-3 text-sm"
                 disabled={reportOffset === 0 || loadingReports}
-                onClick={() => setReportOffset((value) => Math.max(0, value - reportLimit))}
+                onClick={() =>
+                  setReportOffset((value) => Math.max(0, value - reportLimit))
+                }
                 variant="secondary"
               >
                 Trước
               </Button>
               <Button
                 className="h-10 w-auto px-3 text-sm"
-                disabled={reportOffset + reportLimit >= reports.total || loadingReports}
+                disabled={
+                  reportOffset + reportLimit >= reports.total || loadingReports
+                }
                 onClick={() => setReportOffset((value) => value + reportLimit)}
                 variant="secondary"
               >
@@ -699,8 +735,12 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">Chi tiết báo cáo</h2>
-              <p className="mt-1 break-all font-mono text-xs text-muted">{selectedReport.id}</p>
+              <h2 className="text-xl font-extrabold text-ink">
+                Chi tiết báo cáo
+              </h2>
+              <p className="mt-1 break-all font-mono text-xs text-muted">
+                {selectedReport.id}
+              </p>
             </div>
             <Button
               className="h-10 w-auto px-3 text-sm"
@@ -715,7 +755,9 @@ export function AdminBookContentQualityScreen() {
               <h3 className="font-bold text-ink">Snapshot lúc phụ huynh gửi</h3>
               <p className="mt-2 text-sm text-muted">
                 {selectedReport.book_title}
-                {selectedReport.page_number !== null ? ` · Trang ${selectedReport.page_number}` : " · Toàn bộ sách"}
+                {selectedReport.page_number !== null
+                  ? ` · Trang ${selectedReport.page_number}`
+                  : " · Toàn bộ sách"}
               </p>
               <p className="mt-2 text-sm font-semibold text-ink">
                 {issueLabels[selectedReport.issue_type]}
@@ -752,13 +794,18 @@ export function AdminBookContentQualityScreen() {
                 {selectedReport.history.map((item, index) => (
                   <li key={`${item.created_at}-${index}`}>
                     <p className="text-sm font-bold text-ink">
-                      {item.from_status ? `${reportStatusLabels[item.from_status]} → ` : ""}
+                      {item.from_status
+                        ? `${reportStatusLabels[item.from_status]} → `
+                        : ""}
                       {reportStatusLabels[item.to_status]}
                     </p>
                     <p className="text-xs text-muted">
-                      {item.actor_name || "Hệ thống"} · {formatDate(item.created_at)}
+                      {item.actor_name || "Hệ thống"} ·{" "}
+                      {formatDate(item.created_at)}
                     </p>
-                    {item.note ? <p className="mt-1 text-sm text-muted">{item.note}</p> : null}
+                    {item.note ? (
+                      <p className="mt-1 text-sm text-muted">{item.note}</p>
+                    ) : null}
                   </li>
                 ))}
               </ol>
@@ -766,12 +813,16 @@ export function AdminBookContentQualityScreen() {
               {selectedReport.related_findings.length ? (
                 <div className="mt-2 grid gap-2">
                   {selectedReport.related_findings.map((finding) => (
-                    <div className="rounded-control bg-canvas p-3" key={finding.id}>
+                    <div
+                      className="rounded-control bg-canvas p-3"
+                      key={finding.id}
+                    >
                       <p className="text-sm font-bold text-ink">
                         Trang {finding.page_number} · {finding.issue_type}
                       </p>
                       <p className="mt-1 text-xs text-muted">
-                        {findingStatusLabels[finding.status]} · {finding.detection_source}
+                        {findingStatusLabels[finding.status]} ·{" "}
+                        {finding.detection_source}
                       </p>
                       <p className="mt-2 whitespace-pre-wrap text-sm text-ink">
                         {finding.original_excerpt}
@@ -781,13 +832,17 @@ export function AdminBookContentQualityScreen() {
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-muted">
-                  Chưa có finding được liên kết. Scan có thể đang chờ hoặc đã hoàn tất trước khi báo cáo được gửi.
+                  Chưa có finding được liên kết. Scan có thể đang chờ hoặc đã
+                  hoàn tất trước khi báo cáo được gửi.
                 </p>
               )}
             </div>
           </div>
           <div className="mt-5 border-t border-border pt-4">
-            <label className="block text-sm font-bold text-ink" htmlFor="report-resolution-note">
+            <label
+              className="block text-sm font-bold text-ink"
+              htmlFor="report-resolution-note"
+            >
               Ghi chú xử lý của Admin
               <textarea
                 className="mt-2 min-h-20 w-full rounded-control border border-border p-3 font-normal"
@@ -803,7 +858,9 @@ export function AdminBookContentQualityScreen() {
                 <Button
                   className="h-11 w-auto px-4 text-sm"
                   disabled={busyKey === `report-status:${selectedReport.id}`}
-                  onClick={() => void changeReportStatus(selectedReport.id, "UNDER_REVIEW")}
+                  onClick={() =>
+                    void changeReportStatus(selectedReport.id, "UNDER_REVIEW")
+                  }
                   variant="secondary"
                 >
                   Tiếp nhận xử lý
@@ -813,7 +870,9 @@ export function AdminBookContentQualityScreen() {
                 <Button
                   className="h-11 w-auto px-4 text-sm"
                   disabled={busyKey === `report-status:${selectedReport.id}`}
-                  onClick={() => void changeReportStatus(selectedReport.id, "OPEN")}
+                  onClick={() =>
+                    void changeReportStatus(selectedReport.id, "OPEN")
+                  }
                   variant="secondary"
                 >
                   Trả về mới tiếp nhận
@@ -823,16 +882,26 @@ export function AdminBookContentQualityScreen() {
                 <>
                   <Button
                     className="h-11 w-auto px-4 text-sm"
-                    disabled={!resolutionNote.trim() || busyKey === `report-status:${selectedReport.id}`}
-                    onClick={() => void changeReportStatus(selectedReport.id, "RESOLVED")}
+                    disabled={
+                      !resolutionNote.trim() ||
+                      busyKey === `report-status:${selectedReport.id}`
+                    }
+                    onClick={() =>
+                      void changeReportStatus(selectedReport.id, "RESOLVED")
+                    }
                     variant="secondary"
                   >
                     Giải quyết báo cáo
                   </Button>
                   <Button
                     className="h-11 w-auto px-4 text-sm"
-                    disabled={!resolutionNote.trim() || busyKey === `report-status:${selectedReport.id}`}
-                    onClick={() => void changeReportStatus(selectedReport.id, "REJECTED")}
+                    disabled={
+                      !resolutionNote.trim() ||
+                      busyKey === `report-status:${selectedReport.id}`
+                    }
+                    onClick={() =>
+                      void changeReportStatus(selectedReport.id, "REJECTED")
+                    }
                     variant="secondary"
                   >
                     Từ chối có lý do
@@ -841,8 +910,13 @@ export function AdminBookContentQualityScreen() {
               ) : (
                 <Button
                   className="h-11 w-auto px-4 text-sm"
-                  disabled={!resolutionNote.trim() || busyKey === `report-status:${selectedReport.id}`}
-                  onClick={() => void changeReportStatus(selectedReport.id, "UNDER_REVIEW")}
+                  disabled={
+                    !resolutionNote.trim() ||
+                    busyKey === `report-status:${selectedReport.id}`
+                  }
+                  onClick={() =>
+                    void changeReportStatus(selectedReport.id, "UNDER_REVIEW")
+                  }
                   variant="secondary"
                 >
                   Mở lại báo cáo
@@ -856,7 +930,9 @@ export function AdminBookContentQualityScreen() {
       <section className="mt-8 rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">Kiểm tra nội dung toàn sách</h2>
+            <h2 className="text-xl font-extrabold text-ink">
+              Kiểm tra nội dung toàn sách
+            </h2>
             <p className="mt-1 text-sm text-muted">
               Số liệu thực lấy từ scan runs và findings trong PostgreSQL.
             </p>
@@ -891,21 +967,31 @@ export function AdminBookContentQualityScreen() {
         ) : (
           <div className="grid gap-3">
             {books.items.map((book) => (
-              <article className="rounded-control border border-border p-4" key={book.book_id}>
+              <article
+                className="rounded-control border border-border p-4"
+                key={book.book_id}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="font-bold text-ink">{book.book_title}</h3>
                     <p className="mt-1 text-sm text-muted">
-                      {book.report_count} báo cáo · {book.finding_count} findings · {book.needs_review_finding_count} cần xem xét
+                      {book.report_count} báo cáo · {book.finding_count}{" "}
+                      findings · {book.needs_review_finding_count} cần xem xét
                     </p>
                     {book.latest_scan ? (
                       <p className="mt-1 text-xs text-muted">
-                        Lần quét gần nhất: {scanStatusLabels[book.latest_scan.status]}
-                        {" · "}{book.latest_scan.completed_pages}/{book.latest_scan.total_pages} trang đã kiểm tra
-                        {" · "}{formatDate(book.latest_scan.created_at)}
+                        Lần quét gần nhất:{" "}
+                        {scanStatusLabels[book.latest_scan.status]}
+                        {" · "}
+                        {book.latest_scan.completed_pages}/
+                        {book.latest_scan.total_pages} trang đã kiểm tra
+                        {" · "}
+                        {formatDate(book.latest_scan.created_at)}
                       </p>
                     ) : (
-                      <p className="mt-1 text-xs text-muted">Chưa có lịch sử kiểm tra</p>
+                      <p className="mt-1 text-xs text-muted">
+                        Chưa có lịch sử kiểm tra
+                      </p>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -919,11 +1005,18 @@ export function AdminBookContentQualityScreen() {
                     </Button>
                     <Button
                       className="h-10 w-auto px-3 text-sm"
-                      disabled={busyKey === `scan:${book.book_id}` || book.latest_scan?.status === "QUEUED" || book.latest_scan?.status === "RUNNING"}
+                      disabled={
+                        busyKey === `scan:${book.book_id}` ||
+                        book.latest_scan?.status === "QUEUED" ||
+                        book.latest_scan?.status === "RUNNING"
+                      }
                       onClick={() => void enqueueBookScan(book.book_id)}
                       variant="secondary"
                     >
-                      {book.latest_scan?.status === "QUEUED" || book.latest_scan?.status === "RUNNING" ? "Đang quét…" : "Quét toàn bộ sách"}
+                      {book.latest_scan?.status === "QUEUED" ||
+                      book.latest_scan?.status === "RUNNING"
+                        ? "Đang quét…"
+                        : "Quét toàn bộ sách"}
                     </Button>
                   </div>
                 </div>
@@ -940,7 +1033,9 @@ export function AdminBookContentQualityScreen() {
               <Button
                 className="h-10 w-auto px-3 text-sm"
                 disabled={bookOffset === 0 || loadingBooks}
-                onClick={() => setBookOffset((value) => Math.max(0, value - bookLimit))}
+                onClick={() =>
+                  setBookOffset((value) => Math.max(0, value - bookLimit))
+                }
                 variant="secondary"
               >
                 Trước
@@ -962,13 +1057,23 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">{selectedBook.book_title}</h2>
-              <p className="mt-1 text-sm text-muted">Chi tiết báo cáo và lịch sử scan</p>
+              <h2 className="text-xl font-extrabold text-ink">
+                {selectedBook.book_title}
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                Chi tiết báo cáo và lịch sử scan
+              </p>
             </div>
             <div className="flex gap-2">
               <Button
                 className="h-10 w-auto px-3 text-sm"
-                disabled={busyKey === `scan:${selectedBook.book_id}` || selectedBook.scans.some((run) => run.status === "QUEUED" || run.status === "RUNNING")}
+                disabled={
+                  busyKey === `scan:${selectedBook.book_id}` ||
+                  selectedBook.scans.some(
+                    (run) =>
+                      run.status === "QUEUED" || run.status === "RUNNING",
+                  )
+                }
                 onClick={() => void enqueueBookScan(selectedBook.book_id)}
                 variant="secondary"
               >
@@ -993,22 +1098,31 @@ export function AdminBookContentQualityScreen() {
                     className="h-10 w-auto px-3 text-xs"
                     key={scan.id}
                     onClick={() => void openScan(scan.id)}
-                    variant={selectedScan?.id === scan.id ? "primary" : "secondary"}
+                    variant={
+                      selectedScan?.id === scan.id ? "primary" : "secondary"
+                    }
                   >
-                    {scanStatusLabels[scan.status]} · {formatDate(scan.created_at)}
+                    {scanStatusLabels[scan.status]} ·{" "}
+                    {formatDate(scan.created_at)}
                   </Button>
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-muted">Sách chưa có lần kiểm tra nào.</p>
+              <p className="mt-2 text-sm text-muted">
+                Sách chưa có lần kiểm tra nào.
+              </p>
             )}
           </div>
 
           {selectedScan ? (
             <div className="mt-5 border-t border-border pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-bold text-ink">Kết quả scan · {scanStatusLabels[selectedScan.status]}</h3>
-                <span className="font-mono text-xs text-muted">{selectedScan.id}</span>
+                <h3 className="font-bold text-ink">
+                  Kết quả scan · {scanStatusLabels[selectedScan.status]}
+                </h3>
+                <span className="font-mono text-xs text-muted">
+                  {selectedScan.id}
+                </span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
                 {[
@@ -1018,29 +1132,47 @@ export function AdminBookContentQualityScreen() {
                   ["Lỗi / stale", selectedScan.failed_pages],
                   ["AI unavailable", selectedScan.ai_unavailable_pages],
                 ].map(([label, value]) => (
-                  <div className="rounded-control bg-canvas p-3" key={String(label)}>
+                  <div
+                    className="rounded-control bg-canvas p-3"
+                    key={String(label)}
+                  >
                     <p className="text-xs text-muted">{label}</p>
-                    <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">{value}</p>
+                    <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">
+                      {value}
+                    </p>
                   </div>
                 ))}
               </div>
               <p className="mt-3 text-xs text-muted">
-                Trang có AI hoàn tất: {selectedScan.ai_completed_pages}. &quot;Đã kiểm tra&quot; phản ánh rule checks; AI unavailable/failed được tách riêng và không được coi là phân tích AI thành công.
+                Trang có AI hoàn tất: {selectedScan.ai_completed_pages}.
+                &quot;Đã kiểm tra&quot; phản ánh rule checks; AI
+                unavailable/failed được tách riêng và không được coi là phân
+                tích AI thành công.
               </p>
               {selectedScan.error_summary ? (
-                <p className="mt-2 text-sm text-danger">{selectedScan.error_summary}</p>
+                <p className="mt-2 text-sm text-danger">
+                  {selectedScan.error_summary}
+                </p>
               ) : null}
 
               <div className="mt-4 grid gap-4">
                 {selectedScan.pages.map((page) => (
-                  <article className="rounded-control border border-border p-4" key={page.id}>
+                  <article
+                    className="rounded-control border border-border p-4"
+                    key={page.id}
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h4 className="font-bold text-ink">Trang {page.page_number}</h4>
+                        <h4 className="font-bold text-ink">
+                          Trang {page.page_number}
+                        </h4>
                         <p className="mt-1 text-xs text-muted">
                           {pageStatusLabels[page.status] ?? page.status}
-                          {" · Rule: "}{page.rule_check_status}
-                          {" · AI: "}{aiStatusLabels[page.ai_analysis_status] ?? page.ai_analysis_status}
+                          {" · Rule: "}
+                          {page.rule_check_status}
+                          {" · AI: "}
+                          {aiStatusLabels[page.ai_analysis_status] ??
+                            page.ai_analysis_status}
                         </p>
                         {page.page_revision_id ? (
                           <p className="mt-1 break-all font-mono text-xs text-muted">
@@ -1048,7 +1180,9 @@ export function AdminBookContentQualityScreen() {
                           </p>
                         ) : null}
                         {page.error_summary ? (
-                          <p className="mt-2 text-sm text-danger">{page.error_summary}</p>
+                          <p className="mt-2 text-sm text-danger">
+                            {page.error_summary}
+                          </p>
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -1060,11 +1194,16 @@ export function AdminBookContentQualityScreen() {
                             Kiểm tra và sửa trang
                           </Link>
                         ) : null}
-                        {(page.status === "FAILED" || page.status === "STALE" || page.ai_analysis_status === "UNAVAILABLE" || page.ai_analysis_status === "FAILED") ? (
+                        {page.status === "FAILED" ||
+                        page.status === "STALE" ||
+                        page.ai_analysis_status === "UNAVAILABLE" ||
+                        page.ai_analysis_status === "FAILED" ? (
                           <Button
                             className="h-10 w-auto px-3 text-sm"
                             disabled={busyKey === `retry:${page.id}`}
-                            onClick={() => void retryPage(selectedScan.id, page.id)}
+                            onClick={() =>
+                              void retryPage(selectedScan.id, page.id)
+                            }
                             variant="secondary"
                           >
                             Quét lại trang này

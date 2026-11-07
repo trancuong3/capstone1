@@ -361,7 +361,9 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <div className="flex flex-wrap gap-3">
             <Button
               className="sm:w-auto"
-              onClick={() => setReportTarget({ pageId: null, pageNumber: null })}
+              onClick={() =>
+                setReportTarget({ pageId: null, pageNumber: null })
+              }
               variant="secondary"
             >
               Báo lỗi sách

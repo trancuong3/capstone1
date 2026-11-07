@@ -37,7 +37,11 @@ export interface AdminBookContentQualityService {
     status: BookContentReportStatus,
     resolutionNote?: string,
   ): Promise<BookContentReportDetailDTO>;
-  listBooks(query?: { search?: string; limit?: number; offset?: number }): Promise<BookQualityBookPageDTO>;
+  listBooks(query?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<BookQualityBookPageDTO>;
   getBook(bookId: string): Promise<BookQualityBookDetailDTO>;
   enqueueScan(bookId: string): Promise<BookQualityScanDTO>;
   listScans(bookId: string): Promise<BookQualityScanDTO[]>;
@@ -78,7 +82,10 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
         undefined,
         {
           method: "PATCH",
-          body: { status, resolution_note: resolutionNote?.trim() || undefined },
+          body: {
+            status,
+            resolution_note: resolutionNote?.trim() || undefined,
+          },
         },
       ),
     listBooks: (query) =>
@@ -117,7 +124,10 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
         `/books/admin/quality/findings/${encodeURIComponent(findingId)}`,
         bookQualityFindingSchema,
         undefined,
-        { method: "PATCH", body: { status, review_note: reviewNote?.trim() || undefined } },
+        {
+          method: "PATCH",
+          body: { status, review_note: reviewNote?.trim() || undefined },
+        },
       ),
     retryPage: (scanId, pageScanId) =>
       requestApi(
