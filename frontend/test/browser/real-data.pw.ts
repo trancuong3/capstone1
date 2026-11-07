@@ -269,7 +269,21 @@ test("Admin OCR draft → local AI correction → save → verify preserves boun
     page.getByRole("heading", { name: "Rà soát đề xuất AI" }),
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
-  await page.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }).click();
+
+  // AI proposals must never be preselected: require an explicit admin choice.
+  const review = page.getByRole("region", { name: "Rà soát đề xuất AI" });
+  const applySelected = page.getByRole("button", {
+    name: /Áp dụng thay đổi đã chọn/,
+  });
+  const proposedChanges = review.getByRole("checkbox");
+  await expect(proposedChanges).toHaveCount(1);
+  await expect(proposedChanges.first()).not.toBeChecked();
+  await expect(applySelected).toBeDisabled();
+
+  await proposedChanges.first().check();
+  await expect(applySelected).toBeEnabled();
+  await applySelected.click();
+
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã sửa");
   expect(api.aiCorrectionText).toBe("Văn bản đã lưu");
   const firstBox = page.getByRole("button", { name: /Từ 1: Văn\./ });

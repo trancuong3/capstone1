@@ -509,9 +509,9 @@ export function AdminOcrReviewScreen({
         return;
       }
       setAiSuggestion(correctedText);
-      setAiAcceptedChanges(new Set(changes.map((change) => change.index)));
+      setAiAcceptedChanges(new Set());
       setNotice(
-        `AI đưa ra ${changes.length} thay đổi để rà soát. Bản nháp chưa bị thay đổi; chọn áp dụng sau khi kiểm tra.`,
+        `AI đưa ra ${changes.length} thay đổi để rà soát. Chưa có thay đổi nào được chọn; bản nháp vẫn giữ nguyên.`,
       );
     } catch (cause) {
       if (
@@ -536,7 +536,7 @@ export function AdminOcrReviewScreen({
           safeMessage.startsWith("Không thể") ||
             safeMessage.startsWith("AI OCR")
             ? safeMessage
-            : "Không thể sửa OCR bằng AI cục bộ: " + safeMessage,
+            : "Không thể sửa OCR bằng AI: " + safeMessage,
         );
       }
     } finally {
@@ -1204,10 +1204,11 @@ export function AdminOcrReviewScreen({
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi chỉnh sửa văn bản, màu sắc của các hộp chữ trên ảnh sẽ tự động
               cập nhật theo thời gian thực (Xanh: chính xác cả từ &amp; dấu,
-              Vàng: nghi sai dấu, Đỏ: không khớp). AI sửa lỗi chạy qua Ollama
-              cục bộ, không gửi văn bản lên dịch vụ AI đám mây. Đề xuất giữ
-              nguyên số từ để bảo toàn bounding box; lỗi cần tách/gộp từ cần
-              được rà soát thủ công.
+              Vàng: nghi sai dấu, Đỏ: không khớp). AI sửa lỗi có thể gửi ảnh
+              trang và văn bản OCR cần thiết tới Gemini/Groq; Ollama cục bộ là
+              phương án dự phòng cuối cùng. Không gửi dữ liệu cá nhân ngoài phạm
+              vi cần thiết. Đề xuất giữ nguyên số từ để bảo toàn bounding box;
+              lỗi cần tách/gộp từ cần được rà soát thủ công.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -1221,7 +1222,7 @@ export function AdminOcrReviewScreen({
                       ? "AI OCR đang chờ máy xử lý"
                       : aiProgress
                         ? `AI OCR đang xử lý đoạn ${aiProgress.completed_chunks}/${aiProgress.total_chunks}`
-                        : "Đang chuẩn bị tác vụ AI OCR cục bộ…"}
+                        : "Đang chuẩn bị tác vụ AI OCR…"}
                   </span>
                   <Button
                     className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
@@ -1269,6 +1270,13 @@ export function AdminOcrReviewScreen({
                   <p className="mt-1 text-sm text-purple-900">
                     Có {aiChanges.length} thay đổi từ. Các bbox được giữ nguyên;
                     đề xuất chưa được lưu.
+                  </p>
+                  <p
+                    aria-live="polite"
+                    className="mt-1 text-sm font-bold text-purple-950"
+                  >
+                    Đã chọn {aiAcceptedChanges.size} / {aiChanges.length} đề
+                    xuất. Chọn thay đổi bên dưới hoặc dùng “Chọn tất cả”.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1390,9 +1398,6 @@ export function AdminOcrReviewScreen({
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-purple-200 pt-3">
-                  <span className="text-sm text-purple-950">
-                    Đã chọn {aiAcceptedChanges.size} / {aiChanges.length}
-                  </span>
                   <Button
                     className="sm:w-auto"
                     disabled={aiAcceptedChanges.size === 0}

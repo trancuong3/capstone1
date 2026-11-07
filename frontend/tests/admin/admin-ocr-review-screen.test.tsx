@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -454,14 +454,45 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       await screen.findByRole("heading", { name: "Rà soát đề xuất AI" }),
     ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
+    const review = screen.getByRole("region", { name: "Rà soát đề xuất AI" });
+    const selectionStatus = within(review).getByText(/Đã chọn 0 \/ 3 đề xuất/);
+    expect(selectionStatus).toBeInTheDocument();
+    const proposalCheckboxes = within(review).getAllByRole("checkbox");
+    expect(proposalCheckboxes).toHaveLength(3);
+    expect(
+      proposalCheckboxes.every(
+        (checkbox) => !(checkbox as HTMLInputElement).checked,
+      ),
+    ).toBe(true);
+
+    await user.click(proposalCheckboxes[1]!);
+    expect(
+      within(review).getByText(/Đã chọn 1 \/ 3 đề xuất/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Chọn tất cả" }));
+    expect(
+      within(review).getByText(/Đã chọn 3 \/ 3 đề xuất/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Bỏ chọn tất cả" }));
+    expect(
+      within(review).getByText(/Đã chọn 0 \/ 3 đề xuất/),
+    ).toBeInTheDocument();
+    await user.click(proposalCheckboxes[1]!);
+    expect(
+      within(review).getByText(/Đã chọn 1 \/ 3 đề xuất/),
+    ).toBeInTheDocument();
+
     await user.click(
       screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
     );
-    expect(textarea).toHaveValue("Nội dung mới đã sửa");
+    expect(textarea).toHaveValue("Nội dung revision đã hành");
     const wordInputs = screen.getAllByLabelText("Văn bản từ");
     expect(
       wordInputs.map((input) => (input as HTMLInputElement).value),
-    ).toEqual(["Nội", "dung", "mới", "đã", "sửa"]);
+    ).toEqual(["Nội", "dung", "revision", "đã", "hành"]);
     expect(
       screen.getByRole("button", {
         name: /Từ 1: Nội\. Confidence OCR: 0\.7/,
@@ -541,6 +572,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ).toBeInTheDocument(),
     );
     expect(textarea).toHaveValue(source.draft_text);
+    await user.click(screen.getByRole("button", { name: "Chọn tất cả" }));
     await user.click(
       screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
     );
