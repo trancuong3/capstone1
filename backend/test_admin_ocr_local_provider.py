@@ -64,7 +64,11 @@ def _response_for_request(request, *, corrupt_output=False):
     if corrupt_output:
         corrections[0] += " invalid"
     result = json.dumps(
-        {"chunk_id": chunk_id, "corrected_words": corrections},
+        {
+            "chunk_id": chunk_id,
+            "corrected_words": corrections,
+            "uncertain_word_indices": [],
+        },
         ensure_ascii=False,
     )
     return httpx.Response(
@@ -95,6 +99,7 @@ class LocalOcrProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(seen[0].url), "http://127.0.0.1:11434/api/chat")
         payload = json.loads(seen[0].content)
         self.assertEqual(payload["model"], DEFAULT_MODEL)
+        self.assertIs(payload["think"], False)
         self.assertEqual(payload["options"]["num_ctx"], 4096)
         self.assertEqual(payload["options"]["num_predict"], 256)
         schema = payload["format"]["properties"]["corrected_words"]

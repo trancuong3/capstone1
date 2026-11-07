@@ -15,8 +15,10 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.admin_ocr import router as admin_ocr_router
 from app.repositories.admin_ocr_repository import AdminOcrRepository
-from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
+from app.services.admin_ocr_local import LocalOcrConfig
 from app.services.admin_ocr_service import AdminOcrService
+from app.services.ocr_ai.config import OcrCorrectionConfig
+from app.services.ocr_ai.exceptions import OcrOrchestrationError
 
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -56,7 +58,7 @@ def _make_app():
     return app
 
 
-class AdminOcrLocalApiTests(unittest.TestCase):
+class AdminOcrCorrectionApiTests(unittest.TestCase):
     def _post(self, *, role="admin", text="ngay xua.", correction_error=None):
         app = _make_app()
         page = SimpleNamespace(Id=PAGE_ID, ImagePath="books/test.png")
@@ -73,11 +75,11 @@ class AdminOcrLocalApiTests(unittest.TestCase):
                 return_value=b"test-image-bytes",
             ) as download,
             patch(
-                "app.services.admin_ocr_service.LocalOcrConfig.from_environment",
-                return_value=LocalOcrConfig(),
+                "app.services.admin_ocr_service.OcrCorrectionConfig.from_environment",
+                return_value=OcrCorrectionConfig(local=LocalOcrConfig()),
             ),
             patch(
-                "app.services.admin_ocr_service.LocalOcrCorrector",
+                "app.services.admin_ocr_service.OcrCorrectionOrchestrator",
                 return_value=corrector,
             ) as provider,
             TestClient(app) as client,
@@ -88,7 +90,7 @@ class AdminOcrLocalApiTests(unittest.TestCase):
             )
         return response, download, provider, corrector
 
-    def test_admin_contract_sends_bbox_and_returns_local_result(self):
+    def test_admin_contract_sends_bbox_and_returns_orchestrated_result(self):
         response, download, provider, corrector = self._post()
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -113,21 +115,19 @@ class AdminOcrLocalApiTests(unittest.TestCase):
         download.assert_not_called()
         provider.assert_not_called()
 
-    def test_local_model_error_is_returned_without_cloud_fallback(self):
+    def test_orchestration_failure_keeps_draft_and_returns_safe_error(self):
         response, _download, _provider, _corrector = self._post(
-            correction_error=LocalCorrectionError(
-                503, "Không thể kết nối Ollama trên máy này; văn bản hiện tại được giữ nguyên."
-            )
+            correction_error=OcrOrchestrationError("ALL_PROVIDERS_FAILED")
         )
         self.assertEqual(response.status_code, 503)
-        self.assertIn("Ollama", response.json()["detail"])
+        self.assertIn("bản nháp", response.json()["detail"])
 
     def test_async_job_returns_before_local_inference_and_exposes_status(self):
         from app.services.admin_ocr_service import PreparedLocalOcrCorrection
 
         app = _make_app()
         prepared = PreparedLocalOcrCorrection(
-            config=LocalOcrConfig(),
+            config=OcrCorrectionConfig(local=LocalOcrConfig()),
             draft_text="ngay xua.",
             image_path="books/test.png",
             word_boxes=((0.1, 0.1, 0.2, 0.1), (0.35, 0.1, 0.2, 0.1)),

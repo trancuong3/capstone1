@@ -1,10 +1,12 @@
-# Triển khai AI OCR cục bộ
+# Triển khai AI OCR đa nhà cung cấp
 
 ## Trạng thái hiện tại
 
-AI sửa OCR gọi Ollama ở loopback, không gọi provider AI cloud và không fallback cloud. Model mặc định vẫn là `qwen3-vl:4b-instruct-q4_K_M`; backend gửi ảnh crop cùng văn bản từng đoạn và kiểm tra số token trước khi ghép kết quả. Việc giữ nguyên số từ giúp bảo toàn bounding box, đồng thời có nghĩa model không tự sửa lỗi cần thêm, bớt, tách hoặc gộp từ.
+AI sửa OCR xử lý từng chunk theo thứ tự `Gemini 3.5 Flash-Lite` → `Groq Qwen 3.8 27B` → `Gemini 3.1 Flash-Lite` → `Ollama Qwen3-VL` cục bộ. Backend gửi ảnh crop cùng văn bản từng đoạn, kiểm tra JSON/schema, số token, token không chắc chắn và dấu câu trước khi ghép kết quả. Việc giữ nguyên số từ giúp bảo toàn bounding box, đồng thời có nghĩa model không tự sửa lỗi cần thêm, bớt, tách hoặc gộp từ.
 
-Yêu cầu AI sửa mới chạy như job nền. Trạng thái, tiến độ, lỗi và kết quả được giữ trong RAM của **một process backend** tối đa một giờ; tối đa một job gọi Ollama đồng thời và tối đa bốn job đang chạy/chờ. Job bị mất khi process khởi động lại. Vì vậy cấu hình phù hợp hiện tại là một backend process, không scale ngang hoặc chạy nhiều worker. Nếu cần HA/scale nhiều instance, thay bộ quản lý RAM bằng queue/broker có xác thực và chính sách lưu trữ đã được duyệt; không ghi nội dung OCR vào database dùng chung.
+Đặt `OCR_CLOUD_CORRECTION_ENABLED=false` để chỉ chạy Ollama. Khi bật cloud nhưng thiếu `GEMINI_API_KEY` hoặc `GROQ_API_KEY`, provider tương ứng bị bỏ qua an toàn; Ollama vẫn là phương án cuối. Lỗi xác thực, quota hoặc lỗi dịch vụ cấp Google sẽ bỏ qua Gemini còn lại dùng cùng credential. Nếu mọi provider của một chunk đều thất bại, toàn bộ job thất bại đóng và không trả partial result; draft không bị thay đổi.
+
+Yêu cầu AI sửa chạy như job nền. Trạng thái, tiến độ, lỗi và kết quả được giữ trong RAM của **một process backend** tối đa một giờ; tối đa một job OCR đồng thời và tối đa bốn job đang chạy/chờ. Job bị mất khi process khởi động lại. Vì vậy cấu hình phù hợp hiện tại là một backend process, không scale ngang hoặc chạy nhiều worker. Nếu cần HA/scale nhiều instance, thay bộ quản lý RAM bằng queue/broker có xác thực và chính sách lưu trữ đã được duyệt; không ghi nội dung OCR vào database dùng chung.
 
 Ảnh nguồn được đọc từ Storage sau khi admin đã xác thực; văn bản và ảnh chỉ được giữ tạm trong bộ nhớ lúc job chạy. Không có migration database cho job. Kết quả AI chỉ trở thành draft sau khi admin chọn áp dụng; việc lưu/xác minh draft vẫn là thao tác riêng.
 
@@ -18,9 +20,23 @@ Các kích thước hiện hành có thể thay đổi theo tag: Qwen3-VL 4B Q4_
 
 ## Cấu hình an toàn
 
+- Chỉ backend đọc `GEMINI_API_KEY` và `GROQ_API_KEY`; không đặt chúng trong frontend, `NEXT_PUBLIC_*`, log, URL request hay source control.
+- Cloud nhận đúng ảnh crop và OCR text/ngữ cảnh cần thiết để sửa chunk; không gửi access token, parent/child/session data hoặc URL ảnh public. Crop chỉ tồn tại trong RAM.
+- Cấu hình server bằng `.env` riêng theo các placeholder trong `backend/.env.example`:
+
+```env
+OCR_CLOUD_CORRECTION_ENABLED=false
+GEMINI_API_KEY=
+GROQ_API_KEY=
+GEMINI_OCR_PRIMARY_MODEL=gemini-3.5-flash-lite
+GEMINI_OCR_FALLBACK_MODEL=gemini-3.1-flash-lite
+GROQ_OCR_MODEL=qwen/qwen3.8-27b
+```
+
+- Mỗi provider có timeout riêng (`OCR_CLOUD_TIMEOUT_SECONDS`, `LOCAL_OCR_TIMEOUT_SECONDS`); toàn job dùng `OCR_CORRECTION_TOTAL_TIMEOUT_SECONDS`. Provider được gọi tuần tự, không fan-out hoặc retry vô hạn.
 - Chạy backend và Ollama trên cùng VM/host để backend tiếp tục dùng `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434`.
 - Giữ Ollama bind ở `127.0.0.1`; không mở port `11434` ra public Internet. API local của Ollama không yêu cầu auth.
-- Có thể tắt tính năng cloud của Ollama bằng `OLLAMA_NO_CLOUD=1` trong môi trường của process Ollama. Backend hiện chỉ gọi local URL và model local đã cài.
+- Có thể tắt tính năng cloud của Ollama bằng `OLLAMA_NO_CLOUD=1` trong môi trường của process Ollama. Backend chỉ gọi Ollama ở local URL; cloud correction dùng Gemini/Groq trực tiếp từ backend khi được cấu hình.
 - Dùng ổ đĩa persistent cho thư mục models của Ollama. Không đưa model weights hoặc ảnh OCR vào repo/image của ứng dụng.
 - Với backend hiện tại, chạy một worker/process. Ví dụ: `python -m uvicorn app.sever:app --host 127.0.0.1 --port 8000 --workers 1`.
 - Cổng frontend dev mặc định là 3000 và backend là 8000; cấu hình `CORS_ALLOWED_ORIGINS` theo đúng origin frontend khi deploy.
@@ -92,6 +108,17 @@ python .\scripts\benchmark_local_ocr.py 'D:\ocr-eval\pages.jsonl'
 ```
 
 Ứng viên chưa được tải/cài sẽ trả lỗi kết nối/model unavailable; hãy chỉ tải model phù hợp khi đã kiểm tra phần cứng và dung lượng. So sánh cùng dataset, cùng prompt, context, nhiệt độ và host. Đọc `exact_match_rate`, CER, WER, số thay đổi có ích/có hại, thời gian case đầu, p50/p95 và lỗi. Chạy lặp lại để tách cold start với warm inference. Không chọn model mới nếu tăng tỷ lệ sửa sai hoặc thời gian vượt ngưỡng của host. Script chưa đo điện năng, CPU/GPU utilization hay VRAM; dùng công cụ giám sát của host cùng `ollama ps` cho các số liệu đó.
+
+## Kiểm thử
+
+Các unit/integration test provider dùng `httpx.MockTransport`, không gọi API có phí và không cần key thật:
+
+```powershell
+Set-Location .\backend
+python -m unittest test_admin_ocr_multimodel test_admin_ocr_local_provider test_admin_ocr_local_chunking test_admin_ocr_jobs
+```
+
+Chỉ chạy smoke test thật sau khi security owner cấp credential server-side mới và synthetic fixture đã được phê duyệt. Không chạy smoke test trong CI, không dùng trang sách trẻ em thật, không in request body/base64/OCR text hay credential. Khi không có credential mới, ghi nhận live smoke test là **NOT RUN**, không suy diễn rằng provider đã được xác thực.
 
 ## Giới hạn đang biết
 

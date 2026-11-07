@@ -172,12 +172,20 @@ def _response_schema(word_count: int) -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["chunk_id", "corrected_words"],
+        "required": ["chunk_id", "corrected_words", "uncertain_word_indices"],
         "properties": {
             "chunk_id": {"type": "integer"},
             "corrected_words": {
                 "type": "array", "minItems": word_count, "maxItems": word_count,
                 "items": {"type": "string", "minLength": 1, "maxLength": 500},
+            },
+            "uncertain_word_indices": {
+                "type": "array",
+                "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": word_count - 1,
+                },
             },
         },
     }
@@ -186,14 +194,14 @@ def _response_schema(word_count: int) -> dict[str, object]:
 def _prompt(chunk: OcrTextChunk) -> str:
     source_words = [{"index": token.index, "text": token.text} for token in chunk.tokens]
     return (
-        "Bạn là bộ sửa lỗi OCR tiếng Việt. Dùng ảnh vùng trang và ngữ cảnh để "
-        "sửa lỗi nhận dạng từ hoặc dấu thanh. Không diễn đạt lại, không thêm, "
-        "bỏ hay đổi thứ tự từ. Giữ nguyên dấu câu của từng từ. Chỉ sửa token "
-        "khi ảnh và ngữ cảnh cho bằng chứng rõ ràng; nếu không chắc, giữ nguyên. "
-        "Trả đúng JSON theo schema: corrected_words phải có đúng một token "
-        "cho mỗi token nguồn, giữ đúng thứ tự ban đầu; không thêm, bỏ hoặc "
-        "đổi thứ tự từ. Mỗi phần tử là một token không có khoảng trắng. "
-        "Chỉ sửa chữ; backend sẽ giữ nguyên dấu câu gốc.\n"
+        "Bạn là hệ thống kiểm tra và sửa lỗi OCR tiếng Việt từ ảnh vùng trang. "
+        "IMAGE là bằng chứng trực quan; chỉ sửa lỗi có bằng chứng rõ ràng. "
+        "Không viết lại câu, thêm, bỏ, tách, gộp hoặc đổi thứ tự token, khoảng "
+        "trắng hay dấu câu. Không chắc chắn thì giữ nguyên token và ghi chỉ số "
+        "tương đối trong chunk vào uncertain_word_indices. Giữ nguyên toàn bộ "
+        "token là kết quả hợp lệ. Chỉ trả JSON, không Markdown hay giải thích. "
+        "corrected_words phải đúng số token, đúng thứ tự, mỗi token không chứa "
+        "khoảng trắng; uncertain_word_indices chỉ gồm chỉ số token không sửa.\n"
         f"CHUNK_ID: {chunk.chunk_id}\n"
         f"PREVIOUS CONTEXT (read-only):\n{chunk.previous_context}\n"
         f"TARGET TEXT:\n{chunk.target_text}\n"
@@ -214,15 +222,25 @@ def _decode_chunk_response(payload: object, chunk: OcrTextChunk) -> tuple[str, .
         result = json.loads(content)
         if (
             not isinstance(result, dict)
-            or set(result) != {"chunk_id", "corrected_words"}
+            or set(result) != {"chunk_id", "corrected_words", "uncertain_word_indices"}
             or isinstance(result["chunk_id"], bool)
             or result["chunk_id"] != chunk.chunk_id
             or not isinstance(result["corrected_words"], list)
             or len(result["corrected_words"]) != chunk.expected_word_count
+            or not isinstance(result["uncertain_word_indices"], list)
         ):
             raise ValueError("provider returned an incomplete chunk")
+        uncertain = result["uncertain_word_indices"]
+        if any(
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or index >= chunk.expected_word_count
+            for index in uncertain
+        ) or len(set(uncertain)) != len(uncertain):
+            raise ValueError("provider returned invalid uncertain indices")
         corrected: list[str] = []
-        for item in result["corrected_words"]:
+        for index, item in enumerate(result["corrected_words"]):
             if (
                 not isinstance(item, str)
                 or not item
@@ -230,6 +248,8 @@ def _decode_chunk_response(payload: object, chunk: OcrTextChunk) -> tuple[str, .
                 or any(character.isspace() for character in item)
             ):
                 raise ValueError("provider returned a malformed word")
+            if index in uncertain and item != chunk.tokens[index].text:
+                raise ValueError("provider changed an uncertain word")
             corrected.append(item)
         return tuple(corrected)
     except (KeyError, TypeError, ValueError) as exc:
@@ -280,6 +300,7 @@ class LocalOcrCorrector:
                     request_payload = {
                         "model": self.config.model,
                         "stream": False,
+                        "think": False,
                         "format": _response_schema(chunk.expected_word_count),
                         "messages": [{
                             "role": "user",
