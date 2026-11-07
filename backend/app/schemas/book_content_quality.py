@@ -97,26 +97,6 @@ class BookContentReportHistoryRead(BaseModel):
     created_at: datetime
 
 
-class BookContentReportDetail(BookContentReportRead):
-    reporter_id: UUID | None
-    reporter_name: str | None
-    verified_text_snapshot: str | None
-    content_hash_snapshot: str | None
-    admin_resolution_note: str | None
-    reviewed_by: UUID | None
-    reviewed_by_name: str | None
-    resolved_at: datetime | None
-    history: list[BookContentReportHistoryRead] = Field(default_factory=list)
-    related_findings: list[BookQualityFindingRead] = Field(default_factory=list)
-
-
-class BookContentReportPage(BaseModel):
-    items: list[BookContentReportRead]
-    total: int = Field(ge=0)
-    limit: int = Field(ge=1, le=100)
-    offset: int = Field(ge=0)
-
-
 class BookQualityFindingRead(BaseModel):
     id: UUID
     page_scan_id: UUID
@@ -137,6 +117,26 @@ class BookQualityFindingRead(BaseModel):
     status: BookQualityFindingStatus
     review_note: str | None
     created_at: datetime
+
+
+class BookContentReportDetail(BookContentReportRead):
+    reporter_id: UUID | None
+    reporter_name: str | None
+    verified_text_snapshot: str | None
+    content_hash_snapshot: str | None
+    admin_resolution_note: str | None
+    reviewed_by: UUID | None
+    reviewed_by_name: str | None
+    resolved_at: datetime | None
+    history: list[BookContentReportHistoryRead] = Field(default_factory=list)
+    related_findings: list[BookQualityFindingRead] = Field(default_factory=list)
+
+
+class BookContentReportPage(BaseModel):
+    items: list[BookContentReportRead]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
 
 
 class BookQualityPageScanRead(BaseModel):
