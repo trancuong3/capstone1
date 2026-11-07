@@ -19,6 +19,7 @@ os.environ.setdefault(
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
+from fastapi import HTTPException
 from sqlalchemy import event, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -29,7 +30,7 @@ from app.database.integrity import (
     is_book_report_idempotency_violation,
     postgres_integrity_error_metadata,
 )
-from app.models import Book, Profile
+from app.models import Book, BookPage, PageRevision, Profile
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
@@ -48,11 +49,12 @@ PARENT_ID = uuid4()
 BOOK_ID = uuid4()
 
 
-def report_payload(*, idempotency_key=None, issue_type="SPELLING_ERROR"):
+def report_payload(*, idempotency_key=None, issue_type="SPELLING_ERROR", page_id=None):
     return BookContentReportCreate(
         idempotency_key=idempotency_key or uuid4(),
         issue_type=issue_type,
         description="Phụ huynh báo nội dung trang sách cần kiểm tra.",
+        page_id=page_id,
         reported_text="trời mua",
         suggested_correction="trời mưa",
     )
@@ -111,12 +113,42 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
             """))
-            await connection.execute(text(
-                "CREATE TABLE bookpages (id uuid PRIMARY KEY)"
-            ))
-            await connection.execute(text(
-                "CREATE TABLE pagerevisions (id uuid PRIMARY KEY)"
-            ))
+            await connection.execute(text("""
+                CREATE TABLE bookpages (
+                    id uuid PRIMARY KEY,
+                    bookid uuid NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    pagenumber smallint NOT NULL,
+                    imagepath varchar NOT NULL,
+                    width smallint NOT NULL,
+                    height smallint NOT NULL,
+                    featurepath varchar,
+                    processingmeta jsonb NOT NULL DEFAULT '{}'::jsonb,
+                    currentverifiedrevisionid uuid,
+                    lifecyclestatus varchar NOT NULL,
+                    createdat timestamptz NOT NULL DEFAULT now()
+                )
+            """))
+            await connection.execute(text("""
+                CREATE TABLE pagerevisions (
+                    id uuid PRIMARY KEY,
+                    pageid uuid NOT NULL REFERENCES bookpages(id) ON DELETE CASCADE,
+                    revisionno varchar NOT NULL,
+                    verificationstatus varchar NOT NULL,
+                    verifiedtext varchar,
+                    drafttext varchar,
+                    contenthash varchar NOT NULL,
+                    processingmeta jsonb NOT NULL DEFAULT '{}'::jsonb,
+                    verifiedby uuid REFERENCES profiles(id) ON DELETE SET NULL,
+                    verifiedat timestamptz,
+                    createdat timestamptz NOT NULL DEFAULT now()
+                )
+            """))
+            await connection.execute(text("""
+                ALTER TABLE bookpages
+                ADD CONSTRAINT fk_bookpages_currentverifiedrevisionid
+                FOREIGN KEY (currentverifiedrevisionid)
+                REFERENCES pagerevisions(id) ON DELETE SET NULL
+            """))
 
             # Use the real SQLAlchemy table definitions and real PostgreSQL FKs,
             # UNIQUE constraints and CHECK constraints for the feature tables.
@@ -233,8 +265,11 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(stored_history.ReportId, stored_report.Id)
 
-    async def test_existing_running_scan_is_reused_without_creating_another(self):
+    async def test_queued_and_running_scans_are_reused_without_creating_another(self):
         first = await self._create_report(report_payload())
+        queued_reuse = await self._create_report(report_payload())
+        self.assertEqual(queued_reuse.scan_run_id, first.scan_run_id)
+
         async with self.sessions() as session:
             await session.execute(
                 update(BookQualityScanRun)
@@ -243,11 +278,74 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             await session.commit()
 
-        second = await self._create_report(report_payload())
-        self.assertEqual(second.scan_run_id, first.scan_run_id)
+        running_reuse = await self._create_report(report_payload())
+        self.assertEqual(running_reuse.scan_run_id, first.scan_run_id)
         self.assertEqual(await self._count(BookQualityScanRun), 1)
-        self.assertEqual(await self._count(BookContentReport), 2)
-        self.assertEqual(await self._count(BookContentReportHistory), 2)
+        self.assertEqual(await self._count(BookContentReport), 3)
+        self.assertEqual(await self._count(BookContentReportHistory), 3)
+
+    async def _seed_page(self, *, verification_status="VERIFIED"):
+        page_id = uuid4()
+        revision_id = uuid4()
+        async with self.sessions() as session:
+            page = BookPage(
+                Id=page_id,
+                BookId=BOOK_ID,
+                PageNumber=4,
+                ImagePath="book-pages/test-page.png",
+                Width=1200,
+                Height=1800,
+                LifecycleStatus="ACTIVE",
+            )
+            session.add(page)
+            await session.flush([page])
+
+            revision = PageRevision(
+                Id=revision_id,
+                PageId=page_id,
+                RevisionNo="V1",
+                VerificationStatus=verification_status,
+                VerifiedText="Bé đang đọc một câu chuyện hay.",
+                DraftText="Bản OCR nháp không được dùng làm snapshot.",
+                ContentHash="verified-content-hash-v1",
+            )
+            session.add(revision)
+            await session.flush([revision])
+
+            page.CurrentVerifiedRevisionId = revision_id
+            await session.commit()
+        return page_id, revision_id
+
+    async def test_page_report_preserves_only_the_current_verified_revision_snapshot(self):
+        page_id, revision_id = await self._seed_page()
+        result = await self._create_report(
+            report_payload(page_id=page_id)
+        )
+
+        self.assertEqual(result.page_id, page_id)
+        self.assertEqual(result.page_number, 4)
+        self.assertEqual(result.page_revision_id, revision_id)
+        self.assertEqual(
+            result.verified_text_snapshot,
+            "Bé đang đọc một câu chuyện hay.",
+        )
+        self.assertEqual(
+            result.content_hash_snapshot,
+            "verified-content-hash-v1",
+        )
+
+    async def test_page_report_rejects_unverified_revision_before_writing(self):
+        page_id, _revision_id = await self._seed_page(
+            verification_status="DRAFT"
+        )
+
+        with self.assertRaises(HTTPException) as caught:
+            await self._create_report(report_payload(page_id=page_id))
+
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(await self._count(BookQualityScanRun), 0)
+        self.assertEqual(await self._count(BookContentReport), 0)
+        self.assertEqual(await self._count(BookContentReportHistory), 0)
 
     async def test_same_idempotency_key_returns_one_report_for_concurrent_requests(self):
         key = uuid4()
