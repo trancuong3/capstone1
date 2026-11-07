@@ -255,8 +255,8 @@ class BookContentQualityService:
         )
 
         try:
-            # Keep all writes in one transaction and establish FK dependencies
-            # explicitly; do not rely on incidental unit-of-work ordering.
+            # Keep all writes and response reads in one transaction. Explicit
+            # flushes establish FK dependencies before dependent rows are added.
             if is_new_scan_run:
                 await self.repository.add_scan_run(run)
             await self.repository.add_report(report)
@@ -270,8 +270,20 @@ class BookContentQualityService:
                     scan_id=run.Id,
                 )
 
-            await self.repository.commit()
+            # Load server defaults and construct the complete response before
+            # committing. A failure in history/detail/finding reads must still
+            # roll back the report, scan run, history and links together.
             await self.repository.refresh(report)
+            history = await self.repository.report_history(report.Id)
+            row = await self.repository.report_detail(report.Id)
+            response = await self._report_detail_response(
+                report,
+                row[1] if row else report.ReporterNameSnapshot,
+                history,
+            )
+
+            await self.repository.commit()
+            return response
         except IntegrityError as exc:
             # Flush can fail before commit. Always reset the failed transaction.
             duplicate_idempotency_conflict = (
@@ -297,17 +309,10 @@ class BookContentQualityService:
                     )
             raise
         except BaseException:
-            # Includes failures from every flush, finding-link insert and commit.
+            # Includes failures from every flush, finding-link insert, response
+            # read/build and commit.
             await self.repository.rollback()
             raise
-
-        history = await self.repository.report_history(report.Id)
-        row = await self.repository.report_detail(report.Id)
-        return await self._report_detail_response(
-            report,
-            row[1] if row else report.ReporterNameSnapshot,
-            history,
-        )
 
     async def list_parent_reports(
         self, actor_id: UUID, *, limit: int, offset: int
