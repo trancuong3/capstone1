@@ -9,6 +9,7 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
+import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
@@ -66,6 +67,10 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     null,
   );
   const [startState, setStartState] = useState<"idle" | "starting">("idle");
+  const [reportTarget, setReportTarget] = useState<{
+    pageId: string | null;
+    pageNumber: number | null;
+  } | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -320,6 +325,15 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
+      {reportTarget ? (
+        <BookContentReportDialog
+          bookId={book.id}
+          bookTitle={book.title}
+          onClose={() => setReportTarget(null)}
+          pageId={reportTarget.pageId}
+          pageNumber={reportTarget.pageNumber}
+        />
+      ) : null}
       <BookChildHeader
         backHref={booksHref}
         child={child}
@@ -344,6 +358,32 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <h1 className="text-heading font-extrabold text-ink sm:text-[44px] sm:leading-[1.4]">
             {book.title}
           </h1>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              className="sm:w-auto"
+              onClick={() =>
+                setReportTarget({ pageId: null, pageNumber: null })
+              }
+              variant="secondary"
+            >
+              Báo lỗi sách
+            </Button>
+            <Button
+              className="sm:w-auto"
+              disabled={!selectedPage}
+              onClick={() =>
+                selectedPage
+                  ? setReportTarget({
+                      pageId: selectedPage.page_id,
+                      pageNumber: selectedPage.page_number,
+                    })
+                  : undefined
+              }
+              variant="secondary"
+            >
+              Báo lỗi trang này
+            </Button>
+          </div>
 
           <BookCover book={book} className="sm:hidden" hero />
 

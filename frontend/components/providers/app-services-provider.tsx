@@ -3,6 +3,7 @@
 import { createContext, useMemo, type ReactNode } from "react";
 
 import type { BookService } from "@/lib/api/book-service";
+import type { BookContentReportService } from "@/lib/api/book-content-report-service";
 import type { ChildService } from "@/lib/api/child-service";
 import type { ComprehensionService } from "@/lib/api/comprehension-service";
 import type { DevicePermissionService } from "@/lib/api/device-permission-service";
@@ -18,6 +19,7 @@ import type { TutorService } from "@/lib/api/tutor-service";
 
 import { createChildService } from "@/lib/api/child-service";
 import { createBookService } from "@/lib/api/book-service";
+import { createBookContentReportService } from "@/lib/api/book-content-report-service";
 import { createSessionService } from "@/lib/api/session-service";
 import { createReportService } from "@/lib/api/report-service";
 import { createDifficultWordService } from "@/lib/api/difficult-word-service";
@@ -34,6 +36,7 @@ import type { Group5DemoState } from "@/types/reports";
 
 export interface AppServices {
   bookService: BookService;
+  bookContentReportService: BookContentReportService;
   childService: ChildService;
   comprehensionService: ComprehensionService;
   devicePermissionService: DevicePermissionService;
@@ -87,6 +90,7 @@ export function AppServicesProvider({
       childService: createChildService(),
       profileService: createProfileService(),
       bookService: createBookService(),
+      bookContentReportService: createBookContentReportService(),
       difficultWordService: createDifficultWordService(),
       reportService: createReportService(),
       sessionService: createSessionService(),

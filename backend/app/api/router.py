@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     admin_ocr,
     book,
+    book_content_quality,
     comprehension,
     profile,
     reading,
@@ -23,3 +24,9 @@ api_router.include_router(comprehension.router, prefix="/comprehension", tags=["
 api_router.include_router(system.router, prefix="/system", tags=["System"])
 api_router.include_router(support.router, prefix="/support", tags=["Support"])
 api_router.include_router(voice.router, prefix="/voice", tags=["Voice"])
+
+api_router.include_router(
+    book_content_quality.router,
+    prefix="/books",
+    tags=["Book Content Quality"],
+)
