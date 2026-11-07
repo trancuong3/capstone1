@@ -91,6 +91,10 @@ const safeBackendMessages: Record<string, string> = {
     "AI OCR cục bộ hết thời gian xử lý. Văn bản hiện tại được giữ nguyên.",
   "AI OCR cục bộ vượt quá thời gian xử lý tối đa; văn bản hiện tại được giữ nguyên.":
     "AI OCR cục bộ vượt thời gian tối đa. Văn bản hiện tại được giữ nguyên.",
+  "AI OCR đang xử lý quá nhiều yêu cầu. Hãy đợi tác vụ hiện tại hoàn tất rồi thử lại.":
+    "Máy AI cục bộ đang bận. Hãy đợi một lúc rồi thử lại.",
+  "AI OCR job not found":
+    "Không tìm thấy tác vụ AI OCR hoặc tác vụ đã hết thời gian lưu.",
   "Model OCR cục bộ trả kết quả không đầy đủ hoặc sai cấu trúc; nội dung hiện tại được giữ nguyên.":
     "Model AI OCR trả kết quả không hợp lệ. Nội dung hiện tại được giữ nguyên.",
   "Draft text and OCR word data are inconsistent":

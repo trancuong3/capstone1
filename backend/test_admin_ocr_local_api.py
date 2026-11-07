@@ -16,6 +16,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.admin_ocr import router as admin_ocr_router
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
+from app.services.admin_ocr_service import AdminOcrService
 
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -98,6 +99,7 @@ class AdminOcrLocalApiTests(unittest.TestCase):
             "ngay xua.",
             b"test-image-bytes",
             [(0.1, 0.1, 0.2, 0.1), (0.35, 0.1, 0.2, 0.1)],
+            on_progress=None,
         )
 
     def test_non_admin_and_inconsistent_word_data_fail_before_storage_or_model(self):
@@ -119,6 +121,64 @@ class AdminOcrLocalApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 503)
         self.assertIn("Ollama", response.json()["detail"])
+
+    def test_async_job_returns_before_local_inference_and_exposes_status(self):
+        from app.services.admin_ocr_service import PreparedLocalOcrCorrection
+
+        app = _make_app()
+        prepared = PreparedLocalOcrCorrection(
+            config=LocalOcrConfig(),
+            draft_text="ngay xua.",
+            image_path="books/test.png",
+            word_boxes=((0.1, 0.1, 0.2, 0.1), (0.35, 0.1, 0.2, 0.1)),
+            total_chunks=2,
+        )
+
+        async def complete_job(_prepared, on_progress=None):
+            on_progress(1, 2)
+            on_progress(2, 2)
+            return "ngày xưa."
+
+        with (
+            patch.object(
+                AdminOcrService,
+                "prepare_ai_correction",
+                new=AsyncMock(return_value=prepared),
+            ) as prepare,
+            patch.object(
+                AdminOcrService,
+                "run_prepared_ai_correction",
+                new=AsyncMock(side_effect=complete_job),
+            ) as run,
+            patch.object(
+                AdminOcrService, "require_admin", new=AsyncMock()
+            ),
+            TestClient(app) as client,
+        ):
+            started = client.post(
+                f"/books/admin/pages/{PAGE_ID}/ai-correct/jobs",
+                json={"draft_text": "ngay xua.", "words": WORDS},
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            self.assertEqual(started.json()["status"], "QUEUED")
+            job_id = started.json()["job_id"]
+            import time
+
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                current = client.get(
+                    f"/books/admin/pages/{PAGE_ID}/ai-correct/jobs/{job_id}"
+                )
+                if current.json()["status"] == "SUCCEEDED":
+                    break
+                time.sleep(0.01)
+
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["status"], "SUCCEEDED")
+        self.assertEqual(current.json()["result"], "ngày xưa.")
+        self.assertEqual(current.json()["completed_chunks"], 2)
+        prepare.assert_awaited_once()
+        run.assert_awaited_once()
 
 
 if __name__ == "__main__":

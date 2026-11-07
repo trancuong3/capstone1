@@ -82,8 +82,13 @@ class DualEngineOcrTests(unittest.TestCase):
         mock_viet = MagicMock()
         mock_viet.predict.return_value = "Chú mèo"
 
-        with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite") as debug_write,
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
             result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+        debug_write.assert_not_called()
 
         # Kiểm tra nội dung trích xuất
         self.assertEqual(result["text"], "Chú mèo")

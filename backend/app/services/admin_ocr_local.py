@@ -9,6 +9,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from io import BytesIO
+from typing import Callable
 from urllib.parse import urlsplit
 
 import httpx
@@ -43,7 +44,7 @@ class LocalOcrConfig:
     base_url: str = "http://127.0.0.1:11434"
     model: str = DEFAULT_MODEL
     timeout_seconds: int = 180
-    total_timeout_seconds: int = 1800
+    total_timeout_seconds: int = 7200
     num_ctx: int = 4096
     num_predict: int = 1024
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
@@ -66,7 +67,9 @@ class LocalOcrConfig:
             base_url=base_url,
             model=model,
             timeout_seconds=_read_int("LOCAL_OCR_TIMEOUT_SECONDS", 180, 1, 180),
-            total_timeout_seconds=_read_int("LOCAL_OCR_TOTAL_TIMEOUT_SECONDS", 1800, 1, 1800),
+            total_timeout_seconds=_read_int(
+                "LOCAL_OCR_TOTAL_TIMEOUT_SECONDS", 7200, 1, 14400
+            ),
             num_ctx=_read_int("LOCAL_OCR_NUM_CTX", 4096, 2048, 32768),
             num_predict=_read_int("LOCAL_OCR_NUM_PREDICT", 1024, 256, 8192),
             chunking=chunking,
@@ -249,6 +252,8 @@ class LocalOcrCorrector:
         text: str,
         image_bytes: bytes,
         word_boxes: list[tuple[float, float, float, float]],
+        *,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> str:
         try:
             plan = chunk_ocr_text(text, self.config.chunking)
@@ -306,6 +311,8 @@ class LocalOcrCorrector:
                     except ValueError as exc:
                         raise LocalCorrectionError(502, "Ollama trả dữ liệu không hợp lệ; văn bản hiện tại được giữ nguyên.") from exc
                     corrected_by_chunk[chunk.chunk_id] = _decode_chunk_response(payload, chunk)
+                    if on_progress is not None:
+                        on_progress(len(corrected_by_chunk), len(plan.chunks))
             try:
                 return reconstruct_ocr_text(plan, corrected_by_chunk)
             except ChunkingError as exc:
@@ -339,7 +346,13 @@ class LocalOcrCorrector:
                 if isinstance(item, dict) and isinstance(item.get("name"), str)
             } if isinstance(models, list) else set()
             if config.model not in names and config.model + ":latest" not in names:
-                return "UNAVAILABLE", "Model AI OCR cục bộ chưa được cài đặt."
-            return "HEALTHY", "Ollama và model AI OCR cục bộ đã sẵn sàng."
+                return (
+                    "UNAVAILABLE",
+                    f"Model AI OCR cục bộ chưa được cài đặt: {config.model}.",
+                )
+            return (
+                "HEALTHY",
+                f"Ollama và model AI OCR cục bộ đã sẵn sàng: {config.model}.",
+            )
         except (httpx.HTTPError, ValueError, TypeError):
             return "UNAVAILABLE", "Không thể kết nối tới Ollama cục bộ."

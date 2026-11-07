@@ -9,6 +9,48 @@ export const aiCorrectResponseSchema = z.object({
   corrected_text: z.string(),
 });
 
+export const aiCorrectionJobSchema = z.object({
+  job_id: z.uuid(),
+  page_id: z.uuid(),
+  status: z.enum(["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]),
+  completed_chunks: z.number().int().nonnegative(),
+  total_chunks: z.number().int().positive(),
+  result: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+});
+
+export type AiCorrectionJobDTO = z.infer<typeof aiCorrectionJobSchema>;
+
+export class AiCorrectionCancelledError extends Error {
+  constructor() {
+    super("AI_OCR_CANCELLED");
+    this.name = "AiCorrectionCancelledError";
+  }
+}
+
+export type AiCorrectionProgress = Pick<
+  AiCorrectionJobDTO,
+  "status" | "completed_chunks" | "total_chunks"
+>;
+
+function waitForJobPoll(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, 3000);
+    const onAbort = () => {
+      globalThis.clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new AiCorrectionCancelledError());
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export interface OcrReviewService {
   getRevision(
     pageId: string,
@@ -24,6 +66,8 @@ export interface OcrReviewService {
     pageId: string,
     draftText: string,
     words: readonly AdminRevisionWordDTO[],
+    onProgress?: (progress: AiCorrectionProgress) => void,
+    signal?: AbortSignal,
   ): Promise<string>;
 }
 
@@ -89,6 +133,7 @@ export function createOcrReviewService(): OcrReviewService {
         {
           method: "PUT",
           body: {
+            idempotency_key: globalThis.crypto.randomUUID(),
             draft_text: draftText,
             words: words.map((word) => ({
               word_index: word.word_index,
@@ -101,25 +146,72 @@ export function createOcrReviewService(): OcrReviewService {
           },
         },
       ),
-    aiCorrectText: (pageId, draftText, words) =>
-      requestApi(
-        "/books/admin/pages/" + encodeURIComponent(pageId) + "/ai-correct",
-        aiCorrectResponseSchema,
-        undefined,
-        {
-          method: "POST",
-          body: {
-            draft_text: draftText,
-            words: words.map((word) => ({
-              word_index: word.word_index,
-              line_index: word.line_index,
-              text: word.text,
-              normalized_text: word.normalized_text,
-              bbox: [...word.bbox],
-              ocr_confidence: word.ocr_confidence,
-            })),
-          },
+    aiCorrectText: async (pageId, draftText, words, onProgress, signal) => {
+      const basePath =
+        "/books/admin/pages/" + encodeURIComponent(pageId) + "/ai-correct/jobs";
+      const job = await requestApi(basePath, aiCorrectionJobSchema, undefined, {
+        method: "POST",
+        body: {
+          draft_text: draftText,
+          words: words.map((word) => ({
+            word_index: word.word_index,
+            line_index: word.line_index,
+            text: word.text,
+            normalized_text: word.normalized_text,
+            bbox: [...word.bbox],
+            ocr_confidence: word.ocr_confidence,
+          })),
         },
-      ).then((res) => res.corrected_text),
+      });
+      let current = job;
+      onProgress?.(current);
+
+      while (current.status === "QUEUED" || current.status === "RUNNING") {
+        if (signal?.aborted) {
+          await requestApi(
+            `${basePath}/${current.job_id}`,
+            aiCorrectionJobSchema,
+            undefined,
+            { method: "DELETE" },
+          ).catch(() => undefined);
+          throw new AiCorrectionCancelledError();
+        }
+        await waitForJobPoll(signal).catch(async (error: unknown) => {
+          if (!(error instanceof AiCorrectionCancelledError)) throw error;
+          await requestApi(
+            `${basePath}/${current.job_id}`,
+            aiCorrectionJobSchema,
+            undefined,
+            { method: "DELETE" },
+          ).catch(() => undefined);
+          throw error;
+        });
+        current = await requestApi(
+          `${basePath}/${current.job_id}`,
+          aiCorrectionJobSchema,
+          signal,
+        ).catch(async (error: unknown) => {
+          if (!signal?.aborted) throw error;
+          await requestApi(
+            `${basePath}/${current.job_id}`,
+            aiCorrectionJobSchema,
+            undefined,
+            { method: "DELETE" },
+          ).catch(() => undefined);
+          throw new AiCorrectionCancelledError();
+        });
+        onProgress?.(current);
+      }
+
+      if (current.status === "SUCCEEDED" && current.result !== null) {
+        return current.result;
+      }
+      if (current.status === "CANCELLED") {
+        throw new AiCorrectionCancelledError();
+      }
+      throw new Error(
+        current.error ?? "AI OCR cục bộ không thể hoàn tất tác vụ.",
+      );
+    },
   };
 }

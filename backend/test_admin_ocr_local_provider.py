@@ -115,14 +115,21 @@ class LocalOcrProviderTests(unittest.IsolatedAsyncioTestCase):
             return _response_for_request(request)
 
         text = "một hai ba bốn năm"
+        progress = []
         result = await LocalOcrCorrector(
             _config(),
             transport=httpx.MockTransport(handler),
-        ).correct(text, _image(), _boxes(5))
+        ).correct(
+            text,
+            _image(),
+            _boxes(5),
+            on_progress=lambda completed, total: progress.append((completed, total)),
+        )
 
         self.assertEqual(result, text)
         self.assertEqual(len(seen), 3)
         self.assertTrue(all(url.host == "127.0.0.1" for url in seen))
+        self.assertEqual(progress, [(1, 3), (2, 3), (3, 3)])
 
         async def bad_handler(request):
             return _response_for_request(request, corrupt_output=True)

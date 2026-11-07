@@ -70,6 +70,7 @@ Route Parent và Admin được bảo vệ phía server. Ứng dụng xác minh 
 - Trình diễn các trạng thái của buổi đọc tương tác.
 - Lịch sử đọc, báo cáo tiến bộ và từ cần luyện.
 - Quản trị sách, trang sách, OCR revision, audit log và health.
+- AI sửa OCR bằng Ollama cục bộ; tác vụ dài có tiến độ, có thể hủy và chỉ áp dụng sau khi Admin rà soát.
 - Responsive tại desktop, tablet và mobile bằng cùng một cây component.
 
 ## Cấu trúc repository
@@ -97,6 +98,7 @@ readalong-vision/
 - [Hướng dẫn frontend chi tiết](frontend/README.md)
 - [Báo cáo nghiệm thu frontend](frontend/FRONTEND_ACCEPTANCE_REPORT.md)
 - [Quy tắc đóng góp](CONTRIBUTING.md)
+- [Triển khai và benchmark AI OCR cục bộ](docs/admin-ocr-local-deployment.md)
 
 Blueprint và Coding Handoff là tài liệu bàn giao nằm ngoài repository. Thành viên cần nhận chúng qua kênh nội bộ nếu công việc yêu cầu đối chiếu contract.
 

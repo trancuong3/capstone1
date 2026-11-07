@@ -265,6 +265,11 @@ test("Admin OCR draft → local AI correction → save → verify preserves boun
   expect(api.draftCreateSourceRevisionId).toBe(ids.revision);
 
   await page.getByRole("button", { name: /AI sửa chính tả/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Rà soát đề xuất AI" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
+  await page.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }).click();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã sửa");
   expect(api.aiCorrectionText).toBe("Văn bản đã lưu");
   const firstBox = page.getByRole("button", { name: /Từ 1: Văn\./ });
