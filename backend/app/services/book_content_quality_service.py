@@ -121,10 +121,13 @@ class BookContentQualityService:
         history: list[BookContentReportHistory],
     ) -> BookContentReportDetail:
         related_rows = await self.repository.findings_for_report(report.Id)
+        report_data = self._report_read(report).model_dump()
+        report_data["reporter_name"] = (
+            reporter_name or report.ReporterNameSnapshot
+        )
         return BookContentReportDetail(
-            **self._report_read(report).model_dump(),
+            **report_data,
             reporter_id=report.ReporterId,
-            reporter_name=reporter_name or report.ReporterNameSnapshot,
             verified_text_snapshot=report.VerifiedTextSnapshot,
             content_hash_snapshot=report.ContentHashSnapshot,
             admin_resolution_note=report.AdminResolutionNote,
