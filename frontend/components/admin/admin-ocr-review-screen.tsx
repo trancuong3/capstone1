@@ -135,7 +135,8 @@ export function AdminOcrReviewScreen({
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
   const searchParams = useSearchParams();
-  const preferredRevisionId = searchParams.get("revisionId");
+  // Next's compatibility layer can return null outside the App Router (e.g. tests).
+  const preferredRevisionId = searchParams?.get("revisionId") ?? null;
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [image, setImage] = useState<AdminPageImageUI | null>(null);
   const [history, setHistory] = useState<
