@@ -2,8 +2,10 @@
 import json
 import logging
 import os
+import tempfile
 import unittest
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
@@ -13,6 +15,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 import httpx
 from PIL import Image
 
+from app.database import config as database_config
 from app.services.admin_ocr_chunking import ChunkingConfig, chunk_ocr_text
 from app.services.admin_ocr_local import LocalOcrConfig
 from app.services.ocr_ai.config import OcrCorrectionConfig
@@ -66,7 +69,16 @@ class _Provider:
         self._result_by_chunk = result_by_chunk
 
     async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
-        self._calls.append((self.name, chunk.chunk_id, image_mime_type, bool(image_bytes)))
+        self._calls.append(
+            (
+                self.name,
+                chunk.chunk_id,
+                image_mime_type,
+                bool(image_bytes),
+                tuple(token.text for token in chunk.tokens),
+                chunk.target_text,
+            )
+        )
         if self._error is not None:
             raise self._error
         if self._result_by_chunk is not None:
@@ -79,6 +91,147 @@ class _Provider:
 
 
 class OcrCorrectionConfigTests(unittest.TestCase):
+    def _provider_chain(self, values):
+        with (
+            patch.dict(os.environ, values, clear=True),
+            patch("app.services.ocr_ai.orchestrator.log_diagnostic"),
+        ):
+            config = OcrCorrectionConfig.from_environment()
+            providers = OcrCorrectionOrchestrator(config).providers
+        return [provider.name for provider in providers]
+
+    def test_runtime_provider_chain_configuration_matrix(self):
+        cases = (
+            (
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "false",
+                    "GEMINI_API_KEY": "gemini-test-key",
+                    "GROQ_API_KEY": "groq-test-key",
+                },
+                ["ollama_qwen3_vl"],
+            ),
+            ({"OCR_CLOUD_CORRECTION_ENABLED": "true"}, ["ollama_qwen3_vl"]),
+            (
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "GEMINI_API_KEY": "gemini-test-key",
+                },
+                ["gemini_3_5", "gemini_3_1", "ollama_qwen3_vl"],
+            ),
+            (
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "GROQ_API_KEY": "groq-test-key",
+                },
+                ["groq_qwen", "ollama_qwen3_vl"],
+            ),
+            (
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "GEMINI_API_KEY": "gemini-test-key",
+                    "GROQ_API_KEY": "groq-test-key",
+                },
+                ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+            ),
+            (
+                {
+                    "GEMINI_API_KEY": "gemini-test-key",
+                    "GROQ_API_KEY": "groq-test-key",
+                },
+                ["ollama_qwen3_vl"],
+            ),
+            (
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "GEMINI_API_KEY": "  \t",
+                    "GROQ_API_KEY": "   ",
+                },
+                ["ollama_qwen3_vl"],
+            ),
+        )
+        for values, expected in cases:
+            with self.subTest(values=tuple(values)):
+                self.assertEqual(self._provider_chain(values), expected)
+
+    def test_invalid_cloud_flag_is_rejected(self):
+        with patch.dict(
+            os.environ, {"OCR_CLOUD_CORRECTION_ENABLED": "sometimes"}, clear=True
+        ):
+            with self.assertRaises(OcrConfigurationError):
+                OcrCorrectionConfig.from_environment()
+
+    def test_process_environment_overrides_dotenv_and_dotenv_values_load(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary_directory:
+            root = Path(temporary_directory)
+            backend_root = root / "backend"
+            repository_root = root / "repository"
+            workspace_root = root / "workspace"
+            backend_root.mkdir()
+            repository_root.mkdir()
+            workspace_root.mkdir()
+            (backend_root / ".env").write_text(
+                'OCR_CLOUD_CORRECTION_ENABLED="true"\n', encoding="utf-8"
+            )
+            (repository_root / ".env").write_text(
+                'GEMINI_API_KEY="dotenv-gemini"\n', encoding="utf-8"
+            )
+            (workspace_root / ".env").write_text(
+                'GROQ_API_KEY="dotenv-groq"\n', encoding="utf-8"
+            )
+            with (
+                patch.object(database_config, "BACKEND_ROOT", backend_root),
+                patch.object(database_config, "REPOSITORY_ROOT", repository_root),
+                patch.object(database_config, "WORKSPACE_ROOT", workspace_root),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                database_config._load_missing_dotenv_values()
+                config = OcrCorrectionConfig.from_environment()
+                self.assertTrue(config.cloud_enabled)
+                self.assertTrue(config.gemini_enabled)
+                self.assertTrue(config.groq_enabled)
+                self.assertEqual(
+                    [
+                        provider.name
+                        for provider in OcrCorrectionOrchestrator(config).providers
+                    ],
+                    ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+                )
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary_directory:
+            backend_root = Path(temporary_directory) / "backend"
+            backend_root.mkdir()
+            (backend_root / ".env").write_text(
+                'OCR_CLOUD_CORRECTION_ENABLED="true"\n', encoding="utf-8"
+            )
+            with (
+                patch.object(database_config, "BACKEND_ROOT", backend_root),
+                patch.object(database_config, "REPOSITORY_ROOT", backend_root.parent / "none"),
+                patch.object(database_config, "WORKSPACE_ROOT", backend_root.parent / "missing"),
+                patch.dict(
+                    os.environ, {"OCR_CLOUD_CORRECTION_ENABLED": "false"}, clear=True
+                ),
+            ):
+                database_config._load_missing_dotenv_values()
+                self.assertFalse(OcrCorrectionConfig.from_environment().cloud_enabled)
+
+    def test_configuration_is_read_again_after_environment_changes(self):
+        with patch.dict(
+            os.environ, {"OCR_CLOUD_CORRECTION_ENABLED": "false"}, clear=True
+        ):
+            before_restart = OcrCorrectionConfig.from_environment()
+        with patch.dict(
+            os.environ,
+            {
+                "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                "GEMINI_API_KEY": "gemini-test-key",
+            },
+            clear=True,
+        ):
+            after_restart = OcrCorrectionConfig.from_environment()
+        self.assertFalse(before_restart.cloud_enabled)
+        self.assertTrue(after_restart.gemini_enabled)
+        self.assertNotIn("gemini-test-key", repr(after_restart))
+
     def test_cloud_is_optional_and_local_is_never_disabled_by_missing_keys(self):
         with patch.dict(
             os.environ,
@@ -134,6 +287,67 @@ class OcrCorrectionConfigTests(unittest.TestCase):
                 OcrCorrectionConfig.from_environment()
 
 
+class ProviderHttpErrorClassificationTests(unittest.TestCase):
+    def test_gemini_http_statuses_and_shared_credential_disablement(self):
+        provider = GeminiOcrProvider(
+            name="gemini_3_5",
+            model="gemini-3.5-flash-lite",
+            api_key="test-key",
+            timeout_seconds=2,
+        )
+        cases = {
+            400: ("PROVIDER_REJECTED", False),
+            401: ("PROVIDER_AUTHENTICATION", True),
+            403: ("PROVIDER_AUTHENTICATION", True),
+            404: ("MODEL_UNAVAILABLE", False),
+            429: ("PROVIDER_QUOTA", True),
+            500: ("PROVIDER_UNAVAILABLE", True),
+            503: ("PROVIDER_UNAVAILABLE", True),
+        }
+        for status_code, (code, disables_family) in cases.items():
+            with self.subTest(status_code=status_code):
+                error = provider._http_error(status_code)
+                self.assertEqual(error.code, code)
+                self.assertEqual(error.disables_family, disables_family)
+
+    def test_groq_http_statuses_disable_only_invalid_credentials(self):
+        provider = GroqOcrProvider(
+            model="qwen/qwen3.8-27b",
+            api_key="test-key",
+            timeout_seconds=2,
+        )
+        cases = {
+            400: ("PROVIDER_REJECTED", False),
+            401: ("PROVIDER_AUTHENTICATION", True),
+            403: ("PROVIDER_AUTHENTICATION", True),
+            404: ("MODEL_UNAVAILABLE", False),
+            429: ("PROVIDER_QUOTA", False),
+            500: ("PROVIDER_UNAVAILABLE", False),
+            503: ("PROVIDER_UNAVAILABLE", False),
+        }
+        for status_code, (code, disables_family) in cases.items():
+            with self.subTest(status_code=status_code):
+                error = provider._http_error(
+                    httpx.Response(
+                        status_code,
+                        headers={"x-request-id": "req_test-123"},
+                        json={
+                            "error": {
+                                "type": "invalid_request_error",
+                                "code": "schema_rejected",
+                                "message": "must never be logged",
+                            }
+                        },
+                    )
+                )
+                self.assertEqual(error.code, code)
+                self.assertEqual(error.disables_family, disables_family)
+                self.assertEqual(error.upstream_status_code, status_code)
+                self.assertEqual(error.upstream_error_type, "invalid_request_error")
+                self.assertEqual(error.upstream_error_code, "schema_rejected")
+                self.assertEqual(error.upstream_request_id, "req_test-123")
+
+
 class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_gemini_sends_image_text_schema_and_model_without_key_in_url(self):
         plan = chunk_ocr_text("ngay xua.", _config().local.chunking)
@@ -144,7 +358,15 @@ class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
             body = json.loads(request.content)
             self.assertEqual(request.headers["x-goog-api-key"], "fresh-key")
             self.assertNotIn("fresh-key", str(request.url))
+            self.assertEqual(
+                request.url.path,
+                "/v1beta/models/gemini-3.5-flash-lite:generateContent",
+            )
             self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
+            self.assertEqual(
+                body["generationConfig"]["responseJsonSchema"]["required"],
+                ["chunk_id", "corrected_words", "uncertain_word_indices"],
+            )
             self.assertIn("inline_data", body["contents"][0]["parts"][1])
             result = {
                 "chunk_id": 0,
@@ -169,7 +391,7 @@ class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.corrected_words, ("ngày", "xưa."))
         self.assertIn("gemini-3.5-flash-lite", str(seen[0].url))
 
-    async def test_groq_sends_data_image_and_rejects_bad_schema(self):
+    async def test_groq_sends_data_image_and_rejects_invalid_json(self):
         plan = chunk_ocr_text("ngay xua.", _config().local.chunking)
 
         async def handler(request):
@@ -197,6 +419,84 @@ class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(caught.exception.code, "INVALID_JSON")
 
+    async def test_groq_accepts_multimodal_structured_response(self):
+        plan = chunk_ocr_text("ngay xua.", _config().local.chunking)
+
+        async def handler(request):
+            body = json.loads(request.content)
+            self.assertEqual(
+                str(request.url), "https://api.groq.com/openai/v1/chat/completions"
+            )
+            self.assertEqual(request.headers["Authorization"], "Bearer fresh-key")
+            self.assertEqual(body["model"], "qwen/qwen3.8-27b")
+            self.assertEqual(body["response_format"], {"type": "json_object"})
+            self.assertIn("text", body["messages"][1]["content"][0])
+            self.assertIn(
+                '"corrected_words" must contain exactly 2 strings',
+                body["messages"][1]["content"][0]["text"],
+            )
+            self.assertTrue(
+                body["messages"][1]["content"][1]["image_url"]["url"].startswith(
+                    "data:image/jpeg;base64,"
+                )
+            )
+            result = {
+                "chunk_id": 0,
+                "corrected_words": ["ngày", "xưa."],
+                "uncertain_word_indices": [],
+            }
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": json.dumps(result)}}]},
+            )
+
+        provider = GroqOcrProvider(
+            model="qwen/qwen3.8-27b",
+            api_key="fresh-key",
+            timeout_seconds=2,
+            transport=httpx.MockTransport(handler),
+        )
+        result = await provider.correct_chunk(
+            chunk=plan.chunks[0], image_bytes=_image(), image_mime_type="image/jpeg"
+        )
+        self.assertEqual(result.corrected_words, ("ngày", "xưa."))
+
+    async def test_cloud_provider_timeout_and_network_errors_are_classified(self):
+        plan = chunk_ocr_text("ngay", _config().local.chunking)
+        factories = (
+            lambda transport: GeminiOcrProvider(
+                name="gemini_3_5",
+                model="gemini-3.5-flash-lite",
+                api_key="fresh-key",
+                timeout_seconds=2,
+                transport=transport,
+            ),
+            lambda transport: GroqOcrProvider(
+                model="qwen/qwen3.8-27b",
+                api_key="fresh-key",
+                timeout_seconds=2,
+                transport=transport,
+            ),
+        )
+        for factory in factories:
+            for provider_error, expected_code in (
+                (httpx.ConnectTimeout("timeout"), "PROVIDER_TIMEOUT"),
+                (httpx.ConnectError("network"), "PROVIDER_NETWORK"),
+            ):
+                async def handler(_request, error=provider_error):
+                    raise error
+
+                provider = factory(httpx.MockTransport(handler))
+                with self.subTest(
+                    provider=provider.name, error=expected_code
+                ), self.assertRaises(OcrProviderError) as caught:
+                    await provider.correct_chunk(
+                        chunk=plan.chunks[0],
+                        image_bytes=_image(),
+                        image_mime_type="image/jpeg",
+                    )
+                self.assertEqual(caught.exception.code, expected_code)
+
 
 class OllamaProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_disables_thinking_and_only_accepts_final_content(self):
@@ -206,6 +506,12 @@ class OllamaProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
         async def handler(request):
             payload = json.loads(request.content)
             seen.append(payload)
+            self.assertEqual(
+                str(request.url), "http://127.0.0.1:11434/api/chat"
+            )
+            self.assertEqual(payload["model"], "qwen3-vl:4b-instruct-q4_K_M")
+            self.assertEqual(len(payload["messages"][0]["images"]), 1)
+            self.assertTrue(payload["messages"][0]["images"][0])
             result = {
                 "chunk_id": plan.chunks[0].chunk_id,
                 "corrected_words": [token.text for token in plan.chunks[0].tokens],
@@ -262,6 +568,32 @@ class OllamaProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_start_and_success_diagnostics_describe_real_call(self):
+        calls = []
+        provider = _Provider("gemini_3_5", calls)
+        provider.model = "gemini-3.5-flash-lite"
+        with self.assertLogs(
+            "app.services.ocr_ai.orchestrator", level=logging.INFO
+        ) as logs:
+            await OcrCorrectionOrchestrator(
+                _config(), providers=[provider]
+            ).correct("ngay", _image(), _boxes(1))
+
+        events = [
+            json.loads(line.split("readalong_diagnostic ", 1)[1])
+            for line in logs.output
+        ]
+        self.assertEqual(
+            [event["event"] for event in events],
+            ["ocr_provider_started", "ocr_provider_succeeded"],
+        )
+        self.assertEqual(events[0]["provider"], "gemini_3_5")
+        self.assertEqual(events[0]["model"], "gemini-3.5-flash-lite")
+        self.assertEqual(events[0]["chunk_id"], 0)
+        self.assertEqual(events[1]["provider"], "gemini_3_5")
+        self.assertGreaterEqual(events[1]["elapsed_ms"], 0)
+        self.assertNotIn("ngay", "\n".join(logs.output))
+
     async def test_primary_success_including_unchanged_words_does_not_fallback(self):
         calls = []
         providers = [_Provider("gemini_3_5", calls), _Provider("groq_qwen", calls)]
@@ -289,6 +621,140 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ).correct("ngay xua.", _image(), _boxes(2))
         self.assertEqual(result, "ngay xua.")
         self.assertEqual([entry[0] for entry in calls], ["gemini_3_5", "groq_qwen"])
+
+    async def test_gemini_and_groq_failures_advance_to_gemini_fallback(self):
+        calls = []
+        providers = [
+            _Provider(
+                "gemini_3_5",
+                calls,
+                error=OcrProviderError(provider="gemini_3_5", code="PROVIDER_TIMEOUT"),
+            ),
+            _Provider(
+                "groq_qwen",
+                calls,
+                error=OcrProviderError(provider="groq_qwen", code="PROVIDER_QUOTA"),
+            ),
+            _Provider("gemini_3_1", calls),
+            _Provider("ollama_qwen3_vl", calls),
+        ]
+        result = await OcrCorrectionOrchestrator(
+            _config(), providers=providers
+        ).correct("ngay xua.", _image(), _boxes(2))
+        self.assertEqual(result, "ngay xua.")
+        self.assertEqual(
+            [entry[0] for entry in calls], ["gemini_3_5", "groq_qwen", "gemini_3_1"]
+        )
+
+    async def test_all_cloud_failures_advance_to_ollama_last(self):
+        calls = []
+        providers = [
+            _Provider(
+                "gemini_3_5",
+                calls,
+                error=OcrProviderError(provider="gemini_3_5", code="PROVIDER_TIMEOUT"),
+            ),
+            _Provider(
+                "groq_qwen",
+                calls,
+                error=OcrProviderError(provider="groq_qwen", code="PROVIDER_TIMEOUT"),
+            ),
+            _Provider(
+                "gemini_3_1",
+                calls,
+                error=OcrProviderError(provider="gemini_3_1", code="PROVIDER_TIMEOUT"),
+            ),
+            _Provider("ollama_qwen3_vl", calls),
+        ]
+        result = await OcrCorrectionOrchestrator(
+            _config(), providers=providers
+        ).correct("ngay xua.", _image(), _boxes(2))
+        self.assertEqual(result, "ngay xua.")
+        self.assertEqual(
+            [entry[0] for entry in calls],
+            ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+        )
+
+    async def test_disabled_cloud_flag_calls_only_ollama_even_with_keys(self):
+        calls = []
+        local_provider = _Provider("ollama_qwen3_vl", calls)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OCR_CLOUD_CORRECTION_ENABLED": "false",
+                    "GEMINI_API_KEY": "gemini-test-key",
+                    "GROQ_API_KEY": "groq-test-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "app.services.ocr_ai.orchestrator.GeminiOcrProvider",
+                side_effect=AssertionError("cloud provider must not be built"),
+            ),
+            patch(
+                "app.services.ocr_ai.orchestrator.GroqOcrProvider",
+                side_effect=AssertionError("cloud provider must not be built"),
+            ),
+            patch(
+                "app.services.ocr_ai.orchestrator.OllamaOcrProvider",
+                return_value=local_provider,
+            ),
+            patch("app.services.ocr_ai.orchestrator.log_diagnostic"),
+        ):
+            config = OcrCorrectionConfig.from_environment()
+            orchestrator = OcrCorrectionOrchestrator(config)
+            result = await orchestrator.correct("ngay xua.", _image(), _boxes(2))
+        self.assertEqual(result, "ngay xua.")
+        self.assertEqual([provider.name for provider in orchestrator.providers], ["ollama_qwen3_vl"])
+        self.assertEqual([entry[0] for entry in calls], ["ollama_qwen3_vl"])
+
+    async def test_uncertain_word_falls_forward_and_keeps_confirmed_word(self):
+        calls = []
+        providers = [
+            _Provider(
+                "gemini_3_5",
+                calls,
+                result=ChunkCorrectionResult(0, ("ngày", "xua"), (1,)),
+            ),
+            _Provider(
+                "groq_qwen",
+                calls,
+                result=ChunkCorrectionResult(0, ("ngay", "xưa"), ()),
+            ),
+            _Provider("gemini_3_1", calls),
+        ]
+        with self.assertLogs("app.services.ocr_ai.orchestrator", level=logging.WARNING) as logs:
+            result = await OcrCorrectionOrchestrator(
+                _config(), providers=providers
+            ).correct("ngay xua", _image(), _boxes(2))
+        self.assertEqual(result, "ngày xưa")
+        self.assertEqual([entry[0] for entry in calls], ["gemini_3_5", "groq_qwen"])
+        self.assertEqual(calls[1][4], ("ngày", "xua"))
+        self.assertEqual(calls[1][5], "ngày xua")
+        self.assertIn("UNCERTAIN_TOKENS", "\n".join(logs.output))
+        self.assertNotIn("ngay xua", "\n".join(logs.output))
+
+    async def test_all_providers_uncertain_preserves_original_and_logs_count(self):
+        calls = []
+        partial = ChunkCorrectionResult(0, ("ngay",), (0,))
+        providers = [
+            _Provider(name, calls, result=partial)
+            for name in ("gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl")
+        ]
+        with self.assertLogs("app.services.ocr_ai.orchestrator", level=logging.WARNING) as logs:
+            result = await OcrCorrectionOrchestrator(
+                _config(), providers=providers
+            ).correct("ngay", _image(), _boxes(1))
+        self.assertEqual(result, "ngay")
+        self.assertEqual(
+            [entry[0] for entry in calls],
+            ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+        )
+        output = "\n".join(logs.output)
+        self.assertIn("ocr_uncertain_tokens_preserved", output)
+        self.assertIn('"uncertain_count":1', output)
+        self.assertNotIn('"text"', output)
 
     async def test_unexpected_provider_error_falls_back_without_logging_exception_text(self):
         calls = []
@@ -493,6 +959,18 @@ class OcrStructuredValidationTests(unittest.TestCase):
                     chunk=self.chunk,
                     provider="test",
                 )
+
+    def test_rejects_token_count_mismatch(self):
+        with self.assertRaises(OcrProviderError):
+            validate_chunk_result(
+                {
+                    "chunk_id": self.chunk.chunk_id,
+                    "corrected_words": ["ngày"],
+                    "uncertain_word_indices": [],
+                },
+                chunk=self.chunk,
+                provider="test",
+            )
 
 
 if __name__ == "__main__":

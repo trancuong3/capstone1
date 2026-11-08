@@ -14,12 +14,20 @@ class OcrProviderError(RuntimeError):
         provider: str,
         code: str,
         status_code: int = 502,
+        upstream_status_code: int | None = None,
+        upstream_error_type: str | None = None,
+        upstream_error_code: str | None = None,
+        upstream_request_id: str | None = None,
         disables_family: bool = False,
     ) -> None:
         super().__init__(code)
         self.provider = provider
         self.code = code
         self.status_code = status_code
+        self.upstream_status_code = upstream_status_code
+        self.upstream_error_type = upstream_error_type
+        self.upstream_error_code = upstream_error_code
+        self.upstream_request_id = upstream_request_id
         self.disables_family = disables_family
 
 

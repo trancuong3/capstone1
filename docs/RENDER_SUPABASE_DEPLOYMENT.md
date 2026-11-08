@@ -48,6 +48,16 @@ Configure these under the Render Web Service's Environment section:
 | SUPABASE_URL | Project URL |
 | SUPABASE_KEY | Publishable key |
 | SUPABASE_SECRET_KEY | Server-only secret key, if required by configured Admin/Storage operations |
+| OCR_CLOUD_CORRECTION_ENABLED | true for cloud-first Admin OCR; false selects local Ollama only |
+| GEMINI_API_KEY | Server-only Gemini key; store as a Render secret |
+| GROQ_API_KEY | Server-only Groq key; store as a Render secret |
+| GEMINI_OCR_PRIMARY_MODEL | gemini-3.5-flash-lite |
+| GROQ_OCR_MODEL | qwen/qwen3.8-27b |
+| GEMINI_OCR_FALLBACK_MODEL | gemini-3.1-flash-lite |
+
+Restart the Render service after changing OCR settings. Missing keys cause their
+providers to be skipped while the configured chain continues. Local repository
+checks cannot change or verify Render secrets.
 
 Never place the database URL, password, Supabase secret key or service-role key in the frontend or a committed file.
 
