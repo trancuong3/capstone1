@@ -179,6 +179,10 @@ class OcrCorrectionOrchestrator:
                     model=getattr(provider, "model", None),
                     next_provider=next_provider,
                     reason_code=exc.code,
+                    provider_http_status=exc.upstream_status_code,
+                    provider_error_type=exc.upstream_error_type,
+                    provider_error_code=exc.upstream_error_code,
+                    provider_request_id=exc.upstream_request_id,
                     chunk_id=chunk_id,
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )

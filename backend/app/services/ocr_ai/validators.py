@@ -34,7 +34,7 @@ def validate_chunk_result(
     if not isinstance(payload, dict) or set(payload) != {
         "chunk_id", "corrected_words", "uncertain_word_indices"
     }:
-        raise _invalid(provider)
+        raise _invalid(provider, "INVALID_OUTPUT_FIELDS")
     chunk_id = payload.get("chunk_id")
     words = payload.get("corrected_words")
     uncertain = payload.get("uncertain_word_indices")
@@ -42,11 +42,12 @@ def validate_chunk_result(
         isinstance(chunk_id, bool)
         or not isinstance(chunk_id, int)
         or chunk_id != chunk.chunk_id
-        or not isinstance(words, list)
-        or len(words) != chunk.expected_word_count
-        or not isinstance(uncertain, list)
     ):
-        raise _invalid(provider)
+        raise _invalid(provider, "INVALID_OUTPUT_CHUNK_ID")
+    if not isinstance(words, list) or len(words) != chunk.expected_word_count:
+        raise _invalid(provider, "INVALID_OUTPUT_WORD_COUNT")
+    if not isinstance(uncertain, list):
+        raise _invalid(provider, "INVALID_OUTPUT_UNCERTAIN_INDICES")
 
     uncertain_indices: list[int] = []
     for index in uncertain:
@@ -57,7 +58,7 @@ def validate_chunk_result(
             or index >= chunk.expected_word_count
             or index in uncertain_indices
         ):
-            raise _invalid(provider)
+            raise _invalid(provider, "INVALID_OUTPUT_UNCERTAIN_INDICES")
         uncertain_indices.append(index)
 
     uncertain_set = set(uncertain_indices)
@@ -70,7 +71,7 @@ def validate_chunk_result(
             or len(candidate) > 500
             or any(character.isspace() for character in candidate)
         ):
-            raise _invalid(provider)
+            raise _invalid(provider, "INVALID_OUTPUT_WORD")
         normalized = unicodedata.normalize("NFC", candidate)
         source_prefix, source_core, source_suffix = _punctuation_boundary(source.text)
         _, candidate_core, _ = _punctuation_boundary(normalized)

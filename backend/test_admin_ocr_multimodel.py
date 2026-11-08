@@ -327,9 +327,25 @@ class ProviderHttpErrorClassificationTests(unittest.TestCase):
         }
         for status_code, (code, disables_family) in cases.items():
             with self.subTest(status_code=status_code):
-                error = provider._http_error(status_code)
+                error = provider._http_error(
+                    httpx.Response(
+                        status_code,
+                        headers={"x-request-id": "req_test-123"},
+                        json={
+                            "error": {
+                                "type": "invalid_request_error",
+                                "code": "schema_rejected",
+                                "message": "must never be logged",
+                            }
+                        },
+                    )
+                )
                 self.assertEqual(error.code, code)
                 self.assertEqual(error.disables_family, disables_family)
+                self.assertEqual(error.upstream_status_code, status_code)
+                self.assertEqual(error.upstream_error_type, "invalid_request_error")
+                self.assertEqual(error.upstream_error_code, "schema_rejected")
+                self.assertEqual(error.upstream_request_id, "req_test-123")
 
 
 class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
@@ -375,7 +391,7 @@ class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.corrected_words, ("ngày", "xưa."))
         self.assertIn("gemini-3.5-flash-lite", str(seen[0].url))
 
-    async def test_groq_sends_data_image_and_rejects_bad_schema(self):
+    async def test_groq_sends_data_image_and_rejects_invalid_json(self):
         plan = chunk_ocr_text("ngay xua.", _config().local.chunking)
 
         async def handler(request):
@@ -413,8 +429,12 @@ class CloudProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(request.headers["Authorization"], "Bearer fresh-key")
             self.assertEqual(body["model"], "qwen/qwen3.8-27b")
-            self.assertTrue(body["response_format"]["json_schema"]["strict"])
+            self.assertEqual(body["response_format"], {"type": "json_object"})
             self.assertIn("text", body["messages"][1]["content"][0])
+            self.assertIn(
+                '"corrected_words" must contain exactly 2 strings',
+                body["messages"][1]["content"][0]["text"],
+            )
             self.assertTrue(
                 body["messages"][1]["content"][1]["image_url"]["url"].startswith(
                     "data:image/jpeg;base64,"
