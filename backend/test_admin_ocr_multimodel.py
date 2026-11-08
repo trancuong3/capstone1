@@ -131,7 +131,7 @@ class OcrCorrectionConfigTests(unittest.TestCase):
                     "GEMINI_API_KEY": "gemini-test-key",
                     "GROQ_API_KEY": "groq-test-key",
                 },
-                ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+                ["gemini_3_5", "gemini_3_1", "groq_qwen", "ollama_qwen3_vl"],
             ),
             (
                 {
@@ -194,7 +194,7 @@ class OcrCorrectionConfigTests(unittest.TestCase):
                         provider.name
                         for provider in OcrCorrectionOrchestrator(config).providers
                     ],
-                    ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+                    ["gemini_3_5", "gemini_3_1", "groq_qwen", "ollama_qwen3_vl"],
                 )
 
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary_directory:
@@ -273,7 +273,7 @@ class OcrCorrectionConfigTests(unittest.TestCase):
         self.assertNotIn("new-gemini-secret", repr(config))
         self.assertEqual(
             [provider.name for provider in OcrCorrectionOrchestrator(config).providers],
-            ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+            ["gemini_3_5", "gemini_3_1", "groq_qwen", "ollama_qwen3_vl"],
         )
         with patch.dict(
             os.environ,

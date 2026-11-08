@@ -2,7 +2,7 @@
 
 ReadAlong Vision là dự án hỗ trợ ba mẹ đồng hành cùng bé trong quá trình đọc sách. Repository hiện chứa frontend responsive bằng Next.js/TypeScript và backend bước đầu bằng FastAPI.
 
-> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho một số dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. Sửa OCR trong khu vực Admin dùng fallback tuần tự Gemini → Groq → Gemini → Ollama; cloud chỉ được gọi server-side khi được cấu hình.
+> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho một số dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. Scan OCR không gọi model AI sửa. Chỉ nút “AI sửa” mới dùng fallback tuần tự gemini-3.5-flash-lite → gemini-3.1-flash-lite → qwen/qwen3.8-27b → Ollama; cloud chỉ được gọi server-side khi được cấu hình.
 
 ## Bắt đầu nhanh
 
@@ -70,7 +70,7 @@ Route Parent và Admin được bảo vệ phía server. Ứng dụng xác minh 
 - Trình diễn các trạng thái của buổi đọc tương tác.
 - Lịch sử đọc, báo cáo tiến bộ và từ cần luyện.
 - Quản trị sách, trang sách, OCR revision, audit log và health.
-- AI sửa OCR dùng fallback Gemini → Groq → Gemini → Ollama; tác vụ dài có tiến độ, có thể hủy và chỉ áp dụng sau khi Admin rà soát.
+- Scan OCR chỉ dùng các engine OCR của hệ thống; AI chỉ chạy khi Admin bấm nút “AI sửa”. Nút này dùng gemini-3.5-flash-lite → gemini-3.1-flash-lite → qwen/qwen3.8-27b, Ollama chỉ là dự phòng cuối; tác vụ dài có tiến độ, có thể hủy và chỉ áp dụng sau khi Admin rà soát.
 - Responsive tại desktop, tablet và mobile bằng cùng một cây component.
 
 ## Cấu trúc repository

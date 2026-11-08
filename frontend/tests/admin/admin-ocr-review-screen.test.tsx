@@ -115,7 +115,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       expect(getWordReviewColor(status)).not.toContain("border-red-600");
     }
     expect(getWordReviewColor("engine_disagreement")).toContain(
-      "border-amber-600",
+      "border-red-600",
     );
     expect(getWordReviewColor("engine_agreement")).toContain(
       "border-green-600",
@@ -302,7 +302,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
-  it("keeps engine disagreement amber and colors automatic agreement green", async () => {
+  it("marks engine disagreement red and colors automatic agreement green", async () => {
     const services = createAdminServiceFixture();
     const reviewDetail: AdminPageRevisionDetailDTO = {
       ...adminR2Fixture,
@@ -391,7 +391,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     expect(stats).toHaveTextContent(/1\s*Khả năng đúng cao/);
     expect(stats).toHaveTextContent(/1\s*Admin xác nhận/);
-    expect(stats).toHaveTextContent(/1\s*Sai với reference/);
+    expect(stats).toHaveTextContent(/1\s*Có dấu hiệu sai/);
     expect(stats).toHaveTextContent(/3\s*Cần Admin xem/);
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),

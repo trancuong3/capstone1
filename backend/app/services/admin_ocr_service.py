@@ -963,6 +963,16 @@ class AdminOcrService:
             ) from exc
 
         processing_meta = dict(ocr["metadata"])
+        processing_meta["word_review_statuses"] = [
+            str(word.get("ocr_review_status", "needs_review")) for word in words
+        ]
+        processing_meta["word_score_sources"] = self._word_score_sources(
+            words, processing_meta
+        )
+        processing_meta["word_evidence_v2"] = [
+            self._normalize_word_evidence(word.get("ocr_evidence"))
+            for word in words
+        ]
         processing_meta.update({
             "source_image_path": object_path,
             "source_image_width": width,

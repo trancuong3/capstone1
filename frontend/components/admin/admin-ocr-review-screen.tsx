@@ -90,9 +90,9 @@ export function getWordReviewLabel(status: AdminOcrReviewStatus): string {
     reference_match: "Khớp văn bản Admin đã xác minh",
     confirmed_mismatch: "Không khớp văn bản Admin đã xác minh",
     engine_agreement: "Khả năng đúng cao · hai engine cùng đọc",
-    engine_disagreement: "Hai engine khác nhau · chưa biết từ nào đúng",
+    engine_disagreement: "Hai engine OCR đọc khác nhau · cần ưu tiên xem",
     matched: "Khả năng đúng cao · hai engine cùng đọc",
-    suspect: "Hai engine khác nhau · chưa biết từ nào đúng",
+    suspect: "Hai engine OCR đọc khác nhau · cần ưu tiên xem",
     needs_review: "Chưa đủ evidence để kết luận · cần Admin xem xét",
   }[status];
 }
@@ -103,9 +103,9 @@ export function getWordReviewColor(status: AdminOcrReviewStatus): string {
     reference_match: "border-green-600 bg-green-400/35 text-green-900",
     confirmed_mismatch: "border-red-600 bg-red-400/35 text-red-900",
     engine_agreement: "border-green-600 bg-green-400/35 text-green-900",
-    engine_disagreement: "border-amber-600 bg-amber-300/40 text-amber-950",
+    engine_disagreement: "border-red-600 bg-red-400/35 text-red-900",
     matched: "border-green-600 bg-green-400/35 text-green-900",
-    suspect: "border-amber-600 bg-amber-300/40 text-amber-950",
+    suspect: "border-red-600 bg-red-400/35 text-red-900",
     needs_review: "border-amber-600 bg-amber-300/40 text-amber-950",
   }[status];
 }
@@ -116,9 +116,9 @@ export function getWordReviewBadgeColor(status: AdminOcrReviewStatus): string {
     reference_match: "bg-green-100 text-green-800 border-green-300",
     confirmed_mismatch: "bg-red-100 text-red-800 border-red-300",
     engine_agreement: "bg-green-100 text-green-800 border-green-300",
-    engine_disagreement: "bg-amber-100 text-amber-900 border-amber-400",
+    engine_disagreement: "bg-red-100 text-red-800 border-red-300",
     matched: "bg-green-100 text-green-800 border-green-300",
-    suspect: "bg-amber-100 text-amber-900 border-amber-400",
+    suspect: "bg-red-100 text-red-800 border-red-300",
     needs_review: "bg-amber-100 text-amber-900 border-amber-400",
   }[status];
 }
@@ -1313,11 +1313,10 @@ export function AdminOcrReviewScreen({
             words={words}
           />
           <p className="mt-3 text-sm text-muted">
-            Xanh: hai engine độc lập cùng đọc một từ hoặc từ khớp với reference
-            đã xác minh. Đây là đánh giá tự động có khả năng đúng cao, không
-            phải xác nhận tuyệt đối. Vàng: engine bất đồng hoặc chưa đủ bằng
-            chứng. Đỏ: khác reference đã xác minh trong căn chỉnh một-một rõ
-            ràng. Admin có thể tập trung vào từ vàng và đỏ.
+            Xanh: hai engine OCR cùng đọc hoặc từ khớp reference đã xác minh.
+            Đỏ: hai engine đọc khác nhau theo cặp hoặc reference xác nhận sai.
+            Vàng: thiếu bằng chứng hoặc chưa ghép được từ chắc chắn. Scan OCR
+            không gọi AI; Admin ưu tiên xem các từ đỏ và vàng.
           </p>
           <div
             aria-label="Chú giải trạng thái từ OCR"
@@ -1329,11 +1328,11 @@ export function AdminOcrReviewScreen({
             </span>
             <span className="inline-flex items-center gap-1.5 text-red-800">
               <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
-              Không khớp reference đã xác minh
+              Engine OCR bất đồng / Reference xác nhận sai
             </span>
             <span className="inline-flex items-center gap-1.5 text-amber-900">
               <span className="size-3.5 rounded-sm border border-amber-600 bg-amber-300/40" />
-              Chưa đủ evidence / engine bất đồng
+              Thiếu bằng chứng / căn chỉnh chưa rõ
             </span>
           </div>
           <div
@@ -1367,10 +1366,11 @@ export function AdminOcrReviewScreen({
             </div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
               <strong className="text-lg text-red-700">
-                {reviewCounts.confirmed_mismatch}
+                {reviewCounts.confirmed_mismatch +
+                  reviewCounts.engine_disagreement}
               </strong>
               <div className="text-xs font-bold text-red-900">
-                Sai với reference
+                Có dấu hiệu sai
               </div>
             </div>
             <div className="rounded-control border border-amber-600/40 bg-amber-50 p-2.5 text-center">
@@ -1428,13 +1428,13 @@ export function AdminOcrReviewScreen({
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi chỉnh sửa văn bản, từ đã thay đổi sẽ trở về trạng thái cần
-              kiểm tra. Màu xanh thể hiện hai engine cùng đọc một từ và hệ thống
-              đánh giá khả năng đúng cao; vàng là cần xem lại; đỏ chỉ xuất hiện
-              khi lệch reference đã xác minh với căn chỉnh chắc chắn. AI sửa lỗi
-              có thể gửi ảnh trang và văn bản OCR cần thiết tới Gemini/Groq;
-              Ollama cục bộ là phương án dự phòng cuối cùng. Không gửi dữ liệu
-              cá nhân ngoài phạm vi cần thiết. Đề xuất giữ nguyên số từ để bảo
-              toàn bounding box; lỗi cần tách/gộp từ cần được rà soát thủ công.
+              kiểm tra. Scan OCR không gọi các model AI sửa. Khi bấm “AI sửa”,
+              hệ thống lần lượt dùng gemini-3.5-flash-lite,
+              gemini-3.1-flash-lite và qwen/qwen3.8-27b; Ollama chỉ là phương án
+              cuối nếu các model đó không hoạt động. Ảnh và văn bản cần thiết
+              được gửi tới dịch vụ AI khi bạn chủ động bấm nút này. Đề xuất giữ
+              nguyên số từ để bảo toàn bounding box; lỗi cần tách/gộp từ cần
+              được rà soát thủ công.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -1756,13 +1756,7 @@ export function AdminOcrReviewScreen({
             </p>
             <div
               aria-live="polite"
-              className={`mb-4 rounded-control border px-3 py-2 text-sm ${
-                !textAlignment.canCompare
-                  ? "border-border bg-canvas text-muted"
-                  : textAlignment.different > 0
-                    ? "border-amber-400 bg-amber-50 text-amber-950"
-                    : "border-green-300 bg-green-50 text-green-900"
-              }`}
+              className="mb-4 rounded-control border border-border bg-canvas px-3 py-2 text-sm text-muted"
               role="status"
             >
               <span className="font-bold">Đối chiếu văn bản ↔ vùng OCR: </span>
@@ -1851,7 +1845,7 @@ export function AdminOcrReviewScreen({
                       id={`ocr-word-${word.word_index}`}
                       className={
                         word.word_index === selectedWord
-                          ? "rounded-control border-2 border-orange-500 p-3"
+                          ? "rounded-control border-2 border-neutral-700 p-3"
                           : "rounded-control border border-border p-3"
                       }
                       key={word.word_index}
@@ -1877,15 +1871,7 @@ export function AdminOcrReviewScreen({
                         </div>
                       </div>
 
-                      <div
-                        className={`mb-3 grid gap-1 rounded-control border px-3 py-2 text-sm ${
-                          !canCompareToken
-                            ? "border-border bg-canvas"
-                            : tokenMatches
-                              ? "border-green-300 bg-green-50"
-                              : "border-amber-400 bg-amber-50"
-                        }`}
-                      >
+                      <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
                         <span className="text-xs font-bold text-muted">
                           Văn bản trang ↔ từ gắn với vùng ảnh
                         </span>
@@ -1894,13 +1880,7 @@ export function AdminOcrReviewScreen({
                             ? `${draftToken} ↔ ${word.text}`
                             : "Không thể ghép từ này theo vị trí hiện tại"}
                           {canCompareToken ? (
-                            <span
-                              className={`ml-2 whitespace-nowrap text-xs ${
-                                tokenMatches
-                                  ? "font-bold text-green-800"
-                                  : "font-bold text-amber-900"
-                              }`}
-                            >
+                            <span className="ml-2 whitespace-nowrap text-xs font-bold text-muted">
                               {tokenMatches ? "Khớp" : "Cần đối chiếu"}
                             </span>
                           ) : null}
