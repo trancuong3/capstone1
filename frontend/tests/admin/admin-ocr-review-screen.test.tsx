@@ -147,6 +147,15 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "red",
     );
     expect(
+      getWordReviewColorGroup("needs_review", rawScoreWord(0.2), 0.81),
+    ).toBe("green");
+    expect(
+      getWordReviewColorGroup("needs_review", rawScoreWord(0.99), 0.8),
+    ).toBe("yellow");
+    expect(
+      getWordReviewColorGroup("needs_review", rawScoreWord(0.99), 0.49),
+    ).toBe("red");
+    expect(
       getWordReviewColorGroup("needs_review", {
         ...rawScoreWord(0.99),
         ocr_score_source: "paddle_line_score_v1",
@@ -234,6 +243,102 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(
       within(evidence).getByText(/Unavailable · chưa có calibration evidence/),
     ).toBeInTheDocument();
+  });
+
+  it("uses high Paddle line scores only for Paddle-selected text and keeps accent-only conflicts yellow", async () => {
+    const services = createAdminServiceFixture();
+    const makeDisputedWord = (
+      wordIndex: number,
+      lineIndex: number,
+      text: string,
+      paddleToken: string,
+      vietocrToken: string,
+    ) => ({
+      ...adminR2Fixture.words[0]!,
+      word_index: wordIndex,
+      line_index: lineIndex,
+      text,
+      normalized_text: text.toLocaleLowerCase("vi"),
+      bbox: [0.05 + wordIndex * 0.2, 0.1, 0.1, 0.04] as [
+        number,
+        number,
+        number,
+        number,
+      ],
+      ocr_confidence: null,
+      ocr_score_source: null,
+      ocr_review_status: "engine_disagreement" as const,
+      ocr_evidence: {
+        contract: "dual_engine_agreement_v2" as const,
+        engine_outputs: { paddleocr: paddleToken, vietocr: vietocrToken },
+        alignment: "substitute",
+        engine_agreement_score: 0.4,
+        calibrated_word_accuracy: null,
+        verification_source: null,
+        reference_text: null,
+        review_reason: "Hai engine OCR trả về token khác nhau.",
+      },
+    });
+    services.ocr.getRevision.mockResolvedValue({
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: "đừng chàng mới",
+      ocr_metadata: {
+        line_evidence: [
+          {
+            line_index: 0,
+            paddle_line_confidence: 0.93,
+            paddle_line_score_contract: "paddle_line_score_v1",
+            vietocr_output_used: false,
+          },
+          {
+            line_index: 1,
+            paddle_line_confidence: 0.94,
+            paddle_line_score_contract: "paddle_line_score_v1",
+            vietocr_output_used: false,
+          },
+          {
+            line_index: 2,
+            paddle_line_confidence: 0.99,
+            paddle_line_score_contract: "paddle_line_score_v1",
+            vietocr_output_used: true,
+          },
+        ],
+      },
+      words: [
+        makeDisputedWord(0, 0, "đừng", "đừng", "dung"),
+        makeDisputedWord(1, 1, "chàng", "chàng", "trăng"),
+        makeDisputedWord(2, 2, "mới", "mười", "mới"),
+      ],
+    });
+
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const accentDifference = await screen.findByRole("button", {
+      name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần xem/,
+    });
+    const highPaddleScore = screen.getByRole("button", {
+      name: /Từ 2: chàng\. PaddleOCR dòng >80\/100 · hai engine còn khác/,
+    });
+    const vietOcrSelected = screen.getByRole("button", {
+      name: /Từ 3: mới\. Hai engine OCR bất đồng/,
+    });
+
+    expect(accentDifference).toHaveClass("border-amber-600");
+    expect(highPaddleScore).toHaveClass("border-green-600");
+    expect(vietOcrSelected).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: "Cần xem (2)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Từ #1 · Dòng 1" }),
+    ).not.toBeInTheDocument();
   });
 
   it("returns safe not-found for a page outside the requested book without fetching its content", async () => {

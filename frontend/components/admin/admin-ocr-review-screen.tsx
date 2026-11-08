@@ -58,7 +58,7 @@ type WordReviewColorGroup = Exclude<WordFilter, "all" | "review">;
 type WordScoreSignal = {
   readonly band: WordReviewColorGroup;
   readonly score: number;
-  readonly isCalibrated: boolean;
+  readonly source: "calibrated" | "tesseract" | "paddle_line";
 };
 type AiTokenChange = {
   readonly index: number;
@@ -88,12 +88,25 @@ const LOW_WORD_SCORE_CUTOFF = 0.5;
 
 function getWordScoreSignal(
   word: AdminRevisionWordDTO | undefined,
+  paddleLineScore?: number | null,
 ): WordScoreSignal | null {
   if (!word) return null;
 
   let score: number;
-  let isCalibrated = false;
+  let source: WordScoreSignal["source"];
   if (
+    paddleLineScore !== null &&
+    paddleLineScore !== undefined &&
+    Number.isFinite(paddleLineScore) &&
+    paddleLineScore >= 0 &&
+    paddleLineScore <= 1
+  ) {
+    // When Paddle's text is the selected OCR result, apply its requested line
+    // score band consistently. Accent-only disagreement is handled as yellow
+    // by the caller before this signal can determine the color.
+    score = paddleLineScore;
+    source = "paddle_line";
+  } else if (
     word.ocr_score_source === "tesseract_raw_word_score_v1" &&
     word.ocr_confidence !== null &&
     word.ocr_confidence !== undefined &&
@@ -102,6 +115,7 @@ function getWordScoreSignal(
     word.ocr_confidence <= 1
   ) {
     score = word.ocr_confidence;
+    source = "tesseract";
   } else if (
     word.ocr_score_source === "ocr_calibrated_word_accuracy_v1" &&
     word.ocr_evidence?.contract === "ocr_calibrated_word_accuracy_v1" &&
@@ -111,7 +125,7 @@ function getWordScoreSignal(
     word.ocr_evidence.calibrated_word_accuracy <= 1
   ) {
     score = word.ocr_evidence.calibrated_word_accuracy;
-    isCalibrated = true;
+    source = "calibrated";
   } else {
     return null;
   }
@@ -124,7 +138,7 @@ function getWordScoreSignal(
           ? "red"
           : "yellow",
     score,
-    isCalibrated,
+    source,
   };
 }
 
@@ -156,14 +170,18 @@ function hasDiacriticOnlyEngineDisagreement(
 export function getWordReviewColorGroup(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
+  paddleLineScore?: number | null,
 ): WordReviewColorGroup {
   if (status === "verified" || status === "reference_match") return "green";
   if (status === "confirmed_mismatch") return "red";
-  const scoreBand = getWordScoreSignal(word)?.band;
+  const scoreSignal = getWordScoreSignal(word, paddleLineScore);
+  const scoreBand = scoreSignal?.band;
   if (status === "engine_disagreement") {
     if (hasDiacriticOnlyEngineDisagreement(word)) return "yellow";
+    if (scoreSignal?.source === "paddle_line") return scoreSignal.band;
     return scoreBand === "red" ? "red" : "yellow";
   }
+  if (scoreSignal?.source === "paddle_line") return scoreSignal.band;
   if (status === "engine_agreement") return "green";
   if (
     status === "needs_review" &&
@@ -179,9 +197,10 @@ function matchesWordFilter(
   status: AdminOcrReviewStatus,
   filter: WordFilter,
   word?: AdminRevisionWordDTO,
+  paddleLineScore?: number | null,
 ): boolean {
   if (filter === "all") return true;
-  const group = getWordReviewColorGroup(status, word);
+  const group = getWordReviewColorGroup(status, word, paddleLineScore);
   if (filter === "review") return group !== "green";
   return filter === group;
 }
@@ -189,19 +208,14 @@ function matchesWordFilter(
 export function getWordReviewLabel(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
+  paddleLineScore?: number | null,
 ): string {
-  const scoreSignal = getWordScoreSignal(word);
+  const scoreSignal = getWordScoreSignal(word, paddleLineScore);
   if (
     status === "engine_disagreement" &&
     hasDiacriticOnlyEngineDisagreement(word)
   ) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần xem";
-  }
-  if (status === "engine_disagreement" && scoreSignal?.band === "red") {
-    return `Điểm OCR rất thấp · hai engine còn bất đồng (${Math.round(scoreSignal.score * 100)}/100)`;
-  }
-  if (status === "engine_disagreement" && scoreSignal) {
-    return "Hai engine bất đồng · chưa thể phân xử bằng điểm này";
   }
   if (
     status === "needs_review" &&
@@ -210,8 +224,27 @@ export function getWordReviewLabel(
   ) {
     return "Chưa ghép chắc chắn với bản Admin đã xác minh · cần xem";
   }
+  if (scoreSignal?.source === "paddle_line") {
+    if (scoreSignal.band === "green") {
+      return status === "engine_disagreement"
+        ? "PaddleOCR dòng >80/100 · hai engine còn khác"
+        : "PaddleOCR dòng >80/100 · xanh";
+    }
+    if (scoreSignal.band === "red") {
+      return "PaddleOCR dòng <50/100 · ưu tiên kiểm tra";
+    }
+    return status === "engine_disagreement"
+      ? "PaddleOCR dòng 50–80/100 · hai engine còn khác"
+      : "PaddleOCR dòng 50–80/100 · cần xem";
+  }
+  if (status === "engine_disagreement" && scoreSignal?.band === "red") {
+    return `Điểm OCR rất thấp · hai engine còn bất đồng (${Math.round(scoreSignal.score * 100)}/100)`;
+  }
+  if (status === "engine_disagreement" && scoreSignal) {
+    return "Hai engine bất đồng · chưa thể phân xử bằng điểm này";
+  }
   if (status === "needs_review" && scoreSignal) {
-    if (scoreSignal.isCalibrated) {
+    if (scoreSignal.source === "calibrated") {
       return scoreSignal.band === "green"
         ? "Độ chính xác đã hiệu chuẩn >80% · xanh"
         : scoreSignal.band === "red"
@@ -239,8 +272,9 @@ export function getWordReviewLabel(
 export function getWordReviewColor(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
+  paddleLineScore?: number | null,
 ): string {
-  const group = getWordReviewColorGroup(status, word);
+  const group = getWordReviewColorGroup(status, word, paddleLineScore);
   return {
     green: "border-green-600 bg-green-400/35 text-green-900",
     red: "border-red-600 bg-red-400/35 text-red-900",
@@ -251,8 +285,9 @@ export function getWordReviewColor(
 export function getWordReviewBadgeColor(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
+  paddleLineScore?: number | null,
 ): string {
-  const group = getWordReviewColorGroup(status, word);
+  const group = getWordReviewColorGroup(status, word, paddleLineScore);
   return {
     green: "bg-green-100 text-green-800 border-green-300",
     red: "bg-red-100 text-red-800 border-red-300",
@@ -322,13 +357,58 @@ function getPaddleLineScoreLabel(
   ) {
     return "PaddleOCR dòng: Unavailable";
   }
-  return `PaddleOCR dòng: ${Math.round(rawScore * 100)}/100 · điểm thô · không phải xác suất đúng`;
+  const selectedWithVietOcr = line?.vietocr_output_used === true;
+  return `PaddleOCR dòng: ${Math.round(rawScore * 100)}/100 · điểm thô · không phải xác suất đúng${selectedWithVietOcr ? " · VietOCR được dùng nên không áp màu theo điểm này" : ""}`;
+}
+
+function getPaddleLineScoreForWord(
+  metadata: Record<string, unknown>,
+  word: AdminRevisionWordDTO,
+): number | null {
+  const lineEvidence = metadata.line_evidence;
+  if (!Array.isArray(lineEvidence)) return null;
+  const line = lineEvidence
+    .map(asRecord)
+    .find((item) => item?.line_index === word.line_index);
+  const score = line?.paddle_line_confidence;
+  if (
+    typeof score !== "number" ||
+    !Number.isFinite(score) ||
+    score < 0 ||
+    score > 1 ||
+    line?.vietocr_output_used === true
+  ) {
+    return null;
+  }
+
+  if (line?.vietocr_output_used !== false) {
+    const paddleToken = word.ocr_evidence?.engine_outputs.paddleocr;
+    if (
+      typeof paddleToken !== "string" ||
+      normalizeVietnameseWord(paddleToken) !==
+        normalizeVietnameseWord(word.text)
+    ) {
+      return null;
+    }
+  }
+
+  return score;
+}
+
+function getWordScoreLabel(
+  word: AdminRevisionWordDTO,
+  metadata: Record<string, unknown>,
+): string {
+  return getPaddleLineScoreForWord(metadata, word) !== null
+    ? getPaddleLineScoreLabel(metadata, word.line_index)
+    : getOcrScoreLabel(word);
 }
 
 function OcrImageViewer({
   book,
   draftTokens,
   image,
+  ocrMetadata,
   onSelectWord,
   selectedWord,
   verificationStatus,
@@ -337,6 +417,7 @@ function OcrImageViewer({
   book: AdminBookDTO;
   draftTokens: readonly string[];
   image: AdminPageImageUI;
+  ocrMetadata: Record<string, unknown>;
   onSelectWord: (index: number) => void;
   selectedWord: number | null;
   verificationStatus: AdminPageRevisionDetailDTO["verification_status"];
@@ -398,8 +479,16 @@ function OcrImageViewer({
           {words.map((word) => {
             const currentDraftToken = draftTokens[word.word_index];
             const reviewStatus = getWordReviewStatus(word, verificationStatus);
-            const reviewLabel = getWordReviewLabel(reviewStatus, word);
-            const scoreLabel = getOcrScoreLabel(word);
+            const paddleLineScore = getPaddleLineScoreForWord(
+              ocrMetadata,
+              word,
+            );
+            const reviewLabel = getWordReviewLabel(
+              reviewStatus,
+              word,
+              paddleLineScore,
+            );
+            const scoreLabel = getWordScoreLabel(word, ocrMetadata);
             const selectedClass =
               word.word_index === selectedWord
                 ? "z-10 border-2 ring-2 ring-white"
@@ -411,7 +500,7 @@ function OcrImageViewer({
               <button
                 aria-label={boxLabel}
                 aria-pressed={word.word_index === selectedWord}
-                className={`absolute box-border cursor-pointer rounded-[2px] p-0 ${getWordReviewColor(reviewStatus, word)} ${selectedClass}`}
+                className={`absolute box-border cursor-pointer rounded-[2px] p-0 ${getWordReviewColor(reviewStatus, word, paddleLineScore)} ${selectedClass}`}
                 key={`${word.line_index}-${word.word_index}`}
                 onClick={() => {
                   onSelectWord(word.word_index);
@@ -659,7 +748,11 @@ export function AdminOcrReviewScreen({
 
     const firstUncertain = words.find((word) => {
       const status = getWordReviewStatus(word, detail.verification_status);
-      return getWordReviewColorGroup(status, word) !== "green";
+      const paddleLineScore = getPaddleLineScoreForWord(
+        detail.ocr_metadata,
+        word,
+      );
+      return getWordReviewColorGroup(status, word, paddleLineScore) !== "green";
     });
     if (firstUncertain) {
       autoScrolledRevisionRef.current = detail.page_revision_id;
@@ -702,8 +795,21 @@ export function AdminOcrReviewScreen({
       const selectedStatus = selected
         ? getWordReviewStatus(selected, detail?.verification_status)
         : "needs_review";
-      if (!matchesWordFilter(selectedStatus, wordFilter, selected)) {
-        setWordFilter(getWordReviewColorGroup(selectedStatus, selected));
+      const paddleLineScore =
+        selected && detail
+          ? getPaddleLineScoreForWord(detail.ocr_metadata, selected)
+          : null;
+      if (
+        !matchesWordFilter(
+          selectedStatus,
+          wordFilter,
+          selected,
+          paddleLineScore,
+        )
+      ) {
+        setWordFilter(
+          getWordReviewColorGroup(selectedStatus, selected, paddleLineScore),
+        );
       }
 
       const element =
@@ -724,7 +830,7 @@ export function AdminOcrReviewScreen({
         }
       }
     },
-    [detail?.verification_status, draftText, wordFilter, words],
+    [detail, draftText, wordFilter, words],
   );
 
   function handleDraftTextChange(value: string) {
@@ -1300,18 +1406,24 @@ export function AdminOcrReviewScreen({
     };
     for (const word of words) {
       const status = getWordReviewStatus(word, detail?.verification_status);
-      counts[getWordReviewColorGroup(status, word)] += 1;
+      const paddleLineScore = detail
+        ? getPaddleLineScoreForWord(detail.ocr_metadata, word)
+        : null;
+      counts[getWordReviewColorGroup(status, word, paddleLineScore)] += 1;
     }
     return counts;
-  }, [detail?.verification_status, words]);
+  }, [detail, words]);
 
   const filteredWords = useMemo(
     () =>
       words.filter((word) => {
         const status = getWordReviewStatus(word, detail?.verification_status);
-        return matchesWordFilter(status, wordFilter, word);
+        const paddleLineScore = detail
+          ? getPaddleLineScoreForWord(detail.ocr_metadata, word)
+          : null;
+        return matchesWordFilter(status, wordFilter, word, paddleLineScore);
       }),
-    [detail?.verification_status, wordFilter, words],
+    [detail, wordFilter, words],
   );
 
   useEffect(() => {
@@ -1345,9 +1457,14 @@ export function AdminOcrReviewScreen({
     () =>
       words.filter((word) => {
         const status = getWordReviewStatus(word, detail?.verification_status);
-        return getWordReviewColorGroup(status, word) !== "green";
+        const paddleLineScore = detail
+          ? getPaddleLineScoreForWord(detail.ocr_metadata, word)
+          : null;
+        return (
+          getWordReviewColorGroup(status, word, paddleLineScore) !== "green"
+        );
       }),
-    [detail?.verification_status, words],
+    [detail, words],
   );
   const nextWordToReview = useMemo(
     () =>
@@ -1431,18 +1548,18 @@ export function AdminOcrReviewScreen({
             book={book}
             draftTokens={draftTokens}
             image={image}
+            ocrMetadata={detail.ocr_metadata}
             onSelectWord={selectWordOnImage}
             selectedWord={selectedWord}
             verificationStatus={detail.verification_status}
             words={words}
           />
           <p className="mt-3 text-sm leading-6 text-muted">
-            Danh sách bên cạnh ưu tiên từ đỏ và vàng. Xanh gồm từ đã được xác
-            minh, hai engine cùng đọc hoặc điểm trên 80/100 khi không có bất
-            đồng; vàng gồm nghi vấn dấu, điểm 50–80 hoặc thiếu căn cứ; đỏ gồm
-            reference đã xác minh không khớp hoặc điểm dưới 50/100. Điểm thô chỉ
-            là tín hiệu phân loại, không phải xác suất đúng. Quét OCR không gọi
-            AI.
+            PaddleOCR dòng trên 80/100 tô xanh khi văn bản Paddle được dùng;
+            nghi vấn khác dấu vẫn vàng. Điểm 50–80 tô vàng, dưới 50 tô đỏ. Nếu
+            VietOCR thay văn bản Paddle, điểm dòng Paddle không đổi màu. Điểm
+            OCR thô chỉ là tín hiệu phân loại, không phải xác suất đúng. Quét
+            OCR không gọi AI.
           </p>
           <div
             aria-label="Thống kê trạng thái từ OCR"
@@ -1662,8 +1779,14 @@ export function AdminOcrReviewScreen({
                           detail.verification_status,
                         )
                       : "needs_review";
+                    const originalPaddleLineScore = originalWord
+                      ? getPaddleLineScoreForWord(
+                          detail.ocr_metadata,
+                          originalWord,
+                        )
+                      : null;
                     const originalScoreLabel = originalWord
-                      ? getOcrScoreLabel(originalWord)
+                      ? getWordScoreLabel(originalWord, detail.ocr_metadata)
                       : "Không có điểm OCR riêng cho từ này";
                     return (
                       <li
@@ -1692,7 +1815,7 @@ export function AdminOcrReviewScreen({
                             </span>
                             <span className="flex flex-wrap items-center gap-2 break-words">
                               <del
-                                className={`rounded border px-1.5 py-0.5 ${getWordReviewBadgeColor(originalStatus, originalWord)}`}
+                                className={`rounded border px-1.5 py-0.5 ${getWordReviewBadgeColor(originalStatus, originalWord, originalPaddleLineScore)}`}
                               >
                                 {change.original}
                               </del>
@@ -1709,6 +1832,7 @@ export function AdminOcrReviewScreen({
                                 {getWordReviewLabel(
                                   originalStatus,
                                   originalWord,
+                                  originalPaddleLineScore,
                                 )}{" "}
                                 · {originalScoreLabel}
                               </span>
@@ -1955,11 +2079,20 @@ export function AdminOcrReviewScreen({
                     word,
                     detail.verification_status,
                   );
+                  const paddleLineScore = getPaddleLineScoreForWord(
+                    detail.ocr_metadata,
+                    word,
+                  );
                   const colorGroup = getWordReviewColorGroup(
                     reviewStatus,
                     word,
+                    paddleLineScore,
                   );
-                  const reviewLabel = getWordReviewLabel(reviewStatus, word);
+                  const reviewLabel = getWordReviewLabel(
+                    reviewStatus,
+                    word,
+                    paddleLineScore,
+                  );
                   const draftToken = draftTokens[word.word_index];
                   const canCompareToken =
                     textAlignment.canCompare && draftToken !== undefined;
@@ -1999,7 +2132,7 @@ export function AdminOcrReviewScreen({
                         </button>
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <span
-                            className={`rounded border px-2 py-0.5 text-xs font-bold ${getWordReviewBadgeColor(reviewStatus, word)}`}
+                            className={`rounded border px-2 py-0.5 text-xs font-bold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
                           >
                             {reviewLabel}
                           </span>
@@ -2026,7 +2159,8 @@ export function AdminOcrReviewScreen({
                                 Điểm OCR rất thấp · ưu tiên kiểm tra
                               </span>
                               <span className="break-words">
-                                Từ OCR: “{word.text}” · {getOcrScoreLabel(word)}
+                                Từ OCR: “{word.text}” ·{" "}
+                                {getWordScoreLabel(word, detail.ocr_metadata)}
                               </span>
                               <span className="text-xs">
                                 Màu đỏ theo ngưỡng điểm thấp, chưa phải xác nhận
@@ -2113,7 +2247,8 @@ export function AdminOcrReviewScreen({
                         open={word.word_index === selectedWord}
                       >
                         <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
-                          Bằng chứng nhận dạng · {getOcrScoreLabel(word)}
+                          Bằng chứng nhận dạng ·{" "}
+                          {getWordScoreLabel(word, detail.ocr_metadata)}
                         </summary>
                         <section
                           aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
