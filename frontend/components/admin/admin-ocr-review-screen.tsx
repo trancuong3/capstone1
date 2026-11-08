@@ -90,9 +90,9 @@ export function getWordReviewLabel(status: AdminOcrReviewStatus): string {
     reference_match: "Khớp văn bản Admin đã xác minh",
     confirmed_mismatch: "Không khớp văn bản Admin đã xác minh",
     engine_agreement: "Khả năng đúng cao · hai engine cùng đọc",
-    engine_disagreement: "Hai engine OCR đọc khác nhau · cần ưu tiên xem",
+    engine_disagreement: "Hai engine OCR bất đồng · chưa biết từ nào đúng",
     matched: "Khả năng đúng cao · hai engine cùng đọc",
-    suspect: "Hai engine OCR đọc khác nhau · cần ưu tiên xem",
+    suspect: "Hai engine OCR bất đồng · chưa biết từ nào đúng",
     needs_review: "Chưa đủ evidence để kết luận · cần Admin xem xét",
   }[status];
 }
@@ -103,9 +103,9 @@ export function getWordReviewColor(status: AdminOcrReviewStatus): string {
     reference_match: "border-green-600 bg-green-400/35 text-green-900",
     confirmed_mismatch: "border-red-600 bg-red-400/35 text-red-900",
     engine_agreement: "border-green-600 bg-green-400/35 text-green-900",
-    engine_disagreement: "border-red-600 bg-red-400/35 text-red-900",
+    engine_disagreement: "border-amber-600 bg-amber-300/40 text-amber-950",
     matched: "border-green-600 bg-green-400/35 text-green-900",
-    suspect: "border-red-600 bg-red-400/35 text-red-900",
+    suspect: "border-amber-600 bg-amber-300/40 text-amber-950",
     needs_review: "border-amber-600 bg-amber-300/40 text-amber-950",
   }[status];
 }
@@ -116,9 +116,9 @@ export function getWordReviewBadgeColor(status: AdminOcrReviewStatus): string {
     reference_match: "bg-green-100 text-green-800 border-green-300",
     confirmed_mismatch: "bg-red-100 text-red-800 border-red-300",
     engine_agreement: "bg-green-100 text-green-800 border-green-300",
-    engine_disagreement: "bg-red-100 text-red-800 border-red-300",
+    engine_disagreement: "bg-amber-100 text-amber-900 border-amber-400",
     matched: "bg-green-100 text-green-800 border-green-300",
-    suspect: "bg-red-100 text-red-800 border-red-300",
+    suspect: "bg-amber-100 text-amber-900 border-amber-400",
     needs_review: "bg-amber-100 text-amber-900 border-amber-400",
   }[status];
 }
@@ -1314,9 +1314,9 @@ export function AdminOcrReviewScreen({
           />
           <p className="mt-3 text-sm text-muted">
             Xanh: hai engine OCR cùng đọc hoặc từ khớp reference đã xác minh.
-            Đỏ: hai engine đọc khác nhau theo cặp hoặc reference xác nhận sai.
-            Vàng: thiếu bằng chứng hoặc chưa ghép được từ chắc chắn. Scan OCR
-            không gọi AI; Admin ưu tiên xem các từ đỏ và vàng.
+            Đỏ: reference đã xác minh chứng minh từ OCR bị sai. Vàng: engine bất
+            đồng hoặc thiếu căn cứ kết luận. Scan OCR không gọi AI; Admin ưu
+            tiên xem các từ đỏ và vàng.
           </p>
           <div
             aria-label="Chú giải trạng thái từ OCR"
@@ -1328,11 +1328,11 @@ export function AdminOcrReviewScreen({
             </span>
             <span className="inline-flex items-center gap-1.5 text-red-800">
               <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
-              Engine OCR bất đồng / Reference xác nhận sai
+              Reference đã xác minh không khớp
             </span>
             <span className="inline-flex items-center gap-1.5 text-amber-900">
               <span className="size-3.5 rounded-sm border border-amber-600 bg-amber-300/40" />
-              Thiếu bằng chứng / căn chỉnh chưa rõ
+              Engine bất đồng / thiếu bằng chứng
             </span>
           </div>
           <div
@@ -1366,11 +1366,10 @@ export function AdminOcrReviewScreen({
             </div>
             <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
               <strong className="text-lg text-red-700">
-                {reviewCounts.confirmed_mismatch +
-                  reviewCounts.engine_disagreement}
+                {reviewCounts.confirmed_mismatch}
               </strong>
               <div className="text-xs font-bold text-red-900">
-                Có dấu hiệu sai
+                Sai theo reference
               </div>
             </div>
             <div className="rounded-control border border-amber-600/40 bg-amber-50 p-2.5 text-center">
