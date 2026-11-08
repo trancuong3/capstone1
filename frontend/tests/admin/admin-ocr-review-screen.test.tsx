@@ -286,13 +286,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: Cao\. OCR lệch nội dung rõ · nghi sai/,
     });
     const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa\. Nghi sai dấu hoặc confidence thấp/,
+      name: /Từ 2: Vừa\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
     });
     const low = screen.getByRole("button", {
       name: /Từ 3: Thấp\. Admin đã xác nhận ảnh/,
     });
     const unknown = screen.getByRole("button", {
-      name: /Từ 4: Chưa rõ\. Nghi sai dấu hoặc confidence thấp/,
+      name: /Từ 4: Chưa rõ\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
     });
     const exactMatch = screen.getByRole("button", {
       name: /Từ 5: Khớp\. Hai engine khớp chính xác · confidence cao/,
@@ -382,7 +382,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Bounding box từ OCR: 1 từ/,
     });
     const wordBox = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Nghi sai dấu hoặc confidence thấp\. Confidence từ Tesseract: 95\/100 · điểm thô/,
+      name: /Từ 1: Nội\. Chưa đủ evidence để kết luận · cần Admin xem xét\. Confidence từ Tesseract: 95\/100 · điểm thô/,
     });
     expect(overlay).toContainElement(wordBox);
     expect(wordBox).toHaveClass("border-amber-600");
@@ -625,7 +625,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toEqual(["Nội", "dung", "revision", "đã", "hành"]);
     expect(
       screen.getByRole("button", {
-        name: /Từ 4: đã\. Nghi sai dấu hoặc confidence thấp/,
+        name: /Từ 4: đã\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
       }),
     ).toBeInTheDocument();
     expect(
@@ -664,7 +664,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
     expect(
       screen.getByRole("button", {
-        name: /Từ 1: Nội\. Nghi sai dấu hoặc confidence thấp/,
+        name: /Từ 1: Nội\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
       }),
     ).toHaveClass("border-amber-600");
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(

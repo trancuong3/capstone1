@@ -171,8 +171,13 @@ class DualEngineOcrTests(unittest.TestCase):
         )
         self.assertEqual(
             [word["ocr_review_status"] for word in result["words"]],
-            ["matched", "needs_review", "needs_review"],
+            ["needs_review", "needs_review", "needs_review"],
         )
+        for confidence in (None, 0.0, 0.92, 1.0):
+            self.assertEqual(
+                ocr_engine._tesseract_review_status(confidence),
+                "needs_review",
+            )
         self.assertEqual(
             result["metadata"]["ocr_score_contract"], "tesseract_raw_word_score_v1"
         )

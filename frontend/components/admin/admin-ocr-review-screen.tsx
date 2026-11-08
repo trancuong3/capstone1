@@ -75,7 +75,7 @@ export function getWordReviewLabel(status: AdminOcrReviewStatus): string {
     verified: "Admin đã xác nhận ảnh",
     matched: "Hai engine khớp chính xác · confidence cao",
     suspect: "OCR lệch nội dung rõ · nghi sai",
-    needs_review: "Nghi sai dấu hoặc confidence thấp",
+    needs_review: "Chưa đủ evidence để kết luận · cần Admin xem xét",
   }[status];
 }
 

@@ -229,7 +229,6 @@ DUAL_ENGINE_SCORE_CONTRACT = "dual_engine_consensus_v1"
 PADDLE_LINE_SCORE_CONTRACT = "paddle_line_score_v1"
 OCR_AUTO_MATCH_MIN_LINE_SCORE = 0.70
 OCR_RED_MAX_TOKEN_SIMILARITY = 0.35
-TESSERACT_GREEN_MIN_SCORE = 0.85
 
 
 def _word_ocr_evidence(
@@ -293,11 +292,8 @@ def _word_ocr_evidence(
     return round(score, 4), status, DUAL_ENGINE_SCORE_CONTRACT
 
 
-def _tesseract_review_status(confidence: float | None) -> str:
-    if confidence is None:
-        return "needs_review"
-    if confidence >= TESSERACT_GREEN_MIN_SCORE:
-        return "matched"
+def _tesseract_review_status(_confidence: float | None) -> str:
+    """A single engine's raw score cannot establish independent OCR agreement."""
     return "needs_review"
 
 
