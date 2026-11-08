@@ -4,7 +4,7 @@
 
 AI sửa OCR xử lý từng chunk theo thứ tự `Gemini 3.5 Flash-Lite` → `Groq Qwen 3.8 27B` → `Gemini 3.1 Flash-Lite` → `Ollama Qwen3-VL` cục bộ. Backend gửi ảnh crop cùng văn bản từng đoạn, kiểm tra JSON/schema, số token, token không chắc chắn và dấu câu trước khi ghép kết quả. Việc giữ nguyên số từ giúp bảo toàn bounding box, đồng thời có nghĩa model không tự sửa lỗi cần thêm, bớt, tách hoặc gộp từ.
 
-Đặt `OCR_CLOUD_CORRECTION_ENABLED=false` để chỉ chạy Ollama. Khi bật cloud nhưng thiếu `GEMINI_API_KEY` hoặc `GROQ_API_KEY`, provider tương ứng bị bỏ qua an toàn; Ollama vẫn là phương án cuối. Lỗi xác thực, quota hoặc lỗi dịch vụ cấp Google sẽ bỏ qua Gemini còn lại dùng cùng credential. Nếu mọi provider của một chunk đều thất bại, toàn bộ job thất bại đóng và không trả partial result; draft không bị thay đổi.
+Đặt `OCR_CLOUD_CORRECTION_ENABLED=false` để chỉ chạy Ollama. Khi bật cloud nhưng thiếu `GEMINI_API_KEY` hoặc `GROQ_API_KEY`, provider tương ứng bị bỏ qua an toàn; Ollama vẫn là phương án cuối. Lỗi xác thực, quota hoặc lỗi dịch vụ cấp Google sẽ bỏ qua Gemini còn lại dùng cùng credential. Nếu provider trả `uncertain_word_indices`, backend chuyển các từ đó cho provider tiếp theo; từ đã được xác nhận sẽ được giữ cố định. Sau Ollama, từ vẫn chưa chắc chắn được giữ nguyên OCR gốc và được ghi nhận bằng diagnostic event an toàn. Nếu mọi provider chỉ trả lỗi hoặc response không hợp lệ, toàn bộ job thất bại đóng và draft không bị thay đổi.
 
 Yêu cầu AI sửa chạy như job nền. Trạng thái, tiến độ, lỗi và kết quả được giữ trong RAM của **một process backend** tối đa một giờ; tối đa một job OCR đồng thời và tối đa bốn job đang chạy/chờ. Job bị mất khi process khởi động lại. Vì vậy cấu hình phù hợp hiện tại là một backend process, không scale ngang hoặc chạy nhiều worker. Nếu cần HA/scale nhiều instance, thay bộ quản lý RAM bằng queue/broker có xác thực và chính sách lưu trữ đã được duyệt; không ghi nội dung OCR vào database dùng chung.
 
@@ -21,11 +21,12 @@ Các kích thước hiện hành có thể thay đổi theo tag: Qwen3-VL 4B Q4_
 ## Cấu hình an toàn
 
 - Chỉ backend đọc `GEMINI_API_KEY` và `GROQ_API_KEY`; không đặt chúng trong frontend, `NEXT_PUBLIC_*`, log, URL request hay source control.
+- Dùng `python backend/scripts/diagnose_ocr_correction.py` từ repo root để xem cấu hình hiệu lực, nguồn biến môi trường và provider chain. Script chỉ in trạng thái key đã cấu hình, không in secret, OCR text hoặc gửi request.
 - Cloud nhận đúng ảnh crop và OCR text/ngữ cảnh cần thiết để sửa chunk; không gửi access token, parent/child/session data hoặc URL ảnh public. Crop chỉ tồn tại trong RAM.
 - Cấu hình server bằng `.env` riêng theo các placeholder trong `backend/.env.example`:
 
 ```env
-OCR_CLOUD_CORRECTION_ENABLED=false
+OCR_CLOUD_CORRECTION_ENABLED=true
 GEMINI_API_KEY=
 GROQ_API_KEY=
 GEMINI_OCR_PRIMARY_MODEL=gemini-3.5-flash-lite
@@ -65,6 +66,8 @@ Invoke-RestMethod http://127.0.0.1:11434/api/tags
 ```
 
 Health screen Admin hiển thị model tag đang cấu hình và trạng thái probe cục bộ. Không có Ollama/model thì job thất bại an toàn, giữ nguyên draft.
+
+Khi muốn dùng cloud trong development, đặt `OCR_CLOUD_CORRECTION_ENABLED=true` trong `backend/.env`, cấu hình các key mới trong backend environment, rồi khởi động lại đúng backend process. Biến trong environment của process có ưu tiên cao hơn dotenv; chạy lại lệnh chẩn đoán sau khi khởi động để xác nhận chain thực tế.
 
 ### Chạy local với frontend 3000 và backend 8001
 

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 
 from app.diagnostic_logging import log_diagnostic
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text, reconstruct_ocr_text
@@ -140,14 +141,29 @@ class OcrCorrectionOrchestrator:
 
     async def _correct_chunk(self, *, chunk_id, chunk, crop, disabled_families):
         attempted = False
+        has_valid_response = False
+        working_words = [token.text for token in chunk.tokens]
+        unresolved_indices = set(range(chunk.expected_word_count))
+        request_chunk = chunk
         for provider in self.providers:
             if provider.family in disabled_families:
                 continue
             attempted = True
             started = time.perf_counter()
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="ocr_provider_started",
+                stage="chunk_correction",
+                provider=provider.name,
+                model=getattr(provider, "model", None),
+                chunk_id=chunk_id,
+            )
             try:
                 result = await provider.correct_chunk(
-                    chunk=chunk, image_bytes=crop, image_mime_type="image/jpeg"
+                    chunk=request_chunk,
+                    image_bytes=crop,
+                    image_mime_type="image/jpeg",
                 )
             except OcrProviderError as exc:
                 if exc.disables_family:
@@ -183,6 +199,28 @@ class OcrCorrectionOrchestrator:
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
                 continue
+            has_valid_response = True
+            uncertain = set(result.uncertain_word_indices)
+            for index in unresolved_indices - uncertain:
+                working_words[index] = result.corrected_words[index]
+            unresolved_indices.intersection_update(uncertain)
+            if unresolved_indices:
+                request_chunk = self._chunk_with_words(chunk, working_words)
+                next_provider = self._next_provider_name(provider, disabled_families)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="ocr_provider_fallback",
+                    stage="chunk_correction",
+                    provider=provider.name,
+                    model=getattr(provider, "model", None),
+                    next_provider=next_provider,
+                    reason_code="UNCERTAIN_TOKENS",
+                    uncertain_count=len(unresolved_indices),
+                    chunk_id=chunk_id,
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+                continue
             log_diagnostic(
                 logger,
                 logging.INFO,
@@ -193,9 +231,48 @@ class OcrCorrectionOrchestrator:
                 chunk_id=chunk_id,
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
-            return result
+            return replace(
+                result,
+                corrected_words=tuple(working_words),
+                uncertain_word_indices=(),
+            )
+        if has_valid_response:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="ocr_uncertain_tokens_preserved",
+                stage="chunk_correction",
+                chunk_id=chunk_id,
+                uncertain_count=len(unresolved_indices),
+            )
+            return replace(
+                result,
+                corrected_words=tuple(working_words),
+                uncertain_word_indices=tuple(sorted(unresolved_indices)),
+            )
         code = "ALL_PROVIDERS_SKIPPED" if not attempted else "ALL_PROVIDERS_FAILED"
         raise OcrOrchestrationError(code)
+
+    @staticmethod
+    def _chunk_with_words(chunk, words):
+        """Build the next provider's input with resolved words held fixed."""
+        first_start = chunk.tokens[0].start
+        cursor = 0
+        pieces: list[str] = []
+        updated_tokens = []
+        for token, word in zip(chunk.tokens, words, strict=True):
+            relative_start = token.start - first_start
+            relative_end = token.end - first_start
+            pieces.append(chunk.target_text[cursor:relative_start])
+            pieces.append(word)
+            cursor = relative_end
+            updated_tokens.append(replace(token, text=word))
+        pieces.append(chunk.target_text[cursor:])
+        return replace(
+            chunk,
+            target_text="".join(pieces),
+            tokens=tuple(updated_tokens),
+        )
 
     def _next_provider_name(
         self, current: OcrCorrectionProvider, disabled_families: set[str]

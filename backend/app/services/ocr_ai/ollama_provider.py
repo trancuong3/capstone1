@@ -23,6 +23,7 @@ class OllamaOcrProvider:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._config = config
+        self.model = config.model
         self._transport = transport
 
     async def correct_chunk(
@@ -35,7 +36,7 @@ class OllamaOcrProvider:
         # Ollama accepts raw base64 image bytes; the crop is generated in memory
         # by the orchestrator and is never written to a public path.
         payload = {
-            "model": self._config.model,
+            "model": self.model,
             "stream": False,
             # Qwen3-VL may put its structured answer in Ollama's separate
             # `thinking` field when reasoning is left enabled. OCR consumes
