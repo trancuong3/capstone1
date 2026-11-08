@@ -1811,7 +1811,7 @@ export function AdminOcrReviewScreen({
                       </div>
 
                       <label className="grid gap-1 text-sm font-bold">
-                        Chỉnh từ OCR
+                        Chỉnh từ OCR - Từ {word.word_index + 1}
                         <input
                           className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
                           disabled={verified || busy !== null}

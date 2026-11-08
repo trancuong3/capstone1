@@ -21,6 +21,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.router import api_router
 from app.models import BookPage, PageRevision, PageRevisionWord
 from app.repositories.admin_ocr_repository import AdminOcrRepository
+from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.admin_ocr_service import AdminOcrService
 from app.services.reading_content_service import ReadingContentService
 
@@ -298,7 +299,8 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
 
             async with self.sessions() as session:
-                reading = ReadingContentService(session)
+                reading_repository = ReadingContentRepository(session)
+                reading = ReadingContentService(reading_repository)
                 reading_page = await reading.repository.verified_page(PAGE_ID, BOOK_ID)
                 self.assertIsNotNone(reading_page)
                 current_revision = await reading.repository.verified_revision(

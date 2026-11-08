@@ -455,10 +455,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.clear(pageText);
     await user.type(pageText, "Ta đi học.");
 
-    const wordInputs = screen.getAllByLabelText("Văn bản từ");
+    const wordInputs = screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/);
     expect(
       wordInputs.map((input) => (input as HTMLInputElement).value),
     ).toEqual(["Ta", "đi", "học."]);
+    expect(screen.getByLabelText("Chỉnh từ OCR - Từ 1")).toHaveValue("Ta");
+    expect(screen.getByLabelText("Chỉnh từ OCR - Từ 2")).toHaveValue("đi");
+    expect(screen.getByLabelText("Chỉnh từ OCR - Từ 3")).toHaveValue("học.");
     expect(pageText).toHaveValue("Ta đi học.");
     expect(boxes.map((box) => (box as HTMLInputElement).value)).toEqual(
       originalBoxValues,
@@ -480,7 +483,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(
       screen
-        .getAllByLabelText("Văn bản từ")
+        .getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)
         .map((input) => (input as HTMLInputElement).value),
     ).toEqual(["Ta", "đi", "học."]);
   });
@@ -616,7 +619,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
     );
     expect(textarea).toHaveValue("Nội dung revision đã hành");
-    const wordInputs = screen.getAllByLabelText("Văn bản từ");
+    const wordInputs = screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/);
     expect(
       wordInputs.map((input) => (input as HTMLInputElement).value),
     ).toEqual(["Nội", "dung", "revision", "đã", "hành"]);
@@ -739,7 +742,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(textarea).toHaveValue(source.draft_text);
     expect(
       screen
-        .getAllByLabelText("Văn bản từ")
+        .getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)
         .map((input) => (input as HTMLInputElement).value),
     ).toEqual(source.words.map((word) => word.text));
     expect(
@@ -770,7 +773,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
     await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
     expect(textarea).toBeDisabled();
-    expect(screen.getAllByLabelText("Văn bản từ")[0]).toBeDisabled();
+    expect(screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)[0]).toBeDisabled();
     resolveCorrection?.("Nội dung AI đã sửa");
 
     await waitFor(() =>
