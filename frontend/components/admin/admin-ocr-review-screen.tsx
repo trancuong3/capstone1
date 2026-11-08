@@ -76,14 +76,22 @@ export function getWordReviewStatus(
     : "needs_review";
 }
 
+function isLikelyCorrectStatus(status: AdminOcrReviewStatus): boolean {
+  return (
+    status === "verified" ||
+    status === "reference_match" ||
+    status === "engine_agreement"
+  );
+}
+
 export function getWordReviewLabel(status: AdminOcrReviewStatus): string {
   return {
     verified: "Admin đã xác nhận ảnh",
     reference_match: "Khớp văn bản Admin đã xác minh",
     confirmed_mismatch: "Không khớp văn bản Admin đã xác minh",
-    engine_agreement: "Hai engine đồng ý · chưa xác minh nội dung",
+    engine_agreement: "Khả năng đúng cao · hai engine cùng đọc",
     engine_disagreement: "Hai engine khác nhau · chưa biết từ nào đúng",
-    matched: "Hai engine đồng ý · chưa xác minh nội dung",
+    matched: "Khả năng đúng cao · hai engine cùng đọc",
     suspect: "Hai engine khác nhau · chưa biết từ nào đúng",
     needs_review: "Chưa đủ evidence để kết luận · cần Admin xem xét",
   }[status];
@@ -94,9 +102,9 @@ export function getWordReviewColor(status: AdminOcrReviewStatus): string {
     verified: "border-green-600 bg-green-400/35 text-green-900",
     reference_match: "border-green-600 bg-green-400/35 text-green-900",
     confirmed_mismatch: "border-red-600 bg-red-400/35 text-red-900",
-    engine_agreement: "border-sky-600 bg-sky-300/35 text-sky-950",
+    engine_agreement: "border-green-600 bg-green-400/35 text-green-900",
     engine_disagreement: "border-amber-600 bg-amber-300/40 text-amber-950",
-    matched: "border-sky-600 bg-sky-300/35 text-sky-950",
+    matched: "border-green-600 bg-green-400/35 text-green-900",
     suspect: "border-amber-600 bg-amber-300/40 text-amber-950",
     needs_review: "border-amber-600 bg-amber-300/40 text-amber-950",
   }[status];
@@ -107,9 +115,9 @@ export function getWordReviewBadgeColor(status: AdminOcrReviewStatus): string {
     verified: "bg-green-100 text-green-800 border-green-300",
     reference_match: "bg-green-100 text-green-800 border-green-300",
     confirmed_mismatch: "bg-red-100 text-red-800 border-red-300",
-    engine_agreement: "bg-sky-100 text-sky-900 border-sky-300",
+    engine_agreement: "bg-green-100 text-green-800 border-green-300",
     engine_disagreement: "bg-amber-100 text-amber-900 border-amber-400",
-    matched: "bg-sky-100 text-sky-900 border-sky-300",
+    matched: "bg-green-100 text-green-800 border-green-300",
     suspect: "bg-amber-100 text-amber-900 border-amber-400",
     needs_review: "bg-amber-100 text-amber-900 border-amber-400",
   }[status];
@@ -376,7 +384,7 @@ export function AdminOcrReviewScreen({
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
-  const [wordFilter, setWordFilter] = useState<"all" | "review" | "matched">(
+  const [wordFilter, setWordFilter] = useState<"all" | "review" | "likely">(
     "all",
   );
   const [error, setError] = useState<LoadError | null>(null);
@@ -515,7 +523,9 @@ export function AdminOcrReviewScreen({
 
     const firstUncertain = words.find(
       (word) =>
-        getWordReviewStatus(word, detail.verification_status) !== "verified",
+        !isLikelyCorrectStatus(
+          getWordReviewStatus(word, detail.verification_status),
+        ),
     );
     if (firstUncertain) {
       autoScrolledRevisionRef.current = detail.page_revision_id;
@@ -558,11 +568,10 @@ export function AdminOcrReviewScreen({
       const selectedStatus = selected
         ? getWordReviewStatus(selected, detail?.verification_status)
         : "needs_review";
-      const isConfirmed =
-        selectedStatus === "reference_match" || selectedStatus === "verified";
+      const isLikelyCorrect = isLikelyCorrectStatus(selectedStatus);
       if (
-        (wordFilter === "matched" && !isConfirmed) ||
-        (wordFilter === "review" && isConfirmed)
+        (wordFilter === "likely" && !isLikelyCorrect) ||
+        (wordFilter === "review" && isLikelyCorrect)
       ) {
         setWordFilter("all");
       }
@@ -1175,8 +1184,8 @@ export function AdminOcrReviewScreen({
       words.filter((word) => {
         if (wordFilter === "all") return true;
         const status = getWordReviewStatus(word, detail?.verification_status);
-        const confirmed = status === "reference_match" || status === "verified";
-        return wordFilter === "review" ? !confirmed : confirmed;
+        const isLikelyCorrect = isLikelyCorrectStatus(status);
+        return wordFilter === "review" ? !isLikelyCorrect : isLikelyCorrect;
       }),
     [detail?.verification_status, wordFilter, words],
   );
@@ -1212,7 +1221,7 @@ export function AdminOcrReviewScreen({
     () =>
       words.filter((word) => {
         const status = getWordReviewStatus(word, detail?.verification_status);
-        return status !== "verified" && status !== "reference_match";
+        return !isLikelyCorrectStatus(status);
       }),
     [detail?.verification_status, words],
   );
@@ -1304,10 +1313,11 @@ export function AdminOcrReviewScreen({
             words={words}
           />
           <p className="mt-3 text-sm text-muted">
-            Xanh: Admin đã xác nhận hoặc từ khớp chính xác với revision đã xác
-            minh của chính trang này. Xanh dương: hai engine đồng ý nhưng chưa
-            xác minh nội dung. Vàng: chưa đủ bằng chứng hoặc engine bất đồng.
-            Đỏ: token khác với văn bản tham chiếu đã được Admin xác minh.
+            Xanh: hai engine độc lập cùng đọc một từ hoặc từ khớp với reference
+            đã xác minh. Đây là đánh giá tự động có khả năng đúng cao, không
+            phải xác nhận tuyệt đối. Vàng: engine bất đồng hoặc chưa đủ bằng
+            chứng. Đỏ: khác reference đã xác minh trong căn chỉnh một-một rõ
+            ràng. Admin có thể tập trung vào từ vàng và đỏ.
           </p>
           <div
             aria-label="Chú giải trạng thái từ OCR"
@@ -1315,11 +1325,7 @@ export function AdminOcrReviewScreen({
           >
             <span className="inline-flex items-center gap-1.5 text-green-800">
               <span className="size-3.5 rounded-sm border border-green-600 bg-green-400/40" />
-              Reference khớp / Admin xác nhận
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-sky-900">
-              <span className="size-3.5 rounded-sm border border-sky-600 bg-sky-300/40" />
-              Hai engine đồng ý, chưa xác minh
+              Engine cùng đọc / Reference khớp / Admin xác nhận
             </span>
             <span className="inline-flex items-center gap-1.5 text-red-800">
               <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
@@ -1335,12 +1341,12 @@ export function AdminOcrReviewScreen({
             className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-3 2xl:grid-cols-5"
             role="group"
           >
-            <div className="rounded-control border border-sky-600/40 bg-sky-50 p-2.5 text-center">
-              <strong className="text-lg text-sky-800">
+            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
+              <strong className="text-lg text-green-700">
                 {reviewCounts.engine_agreement}
               </strong>
-              <div className="text-xs font-bold text-sky-950">
-                Engine đồng ý
+              <div className="text-xs font-bold text-green-900">
+                Khả năng đúng cao
               </div>
             </div>
             <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
@@ -1369,7 +1375,9 @@ export function AdminOcrReviewScreen({
             </div>
             <div className="rounded-control border border-amber-600/40 bg-amber-50 p-2.5 text-center">
               <strong className="text-lg text-amber-800">
-                {reviewCounts.engine_disagreement + reviewCounts.needs_review}
+                {reviewCounts.confirmed_mismatch +
+                  reviewCounts.engine_disagreement +
+                  reviewCounts.needs_review}
               </strong>
               <div className="text-xs font-bold text-amber-950">
                 Cần Admin xem
@@ -1420,13 +1428,13 @@ export function AdminOcrReviewScreen({
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi chỉnh sửa văn bản, từ đã thay đổi sẽ trở về trạng thái cần
-              kiểm tra. Màu hộp phản ánh mức khớp OCR (xanh: hai engine cùng đọc
-              khớp rõ hoặc Admin xác nhận, vàng: nghi sai dấu/confidence thấp,
-              đỏ: lệch nội dung rõ). AI sửa lỗi có thể gửi ảnh trang và văn bản
-              OCR cần thiết tới Gemini/Groq; Ollama cục bộ là phương án dự phòng
-              cuối cùng. Không gửi dữ liệu cá nhân ngoài phạm vi cần thiết. Đề
-              xuất giữ nguyên số từ để bảo toàn bounding box; lỗi cần tách/gộp
-              từ cần được rà soát thủ công.
+              kiểm tra. Màu xanh thể hiện hai engine cùng đọc một từ và hệ thống
+              đánh giá khả năng đúng cao; vàng là cần xem lại; đỏ chỉ xuất hiện
+              khi lệch reference đã xác minh với căn chỉnh chắc chắn. AI sửa lỗi
+              có thể gửi ảnh trang và văn bản OCR cần thiết tới Gemini/Groq;
+              Ollama cục bộ là phương án dự phòng cuối cùng. Không gửi dữ liệu
+              cá nhân ngoài phạm vi cần thiết. Đề xuất giữ nguyên số từ để bảo
+              toàn bounding box; lỗi cần tách/gộp từ cần được rà soát thủ công.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -1781,13 +1789,15 @@ export function AdminOcrReviewScreen({
                     count:
                       reviewCounts.confirmed_mismatch +
                       reviewCounts.engine_disagreement +
-                      reviewCounts.needs_review +
-                      reviewCounts.engine_agreement,
+                      reviewCounts.needs_review,
                   },
                   {
-                    id: "matched",
-                    label: "Đã xác minh",
-                    count: reviewCounts.reference_match + reviewCounts.verified,
+                    id: "likely",
+                    label: "Khả năng đúng cao",
+                    count:
+                      reviewCounts.reference_match +
+                      reviewCounts.verified +
+                      reviewCounts.engine_agreement,
                   },
                 ] as const
               ).map((filter) => (

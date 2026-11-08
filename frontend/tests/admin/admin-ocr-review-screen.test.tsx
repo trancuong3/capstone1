@@ -102,7 +102,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(parsed.words[0]?.ocr_score_source).toBeNull();
   });
 
-  it("uses green only for verified reference matches and amber for engine disagreement", () => {
+  it("uses green for automatic engine agreement, amber for uncertainty, and red for confirmed mismatch", () => {
     for (const text of ["sư", "đồ", "cửa"]) {
       const status = getWordReviewStatus({
         ...adminR1Fixture.words[0]!,
@@ -116,6 +116,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     }
     expect(getWordReviewColor("engine_disagreement")).toContain(
       "border-amber-600",
+    );
+    expect(getWordReviewColor("engine_agreement")).toContain(
+      "border-green-600",
+    );
+    expect(getWordReviewColor("confirmed_mismatch")).toContain(
+      "border-red-600",
     );
   });
 
@@ -296,7 +302,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
-  it("keeps engine disagreement amber and agreement neutral until reference or Admin verification", async () => {
+  it("keeps engine disagreement amber and colors automatic agreement green", async () => {
     const services = createAdminServiceFixture();
     const reviewDetail: AdminPageRevisionDetailDTO = {
       ...adminR2Fixture,
@@ -371,22 +377,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const unknown = screen.getByRole("button", {
       name: /Từ 4: Chưa rõ\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
     });
-    const exactMatch = screen.getByRole("button", {
-      name: /Từ 5: Khớp\. Hai engine đồng ý · chưa xác minh nội dung/,
+    const likelyCorrect = screen.getByRole("button", {
+      name: /Từ 5: Khớp\. Khả năng đúng cao · hai engine cùng đọc/,
     });
 
     expect(high).toHaveClass("border-red-600");
     expect(medium).toHaveClass("border-amber-600");
     expect(low).toHaveClass("border-green-600");
     expect(unknown).toHaveClass("border-amber-600");
-    expect(exactMatch).toHaveClass("border-sky-600");
+    expect(likelyCorrect).toHaveClass("border-green-600");
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/1\s*Engine đồng ý/);
+    expect(stats).toHaveTextContent(/1\s*Khả năng đúng cao/);
     expect(stats).toHaveTextContent(/1\s*Admin xác nhận/);
     expect(stats).toHaveTextContent(/1\s*Sai với reference/);
-    expect(stats).toHaveTextContent(/2\s*Cần Admin xem/);
+    expect(stats).toHaveTextContent(/3\s*Cần Admin xem/);
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
     ).toBeEnabled();
@@ -402,7 +408,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("keeps exact engine agreement in the manual review queue", async () => {
+  it("keeps exact engine agreement green and removes it from the manual review queue", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
       ...adminR2Fixture,
@@ -425,12 +431,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Hai engine đồng ý · chưa xác minh nội dung/,
+      name: /Từ 1: Nội\. Khả năng đúng cao · hai engine cùng đọc/,
     });
-    expect(matchedWord).toHaveClass("border-sky-600");
+    expect(matchedWord).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
-    ).toBeEnabled();
+    ).toBeDisabled();
+    expect(screen.getByText("Không còn từ cần kiểm tra")).toBeInTheDocument();
   });
 
   it("keeps a word amber when agreement evidence asks for review despite a high raw score", async () => {

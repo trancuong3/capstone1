@@ -212,6 +212,20 @@ class DualEngineOcrTests(unittest.TestCase):
         )
         self.assertIsNone(wrong_reference[0]["ocr_confidence"])
 
+        punctuation_match = [{"text": "Cửa,"}]
+        AdminOcrService._apply_verified_reference(punctuation_match, "cửa")
+        self.assertEqual(
+            punctuation_match[0]["ocr_review_status"], "reference_match"
+        )
+
+        ambiguous_alignment = [{"text": token} for token in ("sư", "on", "cửa")]
+        AdminOcrService._apply_verified_reference(ambiguous_alignment, "sư ơn")
+        self.assertEqual(
+            [word["ocr_review_status"] for word in ambiguous_alignment],
+            ["reference_match", "needs_review", "needs_review"],
+            "Unequal token counts must not create false red mismatch labels.",
+        )
+
         verified_words = [{"text": text, "ocr_confidence": None} for text in ("sư", "đồ", "cửa")]
         AdminOcrService._apply_verified_reference(verified_words, "sư đồ cửa")
         self.assertEqual(
