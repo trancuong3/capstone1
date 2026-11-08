@@ -225,109 +225,166 @@ def is_vietocr_reliable(
     return True
 
 
-DUAL_ENGINE_SCORE_CONTRACT = "dual_engine_consensus_v1"
+DUAL_ENGINE_EVIDENCE_CONTRACT = "dual_engine_agreement_v2"
 PADDLE_LINE_SCORE_CONTRACT = "paddle_line_score_v1"
-OCR_AUTO_MATCH_MIN_LINE_SCORE = 0.70
-OCR_RED_MAX_TOKEN_SIMILARITY = 0.35
+MAX_ALIGNMENT_CELLS = 100_000
+
+
+def _token_surface(value: str) -> str:
+    return unicodedata.normalize("NFC", str(value)).strip()
+
+
+def _token_alignment_cost(left: str, right: str) -> float:
+    """Return a bounded alignment cost; accent folding is only a hint."""
+    left_surface = _token_surface(left)
+    right_surface = _token_surface(right)
+    if left_surface == right_surface:
+        return 0.0
+
+    left_norm = normalize_word(left_surface)
+    right_norm = normalize_word(right_surface)
+    if left_norm and right_norm and left_norm == right_norm:
+        # Case and punctuation differences can be aligned, but are not exact.
+        return 0.1
+    if left_norm and right_norm and strip_accents(left_norm) == strip_accents(right_norm):
+        return 0.3
+
+    if not left_norm or not right_norm or max(len(left_norm), len(right_norm)) > 128:
+        return 1.1
+    distance = float(jiwer.cer(left_norm, right_norm))
+    # Unrelated tokens are cheaper to represent as a delete plus an insert.
+    return min(1.5, distance * 1.1)
+
+
+def align_ocr_tokens(
+    primary_tokens: list[str],
+    secondary_tokens: list[str],
+    *,
+    max_cells: int = MAX_ALIGNMENT_CELLS,
+) -> list[dict[str, object]]:
+    """Globally align tokens in order, with explicit gaps and one-to-one pairs."""
+    left_count = len(primary_tokens)
+    right_count = len(secondary_tokens)
+    if left_count * right_count > max_cells:
+        return (
+            [
+                {"operation": "delete", "primary_index": i, "secondary_index": None, "similarity": None}
+                for i in range(left_count)
+            ]
+            + [
+                {"operation": "insert", "primary_index": None, "secondary_index": j, "similarity": None}
+                for j in range(right_count)
+            ]
+        )
+
+    gap_cost = 0.45
+    costs = [[0.0] * (right_count + 1) for _ in range(left_count + 1)]
+    steps: list[list[str | None]] = [
+        [None] * (right_count + 1) for _ in range(left_count + 1)
+    ]
+    for i in range(1, left_count + 1):
+        costs[i][0] = i * gap_cost
+        steps[i][0] = "delete"
+    for j in range(1, right_count + 1):
+        costs[0][j] = j * gap_cost
+        steps[0][j] = "insert"
+
+    for i in range(1, left_count + 1):
+        for j in range(1, right_count + 1):
+            substitution_cost = _token_alignment_cost(
+                primary_tokens[i - 1], secondary_tokens[j - 1]
+            )
+            options = (
+                (costs[i - 1][j - 1] + substitution_cost, "pair"),
+                (costs[i - 1][j] + gap_cost, "delete"),
+                (costs[i][j - 1] + gap_cost, "insert"),
+            )
+            best_cost, best_step = options[0]
+            for candidate_cost, candidate_step in options[1:]:
+                if candidate_cost < best_cost - 1e-12:
+                    best_cost, best_step = candidate_cost, candidate_step
+            costs[i][j] = best_cost
+            steps[i][j] = best_step
+
+    aligned: list[dict[str, object]] = []
+    i, j = left_count, right_count
+    while i or j:
+        step = steps[i][j]
+        if step == "pair":
+            primary_index, secondary_index = i - 1, j - 1
+            exact = _token_surface(primary_tokens[primary_index]) == _token_surface(
+                secondary_tokens[secondary_index]
+            )
+            similarity = max(
+                0.0,
+                min(
+                    1.0,
+                    1.0
+                    - float(
+                        jiwer.cer(
+                            _token_surface(primary_tokens[primary_index]).casefold(),
+                            _token_surface(secondary_tokens[secondary_index]).casefold(),
+                        )
+                    ),
+                ),
+            )
+            aligned.append(
+                {
+                    "operation": "match" if exact else "substitute",
+                    "primary_index": primary_index,
+                    "secondary_index": secondary_index,
+                    "similarity": round(similarity, 4),
+                }
+            )
+            i -= 1
+            j -= 1
+        elif step == "delete":
+            aligned.append(
+                {"operation": "delete", "primary_index": i - 1, "secondary_index": None, "similarity": None}
+            )
+            i -= 1
+        elif step == "insert":
+            aligned.append(
+                {"operation": "insert", "primary_index": None, "secondary_index": j - 1, "similarity": None}
+            )
+            j -= 1
+        else:
+            raise RuntimeError("OCR token alignment has an invalid backtrace")
+    aligned.reverse()
+    return aligned
+
+
+def _word_engine_evidence(
+    recognized_word: str,
+    other_engine_word: str | None,
+) -> tuple[float | None, str]:
+    recognized = _token_surface(recognized_word)
+    other = _token_surface(other_engine_word or "")
+    if not recognized or not other:
+        return None, "needs_review"
+    if recognized == other:
+        return 1.0, "engine_agreement"
+    try:
+        similarity = max(0.0, min(1.0, 1.0 - float(jiwer.cer(recognized.casefold(), other.casefold()))))
+    except (TypeError, ValueError, ZeroDivisionError):
+        similarity = None
+    return (round(similarity, 4) if similarity is not None else None), "engine_disagreement"
 
 
 def _word_ocr_evidence(
     recognized_word: str,
     other_engine_word: str | None,
-    line_confidence: float | None,
-) -> tuple[float | None, str, str | None]:
-    """Build word-level consensus evidence without claiming calibrated probability.
-
-    Exact agreement gets the green ``matched`` state only when Paddle's line
-    confidence is not low. Tone-only changes stay yellow. Large lexical
-    disagreement with a strong line score becomes red. The score combines token
-    agreement and Paddle's line score; the API records its source separately.
-    """
-    line_score: float | None = None
-    if line_confidence is not None:
-        try:
-            candidate = float(line_confidence)
-            if np.isfinite(candidate) and 0.0 <= candidate <= 1.0:
-                line_score = candidate
-        except (TypeError, ValueError, OverflowError):
-            pass
-
-    recognized_display = unicodedata.normalize("NFC", recognized_word).strip().casefold()
-    other_display = unicodedata.normalize("NFC", other_engine_word or "").strip().casefold()
-    recognized = normalize_word(recognized_display)
-    other = normalize_word(other_display)
-    if not recognized or not other:
-        return line_score, "needs_review", PADDLE_LINE_SCORE_CONTRACT if line_score is not None else None
-
-    if recognized_display == other_display:
-        agreement = 1.0
-        status = (
-            "matched"
-            if line_score is None or line_score >= OCR_AUTO_MATCH_MIN_LINE_SCORE
-            else "needs_review"
-        )
-    elif (
-        recognized == other
-        or strip_accents(recognized) == strip_accents(other)
-    ):
-        # Same word body but different Vietnamese marks, punctuation, or casing.
-        agreement = 0.70
-        status = "needs_review"
-    else:
-        try:
-            agreement = max(0.0, min(1.0, 1.0 - float(jiwer.cer(recognized, other))))
-        except (TypeError, ValueError, ZeroDivisionError):
-            agreement = 0.0
-        status = (
-            "suspect"
-            if line_score is not None
-            and line_score >= OCR_AUTO_MATCH_MIN_LINE_SCORE
-            and agreement <= OCR_RED_MAX_TOKEN_SIMILARITY
-            else "needs_review"
-        )
-
-    # When the detector supplied no usable line score, exact consensus still
-    # counts as high evidence; other comparisons remain conservative.
-    score = agreement if line_score is None else (agreement + line_score) / 2.0
-    return round(score, 4), status, DUAL_ENGINE_SCORE_CONTRACT
+    line_confidence: float | None = None,
+) -> tuple[None, str, None]:
+    """Compatibility wrapper: engine evidence never becomes word probability."""
+    del line_confidence
+    _, status = _word_engine_evidence(recognized_word, other_engine_word)
+    return None, status, None
 
 
 def _tesseract_review_status(_confidence: float | None) -> str:
-    """A single engine's raw score cannot establish independent OCR agreement."""
+    """A raw score from one engine cannot establish correctness."""
     return "needs_review"
-
-
-def _find_best_matching_paddle_token(
-    viet_word: str,
-    paddle_tokens: list[str],
-    current_idx: int,
-    window_size: int = 3,
-) -> str | None:
-    if not paddle_tokens:
-        return None
-
-    v_norm = normalize_word(viet_word)
-    v_base = strip_accents(v_norm)
-
-    start = max(0, current_idx - window_size)
-    end = min(len(paddle_tokens), current_idx + window_size + 1)
-    candidates = paddle_tokens[start:end]
-
-    for candidate in candidates:
-        if normalize_word(candidate).lower() == v_norm.lower():
-            return candidate
-
-    for candidate in candidates:
-        if strip_accents(normalize_word(candidate)) == v_base:
-            return candidate
-
-    for candidate in candidates:
-        c_base = strip_accents(normalize_word(candidate))
-        if c_base and v_base and abs(len(c_base) - len(v_base)) <= 1:
-            if jiwer.cer(v_base, c_base) <= 0.35:
-                return candidate
-
-    return None
 
 
 def _order_quad_points(pts: np.ndarray) -> np.ndarray:
@@ -389,9 +446,14 @@ def _extract_curved_lines_from_items(
         pts = _order_quad_points(raw[0])
         p_text = str(raw[1][0]) if (len(raw) > 1 and raw[1]) else ""
         try:
-            p_conf = float(raw[1][1]) if (len(raw) > 1 and raw[1]) else 0.0
-        except (TypeError, ValueError):
-            p_conf = 0.0
+            raw_confidence = raw[1][1] if (len(raw) > 1 and raw[1]) else None
+            p_conf = (
+                float("nan")
+                if raw_confidence is None or isinstance(raw_confidence, (bool, np.bool_))
+                else float(raw_confidence)
+            )
+        except (TypeError, ValueError, OverflowError):
+            p_conf = float("nan")
 
         raw_w = max(np.linalg.norm(pts[0] - pts[1]), np.linalg.norm(pts[2] - pts[3]))
         raw_h = max(np.linalg.norm(pts[0] - pts[3]), np.linalg.norm(pts[1] - pts[2]))
@@ -735,7 +797,18 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "normalized_text": normalized,
             "bbox": [left / orig_width, top / orig_height, w / orig_width, h / orig_height],
             "ocr_confidence": confidence,
+            "ocr_score_source": "tesseract_raw_word_score_v1" if confidence is not None else None,
             "ocr_review_status": _tesseract_review_status(confidence),
+            "ocr_evidence": {
+                "contract": "tesseract_raw_word_score_v1",
+                "engine_outputs": {"tesseract": token},
+                "alignment": "single_engine",
+                "engine_agreement_score": None,
+                "calibrated_word_accuracy": None,
+                "verification_source": None,
+                "reference_text": None,
+                "review_reason": "Chỉ có điểm thô từ một engine; Admin cần xác minh nội dung.",
+            },
         })
         lines.setdefault(line, []).append(token)
 
@@ -749,6 +822,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
         "metadata": {
             "engine": "tesseract",
             "ocr_score_contract": "tesseract_raw_word_score_v1",
+            "ocr_evidence_contract": "tesseract_raw_word_score_v1",
             "language": target_lang,
             "word_count": len(words),
             "line_count": len(lines),
@@ -801,6 +875,7 @@ def _extract_text_and_boxes_dual_engine(
 
     words_output: list[dict[str, object]] = []
     lines_output: list[str] = []
+    line_evidence: list[dict[str, object]] = []
 
     for line_idx, item in enumerate(ordered_items):
         paddle_text = item["paddle_text"]
@@ -853,18 +928,77 @@ def _extract_text_and_boxes_dual_engine(
             w for w in (viet_text_candidate or "").split() if normalize_word(w)
         ]
         other_engine_tokens = paddle_tokens if viet_text_used else vietocr_tokens
+        alignment = align_ocr_tokens(valid_words, other_engine_tokens)
+        by_primary_index = {
+            int(step["primary_index"]): step
+            for step in alignment
+            if step["primary_index"] is not None
+        }
+        line_index = len(lines_output)
+        valid_line_confidence = None
+        try:
+            if not isinstance(paddle_conf, bool):
+                candidate_line_score = float(paddle_conf)
+                if np.isfinite(candidate_line_score) and 0 <= candidate_line_score <= 1:
+                    valid_line_confidence = candidate_line_score
+        except (TypeError, ValueError, OverflowError):
+            pass
+        alignment_operations = []
+        for step in alignment:
+            primary_index = step["primary_index"]
+            secondary_index = step["secondary_index"]
+            primary_token = (
+                valid_words[int(primary_index)] if primary_index is not None else None
+            )
+            secondary_token = (
+                other_engine_tokens[int(secondary_index)]
+                if secondary_index is not None
+                else None
+            )
+            alignment_operations.append({
+                "operation": step["operation"],
+                "paddle_token": secondary_token if viet_text_used else primary_token,
+                "vietocr_token": primary_token if viet_text_used else secondary_token,
+            })
+        line_evidence.append({
+            "line_index": line_index,
+            "paddle_output": paddle_text,
+            "vietocr_output": viet_text_candidate,
+            "paddle_line_confidence": valid_line_confidence,
+            "paddle_line_score_contract": PADDLE_LINE_SCORE_CONTRACT,
+            "vietocr_output_used": viet_text_used,
+            "alignment_operations": alignment_operations,
+        })
 
         for w_idx, raw_token in enumerate(valid_words):
+            step = by_primary_index.get(w_idx)
+            secondary_index = (
+                int(step["secondary_index"])
+                if step is not None and step["secondary_index"] is not None
+                else None
+            )
             matched_other_token = (
-                other_engine_tokens[w_idx]
-                if len(other_engine_tokens) == len(valid_words)
-                else _find_best_matching_paddle_token(
-                    raw_token, other_engine_tokens, w_idx, window_size=3
-                )
+                other_engine_tokens[secondary_index]
+                if secondary_index is not None
+                else None
             )
-            word_confidence, review_status, score_source = _word_ocr_evidence(
-                raw_token, matched_other_token, paddle_conf
+            agreement, review_status = _word_engine_evidence(
+                raw_token, matched_other_token
             )
+            operation = str(step["operation"]) if step is not None else "unmatched"
+            if operation == "delete":
+                operation = "unmatched"
+
+            paddle_token = raw_token if not viet_text_used else matched_other_token
+            vietocr_token = raw_token if viet_text_used else matched_other_token
+            if operation == "insert":
+                review_reason = "Engine còn lại có thêm token; hệ thống không ghép theo vị trí."
+            elif operation == "unmatched":
+                review_reason = "Không tìm thấy từ tương ứng đáng tin cậy ở engine còn lại."
+            elif operation == "match":
+                review_reason = "Hai engine trả về cùng token; điều này chưa xác minh từ có đúng không."
+            else:
+                review_reason = "Hai token đã căn chỉnh khác nhau; bất đồng chưa cho biết token nào đúng."
 
             norm_token = normalize_word(raw_token)
             words_output.append({
@@ -873,9 +1007,22 @@ def _extract_text_and_boxes_dual_engine(
                 "text": raw_token,
                 "normalized_text": norm_token,
                 "bbox": line_boxes[w_idx],
-                "ocr_confidence": word_confidence,
+                "ocr_confidence": None,
                 "ocr_review_status": review_status,
-                "ocr_score_source": score_source,
+                "ocr_score_source": None,
+                "ocr_evidence": {
+                    "contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+                    "engine_outputs": {
+                        "paddleocr": paddle_token,
+                        "vietocr": vietocr_token,
+                    },
+                    "alignment": operation,
+                    "engine_agreement_score": agreement,
+                    "calibrated_word_accuracy": None,
+                    "verification_source": None,
+                    "reference_text": None,
+                    "review_reason": review_reason,
+                },
             })
 
         lines_output.append(" ".join(valid_words))
@@ -906,7 +1053,8 @@ def _extract_text_and_boxes_dual_engine(
         "metadata": {
             "engine": "paddleocr_vietocr_dual",
             "engine_version": "PP-OCRv4 + VietOCR-vgg_transformer",
-            "ocr_score_contract": DUAL_ENGINE_SCORE_CONTRACT,
+            "ocr_evidence_contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+            "ocr_score_contract": None,
             "language": "vi",
             "coordinate_space": "normalized_original_dimensions",
             "source_width": orig_width,
@@ -917,6 +1065,7 @@ def _extract_text_and_boxes_dual_engine(
             "word_count": len(words_output),
             "line_count": len(lines_output),
             "reading_layout": layout_type,
+            "line_evidence": line_evidence,
         },
     }
 

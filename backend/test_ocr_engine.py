@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 from app.services import ocr_engine
+from app.services.admin_ocr_service import AdminOcrService
 
 
 def sample_png_bytes(width: int = 400, height: int = 200) -> bytes:
@@ -98,14 +99,19 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(first_word["text"], "Chú")
         self.assertEqual(first_word["normalized_text"], "chú")
         self.assertEqual(first_word["line_index"], 0)
-        self.assertEqual(first_word["ocr_score_source"], "dual_engine_consensus_v1")
-        self.assertEqual(first_word["ocr_review_status"], "needs_review")
+        self.assertIsNone(first_word["ocr_score_source"])
+        self.assertIsNone(first_word["ocr_confidence"])
+        self.assertEqual(first_word["ocr_review_status"], "engine_disagreement")
         self.assertEqual(
             [word["ocr_review_status"] for word in result["words"]],
-            ["needs_review", "needs_review"],
-            "Tone-only disagreement should be yellow, not red",
+            ["engine_disagreement", "engine_disagreement"],
+            "Tone-only disagreement requires review and is not evidence of which token is wrong",
         )
-        self.assertTrue(all(word["ocr_confidence"] >= 0.8 for word in result["words"]))
+        self.assertTrue(all(word["ocr_confidence"] is None for word in result["words"]))
+        self.assertEqual(
+            [word["ocr_evidence"]["alignment"] for word in result["words"]],
+            ["substitute", "substitute"],
+        )
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
@@ -122,35 +128,159 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["coordinate_space"], "normalized_original_dimensions")
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
-        self.assertEqual(meta["ocr_score_contract"], "dual_engine_consensus_v1")
+        self.assertIsNone(meta["ocr_score_contract"])
+        self.assertEqual(meta["ocr_evidence_contract"], "dual_engine_agreement_v2")
+        self.assertEqual(meta["line_evidence"][0]["paddle_line_confidence"], 0.95)
+        self.assertEqual(
+            meta["line_evidence"][0]["paddle_line_score_contract"],
+            "paddle_line_score_v1",
+        )
 
-    def test_word_evidence_maps_exact_tone_and_lexical_differences_to_colors(self):
-        score, status, source = ocr_engine._word_ocr_evidence("Chú", "Chú", 0.95)
-        self.assertEqual(status, "matched")
-        self.assertEqual(source, "dual_engine_consensus_v1")
-        self.assertGreaterEqual(score or 0, 0.95)
+    def test_dual_engine_line_evidence_keeps_insertions_and_deletions_separate_from_boxes(self):
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("một ba", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "một hai ba"
 
-        for recognized, alternative in (("ma", "má"), ("a", "ă"), ("d", "đ")):
-            with self.subTest(recognized=recognized, alternative=alternative):
-                _, status, _ = ocr_engine._word_ocr_evidence(
-                    recognized, alternative, 0.95
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        line = result["metadata"]["line_evidence"][0]
+        operations = line["alignment_operations"]
+        self.assertNotEqual(line["paddle_output"].split(), line["vietocr_output"].split())
+        self.assertTrue(any(step["operation"] in {"insert", "delete"} for step in operations))
+        self.assertEqual(len(result["words"]), len(result["text"].split()))
+        self.assertTrue(all(len(word["bbox"]) == 4 for word in result["words"]))
+        self.assertTrue(
+            all(word["ocr_confidence"] is None for word in result["words"]),
+            "The raw Paddle line score must not be duplicated into word probability.",
+        )
+
+    def test_invalid_paddle_line_scores_remain_unavailable_at_line_scope(self):
+        quad = [[40.0, 30.0], [160.0, 30.0], [160.0, 70.0], [40.0, 70.0]]
+        for invalid_score in (float("nan"), float("inf"), True, -0.1, 1.1):
+            with self.subTest(score=invalid_score):
+                mock_paddle = MagicMock()
+                mock_paddle.ocr.return_value = [[[quad, ("ma", invalid_score)]]]
+                mock_viet = MagicMock()
+                mock_viet.predict.return_value = "ma"
+                with (
+                    patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+                    patch.object(ocr_engine.cv2, "imwrite"),
+                    patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+                ):
+                    result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+                self.assertIsNone(
+                    result["metadata"]["line_evidence"][0]["paddle_line_confidence"]
                 )
-                self.assertEqual(status, "needs_review")
+                self.assertIsNone(result["words"][0]["ocr_confidence"])
 
-        _, low_confidence_status, _ = ocr_engine._word_ocr_evidence(
-            "Chú", "Chú", 0.45
-        )
-        self.assertEqual(low_confidence_status, "needs_review")
+    def test_word_evidence_separates_agreement_from_probability_and_reference(self):
+        score, status, source = ocr_engine._word_ocr_evidence("on", "on", 0.95)
+        self.assertIsNone(score)
+        self.assertIsNone(source)
+        self.assertEqual(status, "engine_agreement")
 
-        _, wrong_word_status, _ = ocr_engine._word_ocr_evidence(
-            "con", "ngôi", 0.95
+        wrong_reference = [{
+            "text": "on",
+            "ocr_confidence": None,
+            "ocr_evidence": {
+                "contract": "dual_engine_agreement_v2",
+                "engine_outputs": {"paddleocr": "on", "vietocr": "on"},
+                "alignment": "match",
+                "engine_agreement_score": 1.0,
+                "calibrated_word_accuracy": None,
+                "verification_source": None,
+                "reference_text": None,
+                "review_reason": "Both engines returned the same token.",
+            },
+        }]
+        operations = AdminOcrService._apply_verified_reference(
+            wrong_reference, "ơn"
         )
-        self.assertEqual(wrong_word_status, "suspect")
+        self.assertEqual(operations[0]["operation"], "substitute")
+        self.assertEqual(wrong_reference[0]["ocr_review_status"], "confirmed_mismatch")
+        self.assertEqual(wrong_reference[0]["ocr_evidence"]["reference_text"], "ơn")
+        self.assertEqual(
+            wrong_reference[0]["ocr_evidence"]["verification_source"],
+            "verified_revision",
+        )
+        self.assertIsNone(wrong_reference[0]["ocr_confidence"])
 
-        _, uncertain_word_status, _ = ocr_engine._word_ocr_evidence(
-            "mèo", "mẹo", 0.95
+        verified_words = [{"text": text, "ocr_confidence": None} for text in ("sư", "đồ", "cửa")]
+        AdminOcrService._apply_verified_reference(verified_words, "sư đồ cửa")
+        self.assertEqual(
+            [word["ocr_review_status"] for word in verified_words],
+            ["reference_match", "reference_match", "reference_match"],
         )
-        self.assertEqual(uncertain_word_status, "needs_review")
+
+    def test_vietnamese_diacritics_are_alignment_hints_not_exact_matches(self):
+        pairs = (
+            ("ơn", "on"),
+            ("nàng", "nảng"),
+            ("sư", "su"),
+            ("đồ", "đo"),
+            ("cửa", "cua"),
+            ("ma", "má"),
+            ("a", "ă"),
+            ("d", "đ"),
+        )
+        for recognized, alternative in pairs:
+            with self.subTest(recognized=recognized, alternative=alternative):
+                alignment = ocr_engine.align_ocr_tokens([recognized], [alternative])
+                self.assertEqual(len(alignment), 1)
+                self.assertEqual(alignment[0]["operation"], "substitute")
+                self.assertLess(alignment[0]["similarity"], 1.0)
+
+    def test_sequence_alignment_is_global_monotonic_and_explicit_about_gaps(self):
+        equal = ocr_engine.align_ocr_tokens(
+            ["Ngọc", "đế", "ơn", "trên"], ["Ngọc", "đế", "on", "trên"]
+        )
+        self.assertEqual(
+            [step["operation"] for step in equal],
+            ["match", "match", "substitute", "match"],
+        )
+        self.assertEqual(
+            [(step["primary_index"], step["secondary_index"]) for step in equal],
+            [(0, 0), (1, 1), (2, 2), (3, 3)],
+        )
+
+        missing = ocr_engine.align_ocr_tokens(
+            ["đầu", "giữa", "cuối"], ["đầu", "cuối"]
+        )
+        self.assertIn(
+            ("delete", 1, None),
+            [(step["operation"], step["primary_index"], step["secondary_index"]) for step in missing],
+        )
+        extra = ocr_engine.align_ocr_tokens(["một", "ba"], ["một", "hai", "ba"])
+        self.assertIn(
+            ("insert", None, 1),
+            [(step["operation"], step["primary_index"], step["secondary_index"]) for step in extra],
+        )
+
+        repeated = ocr_engine.align_ocr_tokens(
+            ["đi", "đi", "đến"], ["đi", "xa", "đi", "đến"]
+        )
+        primary_matches = [
+            step["primary_index"] for step in repeated if step["primary_index"] is not None
+        ]
+        secondary_matches = [
+            step["secondary_index"] for step in repeated if step["secondary_index"] is not None
+        ]
+        self.assertEqual(len(primary_matches), len(set(primary_matches)))
+        self.assertEqual(len(secondary_matches), len(set(secondary_matches)))
+        self.assertEqual(primary_matches, sorted(primary_matches))
+        self.assertEqual(secondary_matches, sorted(secondary_matches))
+
+        punctuation = ocr_engine.align_ocr_tokens(["cửa,", "Sư"], ["cửa", "sư"])
+        self.assertEqual([step["operation"] for step in punctuation], ["substitute", "substitute"])
+        capped = ocr_engine.align_ocr_tokens(["a", "b"], ["a", "b"], max_cells=1)
+        self.assertEqual([step["operation"] for step in capped], ["delete", "delete", "insert", "insert"])
 
     def test_tesseract_keeps_its_per_word_raw_scores_without_claiming_verification(self):
         data = {
@@ -180,6 +310,10 @@ class DualEngineOcrTests(unittest.TestCase):
             )
         self.assertEqual(
             result["metadata"]["ocr_score_contract"], "tesseract_raw_word_score_v1"
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["contract"],
+            "tesseract_raw_word_score_v1",
         )
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):

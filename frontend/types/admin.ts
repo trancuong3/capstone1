@@ -98,12 +98,35 @@ export interface AdminPageLifecycleDTO {
 }
 
 export type AdminOcrReviewStatus =
-  "matched" | "suspect" | "needs_review" | "verified";
+  | "matched"
+  | "suspect"
+  | "needs_review"
+  | "engine_agreement"
+  | "engine_disagreement"
+  | "reference_match"
+  | "confirmed_mismatch"
+  | "verified";
 
 export type AdminOcrScoreSource =
   | "tesseract_raw_word_score_v1"
   | "dual_engine_consensus_v1"
-  | "paddle_line_score_v1";
+  | "paddle_line_score_v1"
+  | "ocr_calibrated_word_accuracy_v1";
+
+export interface AdminOcrWordEvidenceDTO {
+  readonly contract:
+    | "dual_engine_agreement_v2"
+    | "tesseract_raw_word_score_v1"
+    | "ocr_calibrated_word_accuracy_v1";
+  readonly engine_outputs: Readonly<Record<string, string | null>>;
+  readonly alignment: string;
+  readonly engine_agreement_score: number | null;
+  readonly calibrated_word_accuracy: number | null;
+  readonly verification_source: "admin" | "verified_revision" | null;
+  readonly reference_text: string | null;
+  readonly reference_alignment?: string | null;
+  readonly review_reason: string;
+}
 
 export interface AdminRevisionWordDTO {
   readonly word_index: number;
@@ -114,6 +137,7 @@ export interface AdminRevisionWordDTO {
   readonly ocr_confidence: number | null;
   readonly ocr_review_status?: AdminOcrReviewStatus;
   readonly ocr_score_source?: AdminOcrScoreSource | null;
+  readonly ocr_evidence?: AdminOcrWordEvidenceDTO | null;
 }
 
 export interface AdminPageRevisionDetailDTO {

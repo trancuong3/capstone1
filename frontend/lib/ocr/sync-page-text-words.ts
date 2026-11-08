@@ -80,6 +80,7 @@ export function syncPageTextToWords(
       normalized_text: normalizeVietnameseWord(token),
       ocr_confidence: tokenChanged ? null : word.ocr_confidence,
       ocr_score_source: tokenChanged ? null : word.ocr_score_source,
+      ocr_evidence: tokenChanged ? null : word.ocr_evidence,
       ocr_review_status: tokenChanged
         ? ("needs_review" as const)
         : (word.ocr_review_status ?? "needs_review"),
