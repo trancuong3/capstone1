@@ -54,6 +54,12 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   if (pathname === "/admin/login") return <>{children}</>;
   return (
     <div className="flex min-h-dvh w-full flex-col bg-canvas">
+      <a
+        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-primary focus:shadow-lg"
+        href="#admin-main-content"
+      >
+        Bỏ qua điều hướng, đến nội dung quản trị
+      </a>
       <header className="shrink-0 border-b border-border bg-white">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-4 py-4 sm:px-8">
           <div className="mr-auto flex min-w-0 items-center gap-3">
@@ -105,7 +111,11 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           Chưa thể đăng xuất lúc này. Vui lòng thử lại.
         </p>
       ) : null}
-      <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 py-6 sm:px-8 sm:py-10">
+      <main
+        className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 py-6 sm:px-8 sm:py-10"
+        id="admin-main-content"
+        tabIndex={-1}
+      >
         {children}
       </main>
       <SiteFooter variant="admin" />

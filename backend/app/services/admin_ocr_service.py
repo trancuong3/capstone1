@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 6000
+OCR_SCORE_CONTRACT = "tesseract_raw_word_score_v1"
+OCR_SCORE_CONTRACTS = {
+    OCR_SCORE_CONTRACT,
+    "dual_engine_consensus_v1",
+    "paddle_line_score_v1",
+}
+OCR_REVIEW_STATUSES = {"matched", "suspect", "needs_review", "verified"}
 ALLOWED_FORMATS = {
     "JPEG": ("image/jpeg", "jpg"),
     "PNG": ("image/png", "png"),
@@ -218,7 +225,7 @@ class AdminOcrService:
 
     @staticmethod
     def _normalize_confidence(value: object) -> float | None:
-        if value is None:
+        if value is None or isinstance(value, bool):
             return None
         try:
             confidence = float(value)
@@ -260,10 +267,130 @@ class AdminOcrService:
                 "normalized_text": norm,
                 "bbox": list(bbox),
                 "ocr_confidence": confidence,
+                "ocr_review_status": (
+                    item.get("ocr_review_status")
+                    if item.get("ocr_review_status") in OCR_REVIEW_STATUSES
+                    else "needs_review"
+                ),
+                "ocr_score_source": (
+                    item.get("ocr_score_source")
+                    if item.get("ocr_score_source") in OCR_SCORE_CONTRACTS
+                    else None
+                ),
             })
         if not normalized:
             raise HTTPException(status_code=422, detail="OCR did not produce any valid word")
         return normalized
+
+    @staticmethod
+    def _word_score_sources(
+        words: list[dict[str, object]], metadata: dict[str, object]
+    ) -> list[str | None]:
+        contract_fallback = metadata.get("ocr_score_contract")
+        sources: list[str | None] = []
+        for word in words:
+            source = word.get("ocr_score_source")
+            if (
+                not isinstance(source, str) or source not in OCR_SCORE_CONTRACTS
+            ) and word.get("ocr_confidence") is not None:
+                source = contract_fallback
+            sources.append(
+                source
+                if isinstance(source, str) and source in OCR_SCORE_CONTRACTS
+                else None
+            )
+        return sources
+
+    @staticmethod
+    def _preserve_trusted_word_scores(
+        revision: PageRevision,
+        words: list[dict[str, object]],
+        existing_rows: list[Any],
+    ) -> None:
+        """Treat OCR scores as immutable engine evidence, never client input."""
+        metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+        raw_sources = metadata.get("word_score_sources")
+        if not isinstance(raw_sources, list):
+            raw_sources = []
+        contract_fallback = metadata.get("ocr_score_contract")
+        existing_by_index = {row.WordIndex: row for row in existing_rows}
+        for word in words:
+            index = int(word["word_index"])
+            source_row = existing_by_index.get(index)
+            score_source = (
+                raw_sources[index]
+                if index < len(raw_sources)
+                else contract_fallback
+            )
+            same_token = (
+                source_row is not None
+                and source_row.LineIndex == int(word["line_index"])
+                and unicodedata.normalize("NFC", str(source_row.Text))
+                == unicodedata.normalize("NFC", str(word["text"]))
+            )
+            trusted_source = (
+                score_source
+                if isinstance(score_source, str) and score_source in OCR_SCORE_CONTRACTS
+                else None
+            )
+            word["ocr_confidence"] = (
+                AdminOcrService._normalize_confidence(source_row.OCRConfidence)
+                if same_token and trusted_source is not None
+                else None
+            )
+            word["ocr_score_source"] = trusted_source if same_token else None
+
+    @staticmethod
+    def _set_word_review_statuses(
+        revision: PageRevision,
+        words: list[dict[str, object]],
+        existing_rows: list[Any],
+        *,
+        verified: bool = False,
+    ) -> None:
+        """Persist review evidence by word index in the revision metadata."""
+        metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+        old_statuses = metadata.get("word_review_statuses")
+        if not isinstance(old_statuses, list):
+            old_statuses = []
+        old_sources = metadata.get("word_score_sources")
+        if not isinstance(old_sources, list):
+            old_sources = []
+        contract_fallback = metadata.get("ocr_score_contract")
+        existing_by_index = {row.WordIndex: row for row in existing_rows}
+        statuses: list[str] = []
+        score_sources: list[str | None] = []
+        for word in words:
+            index = int(word["word_index"])
+            source = existing_by_index.get(index)
+            unchanged = (
+                source is not None
+                and unicodedata.normalize("NFC", str(source.Text))
+                == unicodedata.normalize("NFC", str(word["text"]))
+            )
+            previous = old_statuses[index] if index < len(old_statuses) else None
+            if verified:
+                current = "verified"
+            elif unchanged and isinstance(previous, str) and previous in OCR_REVIEW_STATUSES:
+                current = previous
+            else:
+                current = "needs_review"
+            statuses.append(current)
+            previous_source = (
+                old_sources[index]
+                if index < len(old_sources)
+                else contract_fallback
+            )
+            score_sources.append(
+                previous_source
+                if unchanged
+                and isinstance(previous_source, str)
+                and previous_source in OCR_SCORE_CONTRACTS
+                else None
+            )
+        metadata["word_review_statuses"] = statuses
+        metadata["word_score_sources"] = score_sources
+        revision.ProcessingMeta = metadata
 
     async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
         """Normalize ACTIVE pages and PROCESSING reservations to 1..N in page order."""
@@ -373,6 +500,13 @@ class AdminOcrService:
                 if not text_value:
                     raise HTTPException(status_code=422, detail="OCR produced empty text")
                 metadata = dict(ocr["metadata"])
+                metadata["word_review_statuses"] = [
+                    str(word.get("ocr_review_status", "needs_review"))
+                    for word in words
+                ]
+                metadata["word_score_sources"] = self._word_score_sources(
+                    words, metadata
+                )
                 content_hash = hashlib.sha256(
                     json.dumps(
                         {"text": text_value, "words": words},
@@ -773,6 +907,15 @@ class AdminOcrService:
 
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
+        metadata = dict(revision.ProcessingMeta or {})
+        raw_statuses = metadata.get("word_review_statuses")
+        if not isinstance(raw_statuses, list):
+            raw_statuses = []
+        raw_score_sources = metadata.get("word_score_sources")
+        if not isinstance(raw_score_sources, list):
+            raw_score_sources = []
+        raw_score_source = metadata.get("ocr_score_contract")
+        score_contract = raw_score_source if raw_score_source in OCR_SCORE_CONTRACTS else None
         words = []
         for row in rows:
             try:
@@ -782,16 +925,45 @@ class AdminOcrService:
                     status_code=409,
                     detail="Stored bounding box does not match the OCR contract",
                 ) from exc
+            status_from_evidence = (
+                raw_statuses[row.WordIndex]
+                if 0 <= row.WordIndex < len(raw_statuses)
+                else None
+            )
+            score_source = (
+                raw_score_sources[row.WordIndex]
+                if 0 <= row.WordIndex < len(raw_score_sources)
+                else score_contract
+            )
+            score_source = (
+                score_source
+                if isinstance(score_source, str)
+                and score_source in OCR_SCORE_CONTRACTS
+                else None
+            )
+            review_status = (
+                "verified"
+                if revision.VerificationStatus == "VERIFIED"
+                else status_from_evidence
+                if isinstance(status_from_evidence, str)
+                and status_from_evidence in OCR_REVIEW_STATUSES
+                else "needs_review"
+            )
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
                 "bbox": tuple(box),
-                "ocr_confidence": self._normalize_confidence(row.OCRConfidence),
+                "ocr_confidence": (
+                    self._normalize_confidence(row.OCRConfidence)
+                    if score_source is not None
+                    else None
+                ),
+                "ocr_review_status": review_status,
+                "ocr_score_source": score_source,
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
             raise HTTPException(status_code=409, detail="Stored revision number is not a positive numeric string")
-        metadata = dict(revision.ProcessingMeta or {})
         for internal_key in (
             "source_image_path",
             "source_image_width",
@@ -801,6 +973,9 @@ class AdminOcrService:
             "previous_image_height",
         ):
             metadata.pop(internal_key, None)
+        metadata.pop("word_review_statuses", None)
+        metadata.pop("word_score_sources", None)
+        metadata.pop("ocr_score_contract", None)
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
             verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
@@ -858,6 +1033,17 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Current verified revision has no editable word data")
 
         candidates = []
+        source_metadata = dict(source.ProcessingMeta or {})
+        raw_score_sources = source_metadata.get("word_score_sources")
+        if not isinstance(raw_score_sources, list):
+            raw_score_sources = []
+        raw_score_source = source_metadata.get("ocr_score_contract")
+        score_contract = (
+            raw_score_source
+            if isinstance(raw_score_source, str)
+            and raw_score_source in OCR_SCORE_CONTRACTS
+            else None
+        )
         for expected_index, row in enumerate(source_words):
             try:
                 box = normalize_ocr_bbox(row.BoundingBox)
@@ -871,18 +1057,25 @@ class AdminOcrService:
                     status_code=409,
                     detail="Stored OCR word ordering cannot be copied safely",
                 )
-            confidence = self._normalize_confidence(row.OCRConfidence)
-            if row.OCRConfidence is not None and confidence is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Stored OCR confidence cannot be copied safely",
-                )
+            word_score_source = (
+                raw_score_sources[expected_index]
+                if expected_index < len(raw_score_sources)
+                else score_contract
+            )
+            word_score_source = (
+                word_score_source
+                if isinstance(word_score_source, str)
+                and word_score_source in OCR_SCORE_CONTRACTS
+                else None
+            )
+            confidence = self._normalize_confidence(row.OCRConfidence) if word_score_source else None
             candidates.append({
                 "word_index": row.WordIndex,
                 "text": unicodedata.normalize("NFC", row.Text),
                 "line_index": row.LineIndex,
                 "bbox": box,
                 "ocr_confidence": confidence,
+                "ocr_score_source": word_score_source,
             })
         words = self._word_data(candidates)
         text_value = unicodedata.normalize("NFC", source.VerifiedText)
@@ -904,7 +1097,13 @@ class AdminOcrService:
             ContentHash=hashlib.sha256(
                 json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest(),
-            ProcessingMeta={"source_revision_id": str(source.Id), "creation_reason": "manual_edit"},
+            ProcessingMeta={
+                "source_revision_id": str(source.Id),
+                "creation_reason": "manual_edit",
+                "word_review_statuses": ["verified"] * len(words),
+                "word_score_sources": self._word_score_sources(words, source_metadata),
+                "ocr_score_contract": score_contract,
+            },
         )
         try:
             self.repo.stage_revision_bundle(revision, words)
@@ -947,6 +1146,9 @@ class AdminOcrService:
             json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
+            existing_rows = await self.repo.words(revision.Id)
+            self._preserve_trusted_word_scores(revision, words, existing_rows)
+            self._set_word_review_statuses(revision, words, existing_rows)
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_draft(
                 revision,
@@ -985,6 +1187,11 @@ class AdminOcrService:
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
+            existing_rows = await self.repo.words(revision.Id)
+            self._preserve_trusted_word_scores(revision, words, existing_rows)
+            self._set_word_review_statuses(
+                revision, words, existing_rows, verified=True
+            )
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
                 revision,
@@ -1063,6 +1270,13 @@ class AdminOcrService:
             raise HTTPException(status_code=422, detail="OCR produced empty text")
 
         processing_meta = dict(ocr["metadata"])
+        processing_meta["word_review_statuses"] = [
+            str(word.get("ocr_review_status", "needs_review"))
+            for word in words
+        ]
+        processing_meta["word_score_sources"] = self._word_score_sources(
+            words, processing_meta
+        )
         if isinstance(candidate_path, str) and candidate_path:
             for key in (
                 "source_image_path",

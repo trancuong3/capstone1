@@ -167,7 +167,11 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [word["ocr_confidence"] for word in copied_words],
-            [word.OCRConfidence for word in source_words],
+            [None for word in source_words],
+        )
+        self.assertEqual(
+            revision.ProcessingMeta["word_review_statuses"],
+            ["verified"] * len(source_words),
         )
         self.assertEqual(
             [word["bbox"] for word in copied_words],
@@ -238,7 +242,6 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ("missing words", lambda _source, words: words.clear()),
             ("invalid order", lambda _source, words: setattr(words[0], "WordIndex", 2)),
             ("invalid bbox", lambda _source, words: setattr(words[0], "BoundingBox", [0, 0, float("nan"), 0.2])),
-            ("invalid confidence", lambda _source, words: setattr(words[0], "OCRConfidence", float("inf"))),
         )
         for label, mutate in invalid_cases:
             with self.subTest(label=label):
@@ -249,6 +252,16 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(caught.exception.status_code, 409)
                 service.repo.stage_revision_bundle.assert_not_called()
                 db.commit.assert_not_awaited()
+
+    async def test_invalid_legacy_score_is_dropped_without_blocking_a_safe_draft(self):
+        service, db, _page, _source, words = _make_service()
+        words[0].OCRConfidence = float("inf")
+
+        await service.create_edit_draft(ACTOR, PAGE_ID, R1_ID)
+
+        _revision, copied_words = service.repo.stage_revision_bundle.call_args.args
+        self.assertIsNone(copied_words[0]["ocr_confidence"])
+        db.commit.assert_awaited_once()
 
     async def test_admin_authorization_runs_before_page_lookup(self):
         service, db, _page, _source_row, _words = _make_service()

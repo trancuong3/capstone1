@@ -96,7 +96,18 @@ export const adminRevisionDetailSchema = z.object({
             width > 0 && height > 0 && x + width <= 1 && y + height <= 1,
           "Bounding box must have positive size and remain within the image.",
         ),
-      ocr_confidence: z.number().min(0).max(1).nullable(),
+      ocr_confidence: z.number().min(0).max(1).nullable().catch(null),
+      ocr_review_status: z
+        .enum(["matched", "suspect", "needs_review", "verified"])
+        .catch("needs_review"),
+      ocr_score_source: z
+        .enum([
+          "tesseract_raw_word_score_v1",
+          "dual_engine_consensus_v1",
+          "paddle_line_score_v1",
+        ])
+        .nullable()
+        .catch(null),
     }),
   ),
   ocr_metadata: z.record(z.string(), z.unknown()),

@@ -37,7 +37,7 @@ class ReadingPageDTO(BaseModel):
     page_id: UUID
     page_revision_id: UUID
     page_number: int
-    # Optional because legacy OCR rows may not have a genuine confidence score.
+    # Kept nullable for API compatibility; OCR scores are not page probabilities.
     confidence: Optional[float] = None
     width: int = 1000
     height: int = 1000

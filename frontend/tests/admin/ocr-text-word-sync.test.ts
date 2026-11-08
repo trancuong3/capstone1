@@ -16,6 +16,8 @@ function words(): AdminRevisionWordDTO[] {
       normalized_text: "tôi",
       bbox: [0.1, 0.2, 0.15, 0.04],
       ocr_confidence: 0.71,
+      ocr_score_source: "tesseract_raw_word_score_v1",
+      ocr_review_status: "needs_review",
     },
     {
       word_index: 1,
@@ -24,6 +26,8 @@ function words(): AdminRevisionWordDTO[] {
       normalized_text: "đi",
       bbox: [0.28, 0.2, 0.1, 0.04],
       ocr_confidence: 0.82,
+      ocr_score_source: "tesseract_raw_word_score_v1",
+      ocr_review_status: "needs_review",
     },
     {
       word_index: 2,
@@ -32,12 +36,14 @@ function words(): AdminRevisionWordDTO[] {
       normalized_text: "học",
       bbox: [0.4, 0.2, 0.2, 0.04],
       ocr_confidence: 0.91,
+      ocr_score_source: "tesseract_raw_word_score_v1",
+      ocr_review_status: "needs_review",
     },
   ];
 }
 
 describe("Vietnamese OCR page text and word synchronization", () => {
-  it("updates the page words for a one-to-one text correction and preserves every box", () => {
+  it("preserves every box but clears OCR evidence for a corrected token", () => {
     const existing = words();
     const result = syncPageTextToWords("Ta đi học.", existing);
 
@@ -52,9 +58,21 @@ describe("Vietnamese OCR page text and word synchronization", () => {
     expect(result.words.map((word) => word.bbox)).toEqual(
       existing.map((word) => word.bbox),
     );
-    expect(result.words.map((word) => word.ocr_confidence)).toEqual(
-      existing.map((word) => word.ocr_confidence),
-    );
+    expect(result.words.map((word) => word.ocr_confidence)).toEqual([
+      null,
+      0.82,
+      0.91,
+    ]);
+    expect(result.words.map((word) => word.ocr_score_source)).toEqual([
+      null,
+      "tesseract_raw_word_score_v1",
+      "tesseract_raw_word_score_v1",
+    ]);
+    expect(result.words.map((word) => word.ocr_review_status)).toEqual([
+      "needs_review",
+      "needs_review",
+      "needs_review",
+    ]);
     expect(result.words.map((word) => word.word_index)).toEqual([0, 1, 2]);
     expect(existing[0].text).toBe("Tôi");
   });

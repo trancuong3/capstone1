@@ -225,6 +225,12 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
+      <a
+        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-primary focus:shadow-lg"
+        href="#main-content"
+      >
+        Bỏ qua điều hướng, đến nội dung
+      </a>
       <header className="shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
@@ -466,6 +472,8 @@ export function AppShell({ children }: AppShellProps) {
       </header>
 
       <main
+        id="main-content"
+        tabIndex={-1}
         className={cn(
           isImmersiveRoute
             ? "w-full flex-1"

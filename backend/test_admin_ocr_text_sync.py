@@ -113,7 +113,10 @@ class AdminOcrDraftTextSyncTests(unittest.IsolatedAsyncioTestCase):
                 [0.4, 0.2, 0.2, 0.04],
             ],
         )
-        self.assertEqual([word["ocr_confidence"] for word in saved_words], [0.71, 0.82, 0.91])
+        self.assertEqual([word["ocr_confidence"] for word in saved_words], [None, None, None])
+        self.assertEqual(revision.ProcessingMeta["word_review_statuses"], [
+            "needs_review", "needs_review", "needs_review"
+        ])
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
 

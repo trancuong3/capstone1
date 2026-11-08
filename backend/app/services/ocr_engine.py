@@ -225,39 +225,80 @@ def is_vietocr_reliable(
     return True
 
 
-_VIET_STOP_CONSONANTS = ("c", "ch", "p", "t")
-_VIET_ILLEGAL_STOP_ACCENTS = re.compile(r"[àằầèềìòồờùừỳảẳẩẻểỉỏổởủửỷãẵẫẽễĩõỗỡũữỹ]", re.IGNORECASE)
+DUAL_ENGINE_SCORE_CONTRACT = "dual_engine_consensus_v1"
+PADDLE_LINE_SCORE_CONTRACT = "paddle_line_score_v1"
+OCR_AUTO_MATCH_MIN_LINE_SCORE = 0.70
+OCR_RED_MAX_TOKEN_SIMILARITY = 0.35
+TESSERACT_GREEN_MIN_SCORE = 0.85
 
 
-def _evaluate_vietnamese_word_confidence(
-    viet_word: str,
-    matched_paddle_word: str | None,
-    base_line_conf: float = 0.90,
-) -> float:
-    v_norm = normalize_word(viet_word)
-    if not v_norm:
-        return 0.50
+def _word_ocr_evidence(
+    recognized_word: str,
+    other_engine_word: str | None,
+    line_confidence: float | None,
+) -> tuple[float | None, str, str | None]:
+    """Build word-level consensus evidence without claiming calibrated probability.
 
-    v_base = strip_accents(v_norm)
+    Exact agreement gets the green ``matched`` state only when Paddle's line
+    confidence is not low. Tone-only changes stay yellow. Large lexical
+    disagreement with a strong line score becomes red. The score combines token
+    agreement and Paddle's line score; the API records its source separately.
+    """
+    line_score: float | None = None
+    if line_confidence is not None:
+        try:
+            candidate = float(line_confidence)
+            if np.isfinite(candidate) and 0.0 <= candidate <= 1.0:
+                line_score = candidate
+        except (TypeError, ValueError, OverflowError):
+            pass
 
-    if any(v_base.endswith(stop) for stop in _VIET_STOP_CONSONANTS):
-        if _VIET_ILLEGAL_STOP_ACCENTS.search(v_norm):
-            return 0.50
+    recognized_display = unicodedata.normalize("NFC", recognized_word).strip().casefold()
+    other_display = unicodedata.normalize("NFC", other_engine_word or "").strip().casefold()
+    recognized = normalize_word(recognized_display)
+    other = normalize_word(other_display)
+    if not recognized or not other:
+        return line_score, "needs_review", PADDLE_LINE_SCORE_CONTRACT if line_score is not None else None
 
-    if not matched_paddle_word:
-        return round(base_line_conf, 4) if base_line_conf >= 0.80 else 0.75
+    if recognized_display == other_display:
+        agreement = 1.0
+        status = (
+            "matched"
+            if line_score is None or line_score >= OCR_AUTO_MATCH_MIN_LINE_SCORE
+            else "needs_review"
+        )
+    elif (
+        recognized == other
+        or strip_accents(recognized) == strip_accents(other)
+    ):
+        # Same word body but different Vietnamese marks, punctuation, or casing.
+        agreement = 0.70
+        status = "needs_review"
+    else:
+        try:
+            agreement = max(0.0, min(1.0, 1.0 - float(jiwer.cer(recognized, other))))
+        except (TypeError, ValueError, ZeroDivisionError):
+            agreement = 0.0
+        status = (
+            "suspect"
+            if line_score is not None
+            and line_score >= OCR_AUTO_MATCH_MIN_LINE_SCORE
+            and agreement <= OCR_RED_MAX_TOKEN_SIMILARITY
+            else "needs_review"
+        )
 
-    p_norm = normalize_word(matched_paddle_word)
-    p_base = strip_accents(p_norm)
+    # When the detector supplied no usable line score, exact consensus still
+    # counts as high evidence; other comparisons remain conservative.
+    score = agreement if line_score is None else (agreement + line_score) / 2.0
+    return round(score, 4), status, DUAL_ENGINE_SCORE_CONTRACT
 
-    # Khớp hoàn toàn cả từ hoặc trùng chữ cái gốc -> trả về đúng độ tin cậy base_line_conf
-    if p_norm and (v_norm.lower() == p_norm.lower() or v_base == p_base):
-        return round(base_line_conf, 4)
 
-    if p_norm and jiwer.cer(v_base, p_base) <= 0.35:
-        return 0.75
-
-    return 0.50
+def _tesseract_review_status(confidence: float | None) -> str:
+    if confidence is None:
+        return "needs_review"
+    if confidence >= TESSERACT_GREEN_MIN_SCORE:
+        return "matched"
+    return "needs_review"
 
 
 def _find_best_matching_paddle_token(
@@ -698,6 +739,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "normalized_text": normalized,
             "bbox": [left / orig_width, top / orig_height, w / orig_width, h / orig_height],
             "ocr_confidence": confidence,
+            "ocr_review_status": _tesseract_review_status(confidence),
         })
         lines.setdefault(line, []).append(token)
 
@@ -710,6 +752,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
         "words": words,
         "metadata": {
             "engine": "tesseract",
+            "ocr_score_contract": "tesseract_raw_word_score_v1",
             "language": target_lang,
             "word_count": len(words),
             "line_count": len(lines),
@@ -781,18 +824,19 @@ def _extract_text_and_boxes_dual_engine(
 
         line_img_pil = Image.fromarray(cv2.cvtColor(dewarped_img_scaled, cv2.COLOR_BGR2RGB))
         chosen_text = paddle_text
-        chosen_conf = paddle_conf
+        viet_text_candidate: str | None = None
         viet_text_used = False
 
         try:
             with torch.inference_mode():
                 viet_text = vietocr_engine.predict(line_img_pil)
-            if isinstance(viet_text, str) and is_vietocr_reliable(
-                viet_text, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
-            ):
-                chosen_text = viet_text.strip()
-                chosen_conf = paddle_conf
-                viet_text_used = True
+            if isinstance(viet_text, str):
+                viet_text_candidate = viet_text.strip()
+                if is_vietocr_reliable(
+                    viet_text_candidate, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
+                ):
+                    chosen_text = viet_text_candidate
+                    viet_text_used = True
         except Exception:
             pass
 
@@ -809,24 +853,33 @@ def _extract_text_and_boxes_dual_engine(
 
         line_boxes = _map_curved_word_boxes(valid_words, item, orig_width, orig_height)
         paddle_tokens = [w for w in paddle_text.split() if normalize_word(w)]
+        vietocr_tokens = [
+            w for w in (viet_text_candidate or "").split() if normalize_word(w)
+        ]
+        other_engine_tokens = paddle_tokens if viet_text_used else vietocr_tokens
 
         for w_idx, raw_token in enumerate(valid_words):
-            matched_p_token = _find_best_matching_paddle_token(
-                raw_token, paddle_tokens, w_idx, window_size=3
+            matched_other_token = (
+                other_engine_tokens[w_idx]
+                if len(other_engine_tokens) == len(valid_words)
+                else _find_best_matching_paddle_token(
+                    raw_token, other_engine_tokens, w_idx, window_size=3
+                )
+            )
+            word_confidence, review_status, score_source = _word_ocr_evidence(
+                raw_token, matched_other_token, paddle_conf
             )
 
             norm_token = normalize_word(raw_token)
-            word_conf = _evaluate_vietnamese_word_confidence(
-                raw_token, matched_p_token, base_line_conf=paddle_conf
-            )
-
             words_output.append({
                 "word_index": len(words_output),
                 "line_index": len(lines_output),
                 "text": raw_token,
                 "normalized_text": norm_token,
                 "bbox": line_boxes[w_idx],
-                "ocr_confidence": round(word_conf, 4),
+                "ocr_confidence": word_confidence,
+                "ocr_review_status": review_status,
+                "ocr_score_source": score_source,
             })
 
         lines_output.append(" ".join(valid_words))
@@ -857,6 +910,7 @@ def _extract_text_and_boxes_dual_engine(
         "metadata": {
             "engine": "paddleocr_vietocr_dual",
             "engine_version": "PP-OCRv4 + VietOCR-vgg_transformer",
+            "ocr_score_contract": DUAL_ENGINE_SCORE_CONTRACT,
             "language": "vi",
             "coordinate_space": "normalized_original_dimensions",
             "source_width": orig_width,

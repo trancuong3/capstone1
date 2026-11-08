@@ -1,6 +1,7 @@
 """Business services for book catalog and admin page-read endpoints."""
 from __future__ import annotations
 
+import math
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -271,6 +272,19 @@ class AdminCatalogService:
         revision = await self.repository.revision(page_id, revision_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+        raw_statuses = metadata.get("word_review_statuses")
+        if not isinstance(raw_statuses, list):
+            raw_statuses = []
+        raw_score_sources = metadata.get("word_score_sources")
+        if not isinstance(raw_score_sources, list):
+            raw_score_sources = []
+        raw_score_contract = metadata.get("ocr_score_contract")
+        trusted_score_contracts = {
+            "tesseract_raw_word_score_v1",
+            "dual_engine_consensus_v1",
+            "paddle_line_score_v1",
+        }
         words = []
         for word in await self.repository.words(revision_id):
             box = word.BoundingBox
@@ -285,13 +299,50 @@ class AdminCatalogService:
             if (any(value < 0 or value > 1 for value in (x, y, width, height))
                 or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
                 raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
+            raw_score = word.OCRConfidence
+            try:
+                numeric_score = float(raw_score) if raw_score is not None and not isinstance(raw_score, bool) else None
+            except (TypeError, ValueError, OverflowError):
+                numeric_score = None
+            if (
+                numeric_score is None
+                or not math.isfinite(numeric_score)
+                or not 0 <= numeric_score <= 1
+            ):
+                numeric_score = None
+            status_from_evidence = (
+                raw_statuses[word.WordIndex]
+                if 0 <= word.WordIndex < len(raw_statuses)
+                else None
+            )
+            score_source = (
+                raw_score_sources[word.WordIndex]
+                if 0 <= word.WordIndex < len(raw_score_sources)
+                else raw_score_contract
+            )
+            score_source = (
+                score_source
+                if isinstance(score_source, str)
+                and score_source in trusted_score_contracts
+                else None
+            )
+            review_status = (
+                "verified"
+                if revision.VerificationStatus == "VERIFIED"
+                else status_from_evidence
+                if isinstance(status_from_evidence, str)
+                and status_from_evidence in {"matched", "suspect", "needs_review", "verified"}
+                else "needs_review"
+            )
             words.append({
                 "word_index": word.WordIndex,
                 "line_index": word.LineIndex,
                 "text": word.Text,
                 "normalized_text": word.NormalizedText,
                 "bbox": (x, y, width, height),
-                "ocr_confidence": word.OCRConfidence,
+                "ocr_confidence": numeric_score if score_source is not None else None,
+                "ocr_review_status": review_status,
+                "ocr_score_source": score_source,
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:

@@ -22,6 +22,7 @@ from app.api.router import api_router
 from app.models import BookPage, PageRevision, PageRevisionWord
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.services.admin_ocr_service import AdminOcrService
+from app.services.reading_content_service import ReadingContentService
 
 
 POSTGRES_TEST_DATABASE_URL = os.getenv("ADMIN_OCR_TEST_DATABASE_URL")
@@ -290,6 +291,29 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(verified.status_code, 200, verified.text)
             self.assertEqual(verified.json()["verification_status"], "VERIFIED")
+            self.assertEqual(verified.json()["draft_text"], "Ngày xưa có em.")
+            self.assertEqual(
+                [word["ocr_review_status"] for word in verified.json()["words"]],
+                ["verified"] * 4,
+            )
+
+            async with self.sessions() as session:
+                reading = ReadingContentService(session)
+                reading_page = await reading.repository.verified_page(PAGE_ID, BOOK_ID)
+                self.assertIsNotNone(reading_page)
+                current_revision = await reading.repository.verified_revision(
+                    PAGE_ID, reading_page.CurrentVerifiedRevisionId
+                )
+                self.assertIsNotNone(current_revision)
+                page_content = await reading._build_page_dto(
+                    reading_page, current_revision
+                )
+                self.assertEqual(page_content.text, "Ngày xưa có em.")
+                self.assertEqual(
+                    [word.text for word in page_content.words],
+                    ["Ngày", "xưa", "có", "em."],
+                )
+                self.assertEqual(page_content.page_revision_id, UUID(r2["page_revision_id"]))
 
             second_draft = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/revisions/draft",
@@ -303,6 +327,13 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             history = await client.get(f"/books/admin/pages/{PAGE_ID}/revisions")
             self.assertEqual(history.status_code, 200, history.text)
             self.assertEqual([row["revision_no"] for row in history.json()], [3, 2, 1])
+            self.assertTrue(
+                next(
+                    row
+                    for row in history.json()
+                    if row["page_revision_id"] == r2["page_revision_id"]
+                )["is_current_verified"]
+            )
             r1_detail = await client.get(
                 f"/books/admin/pages/{PAGE_ID}/revisions/{R1_ID}"
             )
@@ -321,6 +352,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 [word["ocr_confidence"] for word in r2_detail.json()["words"]],
                 [word["ocr_confidence"] for word in r2["words"]],
             )
+            self.assertEqual(
+                [word["ocr_review_status"] for word in r2_detail.json()["words"]],
+                ["verified"] * 4,
+            )
 
         async with self.sessions() as session:
             page = await session.get(BookPage, PAGE_ID)
@@ -328,6 +363,7 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             r2_row = await session.get(PageRevision, UUID(r2["page_revision_id"]))
             r3_row = await session.get(PageRevision, UUID(r3["page_revision_id"]))
             self.assertEqual(page.CurrentVerifiedRevisionId, UUID(r2["page_revision_id"]))
+            self.assertEqual(page.ImagePath, "source/page.png")
             self.assertEqual(r1.VerifiedText, "Ngày xưa có bé.")
             self.assertEqual(r2_row.VerifiedText, "Ngày xưa có em.")
             self.assertIsNone(r3_row.VerifiedText)

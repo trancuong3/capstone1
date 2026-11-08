@@ -40,7 +40,7 @@ class AdminOcrWordInput(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     normalized_text: str = Field(min_length=1, max_length=500)
     bbox: tuple[float, float, float, float]
-    ocr_confidence: float | None = Field(default=None, ge=0, le=1)
+    ocr_confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
     @field_validator("bbox", mode="before")
     @classmethod
