@@ -53,6 +53,7 @@ import type {
 } from "@/types/admin";
 
 type LoadError = "not-found" | "unavailable" | "safe";
+type WordFilter = "all" | "review" | "red" | "yellow" | "green";
 type AiTokenChange = {
   readonly index: number;
   readonly original: string;
@@ -82,6 +83,24 @@ function isLikelyCorrectStatus(status: AdminOcrReviewStatus): boolean {
     status === "reference_match" ||
     status === "engine_agreement"
   );
+}
+
+function getWordReviewColorGroup(
+  status: AdminOcrReviewStatus,
+): Exclude<WordFilter, "all" | "review"> {
+  if (isLikelyCorrectStatus(status)) return "green";
+  if (status === "confirmed_mismatch") return "red";
+  return "yellow";
+}
+
+function matchesWordFilter(
+  status: AdminOcrReviewStatus,
+  filter: WordFilter,
+): boolean {
+  if (filter === "all") return true;
+  const group = getWordReviewColorGroup(status);
+  if (filter === "review") return group !== "green";
+  return filter === group;
 }
 
 export function getWordReviewLabel(status: AdminOcrReviewStatus): string {
@@ -384,9 +403,7 @@ export function AdminOcrReviewScreen({
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
-  const [wordFilter, setWordFilter] = useState<"all" | "review" | "likely">(
-    "all",
-  );
+  const [wordFilter, setWordFilter] = useState<WordFilter>("review");
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -417,6 +434,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
+    setWordFilter("review");
     setWords(
       next.words.map((word) => ({
         ...word,
@@ -568,12 +586,8 @@ export function AdminOcrReviewScreen({
       const selectedStatus = selected
         ? getWordReviewStatus(selected, detail?.verification_status)
         : "needs_review";
-      const isLikelyCorrect = isLikelyCorrectStatus(selectedStatus);
-      if (
-        (wordFilter === "likely" && !isLikelyCorrect) ||
-        (wordFilter === "review" && isLikelyCorrect)
-      ) {
-        setWordFilter("all");
+      if (!matchesWordFilter(selectedStatus, wordFilter)) {
+        setWordFilter(getWordReviewColorGroup(selectedStatus));
       }
 
       const element =
@@ -1179,13 +1193,27 @@ export function AdminOcrReviewScreen({
     return counts;
   }, [detail?.verification_status, words]);
 
+  const colorCounts = useMemo(
+    () => ({
+      green:
+        reviewCounts.engine_agreement +
+        reviewCounts.reference_match +
+        reviewCounts.verified +
+        reviewCounts.matched,
+      red: reviewCounts.confirmed_mismatch,
+      yellow:
+        reviewCounts.engine_disagreement +
+        reviewCounts.needs_review +
+        reviewCounts.suspect,
+    }),
+    [reviewCounts],
+  );
+
   const filteredWords = useMemo(
     () =>
       words.filter((word) => {
-        if (wordFilter === "all") return true;
         const status = getWordReviewStatus(word, detail?.verification_status);
-        const isLikelyCorrect = isLikelyCorrectStatus(status);
-        return wordFilter === "review" ? !isLikelyCorrect : isLikelyCorrect;
+        return matchesWordFilter(status, wordFilter);
       }),
     [detail?.verification_status, wordFilter, words],
   );
@@ -1312,76 +1340,46 @@ export function AdminOcrReviewScreen({
             verificationStatus={detail.verification_status}
             words={words}
           />
-          <p className="mt-3 text-sm text-muted">
-            Xanh: hai engine OCR cùng đọc hoặc từ khớp reference đã xác minh.
-            Đỏ: reference đã xác minh chứng minh từ OCR bị sai. Vàng: engine bất
-            đồng hoặc thiếu căn cứ kết luận. Scan OCR không gọi AI; Admin ưu
-            tiên xem các từ đỏ và vàng.
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Danh sách bên cạnh ưu tiên từ đỏ và vàng để Admin kiểm tra. Xanh là
+            từ có bằng chứng đáng tin; đỏ có reference đã xác minh không khớp;
+            vàng là chưa đủ căn cứ kết luận. Quét OCR không gọi AI.
           </p>
           <div
-            aria-label="Chú giải trạng thái từ OCR"
-            className="mt-3 flex flex-wrap gap-4 text-xs font-bold"
-          >
-            <span className="inline-flex items-center gap-1.5 text-green-800">
-              <span className="size-3.5 rounded-sm border border-green-600 bg-green-400/40" />
-              Engine cùng đọc / Reference khớp / Admin xác nhận
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-red-800">
-              <span className="size-3.5 rounded-sm border border-red-600 bg-red-400/40" />
-              Reference đã xác minh không khớp
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-amber-900">
-              <span className="size-3.5 rounded-sm border border-amber-600 bg-amber-300/40" />
-              Engine bất đồng / thiếu bằng chứng
-            </span>
-          </div>
-          <div
             aria-label="Thống kê trạng thái từ OCR"
-            className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-3 2xl:grid-cols-5"
+            className="mt-4 grid grid-cols-3 gap-2"
             role="group"
           >
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
-              <strong className="text-lg text-green-700">
-                {reviewCounts.engine_agreement}
-              </strong>
-              <div className="text-xs font-bold text-green-900">
-                Khả năng đúng cao
+            {(
+              [
+                {
+                  id: "green",
+                  label: "Xanh · có căn cứ",
+                  count: colorCounts.green,
+                  cardClass: "border-green-600/50 bg-green-50 text-green-900",
+                },
+                {
+                  id: "red",
+                  label: "Đỏ · đã xác nhận sai",
+                  count: colorCounts.red,
+                  cardClass: "border-red-600/50 bg-red-50 text-red-900",
+                },
+                {
+                  id: "yellow",
+                  label: "Vàng · cần xem",
+                  count: colorCounts.yellow,
+                  cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
+                },
+              ] as const
+            ).map((state) => (
+              <div
+                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-bold ${state.cardClass}`}
+                key={state.id}
+              >
+                <strong className="text-xl leading-none">{state.count}</strong>
+                <span>{state.label}</span>
               </div>
-            </div>
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
-              <strong className="text-lg text-green-700">
-                {reviewCounts.reference_match}
-              </strong>
-              <div className="text-xs font-bold text-green-900">
-                Reference khớp
-              </div>
-            </div>
-            <div className="rounded-control border border-green-600/40 bg-green-50 p-2.5 text-center">
-              <strong className="text-lg text-green-700">
-                {reviewCounts.verified}
-              </strong>
-              <div className="text-xs font-bold text-green-900">
-                Admin xác nhận
-              </div>
-            </div>
-            <div className="rounded-control border border-red-600/40 bg-red-50 p-2.5 text-center">
-              <strong className="text-lg text-red-700">
-                {reviewCounts.confirmed_mismatch}
-              </strong>
-              <div className="text-xs font-bold text-red-900">
-                Sai theo reference
-              </div>
-            </div>
-            <div className="rounded-control border border-amber-600/40 bg-amber-50 p-2.5 text-center">
-              <strong className="text-lg text-amber-800">
-                {reviewCounts.confirmed_mismatch +
-                  reviewCounts.engine_disagreement +
-                  reviewCounts.needs_review}
-              </strong>
-              <div className="text-xs font-bold text-amber-950">
-                Cần Admin xem
-              </div>
-            </div>
+            ))}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
@@ -1407,14 +1405,18 @@ export function AdminOcrReviewScreen({
         <div className="grid content-start gap-6">
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-2xl font-black">Văn bản nháp</h2>
-              <AdminStatusBadge status={detail.verification_status} />
+              <div>
+                <h2 className="text-2xl font-black">Văn bản OCR</h2>
+                <p className="mt-1 text-sm text-muted">
+                  Chỉnh nội dung tại đây; các vùng từ và ảnh sẽ được đồng bộ.
+                </p>
+              </div>
             </div>
             <label className="grid gap-2 font-bold" htmlFor="ocr-text">
               Nội dung trang
               <textarea
                 aria-describedby="ocr-help"
-                className="min-h-44 rounded-control border border-border bg-white p-4 font-normal outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
+                className="min-h-60 max-h-[32rem] resize-y rounded-control border border-border bg-white p-4 font-normal leading-7 outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
                 disabled={
                   verified ||
                   detail.lifecycle_status !== "ACTIVE" ||
@@ -1727,10 +1729,16 @@ export function AdminOcrReviewScreen({
 
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-2xl font-black">Từ và bounding box</h2>
+              <div>
+                <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
+                <p className="mt-1 text-sm text-muted">
+                  Ưu tiên xử lý {colorCounts.red + colorCounts.yellow} từ đỏ và
+                  vàng; từ xanh đang được thu gọn khỏi hàng đợi.
+                </p>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  className="h-11 w-auto"
+                  className="min-h-11 h-auto w-auto px-3 text-sm"
                   disabled={verified || busy !== null || words.length === 0}
                   onClick={reconcileAllMatchedWords}
                   type="button"
@@ -1740,7 +1748,7 @@ export function AdminOcrReviewScreen({
                   khớp với văn bản
                 </Button>
                 <Button
-                  className="h-11 w-auto"
+                  className="min-h-11 h-auto w-auto px-3 text-sm"
                   disabled={verified || busy !== null}
                   onClick={syncTextFromWords}
                   variant="secondary"
@@ -1750,8 +1758,8 @@ export function AdminOcrReviewScreen({
               </div>
             </div>
             <p className="mb-4 text-sm text-muted">
-              Chọn từ để làm nổi bật vùng tương ứng trên ảnh. Bốn giá trị bbox
-              là x, y, width, height đã chuẩn hóa.
+              Chọn một từ để làm nổi bật vùng trên ảnh. Tọa độ và log engine
+              được đặt trong phần chi tiết của từng từ.
             </p>
             <div
               aria-live="polite"
@@ -1769,8 +1777,8 @@ export function AdminOcrReviewScreen({
               )}
             </div>
             <div
-              aria-label="Lọc danh sách từ OCR"
-              className="mb-3 flex flex-wrap gap-2"
+              aria-label="Lọc danh sách từ theo trạng thái"
+              className="mb-4 flex flex-wrap gap-2"
               role="group"
             >
               {(
@@ -1779,26 +1787,40 @@ export function AdminOcrReviewScreen({
                   {
                     id: "review",
                     label: "Cần xem",
-                    count:
-                      reviewCounts.confirmed_mismatch +
-                      reviewCounts.engine_disagreement +
-                      reviewCounts.needs_review,
+                    count: colorCounts.red + colorCounts.yellow,
                   },
                   {
-                    id: "likely",
-                    label: "Khả năng đúng cao",
-                    count:
-                      reviewCounts.reference_match +
-                      reviewCounts.verified +
-                      reviewCounts.engine_agreement,
+                    id: "red",
+                    label: "Đỏ · sai",
+                    count: colorCounts.red,
                   },
-                ] as const
+                  {
+                    id: "yellow",
+                    label: "Vàng · chưa rõ",
+                    count: colorCounts.yellow,
+                  },
+                  {
+                    id: "green",
+                    label: "Xanh · có căn cứ",
+                    count: colorCounts.green,
+                  },
+                ] as const satisfies readonly {
+                  id: WordFilter;
+                  label: string;
+                  count: number;
+                }[]
               ).map((filter) => (
                 <button
                   aria-pressed={wordFilter === filter.id}
                   className={`min-h-10 rounded-full border px-3 text-sm font-bold ${
                     wordFilter === filter.id
-                      ? "border-primary bg-sky text-primary-hover"
+                      ? filter.id === "red"
+                        ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
+                        : filter.id === "yellow"
+                          ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
+                          : filter.id === "green"
+                            ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
+                            : "border-primary bg-sky text-primary-hover"
                       : "border-border bg-white text-muted hover:bg-canvas"
                   }`}
                   key={filter.id}
@@ -1812,13 +1834,17 @@ export function AdminOcrReviewScreen({
                 aria-live="polite"
                 className="self-center text-xs font-semibold text-muted"
               >
-                Đang hiện {filteredWords.length}/{words.length} từ
+                {wordFilter === "review"
+                  ? `Còn ${filteredWords.length} từ cần chú ý`
+                  : `Đang hiện ${filteredWords.length}/${words.length} từ`}
               </span>
             </div>
             <div className="grid gap-3">
               {filteredWords.length === 0 ? (
                 <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
-                  Không có từ nào trong nhóm này.
+                  {wordFilter === "review"
+                    ? "Không có từ đỏ hoặc vàng cần chú ý. Bạn có thể xem nhóm xanh nếu cần kiểm tra lại."
+                    : `Không có từ nào trong nhóm ${wordFilter === "red" ? "đỏ" : wordFilter === "yellow" ? "vàng" : wordFilter === "green" ? "xanh" : "này"}.`}
                 </p>
               ) : (
                 filteredWords.map((word) => {
@@ -1826,6 +1852,7 @@ export function AdminOcrReviewScreen({
                     word,
                     detail.verification_status,
                   );
+                  const colorGroup = getWordReviewColorGroup(reviewStatus);
                   const reviewLabel = getWordReviewLabel(reviewStatus);
                   const draftToken = draftTokens[word.word_index];
                   const canCompareToken =
@@ -1842,26 +1869,29 @@ export function AdminOcrReviewScreen({
                         else wordRefs.current.delete(word.word_index);
                       }}
                       id={`ocr-word-${word.word_index}`}
-                      className={
+                      className={`rounded-control border border-border border-l-4 p-3 transition-shadow ${
+                        colorGroup === "green"
+                          ? "border-l-green-600"
+                          : colorGroup === "red"
+                            ? "border-l-red-600"
+                            : "border-l-amber-500"
+                      } ${
                         word.word_index === selectedWord
-                          ? "rounded-control border-2 border-neutral-700 p-3"
-                          : "rounded-control border border-border p-3"
-                      }
+                          ? "border-y-primary border-r-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
+                          : "bg-white hover:shadow-sm"
+                      }`}
                       key={word.word_index}
                     >
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <button
                           aria-pressed={word.word_index === selectedWord}
-                          className="text-left text-sm font-bold text-primary underline"
+                          className="rounded-sm text-left text-sm font-extrabold text-primary underline underline-offset-2"
                           onClick={() => selectWordOnImage(word.word_index)}
                           type="button"
                         >
                           Từ #{word.word_index} · Dòng {word.line_index}
                         </button>
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          <span className="rounded border border-border bg-canvas px-2 py-0.5 text-xs font-bold text-muted">
-                            {getOcrScoreLabel(word)}
-                          </span>
                           <span
                             className={`rounded border px-2 py-0.5 text-xs font-bold ${getWordReviewBadgeColor(reviewStatus)}`}
                           >
@@ -1869,6 +1899,23 @@ export function AdminOcrReviewScreen({
                           </span>
                         </div>
                       </div>
+
+                      {colorGroup === "red" ? (
+                        <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
+                          <span className="font-bold">Căn cứ xác nhận sai</span>
+                          <span className="break-words">
+                            OCR đọc “{word.text}”
+                            {word.ocr_evidence?.reference_text
+                              ? ` · Reference đã xác minh: “${word.ocr_evidence.reference_text}”`
+                              : " · Reference đã xác minh không khớp"}
+                          </span>
+                          {word.ocr_evidence?.review_reason ? (
+                            <span className="text-xs">
+                              {word.ocr_evidence.review_reason}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
                         <span className="text-xs font-bold text-muted">
@@ -1902,39 +1949,50 @@ export function AdminOcrReviewScreen({
                           value={word.text}
                         />
                       </label>
-                      <div className="mt-2 grid grid-cols-4 gap-2">
-                        {(["x", "y", "w", "h"] as const).map(
-                          (label, coordinate) => (
-                            <label
-                              className="grid gap-1 text-xs font-bold"
-                              key={label}
-                            >
-                              {label}
-                              <input
-                                aria-label={`Từ ${word.word_index} bbox ${label}`}
-                                className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
-                                disabled={verified || busy !== null}
-                                max={1}
-                                min={0}
-                                onChange={(event) =>
-                                  updateBbox(
-                                    word.word_index,
-                                    coordinate,
-                                    Number(event.target.value),
-                                  )
-                                }
-                                step="0.001"
-                                type="number"
-                                value={word.bbox[coordinate]}
-                              />
-                            </label>
-                          ),
-                        )}
-                      </div>
-                      {word.word_index === selectedWord ? (
+                      <details className="mt-2 rounded-control border border-border bg-white">
+                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
+                          Tọa độ vùng ảnh · chỉnh sửa nâng cao
+                        </summary>
+                        <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
+                          {(["x", "y", "w", "h"] as const).map(
+                            (label, coordinate) => (
+                              <label
+                                className="grid gap-1 text-xs font-bold"
+                                key={label}
+                              >
+                                {label}
+                                <input
+                                  aria-label={`Từ ${word.word_index} bbox ${label}`}
+                                  className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
+                                  disabled={verified || busy !== null}
+                                  max={1}
+                                  min={0}
+                                  onChange={(event) =>
+                                    updateBbox(
+                                      word.word_index,
+                                      coordinate,
+                                      Number(event.target.value),
+                                    )
+                                  }
+                                  step="0.001"
+                                  type="number"
+                                  value={word.bbox[coordinate]}
+                                />
+                              </label>
+                            ),
+                          )}
+                        </div>
+                      </details>
+                      <details
+                        className="mt-2 rounded-control border border-border bg-canvas"
+                        open={word.word_index === selectedWord}
+                      >
+                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
+                          Bằng chứng nhận dạng · {getOcrScoreLabel(word)}
+                        </summary>
                         <section
                           aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
-                          className="mt-3 grid gap-1 rounded-control border border-border bg-canvas p-3 text-xs"
+                          className="grid gap-1 border-t border-border px-3 py-3 text-xs"
                         >
                           <h3 className="text-sm font-bold">Bằng chứng OCR</h3>
                           <span>
@@ -1994,7 +2052,7 @@ export function AdminOcrReviewScreen({
                             )}
                           </span>
                         </section>
-                      ) : null}
+                      </details>
                     </div>
                   );
                 })

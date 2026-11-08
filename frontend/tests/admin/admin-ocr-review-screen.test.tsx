@@ -166,6 +166,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     await user.click(
+      await screen.findByRole("button", { name: /Xanh · có căn cứ \(1\)/ }),
+    );
+    await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
     const evidence = screen.getByRole("region", {
@@ -389,10 +392,19 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/1\s*Khả năng đúng cao/);
-    expect(stats).toHaveTextContent(/1\s*Admin xác nhận/);
-    expect(stats).toHaveTextContent(/1\s*Sai theo reference/);
-    expect(stats).toHaveTextContent(/3\s*Cần Admin xem/);
+    expect(stats).toHaveTextContent(/2\s*Xanh · có căn cứ/);
+    expect(stats).toHaveTextContent(/1\s*Đỏ · đã xác nhận sai/);
+    expect(stats).toHaveTextContent(/2\s*Vàng · cần xem/);
+    expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Từ #4 · Dòng 0" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Reference đã xác minh không khớp/),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
     ).toBeEnabled();
@@ -537,6 +549,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     const pageText = await screen.findByLabelText("Nội dung trang");
     expect(pageText).toHaveValue("Tôi đi học.");
+    await user.click(screen.getByRole("button", { name: "Tất cả (3)" }));
+    await user.click(
+      screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
+    );
     const boxes = [
       screen.getByLabelText("Từ 0 bbox x"),
       screen.getByLabelText("Từ 0 bbox y"),
@@ -654,6 +670,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     await screen.findByDisplayValue(source.draft_text ?? "");
+    await user.click(
+      screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
+    );
     const boxLabels = [
       "Từ 0 bbox x",
       "Từ 0 bbox y",
@@ -801,6 +820,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
+    await user.click(
+      screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
+    );
     await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
     await screen.findByRole("heading", { name: "Rà soát đề xuất AI" });
     expect(textarea).toHaveValue(source.draft_text);

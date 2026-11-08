@@ -100,6 +100,21 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+:where(button, a, input, textarea, select, summary) {
+  transition-property:
+    color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 :where(a, button, input, select, textarea, summary):focus-visible {
   outline: 3px solid var(--ra-color-primary);
   outline-offset: 3px;
