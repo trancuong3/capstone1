@@ -105,8 +105,6 @@ export type AdminOcrReviewStatus =
   | "engine_disagreement"
   | "reference_match"
   | "confirmed_mismatch"
-  | "local_vision_match"
-  | "vision_suggested_mismatch"
   | "verified";
 
 export type AdminOcrScoreSource =
@@ -127,9 +125,6 @@ export interface AdminOcrWordEvidenceDTO {
   readonly verification_source: "admin" | "verified_revision" | null;
   readonly reference_text: string | null;
   readonly reference_alignment?: string | null;
-  readonly local_vision_source?: "ollama_local_vision_v1" | null;
-  readonly local_vision_result?: "match" | "mismatch" | "uncertain" | null;
-  readonly local_vision_suggestion?: string | null;
   readonly review_reason: string;
 }
 

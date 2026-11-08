@@ -38,7 +38,6 @@ from app.services.ocr_engine import (
     normalize_text_tokens,
     normalize_word,
 )
-from app.services.ocr_auto_triage import triage_ocr_words_locally
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
@@ -71,8 +70,6 @@ OCR_REVIEW_STATUSES = {
     "engine_disagreement",
     "reference_match",
     "confirmed_mismatch",
-    "local_vision_match",
-    "vision_suggested_mismatch",
     "verified",
 }
 ALLOWED_FORMATS = {
@@ -341,18 +338,6 @@ class AdminOcrService:
         review_reason = value.get("review_reason")
         if not isinstance(review_reason, str):
             review_reason = "Evidence is unavailable."
-        local_vision_source = value.get("local_vision_source")
-        if local_vision_source != "ollama_local_vision_v1":
-            local_vision_source = None
-        local_vision_result = value.get("local_vision_result")
-        if local_vision_result not in {"match", "mismatch", "uncertain"}:
-            local_vision_result = None
-        local_vision_suggestion = value.get("local_vision_suggestion")
-        if (
-            not isinstance(local_vision_suggestion, str)
-            or len(local_vision_suggestion) > 500
-        ):
-            local_vision_suggestion = None
         return {
             "contract": value["contract"],
             "engine_outputs": safe_outputs,
@@ -362,66 +347,8 @@ class AdminOcrService:
             "verification_source": verification_source,
             "reference_text": reference_text,
             "reference_alignment": reference_alignment,
-            "local_vision_source": local_vision_source,
-            "local_vision_result": local_vision_result,
-            "local_vision_suggestion": local_vision_suggestion,
             "review_reason": review_reason,
         }
-
-    @staticmethod
-    def _apply_local_vision_decisions(
-        words: list[dict[str, object]], decisions: dict[int, dict[str, str | None]]
-    ) -> None:
-        for index, decision in decisions.items():
-            if not 0 <= index < len(words):
-                continue
-            word = words[index]
-            result = decision.get("result")
-            if result not in {"match", "mismatch", "uncertain"}:
-                continue
-            evidence = AdminOcrService._normalize_word_evidence(
-                word.get("ocr_evidence")
-            ) or {
-                "contract": "dual_engine_agreement_v2",
-                "engine_outputs": {
-                    "paddleocr": None,
-                    "vietocr": None,
-                    "tesseract": None,
-                },
-                "alignment": "unknown",
-                "engine_agreement_score": None,
-                "calibrated_word_accuracy": None,
-                "verification_source": None,
-                "reference_text": None,
-                "reference_alignment": None,
-                "review_reason": "Bằng chứng OCR gốc không khả dụng.",
-            }
-            suggestion = decision.get("suggestion")
-            evidence.update(
-                {
-                    "local_vision_source": "ollama_local_vision_v1",
-                    "local_vision_result": result,
-                    "local_vision_suggestion": (
-                        suggestion[:500] if isinstance(suggestion, str) else None
-                    ),
-                }
-            )
-            if result == "match":
-                word["ocr_review_status"] = "local_vision_match"
-                evidence["review_reason"] = (
-                    "Model thị giác cục bộ đối chiếu token với ảnh và thấy khớp."
-                )
-            elif result == "mismatch":
-                word["ocr_review_status"] = "vision_suggested_mismatch"
-                evidence["review_reason"] = (
-                    "Model thị giác cục bộ đề xuất token khác dựa trên ảnh gốc."
-                )
-            else:
-                word["ocr_review_status"] = "needs_review"
-                evidence["review_reason"] = (
-                    "Model thị giác cục bộ chưa đủ chắc chắn; cần Admin xem."
-                )
-            word["ocr_evidence"] = evidence
 
     @staticmethod
     def _apply_verified_reference(
@@ -763,12 +690,6 @@ class AdminOcrService:
                 if not text_value:
                     raise HTTPException(status_code=422, detail="OCR produced empty text")
                 metadata = dict(ocr["metadata"])
-                local_decisions = await triage_ocr_words_locally(
-                    data, text_value, words
-                )
-                self._apply_local_vision_decisions(words, local_decisions)
-                if local_decisions:
-                    metadata["auto_triage_source"] = "ollama_local_vision_v1"
                 metadata["word_review_statuses"] = [
                     str(word.get("ocr_review_status", "needs_review"))
                     for word in words
@@ -990,8 +911,6 @@ class AdminOcrService:
             text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
             if not text_value:
                 raise HTTPException(status_code=422, detail="OCR produced empty text")
-            local_decisions = await triage_ocr_words_locally(data, text_value, words)
-            self._apply_local_vision_decisions(words, local_decisions)
         except OcrEngineUnavailable as exc:
             await self._cleanup_uploaded_object(
                 object_path, object_may_exist=storage_uploaded,
@@ -1044,18 +963,6 @@ class AdminOcrService:
             ) from exc
 
         processing_meta = dict(ocr["metadata"])
-        if local_decisions:
-            processing_meta["auto_triage_source"] = "ollama_local_vision_v1"
-        processing_meta["word_review_statuses"] = [
-            str(word.get("ocr_review_status", "needs_review")) for word in words
-        ]
-        processing_meta["word_score_sources"] = self._word_score_sources(
-            words, processing_meta
-        )
-        processing_meta["word_evidence_v2"] = [
-            self._normalize_word_evidence(word.get("ocr_evidence"))
-            for word in words
-        ]
         processing_meta.update({
             "source_image_path": object_path,
             "source_image_width": width,
@@ -1587,16 +1494,7 @@ class AdminOcrService:
         if not text_value:
             raise HTTPException(status_code=422, detail="OCR produced empty text")
 
-        local_decisions = (
-            await triage_ocr_words_locally(image_bytes, text_value, words)
-            if reference_text is None
-            else {}
-        )
-        self._apply_local_vision_decisions(words, local_decisions)
-
         processing_meta = dict(ocr["metadata"])
-        if local_decisions:
-            processing_meta["auto_triage_source"] = "ollama_local_vision_v1"
         processing_meta["word_review_statuses"] = [
             str(word.get("ocr_review_status", "needs_review"))
             for word in words

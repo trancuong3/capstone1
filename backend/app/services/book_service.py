@@ -348,8 +348,6 @@ class AdminCatalogService:
                     "engine_disagreement",
                     "reference_match",
                     "confirmed_mismatch",
-                    "local_vision_match",
-                    "vision_suggested_mismatch",
                     "verified",
                 }
                 else "needs_review"
@@ -401,18 +399,6 @@ class AdminCatalogService:
                 reference_alignment = raw_evidence.get("reference_alignment")
                 if not isinstance(reference_alignment, str):
                     reference_alignment = None
-                local_vision_source = raw_evidence.get("local_vision_source")
-                if local_vision_source != "ollama_local_vision_v1":
-                    local_vision_source = None
-                local_vision_result = raw_evidence.get("local_vision_result")
-                if local_vision_result not in {"match", "mismatch", "uncertain"}:
-                    local_vision_result = None
-                local_vision_suggestion = raw_evidence.get("local_vision_suggestion")
-                if (
-                    not isinstance(local_vision_suggestion, str)
-                    or len(local_vision_suggestion) > 500
-                ):
-                    local_vision_suggestion = None
                 word_evidence = {
                     "contract": raw_evidence["contract"],
                     "engine_outputs": safe_outputs,
@@ -422,9 +408,6 @@ class AdminCatalogService:
                     "verification_source": verification_source,
                     "reference_text": reference_text,
                     "reference_alignment": reference_alignment,
-                    "local_vision_source": local_vision_source,
-                    "local_vision_result": local_vision_result,
-                    "local_vision_suggestion": local_vision_suggestion,
                     "review_reason": raw_evidence.get("review_reason") if isinstance(raw_evidence.get("review_reason"), str) else "Evidence is unavailable.",
                 }
             words.append({
