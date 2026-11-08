@@ -381,8 +381,15 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const overlay = await screen.findByRole("group", {
       name: /Bounding box từ OCR: 1 từ/,
     });
+    const tesseractWordName = new RegExp(
+      [
+        String.raw`Từ 1: Nội\. Chưa đủ evidence để kết luận · `,
+        String.raw`cần Admin xem xét\. Confidence từ Tesseract: `,
+        String.raw`95\/100 · điểm thô`,
+      ].join(""),
+    );
     const wordBox = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Chưa đủ evidence để kết luận · cần Admin xem xét\. Confidence từ Tesseract: 95\/100 · điểm thô/,
+      name: tesseractWordName,
     });
     expect(overlay).toContainElement(wordBox);
     expect(wordBox).toHaveClass("border-amber-600");
@@ -775,7 +782,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
     await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
     expect(textarea).toBeDisabled();
-    expect(screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)[0]).toBeDisabled();
+    expect(
+      screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)[0],
+    ).toBeDisabled();
     resolveCorrection?.("Nội dung AI đã sửa");
 
     await waitFor(() =>
