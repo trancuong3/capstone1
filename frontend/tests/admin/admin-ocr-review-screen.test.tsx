@@ -386,7 +386,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     expect(overlay).toContainElement(wordBox);
     expect(wordBox).toHaveClass("border-amber-600");
-    expect(wordBox.getAttribute("title")).toContain("Chưa đủ evidence để kết luận");
+    expect(wordBox.getAttribute("title")).toContain(
+      "Chưa đủ evidence để kết luận",
+    );
 
     await user.click(wordBox);
     expect(wordBox).toHaveClass("ring-2");
