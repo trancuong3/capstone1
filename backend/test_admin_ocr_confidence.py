@@ -69,7 +69,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         result = detail.words[0]
         self.assertEqual(result.ocr_confidence, 0.97)
         self.assertEqual(result.ocr_score_source, OCR_SCORE_CONTRACT)
-        self.assertEqual(result.ocr_review_status, "suspect")
+        self.assertEqual(result.ocr_review_status, "engine_disagreement")
         self.assertNotIn("word_review_statuses", detail.ocr_metadata)
         self.assertNotIn("word_score_sources", detail.ocr_metadata)
         self.assertNotIn("ocr_score_contract", detail.ocr_metadata)
@@ -110,8 +110,11 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             ["dual_engine_consensus_v1", "paddle_line_score_v1"],
         )
         self.assertEqual(
+            [word.ocr_confidence for word in detail.words], [None, None]
+        )
+        self.assertEqual(
             [word.ocr_review_status for word in detail.words],
-            ["matched", "needs_review"],
+            ["engine_agreement", "needs_review"],
         )
         self.assertNotIn("word_score_sources", detail.ocr_metadata)
 
@@ -130,9 +133,54 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
 
         detail = await service.revision(PAGE_ID, REVISION_ID)
 
-        self.assertEqual(detail.words[0].ocr_review_status, "suspect")
+        self.assertEqual(detail.words[0].ocr_review_status, "engine_disagreement")
         self.assertEqual(detail.words[0].ocr_confidence, 0.96)
         self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
+
+    async def test_revision_read_exposes_sanitized_engine_and_line_evidence(self):
+        service = AdminCatalogService(MagicMock())
+        service.page = AsyncMock(return_value=page())
+        service.repository.revision = AsyncMock(
+            return_value=revision(
+                metadata={
+                    "ocr_evidence_contract": "dual_engine_agreement_v2",
+                    "word_review_statuses": ["engine_agreement"],
+                    "word_score_sources": [None],
+                    "word_evidence_v2": [
+                        {
+                            "contract": "dual_engine_agreement_v2",
+                            "engine_outputs": {"paddleocr": "on", "vietocr": "on"},
+                            "alignment": "match",
+                            "engine_agreement_score": 1.0,
+                            "calibrated_word_accuracy": None,
+                            "verification_source": None,
+                            "reference_text": None,
+                            "review_reason": "Both engines returned the same token.",
+                        }
+                    ],
+                    "line_evidence": [
+                        {
+                            "line_index": 0,
+                            "paddle_output": "on",
+                            "vietocr_output": "on",
+                            "paddle_line_confidence": 0.81,
+                            "paddle_line_score_contract": "paddle_line_score_v1",
+                        }
+                    ],
+                    "source_image_path": "private/storage/path.jpg",
+                }
+            )
+        )
+        service.repository.words = AsyncMock(return_value=[word(0, "on", 0.97)])
+
+        detail = await service.revision(PAGE_ID, REVISION_ID)
+
+        self.assertIsNone(detail.words[0].ocr_confidence)
+        self.assertEqual(detail.words[0].ocr_review_status, "engine_agreement")
+        self.assertEqual(detail.words[0].ocr_evidence.engine_outputs["paddleocr"], "on")
+        self.assertIsNone(detail.words[0].ocr_evidence.calibrated_word_accuracy)
+        self.assertEqual(detail.ocr_metadata["line_evidence"][0]["paddle_line_confidence"], 0.81)
+        self.assertNotIn("source_image_path", detail.ocr_metadata)
 
     async def test_admin_verification_is_the_only_green_state_for_legacy_words(self):
         service = AdminOcrService(MagicMock())
@@ -149,6 +197,10 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             metadata={
                 "ocr_score_contract": OCR_SCORE_CONTRACT,
                 "word_review_statuses": ["suspect", "suspect"],
+                "word_evidence_v2": [
+                    {"contract": "dual_engine_agreement_v2", "engine_outputs": {}, "alignment": "match"},
+                    {"contract": "dual_engine_agreement_v2", "engine_outputs": {}, "alignment": "match"},
+                ],
             }
         )
         existing = [word(0, "ma", 0.94), word(1, "ba", 0.81)]
@@ -169,11 +221,16 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             revision_row.ProcessingMeta["word_review_statuses"],
-            ["needs_review", "suspect"],
+            ["needs_review", "engine_disagreement"],
         )
         self.assertEqual(
             revision_row.ProcessingMeta["word_score_sources"],
             [None, OCR_SCORE_CONTRACT],
+        )
+        self.assertIsNone(revision_row.ProcessingMeta["word_evidence_v2"][0])
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_evidence_v2"][1]["alignment"],
+            "match",
         )
 
     async def test_invalid_stored_scores_are_removed(self):

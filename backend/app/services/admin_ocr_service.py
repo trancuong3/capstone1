@@ -33,6 +33,7 @@ from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.services.ocr_engine import (
     OcrEngineUnavailable,
     OcrNoTextDetected,
+    align_ocr_tokens,
     extract_text_and_boxes,
     normalize_text_tokens,
     normalize_word,
@@ -52,8 +53,25 @@ OCR_SCORE_CONTRACTS = {
     OCR_SCORE_CONTRACT,
     "dual_engine_consensus_v1",
     "paddle_line_score_v1",
+    "ocr_calibrated_word_accuracy_v1",
 }
-OCR_REVIEW_STATUSES = {"matched", "suspect", "needs_review", "verified"}
+WORD_PROBABILITY_SCORE_CONTRACTS = {"ocr_calibrated_word_accuracy_v1"}
+RAW_WORD_SCORE_CONTRACTS = {OCR_SCORE_CONTRACT}
+OCR_EVIDENCE_CONTRACTS = {
+    "dual_engine_agreement_v2",
+    "tesseract_raw_word_score_v1",
+    "ocr_calibrated_word_accuracy_v1",
+}
+OCR_REVIEW_STATUSES = {
+    "matched",
+    "suspect",
+    "needs_review",
+    "engine_agreement",
+    "engine_disagreement",
+    "reference_match",
+    "confirmed_mismatch",
+    "verified",
+}
 ALLOWED_FORMATS = {
     "JPEG": ("image/jpeg", "jpg"),
     "PNG": ("image/png", "png"),
@@ -277,10 +295,140 @@ class AdminOcrService:
                     if item.get("ocr_score_source") in OCR_SCORE_CONTRACTS
                     else None
                 ),
+                "ocr_evidence": AdminOcrService._normalize_word_evidence(
+                    item.get("ocr_evidence")
+                ),
             })
         if not normalized:
             raise HTTPException(status_code=422, detail="OCR did not produce any valid word")
         return normalized
+
+    @staticmethod
+    def _normalize_word_evidence(value: object) -> dict[str, object] | None:
+        if not isinstance(value, dict) or value.get("contract") not in OCR_EVIDENCE_CONTRACTS:
+            return None
+        outputs = value.get("engine_outputs")
+        safe_outputs = {}
+        if isinstance(outputs, dict):
+            for engine in ("paddleocr", "vietocr", "tesseract"):
+                token = outputs.get(engine)
+                safe_outputs[engine] = token if isinstance(token, str) else None
+        agreement = value.get("engine_agreement_score")
+        if isinstance(agreement, bool) or not isinstance(agreement, (int, float)):
+            agreement = None
+        elif not math.isfinite(float(agreement)) or not 0 <= float(agreement) <= 1:
+            agreement = None
+        calibrated = value.get("calibrated_word_accuracy")
+        if isinstance(calibrated, bool) or not isinstance(calibrated, (int, float)):
+            calibrated = None
+        elif not math.isfinite(float(calibrated)) or not 0 <= float(calibrated) <= 1:
+            calibrated = None
+        verification_source = value.get("verification_source")
+        if verification_source not in {"admin", "verified_revision"}:
+            verification_source = None
+        reference_text = value.get("reference_text")
+        if not isinstance(reference_text, str):
+            reference_text = None
+        reference_alignment = value.get("reference_alignment")
+        if not isinstance(reference_alignment, str):
+            reference_alignment = None
+        alignment = value.get("alignment")
+        if not isinstance(alignment, str):
+            alignment = "unknown"
+        review_reason = value.get("review_reason")
+        if not isinstance(review_reason, str):
+            review_reason = "Evidence is unavailable."
+        return {
+            "contract": value["contract"],
+            "engine_outputs": safe_outputs,
+            "alignment": alignment,
+            "engine_agreement_score": float(agreement) if agreement is not None else None,
+            "calibrated_word_accuracy": float(calibrated) if calibrated is not None else None,
+            "verification_source": verification_source,
+            "reference_text": reference_text,
+            "reference_alignment": reference_alignment,
+            "review_reason": review_reason,
+        }
+
+    @staticmethod
+    def _apply_verified_reference(
+        words: list[dict[str, object]], reference_text: str
+    ) -> list[dict[str, object]]:
+        """Attach evidence only from the exact page's current verified revision."""
+        reference_tokens = [
+            unicodedata.normalize("NFC", token).strip()
+            for token in reference_text.split()
+            if normalize_word(token)
+        ]
+        recognized_tokens = [str(word["text"]) for word in words]
+        alignment = align_ocr_tokens(reference_tokens, recognized_tokens)
+        by_recognized_index = {
+            int(step["secondary_index"]): step
+            for step in alignment
+            if step["secondary_index"] is not None
+        }
+        for index, word in enumerate(words):
+            step = by_recognized_index.get(index)
+            reference_index = (
+                int(step["primary_index"])
+                if step is not None and step["primary_index"] is not None
+                else None
+            )
+            reference_token = (
+                reference_tokens[reference_index]
+                if reference_index is not None
+                else None
+            )
+            exact_match = (
+                reference_token is not None
+                and unicodedata.normalize("NFC", str(word["text"])).strip()
+                == reference_token
+            )
+            evidence = AdminOcrService._normalize_word_evidence(
+                word.get("ocr_evidence")
+            ) or {
+                "contract": "dual_engine_agreement_v2",
+                "engine_outputs": {"paddleocr": None, "vietocr": None, "tesseract": None},
+                "alignment": "unknown",
+                "engine_agreement_score": None,
+                "calibrated_word_accuracy": None,
+                "verification_source": None,
+                "reference_text": None,
+                "reference_alignment": None,
+                "review_reason": "Bằng chứng từ engine không khả dụng.",
+            }
+            evidence.update({
+                "reference_text": reference_token,
+                "verification_source": "verified_revision",
+                "reference_alignment": (
+                    str(step["operation"]) if step is not None else "unmatched"
+                ),
+                "review_reason": (
+                    "Token khớp chính xác với revision đã được Admin xác minh của trang này."
+                    if exact_match
+                    else "Token khác với revision đã được Admin xác minh của trang này."
+                ),
+            })
+            word["ocr_evidence"] = evidence
+            word["ocr_review_status"] = (
+                "reference_match" if exact_match else "confirmed_mismatch"
+            )
+        return [
+            {
+                "operation": step["operation"],
+                "reference_token": (
+                    reference_tokens[int(step["primary_index"])]
+                    if step["primary_index"] is not None
+                    else None
+                ),
+                "ocr_token": (
+                    recognized_tokens[int(step["secondary_index"])]
+                    if step["secondary_index"] is not None
+                    else None
+                ),
+            }
+            for step in alignment
+        ]
 
     @staticmethod
     def _word_score_sources(
@@ -335,7 +483,8 @@ class AdminOcrService:
             )
             word["ocr_confidence"] = (
                 AdminOcrService._normalize_confidence(source_row.OCRConfidence)
-                if same_token and trusted_source is not None
+                if same_token
+                and trusted_source in RAW_WORD_SCORE_CONTRACTS | WORD_PROBABILITY_SCORE_CONTRACTS
                 else None
             )
             word["ocr_score_source"] = trusted_source if same_token else None
@@ -356,15 +505,20 @@ class AdminOcrService:
         old_sources = metadata.get("word_score_sources")
         if not isinstance(old_sources, list):
             old_sources = []
+        old_evidence = metadata.get("word_evidence_v2")
+        if not isinstance(old_evidence, list):
+            old_evidence = []
         contract_fallback = metadata.get("ocr_score_contract")
         existing_by_index = {row.WordIndex: row for row in existing_rows}
         statuses: list[str] = []
         score_sources: list[str | None] = []
+        evidence_items: list[dict[str, object] | None] = []
         for word in words:
             index = int(word["word_index"])
             source = existing_by_index.get(index)
             unchanged = (
                 source is not None
+                and source.LineIndex == int(word["line_index"])
                 and unicodedata.normalize("NFC", str(source.Text))
                 == unicodedata.normalize("NFC", str(word["text"]))
             )
@@ -372,7 +526,13 @@ class AdminOcrService:
             if verified:
                 current = "verified"
             elif unchanged and isinstance(previous, str) and previous in OCR_REVIEW_STATUSES:
-                current = previous
+                current = (
+                    "engine_agreement"
+                    if previous == "matched"
+                    else "engine_disagreement"
+                    if previous == "suspect"
+                    else previous
+                )
             else:
                 current = "needs_review"
             statuses.append(current)
@@ -388,8 +548,15 @@ class AdminOcrService:
                 and previous_source in OCR_SCORE_CONTRACTS
                 else None
             )
+            evidence = (
+                old_evidence[index]
+                if unchanged and index < len(old_evidence)
+                else None
+            )
+            evidence_items.append(AdminOcrService._normalize_word_evidence(evidence))
         metadata["word_review_statuses"] = statuses
         metadata["word_score_sources"] = score_sources
+        metadata["word_evidence_v2"] = evidence_items
         revision.ProcessingMeta = metadata
 
     async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
@@ -507,6 +674,10 @@ class AdminOcrService:
                 metadata["word_score_sources"] = self._word_score_sources(
                     words, metadata
                 )
+                metadata["word_evidence_v2"] = [
+                    self._normalize_word_evidence(word.get("ocr_evidence"))
+                    for word in words
+                ]
                 content_hash = hashlib.sha256(
                     json.dumps(
                         {"text": text_value, "words": words},
@@ -914,6 +1085,9 @@ class AdminOcrService:
         raw_score_sources = metadata.get("word_score_sources")
         if not isinstance(raw_score_sources, list):
             raw_score_sources = []
+        raw_word_evidence = metadata.get("word_evidence_v2")
+        if not isinstance(raw_word_evidence, list):
+            raw_word_evidence = []
         raw_score_source = metadata.get("ocr_score_contract")
         score_contract = raw_score_source if raw_score_source in OCR_SCORE_CONTRACTS else None
         words = []
@@ -949,17 +1123,25 @@ class AdminOcrService:
                 and status_from_evidence in OCR_REVIEW_STATUSES
                 else "needs_review"
             )
+            if review_status == "matched":
+                review_status = "engine_agreement"
+            elif review_status == "suspect":
+                review_status = "engine_disagreement"
+            word_score = self._normalize_confidence(row.OCRConfidence)
+            if score_source not in RAW_WORD_SCORE_CONTRACTS | WORD_PROBABILITY_SCORE_CONTRACTS:
+                word_score = None
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
                 "bbox": tuple(box),
-                "ocr_confidence": (
-                    self._normalize_confidence(row.OCRConfidence)
-                    if score_source is not None
-                    else None
-                ),
+                "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
                 "ocr_score_source": score_source,
+                "ocr_evidence": self._normalize_word_evidence(
+                    raw_word_evidence[row.WordIndex]
+                    if 0 <= row.WordIndex < len(raw_word_evidence)
+                    else None
+                ),
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
@@ -975,6 +1157,7 @@ class AdminOcrService:
             metadata.pop(internal_key, None)
         metadata.pop("word_review_statuses", None)
         metadata.pop("word_score_sources", None)
+        metadata.pop("word_evidence_v2", None)
         metadata.pop("ocr_score_contract", None)
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
@@ -1102,6 +1285,11 @@ class AdminOcrService:
                 "creation_reason": "manual_edit",
                 "word_review_statuses": ["verified"] * len(words),
                 "word_score_sources": self._word_score_sources(words, source_metadata),
+                "word_evidence_v2": (
+                    list(source_metadata.get("word_evidence_v2", []))
+                    if isinstance(source_metadata.get("word_evidence_v2"), list)
+                    else [None] * len(words)
+                ),
                 "ocr_score_contract": score_contract,
             },
         )
@@ -1236,6 +1424,20 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Cannot reprocess a retired page")
 
         expected_verified_revision_id = page.CurrentVerifiedRevisionId
+        verified_reference = (
+            await self.repo.revision(page.Id, expected_verified_revision_id)
+            if expected_verified_revision_id is not None
+            else None
+        )
+        reference_text = (
+            unicodedata.normalize("NFC", verified_reference.VerifiedText).strip()
+            if verified_reference is not None
+            and verified_reference.PageId == page.Id
+            and verified_reference.VerificationStatus == "VERIFIED"
+            and isinstance(verified_reference.VerifiedText, str)
+            and verified_reference.VerifiedText.strip()
+            else None
+        )
         page_book_id = page.BookId
         latest_revisions = await self.repo.revisions(page.Id)
         expected_latest_revision_id = latest_revisions[0].Id if latest_revisions else None
@@ -1277,6 +1479,24 @@ class AdminOcrService:
         processing_meta["word_score_sources"] = self._word_score_sources(
             words, processing_meta
         )
+        processing_meta["word_evidence_v2"] = [
+            self._normalize_word_evidence(word.get("ocr_evidence")) for word in words
+        ]
+        if reference_text is not None and verified_reference is not None:
+            processing_meta["verified_reference_alignment"] = self._apply_verified_reference(
+                words, reference_text
+            )
+            processing_meta["reference_source"] = "current_verified_revision"
+            processing_meta["reference_revision_id"] = str(verified_reference.Id)
+            processing_meta["word_review_statuses"] = [
+                str(word.get("ocr_review_status", "needs_review")) for word in words
+            ]
+            processing_meta["word_score_sources"] = [
+                word.get("ocr_score_source") for word in words
+            ]
+            processing_meta["word_evidence_v2"] = [
+                self._normalize_word_evidence(word.get("ocr_evidence")) for word in words
+            ]
         if isinstance(candidate_path, str) and candidate_path:
             for key in (
                 "source_image_path",

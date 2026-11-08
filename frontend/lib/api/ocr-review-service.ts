@@ -98,15 +98,46 @@ export const adminRevisionDetailSchema = z.object({
         ),
       ocr_confidence: z.number().min(0).max(1).nullable().catch(null),
       ocr_review_status: z
-        .enum(["matched", "suspect", "needs_review", "verified"])
+        .enum([
+          "matched",
+          "suspect",
+          "needs_review",
+          "engine_agreement",
+          "engine_disagreement",
+          "reference_match",
+          "confirmed_mismatch",
+          "verified",
+        ])
         .catch("needs_review"),
       ocr_score_source: z
         .enum([
           "tesseract_raw_word_score_v1",
           "dual_engine_consensus_v1",
           "paddle_line_score_v1",
+          "ocr_calibrated_word_accuracy_v1",
         ])
         .nullable()
+        .catch(null),
+      ocr_evidence: z
+        .object({
+          contract: z.enum([
+            "dual_engine_agreement_v2",
+            "tesseract_raw_word_score_v1",
+            "ocr_calibrated_word_accuracy_v1",
+          ]),
+          engine_outputs: z.record(z.string(), z.string().nullable()),
+          alignment: z.string(),
+          engine_agreement_score: z.number().min(0).max(1).nullable(),
+          calibrated_word_accuracy: z.number().min(0).max(1).nullable(),
+          verification_source: z
+            .enum(["admin", "verified_revision"])
+            .nullable(),
+          reference_text: z.string().nullable(),
+          reference_alignment: z.string().nullable().optional(),
+          review_reason: z.string(),
+        })
+        .nullable()
+        .optional()
         .catch(null),
     }),
   ),

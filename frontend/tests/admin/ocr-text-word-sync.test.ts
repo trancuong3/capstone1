@@ -18,6 +18,16 @@ function words(): AdminRevisionWordDTO[] {
       ocr_confidence: 0.71,
       ocr_score_source: "tesseract_raw_word_score_v1",
       ocr_review_status: "needs_review",
+      ocr_evidence: {
+        contract: "tesseract_raw_word_score_v1",
+        engine_outputs: { tesseract: "Tôi" },
+        alignment: "single_engine",
+        engine_agreement_score: null,
+        calibrated_word_accuracy: null,
+        verification_source: null,
+        reference_text: null,
+        review_reason: "Only one engine produced raw evidence.",
+      },
     },
     {
       word_index: 1,
@@ -72,6 +82,11 @@ describe("Vietnamese OCR page text and word synchronization", () => {
       "needs_review",
       "needs_review",
       "needs_review",
+    ]);
+    expect(result.words.map((word) => word.ocr_evidence)).toEqual([
+      null,
+      undefined,
+      undefined,
     ]);
     expect(result.words.map((word) => word.word_index)).toEqual([0, 1, 2]);
     expect(existing[0].text).toBe("Tôi");
