@@ -215,6 +215,9 @@ class AdminOcrWordEvidenceRead(BaseModel):
     verification_source: Literal["admin", "verified_revision"] | None = None
     reference_text: str | None = None
     reference_alignment: str | None = None
+    local_vision_source: Literal["ollama_local_vision_v1"] | None = None
+    local_vision_result: Literal["match", "mismatch", "uncertain"] | None = None
+    local_vision_suggestion: str | None = None
     review_reason: str
 
 
@@ -233,6 +236,8 @@ class AdminRevisionWordRead(BaseModel):
         "engine_disagreement",
         "reference_match",
         "confirmed_mismatch",
+        "local_vision_match",
+        "vision_suggested_mismatch",
         "verified",
     ] = "needs_review"
     ocr_score_source: Literal[

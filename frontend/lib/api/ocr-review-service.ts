@@ -106,6 +106,8 @@ export const adminRevisionDetailSchema = z.object({
           "engine_disagreement",
           "reference_match",
           "confirmed_mismatch",
+          "local_vision_match",
+          "vision_suggested_mismatch",
           "verified",
         ])
         .catch("needs_review"),
@@ -134,6 +136,15 @@ export const adminRevisionDetailSchema = z.object({
             .nullable(),
           reference_text: z.string().nullable(),
           reference_alignment: z.string().nullable().optional(),
+          local_vision_source: z
+            .literal("ollama_local_vision_v1")
+            .nullable()
+            .optional(),
+          local_vision_result: z
+            .enum(["match", "mismatch", "uncertain"])
+            .nullable()
+            .optional(),
+          local_vision_suggestion: z.string().nullable().optional(),
           review_reason: z.string(),
         })
         .nullable()
