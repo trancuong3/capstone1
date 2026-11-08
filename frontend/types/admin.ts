@@ -97,6 +97,14 @@ export interface AdminPageLifecycleDTO {
   readonly lifecycle_status: "RETIRED";
 }
 
+export type AdminOcrReviewStatus =
+  "matched" | "suspect" | "needs_review" | "verified";
+
+export type AdminOcrScoreSource =
+  | "tesseract_raw_word_score_v1"
+  | "dual_engine_consensus_v1"
+  | "paddle_line_score_v1";
+
 export interface AdminRevisionWordDTO {
   readonly word_index: number;
   readonly line_index: number;
@@ -104,6 +112,8 @@ export interface AdminRevisionWordDTO {
   readonly normalized_text: string;
   readonly bbox: readonly [number, number, number, number];
   readonly ocr_confidence: number | null;
+  readonly ocr_review_status?: AdminOcrReviewStatus;
+  readonly ocr_score_source?: AdminOcrScoreSource | null;
 }
 
 export interface AdminPageRevisionDetailDTO {

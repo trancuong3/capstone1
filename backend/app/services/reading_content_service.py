@@ -709,24 +709,11 @@ class ReadingContentService:
 
         word_rows = await self.repository.revision_words(revision.Id)
         words: list[ReadingPageWordDTO] = []
-        confidence_scores: list[float] = []
-        confidence_complete = True
         for row in word_rows:
             box = self._valid_bbox(row.BoundingBox)
             if box is None or not row.Text.strip():
                 continue
             x, y, width, height = box
-            raw_confidence = row.OCRConfidence
-            numeric_confidence = float("nan")
-            if raw_confidence is not None:
-                try:
-                    numeric_confidence = float(raw_confidence)
-                except (TypeError, ValueError):
-                    pass
-            if math.isfinite(numeric_confidence) and 0.0 <= numeric_confidence <= 1.0:
-                confidence_scores.append(numeric_confidence)
-            else:
-                confidence_complete = False
             words.append(
                 ReadingPageWordDTO(
                     word_id=row.Id,
@@ -785,11 +772,9 @@ class ReadingContentService:
             page_id=page_id,
             page_revision_id=page_revision_id,
             page_number=page_number,
-            confidence=(
-                sum(confidence_scores) / len(confidence_scores)
-                if confidence_complete and len(confidence_scores) == len(words)
-                else None
-            ),
+            # OCR engine scores are not calibrated probabilities and cannot be
+            # averaged into a verified page-level confidence value.
+            confidence=None,
             width=page_width,
             height=page_height,
             image_url=image_url,

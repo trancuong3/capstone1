@@ -51,6 +51,8 @@ export const adminR1Fixture: AdminPageRevisionDetailDTO = {
       normalized_text: "nội",
       bbox: [0.1, 0.1, 0.2, 0.05],
       ocr_confidence: 0.95,
+      ocr_review_status: "verified",
+      ocr_score_source: null,
     },
   ],
   ocr_metadata: {},

@@ -98,7 +98,14 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(first_word["text"], "Chú")
         self.assertEqual(first_word["normalized_text"], "chú")
         self.assertEqual(first_word["line_index"], 0)
-        self.assertAlmostEqual(first_word["ocr_confidence"], 0.95, places=2)
+        self.assertEqual(first_word["ocr_score_source"], "dual_engine_consensus_v1")
+        self.assertEqual(first_word["ocr_review_status"], "needs_review")
+        self.assertEqual(
+            [word["ocr_review_status"] for word in result["words"]],
+            ["needs_review", "needs_review"],
+            "Tone-only disagreement should be yellow, not red",
+        )
+        self.assertTrue(all(word["ocr_confidence"] >= 0.8 for word in result["words"]))
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
@@ -115,6 +122,65 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["coordinate_space"], "normalized_original_dimensions")
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
+        self.assertEqual(meta["ocr_score_contract"], "dual_engine_consensus_v1")
+
+    def test_word_evidence_maps_exact_tone_and_lexical_differences_to_colors(self):
+        score, status, source = ocr_engine._word_ocr_evidence("Chú", "Chú", 0.95)
+        self.assertEqual(status, "matched")
+        self.assertEqual(source, "dual_engine_consensus_v1")
+        self.assertGreaterEqual(score or 0, 0.95)
+
+        for recognized, alternative in (("ma", "má"), ("a", "ă"), ("d", "đ")):
+            with self.subTest(recognized=recognized, alternative=alternative):
+                _, status, _ = ocr_engine._word_ocr_evidence(
+                    recognized, alternative, 0.95
+                )
+                self.assertEqual(status, "needs_review")
+
+        _, low_confidence_status, _ = ocr_engine._word_ocr_evidence(
+            "Chú", "Chú", 0.45
+        )
+        self.assertEqual(low_confidence_status, "needs_review")
+
+        _, wrong_word_status, _ = ocr_engine._word_ocr_evidence(
+            "con", "ngôi", 0.95
+        )
+        self.assertEqual(wrong_word_status, "suspect")
+
+        _, uncertain_word_status, _ = ocr_engine._word_ocr_evidence(
+            "mèo", "mẹo", 0.95
+        )
+        self.assertEqual(uncertain_word_status, "needs_review")
+
+    def test_tesseract_keeps_its_per_word_raw_scores_without_claiming_verification(self):
+        data = {
+            "text": ["ma", "má", "mèo"],
+            "left": [10, 70, 130],
+            "top": [20, 20, 20],
+            "width": [40, 40, 40],
+            "height": [20, 20, 20],
+            "conf": ["92", "27", "62"],
+            "line_num": [1, 1, 1],
+        }
+        with patch.object(ocr_engine.pytesseract, "image_to_data", return_value=data):
+            result = ocr_engine._extract_text_and_boxes_tesseract(sample_png_bytes())
+
+        self.assertEqual(
+            [word["ocr_confidence"] for word in result["words"]],
+            [0.92, 0.27, 0.62],
+        )
+        self.assertEqual(
+            [word["ocr_review_status"] for word in result["words"]],
+            ["needs_review", "needs_review", "needs_review"],
+        )
+        for confidence in (None, 0.0, 0.92, 1.0):
+            self.assertEqual(
+                ocr_engine._tesseract_review_status(confidence),
+                "needs_review",
+            )
+        self.assertEqual(
+            result["metadata"]["ocr_score_contract"], "tesseract_raw_word_score_v1"
+        )
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""

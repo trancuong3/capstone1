@@ -614,16 +614,11 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dto.width, 600)
         self.assertEqual(dto.height, 800)
-        self.assertEqual(dto.confidence, 0.93)
+        self.assertIsNone(dto.confidence)
         self.assertEqual(dto.words[0].bbox, (0.1, 0.2, 0.12, 0.04))
         self.assertEqual(dto.words[0].line_index, 3)
         self.assertEqual(dto.paragraph_start_line_indices, [2])
         self.assertEqual(dto.indented_line_indices, [2])
-
-        word_row.OCRConfidence = None
-        repo.revision_words.return_value = [word_row]
-        incomplete_confidence_dto = await service._build_page_dto(page, revision)
-        self.assertIsNone(incomplete_confidence_dto.confidence)
 
         repo.revision_words.return_value = []
         with self.assertRaises(HTTPException) as raised:

@@ -1,0 +1,187 @@
+"""OCR score provenance and per-word review-state safety tests."""
+from __future__ import annotations
+
+import os
+import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
+
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
+
+from app.services.admin_ocr_service import AdminOcrService, OCR_SCORE_CONTRACT
+from app.services.book_service import AdminCatalogService
+
+
+ACTOR = UUID("11111111-1111-4111-8111-111111111111")
+PAGE_ID = UUID("33333333-3333-4333-8333-333333333333")
+REVISION_ID = UUID("44444444-4444-4444-8444-444444444444")
+CREATED_AT = datetime(2026, 11, 8, tzinfo=timezone.utc)
+
+
+def revision(*, status="NEEDS_REVIEW", metadata=None):
+    return SimpleNamespace(
+        Id=REVISION_ID,
+        PageId=PAGE_ID,
+        RevisionNo="1",
+        VerificationStatus=status,
+        DraftText="ma ba",
+        VerifiedText="ma ba" if status == "VERIFIED" else None,
+        ProcessingMeta=metadata or {},
+        CreatedAt=CREATED_AT,
+        VerifiedAt=CREATED_AT if status == "VERIFIED" else None,
+        VerifiedBy=ACTOR if status == "VERIFIED" else None,
+    )
+
+
+def page():
+    return SimpleNamespace(Id=PAGE_ID, LifecycleStatus="ACTIVE")
+
+
+def word(index, text, score):
+    return SimpleNamespace(
+        WordIndex=index,
+        LineIndex=0,
+        Text=text,
+        NormalizedText=text.lower(),
+        BoundingBox=[0.1 + index * 0.2, 0.1, 0.15, 0.05],
+        OCRConfidence=score,
+    )
+
+
+class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_versioned_tesseract_token_scores_are_exposed(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.97)])
+        detail = await service.revision_detail(
+            page(),
+            revision(
+                metadata={
+                    "ocr_score_contract": OCR_SCORE_CONTRACT,
+                    "word_review_statuses": ["suspect"],
+                }
+            ),
+        )
+
+        result = detail.words[0]
+        self.assertEqual(result.ocr_confidence, 0.97)
+        self.assertEqual(result.ocr_score_source, OCR_SCORE_CONTRACT)
+        self.assertEqual(result.ocr_review_status, "suspect")
+        self.assertNotIn("word_review_statuses", detail.ocr_metadata)
+        self.assertNotIn("word_score_sources", detail.ocr_metadata)
+        self.assertNotIn("ocr_score_contract", detail.ocr_metadata)
+
+    async def test_legacy_line_scores_and_missing_statuses_are_safe(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.99)])
+        detail = await service.revision_detail(
+            page(),
+            revision(metadata={"engine": "paddleocr_vietocr_dual"}),
+        )
+
+        self.assertIsNone(detail.words[0].ocr_confidence)
+        self.assertIsNone(detail.words[0].ocr_score_source)
+        self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
+
+    async def test_word_score_source_is_preserved_for_consensus_and_line_scores(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(
+            return_value=[word(0, "má", 0.97), word(1, "mèo", 0.82)]
+        )
+        detail = await service.revision_detail(
+            page(),
+            revision(
+                metadata={
+                    "ocr_score_contract": "dual_engine_consensus_v1",
+                    "word_score_sources": [
+                        "dual_engine_consensus_v1",
+                        "paddle_line_score_v1",
+                    ],
+                    "word_review_statuses": ["matched", "needs_review"],
+                }
+            ),
+        )
+
+        self.assertEqual(
+            [word.ocr_score_source for word in detail.words],
+            ["dual_engine_consensus_v1", "paddle_line_score_v1"],
+        )
+        self.assertEqual(
+            [word.ocr_review_status for word in detail.words],
+            ["matched", "needs_review"],
+        )
+        self.assertNotIn("word_score_sources", detail.ocr_metadata)
+
+    async def test_admin_revision_read_endpoint_uses_persisted_review_evidence(self):
+        service = AdminCatalogService(MagicMock())
+        service.page = AsyncMock(return_value=page())
+        service.repository.revision = AsyncMock(
+            return_value=revision(
+                metadata={
+                    "ocr_score_contract": OCR_SCORE_CONTRACT,
+                    "word_review_statuses": ["suspect"],
+                }
+            )
+        )
+        service.repository.words = AsyncMock(return_value=[word(0, "ma", 0.96)])
+
+        detail = await service.revision(PAGE_ID, REVISION_ID)
+
+        self.assertEqual(detail.words[0].ocr_review_status, "suspect")
+        self.assertEqual(detail.words[0].ocr_confidence, 0.96)
+        self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
+
+    async def test_admin_verification_is_the_only_green_state_for_legacy_words(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.99)])
+        detail = await service.revision_detail(
+            page(), revision(status="VERIFIED", metadata={"engine": "unknown"})
+        )
+
+        self.assertEqual(detail.words[0].ocr_review_status, "verified")
+        self.assertIsNone(detail.words[0].ocr_confidence)
+
+    async def test_client_cannot_rewrite_scores_and_accent_edits_clear_old_evidence(self):
+        revision_row = revision(
+            metadata={
+                "ocr_score_contract": OCR_SCORE_CONTRACT,
+                "word_review_statuses": ["suspect", "suspect"],
+            }
+        )
+        existing = [word(0, "ma", 0.94), word(1, "ba", 0.81)]
+        submitted = [
+            {"word_index": 0, "line_index": 0, "text": "má", "ocr_confidence": 1.0},
+            {"word_index": 1, "line_index": 0, "text": "ba", "ocr_confidence": 0.01},
+        ]
+
+        AdminOcrService._preserve_trusted_word_scores(
+            revision_row, submitted, existing
+        )
+        AdminOcrService._set_word_review_statuses(
+            revision_row, submitted, existing
+        )
+
+        self.assertEqual(
+            [item["ocr_confidence"] for item in submitted], [None, 0.81]
+        )
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_review_statuses"],
+            ["needs_review", "suspect"],
+        )
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_score_sources"],
+            [None, OCR_SCORE_CONTRACT],
+        )
+
+    async def test_invalid_stored_scores_are_removed(self):
+        self.assertIsNone(AdminOcrService._normalize_confidence(float("nan")))
+        self.assertIsNone(AdminOcrService._normalize_confidence(float("inf")))
+        self.assertIsNone(AdminOcrService._normalize_confidence(True))
+        self.assertIsNone(AdminOcrService._normalize_confidence("bad score"))
+
+
+if __name__ == "__main__":
+    unittest.main()

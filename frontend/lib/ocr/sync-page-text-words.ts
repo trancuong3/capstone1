@@ -52,7 +52,8 @@ export function tokenizePageText(value: string): string[] {
 
 /**
  * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token
- * khớp 1:1, bảo toàn nguyên vẹn ocr_confidence và bbox gốc của từng từ.
+ * khớp 1:1, giữ bbox và điểm OCR chỉ khi token không đổi. Token đã sửa mất
+ * điểm OCR nguồn và cần được Admin xem lại trước khi xác minh.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -72,11 +73,16 @@ export function syncPageTextToWords(
 
   const words = existingWords.map((word, index) => {
     const token = tokens[index];
+    const tokenChanged = token !== word.text.normalize("NFC");
     return {
       ...word,
       text: token,
       normalized_text: normalizeVietnameseWord(token),
-      ocr_confidence: word.ocr_confidence,
+      ocr_confidence: tokenChanged ? null : word.ocr_confidence,
+      ocr_score_source: tokenChanged ? null : word.ocr_score_source,
+      ocr_review_status: tokenChanged
+        ? ("needs_review" as const)
+        : (word.ocr_review_status ?? "needs_review"),
       bbox: [...word.bbox] as [number, number, number, number],
     };
   });

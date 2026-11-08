@@ -110,6 +110,16 @@ a {
   color: var(--ra-color-ink);
 }
 
+.ocr-review-image-frame {
+  width: 100%;
+}
+
+@media (min-width: 80rem) {
+  .ocr-review-image-frame {
+    width: min(100%, var(--ocr-image-frame-max-width));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

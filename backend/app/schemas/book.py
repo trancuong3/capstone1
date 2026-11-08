@@ -208,7 +208,13 @@ class AdminRevisionWordRead(BaseModel):
     text: str
     normalized_text: str
     bbox: tuple[float, float, float, float]
-    ocr_confidence: float | None = Field(ge=0, le=1)
+    ocr_confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
+    ocr_review_status: Literal["matched", "suspect", "needs_review", "verified"] = "needs_review"
+    ocr_score_source: Literal[
+        "tesseract_raw_word_score_v1",
+        "dual_engine_consensus_v1",
+        "paddle_line_score_v1",
+    ] | None = None
 
 
 class AdminRevisionDetailRead(BaseModel):
