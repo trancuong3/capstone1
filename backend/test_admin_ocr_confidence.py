@@ -303,6 +303,46 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "needs_review",
         )
 
+    def test_reconstructs_legacy_word_evidence_from_line_metadata(self):
+        metadata = {
+            "line_evidence": [
+                {
+                    "line_index": 0,
+                    "paddle_output": "vé bạn",
+                    "vietocr_output": "về bạn",
+                    "vietocr_output_used": True,
+                    "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+                    "alignment_operations": [
+                        {
+                            "operation": "substitute",
+                            "paddle_token": "vé",
+                            "vietocr_token": "về",
+                        },
+                        {
+                            "operation": "match",
+                            "paddle_token": "bạn",
+                            "vietocr_token": "bạn",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        first = AdminOcrService._line_word_evidence(metadata, 0, 0)
+        second = AdminOcrService._line_word_evidence(metadata, 0, 1)
+
+        self.assertEqual(first["source_text"], "về")
+        self.assertEqual(first["engine_outputs"]["paddleocr"], "vé")
+        self.assertEqual(first["engine_outputs"]["vietocr"], "về")
+        self.assertEqual(first["selected_engine"], "vietocr")
+        self.assertEqual(first["alignment"], "substitute")
+        self.assertIsNone(first["engine_agreement_score"])
+        self.assertIsNone(first["calibrated_word_accuracy"])
+        self.assertEqual(second["source_text"], "bạn")
+        self.assertEqual(second["alignment"], "match")
+        self.assertIsNone(AdminOcrService._line_word_evidence(metadata, 1, 0))
+        self.assertIsNone(AdminOcrService._line_word_evidence({}, 0, 0))
+
     def test_hybrid_crop_evidence_is_preserved_as_raw_engine_evidence(self):
         evidence = AdminOcrService._normalize_word_evidence({
             "contract": "hybrid_ocr_evidence_v3",
