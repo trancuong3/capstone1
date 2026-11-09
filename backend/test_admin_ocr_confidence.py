@@ -516,6 +516,34 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "yellow",
         )
 
+    def test_legacy_recovery_refuses_filtered_operation_index_shift(self):
+        metadata = {
+            "line_evidence": [{
+                "line_index": 0,
+                "paddle_output": "một hai ba",
+                "vietocr_output": "một hai ba",
+                "vietocr_output_used": False,
+                "alignment_operations": [{
+                    "operation": "match",
+                    "paddle_token": "một",
+                    "vietocr_token": "một",
+                }, {
+                    "operation": "insert",
+                    "paddle_token": None,
+                    "vietocr_token": "hai",
+                }, {
+                    "operation": "match",
+                    "paddle_token": "ba",
+                    "vietocr_token": "ba",
+                }],
+            }]
+        }
+        self.assertIsNone(
+            AdminOcrService._line_word_evidence(
+                metadata, 0, 1, ["một", "hai", "ba"]
+            )
+        )
+
     def test_legacy_recovery_refuses_to_map_evidence_after_line_edit_or_insert(self):
         metadata = {
             "line_evidence": [{
