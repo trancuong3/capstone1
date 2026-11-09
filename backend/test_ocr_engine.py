@@ -5,7 +5,10 @@ Mocked engine output tests without requiring GPU, live models, or external servi
 from __future__ import annotations
 
 import os
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
@@ -245,6 +248,60 @@ class DualEngineOcrTests(unittest.TestCase):
             split["metadata"]["line_evidence"][0]["split_merge_candidates"],
             [{"operation": "split", "primary_indices": [0, 1], "secondary_indices": [0]}],
         )
+
+    def test_shared_models_serialize_inference_across_concurrent_requests(self):
+        counters = {
+            name: {"guard": threading.Lock(), "active": 0, "max_active": 0}
+            for name in ("paddle", "vietocr")
+        }
+
+        def tracked(counter, result_factory):
+            with counter["guard"]:
+                counter["active"] += 1
+                counter["max_active"] = max(counter["max_active"], counter["active"])
+            time.sleep(0.02)
+            try:
+                return result_factory()
+            finally:
+                with counter["guard"]:
+                    counter["active"] -= 1
+
+        def paddle_result():
+            # A fresh box is needed because the extraction path normalizes
+            # PaddleOCR coordinates in-place after detection.
+            quad = [[20.0, 30.0], [380.0, 30.0], [380.0, 90.0], [20.0, 90.0]]
+            return [[[quad, ("Xin chao", 0.95)]]]
+
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.side_effect = lambda *_args, **_kwargs: tracked(
+            counters["paddle"], paddle_result
+        )
+        mock_viet = MagicMock()
+        mock_viet.predict.side_effect = lambda *_args, **_kwargs: tracked(
+            counters["vietocr"], lambda: "Xin chao"
+        )
+        image_bytes = sample_png_bytes(400, 200)
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=True),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(
+                    executor.map(
+                        lambda _index: ocr_engine.extract_text_and_boxes(image_bytes),
+                        range(4),
+                    )
+                )
+
+        self.assertEqual(len(results), 4)
+        self.assertTrue(all(result["text"] == "Xin chao" for result in results))
+        self.assertEqual(mock_paddle.ocr.call_count, 4)
+        self.assertEqual(mock_viet.predict.call_count, 4)
+        self.assertEqual(counters["paddle"]["max_active"], 1)
+        self.assertEqual(counters["vietocr"]["max_active"], 1)
 
     def test_invalid_paddle_line_scores_remain_unavailable_at_line_scope(self):
         quad = [[40.0, 30.0], [160.0, 30.0], [160.0, 70.0], [40.0, 70.0]]

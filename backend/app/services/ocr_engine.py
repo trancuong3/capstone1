@@ -120,6 +120,10 @@ def _tokens_with_source_indices(value: str) -> list[tuple[int, str]]:
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
 _engine_lock = threading.Lock()
+# Model instances are shared by FastAPI threadpool workers. Initialization
+# locking alone does not make inference methods safe for concurrent requests.
+_paddle_inference_lock = threading.Lock()
+_vietocr_inference_lock = threading.Lock()
 _paddle_initialization_status = "not_initialized"
 _vietocr_initialization_status = "not_initialized"
 _paddle_initialization_error: str | None = None
@@ -1026,7 +1030,8 @@ def _recognize_uncertain_word_crops(
         crops = [item[1] for item in prepared]
         try:
             # PaddleOCR 2.7.x exposes recognition-only OCR with det=False.
-            paddle_results = paddle_engine.ocr(crops, det=False, rec=True, cls=False)
+            with _paddle_inference_lock:
+                paddle_results = paddle_engine.ocr(crops, det=False, rec=True, cls=False)
             inference_calls += 1
             for index, (evidence, _crop, _quality) in enumerate(prepared):
                 page_result = (
@@ -1083,7 +1088,7 @@ def _recognize_uncertain_word_crops(
                 crop_evidence_decoding_mode = (
                     "beam_search" if beam_search_enabled else "standard_batch_or_predict"
                 )
-                with torch.inference_mode():
+                with torch.inference_mode(), _vietocr_inference_lock:
                     can_batch = (
                         not beam_search_enabled
                         and callable(getattr(vietocr_engine, "predict_batch", None))
@@ -1186,7 +1191,8 @@ def _extract_text_and_boxes_dual_engine(
         proc_image = image
 
     try:
-        ocr_res = paddle_engine.ocr(proc_image, cls=False)
+        with _paddle_inference_lock:
+            ocr_res = paddle_engine.ocr(proc_image, cls=False)
     except Exception as exc:
         raise OcrEngineUnavailable(f"PaddleOCR xử lý hình ảnh thất bại: {exc}") from exc
 
@@ -1233,7 +1239,7 @@ def _extract_text_and_boxes_dual_engine(
 
         if vietocr_engine is not None:
             try:
-                with torch.inference_mode():
+                with torch.inference_mode(), _vietocr_inference_lock:
                     viet_text = vietocr_engine.predict(line_img_pil)
                 if isinstance(viet_text, str) and viet_text.strip():
                     viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
