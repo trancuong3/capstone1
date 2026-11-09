@@ -1326,6 +1326,11 @@ def _extract_text_and_boxes_dual_engine(
                         "vietocr": vietocr_token,
                     },
                     "engine_statuses": line_engine_statuses,
+                    "engine_errors": (
+                        {"vietocr": vietocr_error}
+                        if vietocr_error is not None
+                        else {}
+                    ),
                     "paddle_token_index": paddle_source_index,
                     "vietocr_token_index": vietocr_source_index,
                     "alignment": operation,
@@ -1435,6 +1440,13 @@ def _attach_engine_statuses(
             evidence = word.get("ocr_evidence")
             if isinstance(evidence, dict):
                 evidence["engine_statuses"] = dict(statuses)
+                if reasons:
+                    evidence["engine_errors"] = {
+                        name: reason
+                        for name, reason in reasons.items()
+                        if name in {"paddleocr", "vietocr", "tesseract"}
+                        and isinstance(reason, str)
+                    }
     return result
 
 
