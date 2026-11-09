@@ -16,6 +16,19 @@ from app.schemas.reading_management import (
     ReadingReminderCreate,
     ReadingReminderUpdate,
 )
+from app.services.reading_management_rules import (
+    goal_cycles,
+    goal_streak,
+    has_scheduled_day,
+    item_phase,
+    local_date,
+    local_day_bounds,
+    next_scheduled_date,
+    ranges_overlap,
+    reference_now,
+    same_minute,
+    weekdays_overlap,
+)
 
 
 class ManagementNotFound(Exception):
@@ -27,7 +40,15 @@ class ManagementForbidden(Exception):
 
 
 class ManagementConflict(Exception):
-    pass
+    """A request that is valid in shape but not allowed by the business rules.
+
+    ``reason`` is a stable code (see ``reading_management_rules.CONFLICT_MESSAGES``);
+    ``None`` means a plain invalid state transition.
+    """
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(reason or "INVALID_TRANSITION")
+        self.reason = reason
 
 
 def completed_metric(sessions, metric: str, now: datetime | None = None, starts_at: datetime | None = None, ends_at: datetime | None = None) -> int:
@@ -119,27 +140,62 @@ class ReadingManagementService:
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
         now = now or datetime.now(timezone.utc)
-        response = []
-        for goal in await self.repository.goals(child_id):
-            window = goal_cycle_window(goal, now)
-            value = goal.CompletedValue if goal.Status in ("COMPLETED", "ENDED") and goal.CompletedValue is not None else 0
-            if goal.Status not in ("COMPLETED", "ENDED") and window:
-                sessions = await self.repository.completed_sessions(child_id, window[0], min(window[1], now + timedelta(microseconds=1)))
-                value = completed_metric(sessions, goal.Metric, now, window[0], min(window[1], now + timedelta(microseconds=1)))
-            response.append({
-                "id": goal.Id, "child_id": goal.ChildId, "metric": goal.Metric,
-                "target_value": goal.TargetValue, "period": goal.Period,
-                "starts_on": goal.StartsOn, "ends_on": goal.EndsOn, "timezone": goal.Timezone,
-                "status": goal.Status, "current_value": value,
-                "progress_percent": min(100.0, round(value * 100 / goal.TargetValue, 1)),
-                "completed_value": goal.CompletedValue, "completed_at": goal.CompletedAt,
-                "created_at": goal.CreatedAt, "updated_at": goal.UpdatedAt,
-            })
-        return response
+        return [await self.goal_dict(goal, now) for goal in await self.repository.goals(child_id)]
 
-    async def create_goal(self, actor_id: UUID, payload: ReadingGoalCreate):
+    async def goal_dict(self, goal: ReadingGoal, now: datetime):
+        """Goal plus derived progress.
+
+        An expired goal keeps showing its final cycle's result (never a bogus 0%), and
+        ``streak_cycles`` counts consecutive cycles that reached the target.
+        """
+        phase = item_phase(goal.Status, goal.StartsOn, goal.EndsOn, goal.Timezone, now)
+        value = 0
+        streak = 0
+        cycle_first = cycle_last = None
+        if goal.Status in ("COMPLETED", "ENDED"):
+            value = goal.CompletedValue or 0
+        else:
+            cycles = goal_cycles(goal, now)
+            if cycles:
+                reference = reference_now(goal.EndsOn, goal.Timezone, now)
+                upper = min(cycles[-1].ends_at, reference + timedelta(microseconds=1))
+                sessions = await self.repository.completed_sessions(goal.ChildId, cycles[0].starts_at, upper)
+
+                def value_of(cycle) -> int:
+                    return completed_metric(
+                        sessions, goal.Metric, now, cycle.starts_at, min(cycle.ends_at, upper)
+                    )
+
+                value = value_of(cycles[-1])
+                streak = goal_streak(cycles, goal.TargetValue, value_of, last_in_progress=phase == "RUNNING")
+                cycle_first, cycle_last = cycles[-1].first_day, cycles[-1].last_day
+        return {
+            "id": goal.Id, "child_id": goal.ChildId, "metric": goal.Metric,
+            "target_value": goal.TargetValue, "period": goal.Period,
+            "starts_on": goal.StartsOn, "ends_on": goal.EndsOn, "timezone": goal.Timezone,
+            "status": goal.Status, "current_value": value,
+            "progress_percent": min(100.0, round(value * 100 / goal.TargetValue, 1)),
+            "completed_value": goal.CompletedValue, "completed_at": goal.CompletedAt,
+            "created_at": goal.CreatedAt, "updated_at": goal.UpdatedAt,
+            "phase": phase, "streak_cycles": streak,
+            "cycle_starts_on": cycle_first, "cycle_ends_on": cycle_last,
+        }
+
+    async def create_goal(self, actor_id: UUID, payload: ReadingGoalCreate, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
+        now = now or datetime.now(timezone.utc)
+        if payload.ends_on is not None and payload.ends_on < local_date(now, payload.timezone):
+            raise ManagementConflict("GOAL_ALREADY_EXPIRED")
+        # Two live goals measuring the same thing per period would contradict each other.
+        for existing in await self.repository.goals(payload.child_id):
+            if (
+                existing.Status in ("ACTIVE", "PAUSED")
+                and existing.Metric == payload.metric
+                and existing.Period == payload.period
+                and ranges_overlap(existing.StartsOn, existing.EndsOn, payload.starts_on, payload.ends_on)
+            ):
+                raise ManagementConflict("GOAL_DUPLICATE")
         return await self.repository.save(ReadingGoal(
             ChildId=payload.child_id, Metric=payload.metric, TargetValue=payload.target_value,
             Period=payload.period, StartsOn=payload.starts_on, EndsOn=payload.ends_on,
@@ -163,7 +219,9 @@ class ReadingManagementService:
                 goal.TargetValue = value
             elif key == "ends_on":
                 if value is not None and value < goal.StartsOn:
-                    raise ManagementConflict()
+                    raise ManagementConflict("GOAL_END_BEFORE_START")
+                if value is not None and value < local_date(datetime.now(timezone.utc), goal.Timezone):
+                    raise ManagementConflict("GOAL_ALREADY_EXPIRED")
                 goal.EndsOn = value
         return await self.repository.save(goal)
 
@@ -175,36 +233,49 @@ class ReadingManagementService:
             raise ManagementConflict()
         if payload.status in ("COMPLETED", "ENDED"):
             now = datetime.now(timezone.utc)
-            window = goal_cycle_window(goal, now)
-            sessions = await self.repository.completed_sessions(goal.ChildId, window[0], min(window[1], now + timedelta(microseconds=1))) if window else []
-            goal.CompletedValue = completed_metric(sessions, goal.Metric, now, window[0], min(window[1], now + timedelta(microseconds=1)))
+            # An already-expired goal records its final cycle, not a bogus 0.
+            cycles = goal_cycles(goal, now, count=1)
+            if cycles:
+                upper = min(cycles[-1].ends_at, now + timedelta(microseconds=1))
+                sessions = await self.repository.completed_sessions(goal.ChildId, cycles[-1].starts_at, upper)
+                goal.CompletedValue = completed_metric(sessions, goal.Metric, now, cycles[-1].starts_at, upper)
+            else:
+                goal.CompletedValue = 0
             goal.CompletedAt = now
         goal.Status = payload.status
         return await self.repository.save(goal)
 
     async def plan_dict(self, plan: ReadingPlan, now: datetime):
         zone = ZoneInfo(plan.Timezone)
-        starts_at, ends_at, scheduled_dates = plan_week_window(plan, now)
+        phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
+        # Once the plan has ended, keep showing its final week instead of an empty one.
+        reference = reference_now(plan.EndsOn, plan.Timezone, now)
+        starts_at, ends_at, scheduled_dates = plan_week_window(plan, reference)
+        today = local_date(now, plan.Timezone)
         intervals_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
-        if scheduled_dates:
+        if scheduled_dates or phase == "RUNNING":
             sessions = await self.repository.completed_plan_sessions(
                 plan.ChildId, starts_at, ends_at, now, plan.BookId
             )
-            scheduled = set(scheduled_dates)
             for session in sessions:
                 if session.StartedAt is not None and session.EndedAt is not None:
-                    local_date = session.StartedAt.astimezone(zone).date()
-                    if local_date in scheduled:
-                        day_start = datetime.combine(local_date, time.min, tzinfo=zone).astimezone(timezone.utc)
-                        day_end = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=zone).astimezone(timezone.utc)
-                        interval_start = max(session.StartedAt, day_start)
-                        interval_end = min(session.EndedAt, day_end)
-                        if interval_end > interval_start:
-                            intervals_by_date.setdefault(local_date, []).append((interval_start, interval_end))
+                    session_day = session.StartedAt.astimezone(zone).date()
+                    day_start, day_end = local_day_bounds(session_day, plan.Timezone)
+                    interval_start = max(session.StartedAt, day_start)
+                    interval_end = min(session.EndedAt, day_end)
+                    if interval_end > interval_start:
+                        intervals_by_date.setdefault(session_day, []).append((interval_start, interval_end))
         completed_dates = {
-            scheduled_date for scheduled_date, intervals in intervals_by_date.items()
-            if union_duration_seconds(intervals) >= plan.TargetMinutes * 60
+            scheduled_date for scheduled_date in scheduled_dates
+            if union_duration_seconds(intervals_by_date.get(scheduled_date, [])) >= plan.TargetMinutes * 60
         }
+        running = phase == "RUNNING"
+        minutes_today = int(union_duration_seconds(intervals_by_date.get(today, [])) // 60) if running else 0
+        next_day = (
+            next_scheduled_date(list(plan.Weekdays or []), plan.StartsOn, plan.EndsOn, today)
+            if plan.Status == "ACTIVE" and phase != "EXPIRED"
+            else None
+        )
         scheduled_count = len(scheduled_dates)
         completed_count = len(completed_dates)
         book = await self.repository.book(plan.BookId) if plan.BookId else None
@@ -226,6 +297,10 @@ class ReadingManagementService:
             "completed_at": plan.CompletedAt,
             "created_at": plan.CreatedAt,
             "updated_at": plan.UpdatedAt,
+            "phase": phase,
+            "next_scheduled_date": next_day,
+            "is_scheduled_today": plan.Status == "ACTIVE" and running and today in scheduled_dates,
+            "minutes_today": minutes_today,
         }
 
     async def list_plans(self, actor_id: UUID, child_id: UUID, now: datetime | None = None):
@@ -234,11 +309,25 @@ class ReadingManagementService:
         now = now or datetime.now(timezone.utc)
         return [await self.plan_dict(plan, now) for plan in await self.repository.plans(child_id)]
 
-    async def create_plan(self, actor_id: UUID, payload: ReadingPlanCreate):
+    @staticmethod
+    def check_plan_schedule(
+        weekdays: list[int], starts_on: date, ends_on: date | None, timezone_name: str, now: datetime,
+        *, check_expiry: bool = True,
+    ) -> None:
+        if check_expiry and ends_on is not None and ends_on < local_date(now, timezone_name):
+            raise ManagementConflict("PLAN_ALREADY_EXPIRED")
+        if not has_scheduled_day(weekdays, starts_on, ends_on):
+            raise ManagementConflict("PLAN_NO_SCHEDULED_DAY")
+
+    async def create_plan(self, actor_id: UUID, payload: ReadingPlanCreate, now: datetime | None = None):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
+        self.check_plan_schedule(
+            payload.weekdays, payload.starts_on, payload.ends_on, payload.timezone,
+            now or datetime.now(timezone.utc),
+        )
         if payload.book_id is not None and await self.repository.eligible_book(payload.book_id) is None:
-            raise ManagementConflict()
+            raise ManagementConflict("BOOK_UNAVAILABLE")
         return await self.repository.save(ReadingPlan(
             ChildId=payload.child_id,
             BookId=payload.book_id,
@@ -264,9 +353,17 @@ class ReadingManagementService:
             raise ManagementConflict()
         changes = payload.model_dump(exclude_unset=True)
         if "ends_on" in changes and changes["ends_on"] is not None and changes["ends_on"] < plan.StartsOn:
-            raise ManagementConflict()
+            raise ManagementConflict("GOAL_END_BEFORE_START")
+        self.check_plan_schedule(
+            changes.get("weekdays", list(plan.Weekdays or [])),
+            plan.StartsOn,
+            changes["ends_on"] if "ends_on" in changes else plan.EndsOn,
+            changes.get("timezone", plan.Timezone),
+            datetime.now(timezone.utc),
+            check_expiry="ends_on" in changes,
+        )
         if changes.get("book_id") is not None and await self.repository.eligible_book(changes["book_id"]) is None:
-            raise ManagementConflict()
+            raise ManagementConflict("BOOK_UNAVAILABLE")
         for key, value in changes.items():
             if key == "title": plan.Title = value
             elif key == "book_id": plan.BookId = value
@@ -337,9 +434,27 @@ class ReadingManagementService:
         await self.owned_child(actor_id, child_id)
         return [self.reminder_dict(row) for row in await self.repository.reminders(child_id)]
 
+    async def ensure_reminder_unique(
+        self, child_id: UUID, remind_at: time, timezone_name: str, weekdays: list[int], ignore_id: UUID | None = None
+    ) -> None:
+        """No two live reminders for one child may fire at the same time on the same day."""
+        for other in await self.repository.reminders(child_id):
+            if (
+                other.Id != ignore_id
+                and other.IsActive
+                and other.Timezone == timezone_name
+                and same_minute(other.RemindAt, remind_at)
+                and weekdays_overlap(list(other.Weekdays or []), weekdays)
+            ):
+                raise ManagementConflict("REMINDER_DUPLICATE")
+
     async def create_reminder(self, actor_id: UUID, payload: ReadingReminderCreate):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
+        if payload.is_active:
+            await self.ensure_reminder_unique(
+                payload.child_id, payload.remind_at, payload.timezone, payload.weekdays
+            )
         return self.reminder_dict(await self.repository.save(ReadingReminder(
             ChildId=payload.child_id, RemindAt=payload.remind_at, Weekdays=payload.weekdays,
             Timezone=payload.timezone, IsActive=payload.is_active,
@@ -351,7 +466,17 @@ class ReadingManagementService:
         reminder = await self.repository.reminder_for_actor(reminder_id, actor_id)
         if reminder is None:
             raise ManagementNotFound()
-        for key, value in payload.model_dump(exclude_unset=True).items():
+        changes = payload.model_dump(exclude_unset=True)
+        schedule_changed = any(key in changes for key in ("remind_at", "weekdays", "timezone", "is_active"))
+        if schedule_changed and changes.get("is_active", reminder.IsActive):
+            await self.ensure_reminder_unique(
+                reminder.ChildId,
+                changes.get("remind_at", reminder.RemindAt),
+                changes.get("timezone", reminder.Timezone),
+                changes.get("weekdays", list(reminder.Weekdays or [])),
+                ignore_id=reminder.Id,
+            )
+        for key, value in changes.items():
             if key == "remind_at": reminder.RemindAt = value
             elif key == "weekdays": reminder.Weekdays = value
             elif key == "timezone": reminder.Timezone = value

@@ -9,6 +9,7 @@ GoalPeriod = Literal["DAILY", "WEEKLY"]
 GoalStatus = Literal["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]
 PlanStatus = Literal["ACTIVE", "PAUSED", "COMPLETED", "ENDED"]
 CollectionType = Literal["FAVORITE", "WANT_TO_READ"]
+ItemPhase = Literal["UPCOMING", "RUNNING", "EXPIRED", "FINISHED"]
 ReminderStatus = Literal["PENDING", "ACKNOWLEDGED"]
 ReminderEmailStatus = Literal["NOT_REQUESTED", "PENDING", "SENDING", "RETRY", "SENT", "FAILED"]
 
@@ -79,6 +80,11 @@ class ReadingGoalRead(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Derived by the backend; defaults keep older clients and fixtures valid.
+    phase: ItemPhase = "RUNNING"
+    streak_cycles: int = Field(default=0, ge=0)
+    cycle_starts_on: date | None = None
+    cycle_ends_on: date | None = None
 
 
 class ReadingPlanCreate(BaseModel):
@@ -167,6 +173,10 @@ class ReadingPlanRead(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    phase: ItemPhase = "RUNNING"
+    next_scheduled_date: date | None = None
+    is_scheduled_today: bool = False
+    minutes_today: int = Field(default=0, ge=0)
 
 
 class ChildBookCollectionCreate(BaseModel):

@@ -25,6 +25,14 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
+import { conflictMessage } from "@/lib/api/reading-management-messages";
+import {
+  GoalInsights,
+  PlanInsights,
+  TodaySummary,
+  isRunningGoal,
+  isRunningPlan,
+} from "@/components/reading-management/reading-management-insights";
 import type { BookListItemDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -251,9 +259,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       setSuccess(message);
       setReloadKey((value) => value + 1);
       return true;
-    } catch {
+    } catch (failure) {
       setError(
-        "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
+        conflictMessage(failure) ??
+          "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
       );
       return false;
     } finally {
@@ -525,13 +534,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             {[
               {
                 label: "Mục tiêu đang chạy",
-                value: goals.filter((goal) => goal.status === "ACTIVE").length,
+                value: goals.filter(isRunningGoal).length,
                 detail: "mục tiêu đọc",
                 icon: <Target className="size-5" />,
               },
               {
                 label: "Kế hoạch trong tuần",
-                value: plans.filter((plan) => plan.status === "ACTIVE").length,
+                value: plans.filter(isRunningPlan).length,
                 detail: "kế hoạch đang hoạt động",
                 icon: <CalendarDays className="size-5" />,
               },
@@ -566,6 +575,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </article>
             ))}
           </section>
+
+          <TodaySummary
+            childName={selectedChild?.alias ?? "bé"}
+            plans={plans}
+            goals={goals}
+          />
 
           <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6">
             <div className="mb-5 flex items-start gap-3">
@@ -764,6 +779,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <p className="mt-1 text-right text-label font-bold text-primary">
                       {plan.progress_percent}%
                     </p>
+                    <PlanInsights plan={plan} />
                     {plan.status === "ACTIVE" || plan.status === "PAUSED" ? (
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button
@@ -945,6 +961,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <p className="mt-1 text-right text-label font-bold text-primary">
                       {goal.progress_percent}%
                     </p>
+                    <GoalInsights goal={goal} />
                     {editingGoalId === goal.id ? (
                       <div className="mt-3 flex gap-2">
                         <input

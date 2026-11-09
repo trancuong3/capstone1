@@ -14,6 +14,7 @@ from app.models.reading_management import (
     ReadingReminder,
     ReadingReminderOccurrence,
 )
+from app.services.reading_management_rules import STALE_REMINDER_HOURS, local_day_bounds
 from app.services.reading_reminder_schedule import local_schedule_to_utc
 
 
@@ -75,6 +76,28 @@ class ReadingManagementRepository:
             ReadingSession.EndedAt >= ReadingSession.StartedAt,
         ).order_by(ReadingSession.EndedAt, ReadingSession.Id))
         return list(result.scalars().all())
+
+    async def child_read_between(self, child_id: UUID, starts_at: datetime, ends_at: datetime) -> bool:
+        """True when the child finished a valid reading session inside [starts_at, ends_at)."""
+        return bool(await self.db.scalar(select(exists().where(
+            ReadingSession.ChildId == child_id,
+            ReadingSession.State.in_(("COMPLETED", "FINISHED")),
+            ReadingSession.StartedAt.is_not(None),
+            ReadingSession.EndedAt.is_not(None),
+            ReadingSession.EndedAt >= ReadingSession.StartedAt,
+            ReadingSession.EndedAt >= starts_at,
+            ReadingSession.EndedAt < ends_at,
+        ))))
+
+    @staticmethod
+    def mark_read_acknowledged(occurrence: ReadingReminderOccurrence, now: datetime) -> None:
+        """The child already read that day, so the reminder (and its email) is moot."""
+        occurrence.Status = "ACKNOWLEDGED"
+        occurrence.AcknowledgedAt = now
+        if occurrence.EmailStatus in ("NOT_REQUESTED", "PENDING", "RETRY"):
+            occurrence.EmailStatus = "NOT_REQUESTED"
+        occurrence.EmailNextAttemptAt = None
+        occurrence.EmailErrorCode = None
 
     async def completed_plan_sessions(
         self,
@@ -266,15 +289,22 @@ class ReadingManagementRepository:
         )
         result = await self.db.execute(statement)
         rows = list(result.all())
-        for occurrence, _reminder, _child in rows:
+        to_send = []
+        for occurrence, reminder, child in rows:
+            day_start, day_end = local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone)
+            if await self.child_read_between(child.Id, day_start, day_end):
+                # No "time to read" email when the child already read that day.
+                self.mark_read_acknowledged(occurrence, now)
+                continue
             occurrence.EmailStatus = "SENDING"
             occurrence.EmailAttempts += 1
             occurrence.EmailLastAttemptAt = now
             occurrence.EmailNextAttemptAt = None
             occurrence.EmailErrorCode = None
+            to_send.append((occurrence, reminder, child))
         if rows:
             await self.db.commit()
-        return rows
+        return to_send
 
     async def update_email_delivery(
         self,
@@ -321,9 +351,23 @@ class ReadingManagementRepository:
         result = await self.db.execute(select(ReadingReminderOccurrence, ReadingReminder)
             .join(ReadingReminder, ReadingReminder.Id == ReadingReminderOccurrence.ReminderId)
             .where(ReadingReminder.ChildId == child_id, ReadingReminder.DeletedAt.is_(None),
-                   ReadingReminder.IsActive.is_(True), ReadingReminderOccurrence.Status == "PENDING", ReadingReminderOccurrence.ScheduledFor <= now)
+                   ReadingReminder.IsActive.is_(True), ReadingReminderOccurrence.Status == "PENDING",
+                   ReadingReminderOccurrence.ScheduledFor <= now,
+                   # Older unacknowledged reminders are missed ones; don't pile them up.
+                   ReadingReminderOccurrence.ScheduledFor >= now - timedelta(hours=STALE_REMINDER_HOURS))
             .order_by(ReadingReminderOccurrence.ScheduledFor, ReadingReminderOccurrence.Id))
-        return [(row[0], row[1]) for row in result.all()]
+        due: list[tuple[ReadingReminderOccurrence, ReadingReminder]] = []
+        changed = False
+        for occurrence, reminder in ((row[0], row[1]) for row in result.all()):
+            day_start, day_end = local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone)
+            if await self.child_read_between(child_id, day_start, day_end):
+                self.mark_read_acknowledged(occurrence, now)
+                changed = True
+            else:
+                due.append((occurrence, reminder))
+        if changed:
+            await self.db.commit()
+        return due
 
     async def occurrence_for_parent(self, occurrence_id: UUID, actor_id: UUID) -> ReadingReminderOccurrence | None:
         return await self.db.scalar(select(ReadingReminderOccurrence)
