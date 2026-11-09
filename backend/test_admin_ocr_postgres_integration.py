@@ -542,7 +542,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_word["ocr_evidence"]["alignment"], "substitute")
         self.assertIsNone(first_word["ocr_evidence"]["paddle_token_index"])
         self.assertEqual(first_word["ocr_evidence"]["vietocr_token_index"], 0)
-        self.assertEqual(first_word["review_color_group"], "yellow")
+        # This source revision is already admin-verified; verified state has
+        # higher priority than historical disagreement in its original OCR candidates.
+        self.assertEqual(first_word["review_color_group"], "green")
 
     async def test_duplicate_concurrent_draft_is_rejected_after_row_lock(self):
         async def create():
