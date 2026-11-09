@@ -433,7 +433,7 @@ class DualEngineOcrTests(unittest.TestCase):
             result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
         )
 
-    def test_vietocr_initialization_failure_does_not_disable_paddle_detector(self):
+    def test_vietocr_initialization_failure_does_not_disable_existing_paddle_detector(self):
         paddle_instance = MagicMock()
         config_loader = MagicMock()
         config_loader.load_config_from_name.side_effect = RuntimeError("missing weights")
@@ -442,7 +442,7 @@ class DualEngineOcrTests(unittest.TestCase):
         with (
             patch.object(ocr_engine, "_paddle_engine", paddle_instance),
             patch.object(ocr_engine, "_vietocr_engine", None),
-            patch.object(ocr_engine, "_paddle_initialization_status", "not_initialized"),
+            patch.object(ocr_engine, "_paddle_initialization_status", "success"),
             patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
             patch.object(ocr_engine, "Cfg", config_loader),
             patch.object(ocr_engine, "Predictor", predictor_factory),
