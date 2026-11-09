@@ -780,9 +780,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(stats).toHaveTextContent(/11\s*Trung tính/);
 
     await user.click(screen.getByRole("button", { name: "Rủi ro cao (4)" }));
-    expect(screen.getAllByRole("button", { name: /^Từ \d+:/ })).toHaveLength(
-      4,
-    );
+    expect(screen.getAllByRole("button", { name: /^Từ \d+:/ })).toHaveLength(4);
   });
 
   it("keeps exact engine agreement neutral until Admin verification", async () => {
