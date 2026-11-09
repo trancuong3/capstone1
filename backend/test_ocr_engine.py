@@ -50,6 +50,12 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine.normalize_word("-"), "-")   # Giữ lại bullet gạch đầu dòng
         self.assertEqual(ocr_engine.normalize_word("Việt-Nam"), "việt-nam")
 
+    def test_source_token_indexes_survive_empty_token_filtering(self):
+        self.assertEqual(
+            ocr_engine._tokens_with_source_indices("một !!! hai"),
+            [(0, "một"), (2, "hai")],
+        )
+
     def test_clean_ocr_punctuation(self):
         """Kiểm tra làm sạch dấu câu tất định."""
         self.assertEqual(ocr_engine.clean_ocr_punctuation("?Có phải không"), '"Có phải không')
@@ -112,6 +118,23 @@ class DualEngineOcrTests(unittest.TestCase):
             [word["ocr_evidence"]["alignment"] for word in result["words"]],
             ["substitute", "substitute"],
         )
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in result["words"]],
+            [
+                {"paddleocr": "Chu", "vietocr": "Chú"},
+                {"paddleocr": "meo", "vietocr": "mèo"},
+            ],
+        )
+        self.assertEqual(
+            result["metadata"]["engine_statuses"],
+            {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_statuses"],
+            {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+        )
+        self.assertEqual(result["words"][0]["ocr_evidence"]["paddle_token_index"], 0)
+        self.assertEqual(result["words"][0]["ocr_evidence"]["vietocr_token_index"], 0)
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
@@ -129,7 +152,7 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
         self.assertIsNone(meta["ocr_score_contract"])
-        self.assertEqual(meta["ocr_evidence_contract"], "hybrid_ocr_evidence_v3")
+        self.assertEqual(meta["ocr_evidence_contract"], "hybrid_ocr_evidence_v4")
         self.assertEqual(meta["line_evidence"][0]["paddle_line_confidence"], 0.95)
         self.assertEqual(
             meta["line_evidence"][0]["paddle_line_score_contract"],
@@ -348,6 +371,93 @@ class DualEngineOcrTests(unittest.TestCase):
             "tesseract_raw_word_score_v1",
         )
 
+    def test_paddle_output_survives_vietocr_inference_error(self):
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("công chúa", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.side_effect = RuntimeError("model failure")
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(
+                ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)
+            ),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+        self.assertEqual(result["text"], "công chúa")
+        self.assertEqual(
+            result["metadata"]["engine_statuses"]["paddleocr"], "success"
+        )
+        self.assertEqual(result["metadata"]["engine_statuses"]["vietocr"], "error")
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["paddleocr"],
+            "công",
+        )
+        self.assertIsNone(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_statuses"]["vietocr"],
+            "error",
+        )
+
+    def test_paddle_recognition_remains_available_when_vietocr_was_not_initialized(self):
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("một hai", 0.95)]]]
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, None)),
+            patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+        self.assertEqual(result["text"], "một hai")
+        self.assertEqual(result["metadata"]["engine_statuses"]["paddleocr"], "success")
+        self.assertEqual(result["metadata"]["engine_statuses"]["vietocr"], "not_initialized")
+        self.assertEqual(result["metadata"]["engine_statuses"]["tesseract"], "not_run")
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["paddleocr"],
+            "một",
+        )
+        self.assertIsNone(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
+        )
+
+    def test_vietocr_initialization_failure_does_not_disable_paddle_detector(self):
+        paddle_instance = MagicMock()
+        paddle_factory = MagicMock(return_value=paddle_instance)
+        config_loader = MagicMock()
+        config_loader.load_config_from_name.side_effect = RuntimeError("missing weights")
+        predictor_factory = MagicMock()
+
+        with (
+            patch.object(ocr_engine, "_paddle_engine", None),
+            patch.object(ocr_engine, "_vietocr_engine", None),
+            patch.object(ocr_engine, "_paddle_initialization_status", "not_initialized"),
+            patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
+            patch.object(ocr_engine, "PaddleOCR", paddle_factory),
+            patch.object(ocr_engine, "Cfg", config_loader),
+            patch.object(ocr_engine, "Predictor", predictor_factory),
+            patch.object(ocr_engine, "_find_cached_vietocr_weights", return_value=None),
+            patch.object(ocr_engine.torch.cuda, "is_available", return_value=False),
+            patch.object(ocr_engine.torch, "set_num_threads"),
+        ):
+            paddle, viet = ocr_engine._get_ocr_engines()
+
+        self.assertIs(paddle, paddle_instance)
+        self.assertIsNone(viet)
+        self.assertEqual(ocr_engine._paddle_initialization_status, "success")
+        self.assertEqual(ocr_engine._vietocr_initialization_status, "not_initialized")
+        self.assertEqual(ocr_engine._vietocr_initialization_error, "RuntimeError")
+        paddle_factory.assert_called_once()
+        predictor_factory.assert_not_called()
+
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
         mock_tesseract_result = {
@@ -377,6 +487,14 @@ class DualEngineOcrTests(unittest.TestCase):
                 result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
                 self.assertEqual(result["metadata"]["engine"], "tesseract")
                 self.assertEqual(result["text"], "Con mèo trèo cây cau")
+                self.assertEqual(
+                    result["metadata"]["engine_statuses"],
+                    {
+                        "paddleocr": ocr_engine._paddle_initialization_status,
+                        "vietocr": "not_run",
+                        "tesseract": "success",
+                    },
+                )
 
 
 if __name__ == "__main__":
