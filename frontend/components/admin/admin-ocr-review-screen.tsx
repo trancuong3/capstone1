@@ -1361,6 +1361,7 @@ export function AdminOcrReviewScreen({
       green: 0,
       red: 0,
       yellow: 0,
+      neutral: 0,
     };
     for (const word of words) {
       const status = getWordReviewStatus(word, detail?.verification_status);
@@ -1963,8 +1964,9 @@ export function AdminOcrReviewScreen({
               <div>
                 <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
                 <p className="mt-1 text-sm text-muted">
-                  Ưu tiên xử lý {colorCounts.red + colorCounts.yellow} từ đỏ và
-                  vàng; từ xanh đang được thu gọn khỏi hàng đợi.
+                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ đã có
+                  mismatch hoặc rủi ro; {colorCounts.neutral} từ đang trung tính
+                  và chưa có xác minh độc lập.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2021,19 +2023,28 @@ export function AdminOcrReviewScreen({
                     count: colorCounts.red + colorCounts.yellow,
                   },
                   {
-                    id: "red",
-                    label: "Đỏ · reference xác nhận sai",
-                    count: colorCounts.red,
-                  },
-                  {
-                    id: "yellow",
-                    label: "Vàng · nghi vấn dấu / chưa rõ",
+                    id: "risk",
+                    label: "Rủi ro cao",
                     count: colorCounts.yellow,
                   },
                   {
-                    id: "green",
-                    label: "Xanh · Admin/reference đã xác minh",
+                    id: "disagreement",
+                    label: "Engine bất đồng",
+                    count: words.filter((word) => {
+                      const status = getWordReviewStatus(word, detail?.verification_status);
+                      return status === "engine_disagreement" ||
+                        word.ocr_evidence?.alignment === "substitute";
+                    }).length,
+                  },
+                  {
+                    id: "verified",
+                    label: "Đã xác minh",
                     count: colorCounts.green,
+                  },
+                  {
+                    id: "neutral",
+                    label: "Trung tính",
+                    count: colorCounts.neutral,
                   },
                 ] as const satisfies readonly {
                   id: WordFilter;
@@ -2045,12 +2056,12 @@ export function AdminOcrReviewScreen({
                   aria-pressed={wordFilter === filter.id}
                   className={`min-h-10 rounded-full border px-3 text-sm font-bold ${
                     wordFilter === filter.id
-                      ? filter.id === "red"
-                        ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
-                        : filter.id === "yellow"
-                          ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
-                          : filter.id === "green"
-                            ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
+                      ? filter.id === "risk" || filter.id === "disagreement"
+                        ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
+                        : filter.id === "verified"
+                          ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
+                          : filter.id === "neutral"
+                            ? "border-slate-500 bg-slate-100 text-slate-900 ring-2 ring-slate-500/15"
                             : "border-primary bg-sky text-primary-hover"
                       : "border-border bg-white text-muted hover:bg-canvas"
                   }`}
@@ -2117,7 +2128,9 @@ export function AdminOcrReviewScreen({
                           ? "border-l-green-600"
                           : colorGroup === "red"
                             ? "border-l-red-600"
-                            : "border-l-amber-500"
+                            : colorGroup === "yellow"
+                              ? "border-l-amber-500"
+                              : "border-l-slate-400"
                       } ${
                         word.word_index === selectedWord
                           ? "border-y-primary border-r-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
