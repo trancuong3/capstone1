@@ -91,6 +91,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(getWordReviewStatus(word, "VERIFIED")).toBe("verified");
     expect(
       getWordReviewStatus(
+        { ...word, ocr_review_status: "verified" },
+        "NEEDS_REVIEW",
+      ),
+    ).toBe("needs_review");
+    expect(
+      getWordReviewStatus(
         { ...word, ocr_review_status: "matched" },
         "NEEDS_REVIEW",
       ),

@@ -113,6 +113,8 @@ export function getWordReviewStatus(
 ): AdminOcrReviewStatus {
   if (revisionStatus === "VERIFIED") return "verified";
   const status = word.ocr_review_status;
+  // A persisted word-level status cannot verify a revision that is still pending.
+  if (status === "verified") return "needs_review";
   if (status === "matched") return "engine_agreement";
   if (status === "suspect") {
     return hasEngineDisagreementEvidence(word)
