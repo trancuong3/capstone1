@@ -1,4 +1,5 @@
 name: Temporary OCR three-color formatting and validation
+# Short-lived helper to persist formatter output and validate the OCR PR branch.
 
 on:
   pull_request:
