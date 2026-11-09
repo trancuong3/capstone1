@@ -218,10 +218,16 @@ export function getWordReviewLabel(
   _paddleLineScore?: number | null,
 ): string {
   if (status === "verified") return "Admin đã xác minh từ";
-  if (status === "reference_match") return "Khớp reference của trang đã xác minh";
-  if (status === "confirmed_mismatch") return "Sai so với reference đã xác minh";
-  if (status === "engine_agreement") return "Hai engine đồng thuận · chưa xác minh độc lập";
-  if (status === "engine_disagreement" && hasDiacriticOnlyEngineDisagreement(word)) {
+  if (status === "reference_match")
+    return "Khớp reference của trang đã xác minh";
+  if (status === "confirmed_mismatch")
+    return "Sai so với reference đã xác minh";
+  if (status === "engine_agreement")
+    return "Hai engine đồng thuận · chưa xác minh độc lập";
+  if (
+    status === "engine_disagreement" &&
+    hasDiacriticOnlyEngineDisagreement(word)
+  ) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
   if (status === "engine_disagreement" || status === "suspect") {
@@ -2400,12 +2406,14 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             Engine dùng cho bản nháp:{" "}
-                            {word.ocr_evidence?.selected_engine ?? "Not selected"}{" "}
+                            {word.ocr_evidence?.selected_engine ??
+                              "Not selected"}{" "}
                             · lựa chọn tạm thời, chưa phải verified
                           </span>
                           <span>
                             Lý do chọn candidate:{" "}
-                            {word.ocr_evidence?.selection_reason ?? "Not recorded"}
+                            {word.ocr_evidence?.selection_reason ??
+                              "Not recorded"}
                           </span>
                           <span>
                             Bounding box quality:{" "}
