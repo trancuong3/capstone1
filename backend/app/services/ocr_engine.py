@@ -783,6 +783,9 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "ocr_evidence": {
                 "contract": "tesseract_raw_word_score_v1",
                 "engine_outputs": {"tesseract": token},
+                "source_text": token,
+                "selected_engine": "tesseract",
+                "selection_reason": "dual_engine_unavailable_tesseract_fallback",
                 "alignment": "single_engine",
                 "engine_agreement_score": None,
                 "calibrated_word_accuracy": None,
