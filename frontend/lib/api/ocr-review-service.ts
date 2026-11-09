@@ -148,6 +148,7 @@ export const adminRevisionDetailSchema = z.object({
             )
             .optional()
             .catch({}),
+          engine_errors: z.record(z.string(), z.string()).optional().catch({}),
           paddle_token_index: z
             .number()
             .int()
