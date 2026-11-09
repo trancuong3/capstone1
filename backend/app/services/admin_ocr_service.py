@@ -1439,16 +1439,24 @@ class AdminOcrService:
             return "neutral"
 
         alignment = evidence.get("alignment")
+        engine_statuses = evidence.get("engine_statuses")
+        statuses = engine_statuses if isinstance(engine_statuses, dict) else {}
         if alignment in {
-            "substitute", "unmatched", "delete", "insert",
-            "split", "merge", "unknown", "unresolved",
+            "substitute", "split", "merge", "unknown", "unresolved",
         }:
             return "yellow"
+        if alignment in {"unmatched", "delete", "insert"}:
+            selected_engine = evidence.get("selected_engine")
+            other_engine = (
+                "vietocr" if selected_engine == "paddleocr"
+                else "paddleocr" if selected_engine == "vietocr"
+                else None
+            )
+            other_status = statuses.get(other_engine) if other_engine else None
+            if other_status in {"success", "no_result", "error"}:
+                return "yellow"
 
-        engine_statuses = evidence.get("engine_statuses")
-        if isinstance(engine_statuses, dict) and any(
-            value == "error" for value in engine_statuses.values()
-        ):
+        if any(value == "error" for value in statuses.values()):
             return "yellow"
 
         if evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}:
@@ -1459,6 +1467,9 @@ class AdminOcrService:
         if isinstance(crop_evidence, dict) and (
             crop_evidence.get("crop_quality") in {"weak", "low", "poor", "rejected"}
             or crop_evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}
+            or crop_evidence.get("status") == "partial"
+            or isinstance(crop_evidence.get("paddle_error"), str)
+            or isinstance(crop_evidence.get("vietocr_error"), str)
         ):
             return "yellow"
 
