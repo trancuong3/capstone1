@@ -11,6 +11,15 @@ import threading
 import unicodedata
 from typing import Any
 
+from app.services.ocr_evidence import (
+    HYBRID_OCR_EVIDENCE_CONTRACT,
+    MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    OCR_PREPROCESSING_VERSION,
+    crop_word_region,
+    find_split_merge_candidates,
+    token_alignment_cost,
+)
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # The Windows setup script keeps the pinned Vietnamese model inside this
@@ -47,14 +56,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-from app.services.ocr_evidence import (
-    HYBRID_OCR_EVIDENCE_CONTRACT,
-    MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
-    OCR_PREPROCESSING_VERSION,
-    crop_word_region,
-    find_split_merge_candidates,
-    token_alignment_cost,
-)
 
 
 class OcrEngineUnavailable(RuntimeError):
