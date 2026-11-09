@@ -26,6 +26,7 @@ function words(): AdminRevisionWordDTO[] {
         calibrated_word_accuracy: null,
         verification_source: null,
         reference_text: null,
+        source_text: "Tôi",
         review_reason: "Only one engine produced raw evidence.",
       },
     },
@@ -53,7 +54,7 @@ function words(): AdminRevisionWordDTO[] {
 }
 
 describe("Vietnamese OCR page text and word synchronization", () => {
-  it("preserves every box but clears OCR evidence for a corrected token", () => {
+  it("preserves source engine evidence but clears the old score for a corrected token", () => {
     const existing = words();
     const result = syncPageTextToWords("Ta đi học.", existing);
 
@@ -83,11 +84,9 @@ describe("Vietnamese OCR page text and word synchronization", () => {
       "needs_review",
       "needs_review",
     ]);
-    expect(result.words.map((word) => word.ocr_evidence)).toEqual([
-      null,
-      undefined,
-      undefined,
-    ]);
+    expect(result.words[0]?.ocr_evidence).toEqual(existing[0]?.ocr_evidence);
+    expect(result.words[1]?.ocr_evidence).toBeUndefined();
+    expect(result.words[2]?.ocr_evidence).toBeUndefined();
     expect(result.words.map((word) => word.word_index)).toEqual([0, 1, 2]);
     expect(existing[0].text).toBe("Tôi");
   });
