@@ -127,6 +127,7 @@ export const adminRevisionDetailSchema = z.object({
             "ocr_calibrated_word_accuracy_v1",
           ]),
           engine_outputs: z.record(z.string(), z.string().nullable()),
+          source_text: z.string().nullable().optional(),
           alignment: z.string(),
           engine_agreement_score: z.number().min(0).max(1).nullable(),
           calibrated_word_accuracy: z.number().min(0).max(1).nullable(),
