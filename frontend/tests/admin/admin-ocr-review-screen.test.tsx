@@ -136,13 +136,15 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const parsed = adminRevisionDetailSchema.parse({
       ...adminR1Fixture,
       verification_status: "NEEDS_REVIEW",
-      words: [{
-        ...adminR1Fixture.words[0],
-        ocr_confidence: "not-a-score",
-        ocr_review_status: "green",
-        ocr_score_source: "untrusted-model",
-        review_color_group: "neutral",
-      }],
+      words: [
+        {
+          ...adminR1Fixture.words[0],
+          ocr_confidence: "not-a-score",
+          ocr_review_status: "green",
+          ocr_score_source: "untrusted-model",
+          review_color_group: "neutral",
+        },
+      ],
     });
     expect(parsed.words[0]?.ocr_confidence).toBeNull();
     expect(parsed.words[0]?.ocr_review_status).toBe("needs_review");
@@ -154,7 +156,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         parsed.words[0],
       ),
     ).toBe("yellow");
-    expect(getWordReviewColor("engine_disagreement")).toContain("border-amber-600");
+    expect(getWordReviewColor("engine_disagreement")).toContain(
+      "border-amber-600",
+    );
   });
 
   it("uses verified references and strict dual-engine consensus for green/red; unresolved evidence stays yellow", () => {
@@ -167,7 +171,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         ocr_evidence: verifiedReferenceEvidence(text, text, "match"),
       };
       expect(getWordReviewColorGroup("reference_match", word)).toBe("green");
-      expect(getWordReviewColor("reference_match", word)).toContain("border-green-600");
+      expect(getWordReviewColor("reference_match", word)).toContain(
+        "border-green-600",
+      );
     }
     const consensus = {
       ...adminR1Fixture.words[0]!,
@@ -176,7 +182,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ocr_review_status: "engine_agreement" as const,
       ocr_evidence: consensusEvidence("Chuyện"),
     };
-    expect(getWordReviewColorGroup("engine_agreement", consensus)).toBe("green");
+    expect(getWordReviewColorGroup("engine_agreement", consensus)).toBe(
+      "green",
+    );
     expect(getWordReviewLabel("engine_agreement", consensus)).toContain(
       "Hai OCR đồng thuận · chưa đối chiếu reference",
     );
@@ -191,8 +199,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         alignment: "substitute",
       },
     };
-    expect(getWordReviewColorGroup("engine_disagreement", disagreement)).toBe("yellow");
-    expect(getWordReviewColor("engine_disagreement", disagreement)).toContain("border-amber-600");
+    expect(getWordReviewColorGroup("engine_disagreement", disagreement)).toBe(
+      "yellow",
+    );
+    expect(getWordReviewColor("engine_disagreement", disagreement)).toContain(
+      "border-amber-600",
+    );
 
     const mismatch = {
       ...adminR1Fixture.words[0]!,
@@ -202,7 +214,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ocr_evidence: verifiedReferenceEvidence("hui", "lui", "substitute"),
     };
     expect(getWordReviewColorGroup("confirmed_mismatch", mismatch)).toBe("red");
-    expect(getWordReviewColor("confirmed_mismatch", mismatch)).toContain("border-red-600");
+    expect(getWordReviewColor("confirmed_mismatch", mismatch)).toContain(
+      "border-red-600",
+    );
     expect(getWordReviewColorGroup("needs_review", mismatch)).toBe("yellow");
     expect(getWordReviewColorGroup("confirmed_mismatch")).toBe("yellow");
     expect(
@@ -228,12 +242,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ocr_score_source: "tesseract_raw_word_score_v1" as const,
     });
     for (const score of [0, 0.2, 0.49, 0.5, 0.8, 0.81, 0.99, 1]) {
-      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score))).toBe("yellow");
-      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score), 0.99)).toBe("yellow");
+      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score))).toBe(
+        "yellow",
+      );
+      expect(
+        getWordReviewColorGroup("needs_review", rawScoreWord(score), 0.99),
+      ).toBe("yellow");
     }
-    expect(getWordReviewColorGroup("engine_agreement", rawScoreWord(0.99))).toBe("yellow");
-    expect(getWordReviewColorGroup("confirmed_mismatch", rawScoreWord(0.99))).toBe("yellow");
-    expect(getWordReviewColorGroup("verified", rawScoreWord(0.1))).toBe("green");
+    expect(
+      getWordReviewColorGroup("engine_agreement", rawScoreWord(0.99)),
+    ).toBe("yellow");
+    expect(
+      getWordReviewColorGroup("confirmed_mismatch", rawScoreWord(0.99)),
+    ).toBe("yellow");
+    expect(getWordReviewColorGroup("verified", rawScoreWord(0.1))).toBe(
+      "green",
+    );
     expect(
       getWordReviewColorGroup("reference_match", {
         ...rawScoreWord(0.1),
@@ -690,34 +714,49 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       words: [
         {
           ...adminR1Fixture.words[0]!,
-          word_index: 0, text: "Cao", normalized_text: "cao",
+          word_index: 0,
+          text: "Cao",
+          normalized_text: "cao",
           bbox: [0.05, 0.1, 0.1, 0.04],
-          ocr_confidence: 0.95, ocr_review_status: "confirmed_mismatch",
+          ocr_confidence: 0.95,
+          ocr_review_status: "confirmed_mismatch",
           ocr_evidence: verifiedReferenceEvidence("Cao", "Thấp", "substitute"),
         },
         {
           ...adminR1Fixture.words[0]!,
-          word_index: 1, text: "Vừa", normalized_text: "vừa",
+          word_index: 1,
+          text: "Vừa",
+          normalized_text: "vừa",
           bbox: [0.2, 0.1, 0.1, 0.04],
-          ocr_confidence: 0.8, ocr_review_status: "needs_review",
+          ocr_confidence: 0.8,
+          ocr_review_status: "needs_review",
         },
         {
           ...adminR1Fixture.words[0]!,
-          word_index: 2, text: "Thấp", normalized_text: "thấp",
+          word_index: 2,
+          text: "Thấp",
+          normalized_text: "thấp",
           bbox: [0.35, 0.1, 0.1, 0.04],
-          ocr_confidence: 0.5, ocr_review_status: "verified",
+          ocr_confidence: 0.5,
+          ocr_review_status: "verified",
         },
         {
           ...adminR1Fixture.words[0]!,
-          word_index: 3, text: "Chưa rõ", normalized_text: "chưa rõ",
+          word_index: 3,
+          text: "Chưa rõ",
+          normalized_text: "chưa rõ",
           bbox: [0.5, 0.1, 0.1, 0.04],
-          ocr_confidence: null, ocr_review_status: undefined,
+          ocr_confidence: null,
+          ocr_review_status: undefined,
         },
         {
           ...adminR1Fixture.words[0]!,
-          word_index: 4, text: "Khớp", normalized_text: "khớp",
+          word_index: 4,
+          text: "Khớp",
+          normalized_text: "khớp",
           bbox: [0.65, 0.1, 0.1, 0.04],
-          ocr_confidence: 0.97, ocr_review_status: "matched",
+          ocr_confidence: 0.97,
+          ocr_review_status: "matched",
           ocr_score_source: "dual_engine_consensus_v1",
           ocr_evidence: consensusEvidence("Khớp"),
         },
@@ -751,22 +790,25 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(verified).toHaveClass("border-green-600");
     expect(unknown).toHaveClass("border-amber-600");
     expect(engineAgreement).toHaveClass("border-green-600");
-    const stats = screen.getByRole("group", { name: "Thống kê trạng thái từ OCR" });
+    const stats = screen.getByRole("group", {
+      name: "Thống kê trạng thái từ OCR",
+    });
     expect(stats).toHaveTextContent(/2\s*Xanh · evidence tốt/);
     expect(stats).toHaveTextContent(/1\s*Đỏ · reference xác nhận sai/);
     expect(stats).toHaveTextContent(/2\s*Vàng · cần kiểm tra/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
-      "aria-pressed", "false",
+      "aria-pressed",
+      "false",
     );
     await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
     expect(needsReview).toHaveAttribute("aria-pressed", "true");
     expect(mismatch).toHaveAttribute("aria-pressed", "false");
     await user.click(unknown);
     expect(unknown).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Từ #3 · Dòng 0" })).toHaveAttribute(
-      "aria-pressed", "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Từ #3 · Dòng 0" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("renders mixed OCR evidence at word granularity without color spreading across a line", async () => {
@@ -789,7 +831,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         text,
         normalized_text: text,
         bbox: [0.02 + wordIndex * 0.043, 0.1, 0.035, 0.04] as [
-          number, number, number, number,
+          number,
+          number,
+          number,
+          number,
         ],
         ocr_confidence: null,
         ocr_score_source: null,
@@ -812,51 +857,81 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     const words = [
       ...Array.from({ length: 8 }, (_, index) =>
-        makeWord(index, "engine_agreement", "green", evidence(`từ${index + 1}`)),
+        makeWord(
+          index,
+          "engine_agreement",
+          "green",
+          evidence(`từ${index + 1}`),
+        ),
       ),
       ...Array.from({ length: 3 }, (_, index) =>
-        makeWord(index + 8, "verified", "green", evidence(`từ${index + 9}`, {
-          verification_source: "admin",
-        })),
+        makeWord(
+          index + 8,
+          "verified",
+          "green",
+          evidence(`từ${index + 9}`, {
+            verification_source: "admin",
+          }),
+        ),
       ),
       ...Array.from({ length: 2 }, (_, index) =>
-        makeWord(index + 11, "confirmed_mismatch", "red", evidence(`từ${index + 12}`, {
-          reference_text: "ground-truth",
-          verification_source: "verified_revision",
-          reference_alignment: "substitute",
-        })),
+        makeWord(
+          index + 11,
+          "confirmed_mismatch",
+          "red",
+          evidence(`từ${index + 12}`, {
+            reference_text: "ground-truth",
+            verification_source: "verified_revision",
+            reference_alignment: "substitute",
+          }),
+        ),
       ),
       ...Array.from({ length: 3 }, (_, index) =>
-        makeWord(index + 13, "engine_disagreement", "yellow", evidence(`từ${index + 14}`, {
-          engine_outputs: {
-            paddleocr: `từ${index + 14}`,
-            vietocr: `từ${index + 14} sai`,
-            tesseract: null,
-          },
-          alignment: "substitute",
-          engine_agreement_score: 0,
-        })),
+        makeWord(
+          index + 13,
+          "engine_disagreement",
+          "yellow",
+          evidence(`từ${index + 14}`, {
+            engine_outputs: {
+              paddleocr: `từ${index + 14}`,
+              vietocr: `từ${index + 14} sai`,
+              tesseract: null,
+            },
+            alignment: "substitute",
+            engine_agreement_score: 0,
+          }),
+        ),
       ),
       ...Array.from({ length: 2 }, (_, index) =>
-        makeWord(index + 16, "needs_review", "yellow", evidence(`từ${index + 17}`, {
-          engine_outputs: {
-            paddleocr: `từ${index + 17}`,
-            vietocr: null,
-            tesseract: null,
-          },
-          engine_statuses: {
-            paddleocr: "success",
-            vietocr: "not_initialized",
-            tesseract: "not_run",
-          },
-          selected_engine: "paddleocr",
-          alignment: "unmatched",
-        })),
+        makeWord(
+          index + 16,
+          "needs_review",
+          "yellow",
+          evidence(`từ${index + 17}`, {
+            engine_outputs: {
+              paddleocr: `từ${index + 17}`,
+              vietocr: null,
+              tesseract: null,
+            },
+            engine_statuses: {
+              paddleocr: "success",
+              vietocr: "not_initialized",
+              tesseract: "not_run",
+            },
+            selected_engine: "paddleocr",
+            alignment: "unmatched",
+          }),
+        ),
       ),
-      makeWord(18, "needs_review", "yellow", evidence("từ19", {
-        crop_quality: "low",
-        review_reason: "Crop quality thấp, cần Admin xem lại.",
-      })),
+      makeWord(
+        18,
+        "needs_review",
+        "yellow",
+        evidence("từ19", {
+          crop_quality: "low",
+          review_reason: "Crop quality thấp, cần Admin xem lại.",
+        }),
+      ),
       makeWord(19, "needs_review", "yellow", null),
     ];
     services.ocr.getRevision.mockResolvedValue({
@@ -872,23 +947,47 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         services,
       ),
     );
-    const wordButtons = await screen.findAllByRole("button", { name: /^Từ \d+:/ });
+    const wordButtons = await screen.findAllByRole("button", {
+      name: /^Từ \d+:/,
+    });
     expect(wordButtons).toHaveLength(20);
-    expect(screen.getByRole("button", { name: /Từ 1: từ1\. Hai OCR đồng thuận/ })).toHaveClass("border-green-600");
-    expect(screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ })).toHaveClass("border-green-600");
-    expect(screen.getByRole("button", { name: /Từ 12: từ12\. Sai so với reference/ })).toHaveClass("border-red-600");
-    expect(screen.getByRole("button", { name: /Từ 14: từ14\. Hai OCR bất đồng/ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /^Từ 17: từ17\./ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /Từ 19: từ19\. Crop quality thấp/ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /Từ 20: từ20\. Chưa đủ bằng chứng OCR/ })).toHaveClass("border-amber-600");
+    expect(
+      screen.getByRole("button", { name: /Từ 1: từ1\. Hai OCR đồng thuận/ }),
+    ).toHaveClass("border-green-600");
+    expect(
+      screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ }),
+    ).toHaveClass("border-green-600");
+    expect(
+      screen.getByRole("button", {
+        name: /Từ 12: từ12\. Sai so với reference/,
+      }),
+    ).toHaveClass("border-red-600");
+    expect(
+      screen.getByRole("button", { name: /Từ 14: từ14\. Hai OCR bất đồng/ }),
+    ).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /^Từ 17: từ17\./ })).toHaveClass(
+      "border-amber-600",
+    );
+    expect(
+      screen.getByRole("button", { name: /Từ 19: từ19\. Crop quality thấp/ }),
+    ).toHaveClass("border-amber-600");
+    expect(
+      screen.getByRole("button", {
+        name: /Từ 20: từ20\. Chưa đủ bằng chứng OCR/,
+      }),
+    ).toHaveClass("border-amber-600");
 
-    const stats = screen.getByRole("group", { name: "Thống kê trạng thái từ OCR" });
+    const stats = screen.getByRole("group", {
+      name: "Thống kê trạng thái từ OCR",
+    });
     expect(stats).toHaveTextContent(/11\s*Xanh/);
     expect(stats).toHaveTextContent(/2\s*Đỏ/);
     expect(stats).toHaveTextContent(/7\s*Vàng/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     await user.click(screen.getByRole("button", { name: "Rủi ro cao (7)" }));
-    expect(screen.getAllByRole("button", { name: /^Từ #\d+ · Dòng \d+$/ })).toHaveLength(7);
+    expect(
+      screen.getAllByRole("button", { name: /^Từ #\d+ · Dòng \d+$/ }),
+    ).toHaveLength(7);
     expect(screen.getByText("Đang hiện 7/20 từ")).toBeInTheDocument();
   });
 
@@ -897,14 +996,16 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     services.ocr.getRevision.mockResolvedValue({
       ...adminR2Fixture,
       verification_status: "NEEDS_REVIEW",
-      words: [{
-        ...adminR1Fixture.words[0]!,
-        text: "Nội",
-        ocr_confidence: 0.97,
-        ocr_review_status: "matched",
-        ocr_score_source: "dual_engine_consensus_v1",
-        ocr_evidence: consensusEvidence("Nội"),
-      }],
+      words: [
+        {
+          ...adminR1Fixture.words[0]!,
+          text: "Nội",
+          ocr_confidence: 0.97,
+          ocr_review_status: "matched",
+          ocr_score_source: "dual_engine_consensus_v1",
+          ocr_evidence: consensusEvidence("Nội"),
+        },
+      ],
     });
     render(
       withAdminFixture(
@@ -917,7 +1018,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     expect(matchedWord).toHaveClass("border-green-600");
     expect(screen.getByRole("button", { name: "Cần xem (0)" })).toHaveAttribute(
-      "aria-pressed", "false",
+      "aria-pressed",
+      "false",
     );
   });
 
@@ -987,7 +1089,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "false",
     );
     expect(
-      screen.queryByText(/Màu đỏ theo ngưỡng điểm thấp/)
+      screen.queryByText(/Màu đỏ theo ngưỡng điểm thấp/),
     ).not.toBeInTheDocument();
   });
 

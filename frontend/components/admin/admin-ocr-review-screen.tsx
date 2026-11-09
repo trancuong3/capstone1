@@ -172,7 +172,8 @@ export function getWordReviewColorGroup(
     contractGroup === "green" ||
     contractGroup === "yellow" ||
     contractGroup === "red"
-  ) return contractGroup;
+  )
+    return contractGroup;
   if (status === "verified") return "green";
   if (!word?.ocr_evidence) return "yellow";
 
@@ -198,10 +199,14 @@ export function getWordReviewColorGroup(
       evidence.reference_alignment === "substitute" &&
       typeof source === "string" &&
       normalize(source) === normalize(word.text)
-    ) return "red";
+    )
+      return "red";
     return "yellow";
   }
-  if (typeof source !== "string" || normalize(source) !== normalize(word.text)) {
+  if (
+    typeof source !== "string" ||
+    normalize(source) !== normalize(word.text)
+  ) {
     return "yellow";
   }
 
@@ -210,11 +215,16 @@ export function getWordReviewColorGroup(
   const statuses = evidence.engine_statuses ?? {};
   const selectedEngine = evidence.selected_engine;
   const selectedCandidate =
-    selectedEngine === "paddleocr" ? paddle :
-    selectedEngine === "vietocr" ? vietocr : null;
+    selectedEngine === "paddleocr"
+      ? paddle
+      : selectedEngine === "vietocr"
+        ? vietocr
+        : null;
   if (
-    typeof paddle !== "string" || !paddle.trim() ||
-    typeof vietocr !== "string" || !vietocr.trim() ||
+    typeof paddle !== "string" ||
+    !paddle.trim() ||
+    typeof vietocr !== "string" ||
+    !vietocr.trim() ||
     normalize(paddle) !== normalize(vietocr) ||
     statuses.paddleocr !== "success" ||
     statuses.vietocr !== "success" ||
@@ -227,7 +237,8 @@ export function getWordReviewColorGroup(
     (evidence.vietocr_token_index ?? -1) < 0 ||
     evidence.bbox_quality !== "valid" ||
     evidence.crop_quality !== "usable"
-  ) return "yellow";
+  )
+    return "yellow";
 
   const crop = evidence.crop_evidence;
   if (crop) {
@@ -235,7 +246,8 @@ export function getWordReviewColorGroup(
       !["not_needed", "completed"].includes(String(crop.status)) ||
       typeof crop.paddle_error === "string" ||
       typeof crop.vietocr_error === "string"
-    ) return "yellow";
+    )
+      return "yellow";
     if (crop.status === "completed") {
       const candidates = [crop.paddleocr_candidate, crop.vietocr_candidate];
       if (
@@ -244,9 +256,11 @@ export function getWordReviewColorGroup(
         ) ||
         candidates.some(
           (candidate) =>
-            typeof candidate === "string" && normalize(candidate) !== normalize(paddle),
+            typeof candidate === "string" &&
+            normalize(candidate) !== normalize(paddle),
         )
-      ) return "yellow";
+      )
+        return "yellow";
     }
   }
   return "green";
@@ -283,7 +297,8 @@ export function getWordReviewLabel(
   if (
     hasEngineDisagreementEvidence(word) &&
     hasDiacriticOnlyEngineDisagreement(word)
-  ) return "Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
+  )
+    return "Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   if (hasEngineDisagreementEvidence(word)) {
     return "Hai OCR bất đồng · chưa thể xác định candidate đúng";
   }
@@ -1675,9 +1690,9 @@ export function AdminOcrReviewScreen({
             Xanh biểu thị Admin/reference đã xác minh hoặc hai OCR đồng thuận
             chính xác ở cấp từ với alignment, token mapping và bbox/crop hợp lệ;
             đồng thuận là evidence tốt, không đồng nghĩa Admin verified. Vàng
-            dành cho từ thiếu evidence, bất đồng hoặc mapping/chất lượng chưa
-            an toàn. Đỏ chỉ xuất hiện khi candidate không khớp reference đã
-            xác minh trong alignment một-một rõ ràng. Raw OCR score và similarity
+            dành cho từ thiếu evidence, bất đồng hoặc mapping/chất lượng chưa an
+            toàn. Đỏ chỉ xuất hiện khi candidate không khớp reference đã xác
+            minh trong alignment một-một rõ ràng. Raw OCR score và similarity
             heuristic không được sử dụng như xác suất đúng.
           </p>
           <div
@@ -2123,9 +2138,9 @@ export function AdminOcrReviewScreen({
               <div>
                 <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
                 <p className="mt-1 text-sm text-muted">
-                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần
-                  kiểm tra; {colorCounts.green} từ đã có evidence tốt, nhưng
-                  nhóm xanh chưa đồng nghĩa với Admin verified.
+                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần kiểm
+                  tra; {colorCounts.green} từ đã có evidence tốt, nhưng nhóm
+                  xanh chưa đồng nghĩa với Admin verified.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
