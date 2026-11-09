@@ -6,6 +6,7 @@ import {
   getOcrScoreLabel,
   getWordReviewColor,
   getWordReviewColorGroup,
+  getWordReviewLabel,
   getWordReviewStatus,
 } from "@/components/admin/admin-ocr-review-screen";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
@@ -542,13 +543,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const accentDifference = await screen.findByRole("button", {
-      name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
+      name: /Từ 1: đừng\. Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
     });
     const highPaddleScore = screen.getByRole("button", {
-      name: /Từ 2: chàng\. Hai engine bất đồng · cần đối chiếu ảnh/,
+      name: /Từ 2: chàng\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
     });
     const vietOcrSelected = screen.getByRole("button", {
-      name: /Từ 3: mới\. Hai engine bất đồng/,
+      name: /Từ 3: mới\. Hai OCR bất đồng · chưa thể xác định candidate đúng/,
     });
 
     expect(accentDifference).toHaveClass("border-amber-600");
@@ -1224,7 +1225,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toEqual(["Nội", "dung", "revision", "đã", "hành"]);
     expect(
       screen.getByRole("button", {
-        name: /Từ 4: đã\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh · chưa phát hiện rủi ro OCR/,
+        name: /Từ 4: đã\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
       }),
     ).toBeInTheDocument();
     expect(
@@ -1263,7 +1264,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
     expect(
       screen.getByRole("button", {
-        name: /Từ 1: Nội\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh · chưa phát hiện rủi ro OCR/,
+        name: /Từ 1: Nội\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
       }),
     ).toHaveClass("border-amber-600");
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
