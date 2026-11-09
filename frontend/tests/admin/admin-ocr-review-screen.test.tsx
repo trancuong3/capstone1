@@ -108,7 +108,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         parsed.words[0],
       ),
     ).toBe("neutral");
-    expect(getWordReviewColor("engine_disagreement")).toContain("border-amber-600");
+    expect(getWordReviewColor("engine_disagreement")).toContain(
+      "border-amber-600",
+    );
   });
 
   it("uses green for verified words, red for confirmed mismatch, yellow for disagreement and neutral for agreement", () => {
