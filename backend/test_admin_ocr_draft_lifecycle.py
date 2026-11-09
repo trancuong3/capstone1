@@ -171,7 +171,25 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             revision.ProcessingMeta["word_review_statuses"],
-            ["verified"] * len(source_words),
+            ["reference_match"] * len(source_words),
+        )
+        self.assertEqual(
+            [word.review_color_group for word in result.words],
+            ["green"] * len(source_words),
+        )
+        self.assertEqual(
+            [
+                word.ocr_evidence.verification_source
+                for word in result.words
+            ],
+            ["verified_revision"] * len(source_words),
+        )
+        self.assertEqual(
+            [
+                word.ocr_evidence.reference_text
+                for word in result.words
+            ],
+            [word.Text for word in source_words],
         )
         self.assertEqual(
             [word["bbox"] for word in copied_words],
