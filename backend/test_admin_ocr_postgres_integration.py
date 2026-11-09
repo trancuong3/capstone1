@@ -328,6 +328,12 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r2["draft_text"], "Ngày xưa có bé.")
             self.assertEqual(len(r2["words"]), 4)
             self.assertEqual(r2["ocr_metadata"]["source_revision_id"], str(R1_ID))
+            self.assertEqual(r2["words"][0]["ocr_review_status"], "reference_match")
+            self.assertEqual(
+                r2["words"][0]["ocr_evidence"]["verification_source"],
+                "verified_revision",
+            )
+            self.assertEqual(r2["words"][0]["ocr_evidence"]["reference_text"], "Ngày")
             self.assertEqual(r2["words"][2]["ocr_confidence"], None)
             self.assertEqual(
                 r2["words"][0]["ocr_evidence"]["engine_outputs"],
@@ -378,6 +384,14 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [word["review_color_group"] for word in verified.json()["words"]],
                 ["green"] * 4,
+            )
+            self.assertEqual(
+                [word["ocr_evidence"]["verification_source"] for word in verified.json()["words"]],
+                ["admin"] * 4,
+            )
+            self.assertEqual(
+                [word["ocr_evidence"]["reference_text"] for word in verified.json()["words"]],
+                ["Ngày", "xưa", "có", "em."],
             )
 
             async with self.sessions() as session:
@@ -459,6 +473,76 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r1.VerifiedText, "Ngày xưa có bé.")
             self.assertEqual(r2_row.VerifiedText, "Ngày xưa có em.")
             self.assertIsNone(r3_row.VerifiedText)
+
+    async def test_partial_dual_engine_evidence_survives_postgres_revision_api_read(self):
+        partial_evidence = {
+            "contract": "hybrid_ocr_evidence_v4",
+            "engine_outputs": {"paddleocr": None, "vietocr": "Ngày", "tesseract": None},
+            "engine_statuses": {},
+            "alignment": "not_computed",
+            "paddle_token_index": -1,
+            "vietocr_token_index": 0,
+            "selected_engine": "vietocr",
+            "review_reason": "Legacy partial candidate record.",
+        }
+        line_evidence = {
+            "line_evidence": [{
+                "line_index": 0,
+                "paddle_output": "Ngay xưa có bé.",
+                "vietocr_output": "Ngày xưa có bé.",
+                "vietocr_output_used": True,
+                "engine_statuses": {
+                    "paddleocr": "success",
+                    "vietocr": "success",
+                    "tesseract": "not_run",
+                },
+                "alignment_operations": [{
+                    "operation": "substitute",
+                    "selected_token_index": 0,
+                    "paddle_token_index": -1,
+                    "vietocr_token_index": 0,
+                    "paddle_token": "Ngay",
+                    "vietocr_token": "Ngày",
+                }],
+            }],
+        }
+        async with self.sessions() as session:
+            await session.execute(
+                text("""
+                    UPDATE pagerevisions
+                    SET processingmeta =
+                        jsonb_set(
+                            processingmeta,
+                            '{word_evidence_v2,0}',
+                            CAST(:evidence AS jsonb),
+                            true
+                        ) || CAST(:line AS jsonb)
+                    WHERE id = :revision
+                """),
+                {
+                    "evidence": json.dumps(partial_evidence),
+                    "line": json.dumps(line_evidence),
+                    "revision": R1_ID,
+                },
+            )
+            await session.commit()
+
+        app = self._test_app()
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(
+                f"/books/admin/pages/{PAGE_ID}/revisions/{R1_ID}"
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        first_word = response.json()["words"][0]
+        self.assertEqual(
+            first_word["ocr_evidence"]["engine_outputs"],
+            {"paddleocr": "Ngay", "vietocr": "Ngày", "tesseract": None},
+        )
+        self.assertEqual(first_word["ocr_evidence"]["alignment"], "substitute")
+        self.assertIsNone(first_word["ocr_evidence"]["paddle_token_index"])
+        self.assertEqual(first_word["ocr_evidence"]["vietocr_token_index"], 0)
+        self.assertEqual(first_word["review_color_group"], "yellow")
 
     async def test_duplicate_concurrent_draft_is_rejected_after_row_lock(self):
         async def create():

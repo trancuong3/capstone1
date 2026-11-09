@@ -1483,11 +1483,11 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
             {"paddleocr": "error", "vietocr": "not_run", "tesseract": "success"},
             {"vietocr": "PaddleOCR failed before VietOCR received line regions."},
         )
-    except Exception as exc:
-        logger.exception("Hybrid OCR pipeline failed; trying configured Tesseract fallback")
-        fallback = _extract_text_and_boxes_tesseract(image_bytes)
-        return _attach_engine_statuses(
-            fallback,
-            {"paddleocr": "error", "vietocr": "not_run", "tesseract": "success"},
-            {"pipeline": type(exc).__name__},
+    except Exception:
+        # A post-initialization pipeline bug is not proof that either OCR engine
+        # failed. Do not silently discard dual-engine evidence for Tesseract output.
+        logger.exception(
+            "Hybrid OCR processing failed after engine initialization; "
+            "refusing to replace dual-engine processing with Tesseract fallback"
         )
+        raise

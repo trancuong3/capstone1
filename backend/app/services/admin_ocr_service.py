@@ -474,6 +474,102 @@ class AdminOcrService:
         }
 
     @staticmethod
+    def _empty_word_evidence(review_reason: str) -> dict[str, object]:
+        """Represent a real verification event when no OCR candidate was stored."""
+        return {
+            "contract": HYBRID_OCR_EVIDENCE_CONTRACT,
+            "engine_outputs": {
+                "paddleocr": None,
+                "vietocr": None,
+                "tesseract": None,
+            },
+            "engine_statuses": {},
+            "engine_errors": {},
+            "paddle_token_index": None,
+            "vietocr_token_index": None,
+            "source_text": None,
+            "alignment": "not_computed",
+            "engine_agreement_score": None,
+            "calibrated_word_accuracy": None,
+            "verification_source": None,
+            "reference_text": None,
+            "reference_alignment": None,
+            "selected_engine": None,
+            "selection_reason": None,
+            "bbox_quality": None,
+            "crop_quality": None,
+            "crop_evidence": None,
+            "review_reason": review_reason,
+        }
+
+    @staticmethod
+    def _merge_recovered_word_evidence(
+        stored: dict[str, object] | None,
+        recovered: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        """Fill missing fields only from a safe reconstruction of an unchanged line."""
+        if stored is None:
+            return recovered
+        if recovered is None:
+            return stored
+
+        merged = dict(stored)
+        stored_outputs = dict(stored.get("engine_outputs") or {})
+        recovered_outputs = recovered.get("engine_outputs")
+        if isinstance(recovered_outputs, dict):
+            for engine in ("paddleocr", "vietocr", "tesseract"):
+                current = stored_outputs.get(engine)
+                candidate = recovered_outputs.get(engine)
+                if (
+                    (not isinstance(current, str) or not current.strip())
+                    and isinstance(candidate, str)
+                    and candidate.strip()
+                ):
+                    stored_outputs[engine] = candidate
+        merged["engine_outputs"] = stored_outputs
+
+        for field in ("engine_statuses", "engine_errors"):
+            current = merged.get(field)
+            recovered_value = recovered.get(field)
+            combined = dict(recovered_value) if isinstance(recovered_value, dict) else {}
+            if isinstance(current, dict):
+                combined.update(current)
+            merged[field] = combined
+
+        for field in (
+            "paddle_token_index",
+            "vietocr_token_index",
+            "source_text",
+            "selected_engine",
+            "selection_reason",
+            "bbox_quality",
+            "crop_quality",
+        ):
+            current = merged.get(field)
+            candidate = recovered.get(field)
+            if current is None or (isinstance(current, str) and not current.strip()):
+                if candidate is not None:
+                    merged[field] = candidate
+
+        if merged.get("alignment") in {None, "", "not_computed"}:
+            recovered_alignment = recovered.get("alignment")
+            if isinstance(recovered_alignment, str):
+                merged["alignment"] = recovered_alignment
+        if merged.get("engine_agreement_score") is None:
+            merged["engine_agreement_score"] = recovered.get("engine_agreement_score")
+        current_reason = merged.get("review_reason")
+        if (
+            not isinstance(current_reason, str)
+            or not current_reason.strip()
+            or current_reason
+            == "Alignment and word-level review reasoning were not recorded in this revision."
+        ):
+            merged["review_reason"] = recovered.get("review_reason")
+
+        # Reference fields are deliberately not reconstructed from OCR output.
+        return AdminOcrService._normalize_word_evidence(merged)
+
+    @staticmethod
     def _line_word_evidence(
         metadata: dict[str, object],
         line_index: int,
@@ -889,12 +985,17 @@ class AdminOcrService:
                 else None
             )
             normalized_evidence = AdminOcrService._normalize_word_evidence(evidence)
-            if normalized_evidence is None and source is not None:
-                normalized_evidence = AdminOcrService._line_word_evidence(
-                    metadata,
-                    int(source.LineIndex),
-                    source_line_positions.get(source_index, 0),
-                    line_tokens.get(int(source.LineIndex)),
+            if source is not None:
+                recovered_evidence = AdminOcrService._normalize_word_evidence(
+                    AdminOcrService._line_word_evidence(
+                        metadata,
+                        int(source.LineIndex),
+                        source_line_positions.get(source_index, 0),
+                        line_tokens.get(int(source.LineIndex)),
+                    )
+                )
+                normalized_evidence = AdminOcrService._merge_recovered_word_evidence(
+                    normalized_evidence, recovered_evidence
                 )
             if (
                 normalized_evidence is not None
@@ -1640,15 +1741,20 @@ class AdminOcrService:
                 if 0 <= row.WordIndex < len(raw_word_evidence)
                 else None
             )
-            if stored_evidence is None:
-                # Recover from line metadata only when the selected line still
-                # matches the persisted word sequence and source token indexes.
-                stored_evidence = self._line_word_evidence(
+            # A partially populated V2 object must not block recovery of the
+            # missing engine candidate. Reconstruction succeeds only when the
+            # selected line still matches the persisted word sequence.
+            recovered_evidence = self._normalize_word_evidence(
+                self._line_word_evidence(
                     metadata,
                     row.LineIndex,
                     word_position,
                     line_tokens.get(int(row.LineIndex)),
                 )
+            )
+            stored_evidence = self._merge_recovered_word_evidence(
+                stored_evidence, recovered_evidence
+            )
             if review_status == "suspect":
                 # A legacy suspect label is not evidence by itself. Preserve it
                 # as an actual disagreement only if this word has conflicting
@@ -1798,6 +1904,52 @@ class AdminOcrService:
         if normalize_text_tokens(text_value) != [str(item["normalized_text"]) for item in words]:
             raise HTTPException(status_code=409, detail="Current verified text and word data are inconsistent")
 
+        source_line_positions: dict[int, int] = {}
+        source_line_tokens: dict[int, list[str]] = {}
+        source_line_counts: dict[int, int] = {}
+        for source_row in sorted(
+            source_words, key=lambda row: (int(row.LineIndex), int(row.WordIndex))
+        ):
+            source_line = int(source_row.LineIndex)
+            source_word_index = int(source_row.WordIndex)
+            source_line_positions[source_word_index] = source_line_counts.get(source_line, 0)
+            source_line_counts[source_line] = source_line_positions[source_word_index] + 1
+            source_line_tokens.setdefault(source_line, []).append(
+                unicodedata.normalize("NFC", str(source_row.Text))
+            )
+
+        raw_source_evidence = source_metadata.get("word_evidence_v2")
+        if not isinstance(raw_source_evidence, list):
+            raw_source_evidence = []
+        draft_evidence: list[dict[str, object]] = []
+        for index, word in enumerate(words):
+            stored = self._normalize_word_evidence(
+                raw_source_evidence[index] if index < len(raw_source_evidence) else None
+            )
+            source_row = source_words[index]
+            recovered = self._normalize_word_evidence(
+                self._line_word_evidence(
+                    source_metadata,
+                    int(source_row.LineIndex),
+                    source_line_positions.get(int(source_row.WordIndex), 0),
+                    source_line_tokens.get(int(source_row.LineIndex)),
+                )
+            )
+            evidence = self._merge_recovered_word_evidence(stored, recovered)
+            if evidence is None:
+                evidence = self._empty_word_evidence(
+                    "Từ được sao chép từ revision nguồn đã xác minh; không có OCR candidate được lưu."
+                )
+            evidence.update({
+                "verification_source": "verified_revision",
+                "reference_text": str(word["text"]),
+                "reference_alignment": "match",
+                "review_reason": (
+                    "Từ khớp chính xác với nội dung của revision nguồn đã được Admin xác minh."
+                ),
+            })
+            draft_evidence.append(evidence)
+
         try:
             next_number = await self.repo.next_revision_number(page.Id)
         except ValueError as exc:
@@ -1816,13 +1968,9 @@ class AdminOcrService:
             ProcessingMeta={
                 "source_revision_id": str(source.Id),
                 "creation_reason": "manual_edit",
-                "word_review_statuses": ["verified"] * len(words),
+                "word_review_statuses": ["reference_match"] * len(words),
                 "word_score_sources": self._word_score_sources(words, source_metadata),
-                "word_evidence_v2": (
-                    list(source_metadata.get("word_evidence_v2", []))
-                    if isinstance(source_metadata.get("word_evidence_v2"), list)
-                    else [None] * len(words)
-                ),
+                "word_evidence_v2": draft_evidence,
                 "word_evidence_v2_authoritative": True,
                 "ocr_score_contract": score_contract,
             },
@@ -1914,6 +2062,32 @@ class AdminOcrService:
             self._set_word_review_statuses(
                 revision, words, existing_rows, verified=True
             )
+            verification_metadata = dict(revision.ProcessingMeta or {})
+            stored_evidence_items = verification_metadata.get("word_evidence_v2")
+            if not isinstance(stored_evidence_items, list):
+                stored_evidence_items = []
+            admin_verified_evidence: list[dict[str, object]] = []
+            for index, word in enumerate(words):
+                evidence = self._normalize_word_evidence(
+                    stored_evidence_items[index]
+                    if index < len(stored_evidence_items)
+                    else None
+                )
+                if evidence is None:
+                    evidence = self._empty_word_evidence(
+                        "Admin đã xác minh từ này; không có OCR candidate gốc được lưu."
+                    )
+                evidence.update({
+                    "verification_source": "admin",
+                    "reference_text": str(word["text"]),
+                    "reference_alignment": "match",
+                    "review_reason": "Admin đã xác minh nội dung từ này trong revision hiện tại.",
+                })
+                admin_verified_evidence.append(evidence)
+            verification_metadata["word_review_statuses"] = ["verified"] * len(words)
+            verification_metadata["word_evidence_v2"] = admin_verified_evidence
+            verification_metadata["word_evidence_v2_authoritative"] = True
+            revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
                 revision,

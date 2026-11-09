@@ -221,6 +221,54 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(evidence.calibrated_word_accuracy)
         self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
 
+    async def test_revision_detail_merges_partial_v2_evidence_with_safe_line_candidates(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "về", None)])
+        detail = await service.revision_detail(
+            page(),
+            revision(metadata={
+                "word_review_statuses": ["needs_review"],
+                "word_evidence_v2": [{
+                    "contract": "hybrid_ocr_evidence_v4",
+                    "engine_outputs": {"paddleocr": None, "vietocr": "về"},
+                    "alignment": "not_computed",
+                    "paddle_token_index": -1,
+                    "vietocr_token_index": 0,
+                    "selected_engine": "vietocr",
+                }],
+                "line_evidence": [{
+                    "line_index": 0,
+                    "paddle_output": "vé",
+                    "vietocr_output": "về",
+                    "vietocr_output_used": True,
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "not_run",
+                    },
+                    "alignment_operations": [{
+                        "operation": "substitute",
+                        "selected_token_index": 0,
+                        "paddle_token_index": -1,
+                        "vietocr_token_index": 0,
+                        "paddle_token": "vé",
+                        "vietocr_token": "về",
+                    }],
+                }],
+            }),
+        )
+
+        evidence = detail.words[0].ocr_evidence
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.engine_outputs["paddleocr"], "vé")
+        self.assertEqual(evidence.engine_outputs["vietocr"], "về")
+        self.assertEqual(evidence.alignment, "substitute")
+        self.assertEqual(evidence.vietocr_token_index, 0)
+        # Invalid source indexes are sanitized, not allowed to invalidate all
+        # candidate evidence at Pydantic or frontend Zod parsing.
+        self.assertIsNone(evidence.paddle_token_index)
+        self.assertEqual(detail.words[0].review_color_group, "yellow")
+
     async def test_revision_detail_preserves_suspect_only_when_word_candidates_disagree(self):
         service = AdminOcrService(MagicMock())
         service.repo.words = AsyncMock(return_value=[word(0, "bà", None)])

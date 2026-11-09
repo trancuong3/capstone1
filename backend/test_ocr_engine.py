@@ -462,6 +462,26 @@ class DualEngineOcrTests(unittest.TestCase):
             self.assertEqual(ocr_engine._paddle_initialization_error, None)
             predictor_factory.assert_not_called()
 
+    def test_unexpected_dual_pipeline_error_is_not_replaced_by_tesseract(self):
+        mock_paddle = MagicMock()
+        mock_vietocr = MagicMock()
+        with (
+            patch.object(
+                ocr_engine,
+                "_get_ocr_engines",
+                return_value=(mock_paddle, mock_vietocr),
+            ),
+            patch.object(
+                ocr_engine,
+                "_extract_text_and_boxes_dual_engine",
+                side_effect=RuntimeError("alignment processing bug"),
+            ),
+            patch.object(ocr_engine, "_extract_text_and_boxes_tesseract") as tesseract,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "alignment processing bug"):
+                ocr_engine.extract_text_and_boxes(sample_png_bytes())
+        tesseract.assert_not_called()
+
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
         mock_tesseract_result = {

@@ -154,13 +154,15 @@ export const adminRevisionDetailSchema = z.object({
             .int()
             .nonnegative()
             .nullable()
-            .optional(),
+            .optional()
+            .catch(null),
           vietocr_token_index: z
             .number()
             .int()
             .nonnegative()
             .nullable()
-            .optional(),
+            .optional()
+            .catch(null),
           source_text: z.string().nullable().optional(),
           alignment: z.string(),
           engine_agreement_score: z.number().min(0).max(1).nullable(),
