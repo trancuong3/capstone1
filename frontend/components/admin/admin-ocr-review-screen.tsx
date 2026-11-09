@@ -130,8 +130,7 @@ export function getWordReviewStatus(
   return status === "engine_agreement" ||
     status === "engine_disagreement" ||
     status === "reference_match" ||
-    status === "confirmed_mismatch" ||
-    status === "verified"
+    status === "confirmed_mismatch"
     ? status
     : "needs_review";
 }
