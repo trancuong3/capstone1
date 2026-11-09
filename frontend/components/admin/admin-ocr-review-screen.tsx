@@ -189,7 +189,7 @@ export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
   }
   const score = Math.round(word.ocr_confidence * 100);
   if (word.ocr_score_source === "tesseract_raw_word_score_v1") {
-    return `Điểm thô Tesseract: ${score}/100 · dùng làm tín hiệu màu, không phải xác suất đúng`;
+    return `Điểm thô Tesseract: ${score}/100 · raw recognition score, không phải xác suất đúng`;
   }
   if (word.ocr_score_source === "ocr_calibrated_word_accuracy_v1") {
     const probability = word.ocr_evidence?.calibrated_word_accuracy;

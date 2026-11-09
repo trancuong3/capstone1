@@ -282,7 +282,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const accentDifference = await screen.findByRole("button", {
-      name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần xem/,
+      name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
     });
     const highPaddleScore = screen.getByRole("button", {
       name: /Từ 2: chàng\. Hai engine bất đồng · chưa thể xác định từ đúng/,
@@ -421,7 +421,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
-  it("keeps engine disagreement amber and colors automatic agreement green", async () => {
+  it("keeps engine agreement amber, confirmed mismatch red, and verified words green", async () => {
     const services = createAdminServiceFixture();
     const reviewDetail: AdminPageRevisionDetailDTO = {
       ...adminR2Fixture,
@@ -484,50 +484,45 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
 
-    const high = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Không khớp văn bản Admin đã xác minh/,
+    const mismatch = await screen.findByRole("button", {
+      name: /Từ 1: Cao\. Sai so với reference đã xác minh/,
     });
-    const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
+    const needsReview = screen.getByRole("button", {
+      name: /Từ 2: Vừa\. Chưa có ground truth hoặc confidence đã hiệu chuẩn/,
     });
-    const low = screen.getByRole("button", {
-      name: /Từ 3: Thấp\. Admin đã xác nhận ảnh/,
+    const verified = screen.getByRole("button", {
+      name: /Từ 3: Thấp\. Admin đã xác minh từ/,
     });
     const unknown = screen.getByRole("button", {
-      name: /Từ 4: Chưa rõ\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
+      name: /Từ 4: Chưa rõ\. Chưa có ground truth hoặc confidence đã hiệu chuẩn/,
     });
-    const likelyCorrect = screen.getByRole("button", {
-      name: /Từ 5: Khớp\. Khả năng đúng cao · hai engine cùng đọc/,
+    const engineAgreement = screen.getByRole("button", {
+      name: /Từ 5: Khớp\. Hai engine đồng ý · chưa có xác minh độc lập/,
     });
 
-    expect(high).toHaveClass("border-red-600");
-    expect(medium).toHaveClass("border-amber-600");
-    expect(low).toHaveClass("border-green-600");
+    expect(mismatch).toHaveClass("border-red-600");
+    expect(needsReview).toHaveClass("border-amber-600");
+    expect(verified).toHaveClass("border-green-600");
     expect(unknown).toHaveClass("border-amber-600");
-    expect(likelyCorrect).toHaveClass("border-green-600");
+    expect(engineAgreement).toHaveClass("border-amber-600");
+
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/2\s*Xanh · điểm cao \/ xác minh/);
-    expect(stats).toHaveTextContent(/1\s*Đỏ · điểm thấp \/ sai/);
-    expect(stats).toHaveTextContent(/2\s*Vàng · nghi vấn/);
-    expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
+    expect(stats).toHaveTextContent(/1\s*Xanh · Admin\/reference đã xác minh/);
+    expect(stats).toHaveTextContent(/1\s*Đỏ · reference xác nhận sai/);
+    expect(stats).toHaveTextContent(/3\s*Vàng · chưa đủ bằng chứng/);
+    expect(screen.getByRole("button", { name: "Cần xem (4)" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(
-      screen.queryByRole("button", { name: "Từ #4 · Dòng 0" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/Reference đã xác minh không khớp/),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
     ).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
-    expect(medium).toHaveAttribute("aria-pressed", "true");
-    expect(high).toHaveAttribute("aria-pressed", "false");
+    expect(needsReview).toHaveAttribute("aria-pressed", "true");
+    expect(mismatch).toHaveAttribute("aria-pressed", "false");
 
     await user.click(unknown);
     expect(unknown).toHaveAttribute("aria-pressed", "true");
@@ -536,7 +531,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("keeps exact engine agreement green and removes it from the manual review queue", async () => {
+  it("keeps exact engine agreement yellow until Admin verification", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
       ...adminR2Fixture,
@@ -559,16 +554,19 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Khả năng đúng cao · hai engine cùng đọc/,
+      name: /Từ 1: Nội\. Hai engine đồng ý · chưa có xác minh độc lập/,
     });
-    expect(matchedWord).toHaveClass("border-green-600");
+    expect(matchedWord).toHaveClass("border-amber-600");
     expect(
       screen.getByRole("button", { name: /Đi tới từ cần kiểm tra/ }),
-    ).toBeDisabled();
-    expect(screen.getByText("Không còn từ cần kiểm tra")).toBeInTheDocument();
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cần xem (1)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
-  it("uses green, yellow, and red bands for high, medium, and very low Tesseract scores", async () => {
+  it("keeps every raw Tesseract score amber until word verification", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
       ...adminR2Fixture,
@@ -617,25 +615,25 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Bounding box từ OCR: 3 từ/,
     });
     const high = await screen.findByRole("button", {
-      name: /Từ 1: Cao\. Điểm Tesseract >80\/100 · tín hiệu mạnh/,
+      name: /Từ 1: Cao\. Chưa có ground truth.*Điểm thô Tesseract: 95\/100 · raw recognition score/,
     });
     const medium = screen.getByRole("button", {
-      name: /Từ 2: Vừa\. Điểm Tesseract 50–80\/100 · nghi vấn/,
+      name: /Từ 2: Vừa\. Chưa có ground truth.*Điểm thô Tesseract: 62\/100 · raw recognition score/,
     });
     const low = screen.getByRole("button", {
-      name: /Từ 3: Thấp\. Điểm Tesseract <50\/100 · ưu tiên kiểm tra/,
+      name: /Từ 3: Thấp\. Chưa có ground truth.*Điểm thô Tesseract: 27\/100 · raw recognition score/,
     });
     expect(overlay).toContainElement(high);
-    expect(high).toHaveClass("border-green-600");
+    expect(high).toHaveClass("border-amber-600");
     expect(medium).toHaveClass("border-amber-600");
-    expect(low).toHaveClass("border-red-600");
+    expect(low).toHaveClass("border-amber-600");
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     expect(
-      screen.getByText(/Màu đỏ theo ngưỡng điểm thấp, chưa phải xác nhận sai/),
-    ).toBeInTheDocument();
+      screen.queryByText(/Màu đỏ theo ngưỡng điểm thấp/),
+    ).not.toBeInTheDocument();
   });
 
   it("synchronizes one-to-one text edits with words without changing bbox and blocks unsafe token-count changes", async () => {
@@ -872,7 +870,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toEqual(["Nội", "dung", "revision", "đã", "hành"]);
     expect(
       screen.getByRole("button", {
-        name: /Từ 4: đã\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
+        name: /Từ 4: đã\. Chưa có ground truth hoặc confidence đã hiệu chuẩn/,
       }),
     ).toBeInTheDocument();
     expect(
@@ -911,7 +909,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await screen.findByRole("heading", { name: /Kiểm tra OCR · R2/ });
     expect(
       screen.getByRole("button", {
-        name: /Từ 1: Nội\. Chưa đủ evidence để kết luận · cần Admin xem xét/,
+        name: /Từ 1: Nội\. Chưa có ground truth hoặc confidence đã hiệu chuẩn/,
       }),
     ).toHaveClass("border-amber-600");
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
@@ -927,7 +925,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /Từ 1: Nội\. Admin đã xác nhận ảnh/,
+        name: /Từ 1: Nội\. Admin đã xác minh từ/,
       }),
     ).toHaveClass("border-green-600");
     expect(services.revisions.verify).toHaveBeenCalledWith(ADMIN_PAGE_ID, {
