@@ -85,14 +85,20 @@ def validate_ground_truth_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str,
             raise CalibrationDatasetError(
                 f"row {row_number}: ground truth must come from an Admin-verified source"
             )
-        if review_status not in {"verified", "reference_match"}:
+        if review_status not in {"verified", "reference_match", "confirmed_mismatch"}:
             raise CalibrationDatasetError(
                 f"row {row_number}: page verification alone is insufficient; "
-                "the word must be verified or reference_match"
+                "the word must be verified, reference_match or an unambiguous confirmed_mismatch"
             )
-        if source.get("reference_alignment") not in (None, "match"):
+        reference_alignment = source.get("reference_alignment")
+        if review_status == "confirmed_mismatch":
+            if verification_source != "verified_revision" or reference_alignment != "substitute":
+                raise CalibrationDatasetError(
+                    f"row {row_number}: negative labels require an unambiguous verified-reference substitution"
+                )
+        elif reference_alignment not in (None, "match"):
             raise CalibrationDatasetError(
-                f"row {row_number}: reference alignment is not an exact one-to-one match"
+                f"row {row_number}: non-mismatch label has a non-exact reference alignment"
             )
 
         for index_key in ("word_index", "line_index"):
@@ -148,7 +154,7 @@ def split_books(
     rows: Sequence[dict[str, Any]],
     *,
     seed: str = "viread-book-disjoint-v1",
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     """Deterministically split complete books; a book can occur in one split only."""
     books = sorted(
         {str(row["book_id"]) for row in rows},

@@ -965,22 +965,39 @@ def _recognize_uncertain_word_crops(
             ]
             with torch.inference_mode():
                 if callable(getattr(vietocr_engine, "predict_batch", None)):
-                    predictions, scores = vietocr_engine.predict_batch(
-                        pil_crops, return_prob=True
-                    )
+                    try:
+                        batch_result = vietocr_engine.predict_batch(
+                            pil_crops, return_prob=True
+                        )
+                    except TypeError:
+                        # Older/beam-search configurations may not expose probabilities.
+                        batch_result = vietocr_engine.predict_batch(pil_crops)
                     inference_calls += 1
+                    if isinstance(batch_result, tuple) and len(batch_result) >= 2:
+                        predictions, scores = batch_result[0], batch_result[1]
+                    else:
+                        predictions = (
+                            list(batch_result)
+                            if isinstance(batch_result, (list, tuple))
+                            else [batch_result]
+                        )
+                        scores = [None] * len(pil_crops)
                 else:
                     predictions, scores = [], []
                     for pil_crop in pil_crops:
                         try:
-                            prediction = vietocr_engine.predict(pil_crop, return_prob=True)
+                            prediction = vietocr_engine.predict(
+                                pil_crop, return_prob=True
+                            )
                         except TypeError:
                             prediction = vietocr_engine.predict(pil_crop)
                         if isinstance(prediction, tuple) and len(prediction) >= 2:
                             predictions.append(prediction[0])
                             scores.append(prediction[1])
                         else:
-                            predictions.append(prediction if isinstance(prediction, str) else None)
+                            predictions.append(
+                                prediction if isinstance(prediction, str) else None
+                            )
                             scores.append(None)
                         inference_calls += 1
             for index, (evidence, _crop, _quality) in enumerate(prepared):
