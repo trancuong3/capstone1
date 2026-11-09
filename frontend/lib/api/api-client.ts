@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 
+import { readingManagementMessages } from "@/lib/api/reading-management-messages";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
@@ -9,6 +10,7 @@ const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
 // Only deliberately authored backend details are shown to users. Unknown server
 // messages may contain SQL, tokens, file paths, or other private diagnostic data.
 const safeBackendMessages: Record<string, string> = {
+  ...readingManagementMessages,
   "Supabase Storage is not configured":
     "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
   "Server-side Supabase Storage credentials are not configured":
