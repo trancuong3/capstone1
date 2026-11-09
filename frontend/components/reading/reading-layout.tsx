@@ -21,6 +21,8 @@ interface ReadingLayoutProps {
   currentWordId: string | null;
   currentWordText?: string | null;
   exitHref: string;
+  /** Optional voice settings control shown in the controls bar. */
+  voiceSettings?: ReactNode;
   isCurrentWordMispronounced?: boolean;
   isListening: boolean;
   isMicRecording?: boolean;
@@ -76,6 +78,7 @@ export function ReadingLayout({
   currentWordId,
   currentWordText,
   exitHref,
+  voiceSettings,
   isCurrentWordMispronounced = false,
   isListening,
   isMicRecording = false,
@@ -382,6 +385,7 @@ export function ReadingLayout({
         onPause={onPause}
         onReadSample={onReadSample}
         onToggleListening={onToggleListening}
+        voiceSettings={voiceSettings}
       />
       <ReadingProgress
         isListening={isListening}

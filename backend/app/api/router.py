@@ -12,6 +12,7 @@ from app.api.routes import (
     support,
     voice,
 )
+from app.api.routes import child_progress, tutor_question, voice_studio
 
 api_router = APIRouter()
 
@@ -30,3 +31,7 @@ api_router.include_router(
     prefix="/books",
     tags=["Book Content Quality"],
 )
+
+api_router.include_router(tutor_question.router, prefix="/tutor", tags=["AI Tutor"])
+api_router.include_router(voice_studio.router, prefix="/voice", tags=["Voice"])
+api_router.include_router(child_progress.router, prefix="/tutor", tags=["AI Tutor"])
