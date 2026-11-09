@@ -42,17 +42,36 @@ from pytesseract import Output
 import torch
 from PIL import Image
 
+_paddle_import_status = "success"
+_paddle_import_error: str | None = None
 try:
     from paddleocr import PaddleOCR
-except ImportError:
+except Exception as exc:
     PaddleOCR = None  # type: ignore
+    try:
+        package_version("paddleocr")
+    except PackageNotFoundError:
+        _paddle_import_status = "not_installed"
+    else:
+        # The distribution exists, but one of its imports/dependencies failed.
+        _paddle_import_status = "not_initialized"
+        _paddle_import_error = type(exc).__name__
 
+_vietocr_import_status = "success"
+_vietocr_import_error: str | None = None
 try:
     from vietocr.tool.config import Cfg
     from vietocr.tool.predictor import Predictor
-except ImportError:
+except Exception as exc:
     Cfg = None  # type: ignore
     Predictor = None  # type: ignore
+    try:
+        package_version("vietocr")
+    except PackageNotFoundError:
+        _vietocr_import_status = "not_installed"
+    else:
+        _vietocr_import_status = "not_initialized"
+        _vietocr_import_error = type(exc).__name__
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +154,8 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     with _engine_lock:
         if _paddle_engine is None:
             if PaddleOCR is None:
-                _paddle_initialization_status = "not_installed"
+                _paddle_initialization_status = _paddle_import_status
+                _paddle_initialization_error = _paddle_import_error
             else:
                 try:
                     _paddle_engine = PaddleOCR(
@@ -158,7 +178,8 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
 
         if _vietocr_engine is None:
             if Cfg is None or Predictor is None:
-                _vietocr_initialization_status = "not_installed"
+                _vietocr_initialization_status = _vietocr_import_status
+                _vietocr_initialization_error = _vietocr_import_error
             else:
                 try:
                     viet_config = Cfg.load_config_from_name("vgg_transformer")
@@ -1455,6 +1476,14 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
         paddle_engine, vietocr_engine = _get_ocr_engines()
     except OcrEngineUnavailable:
         fallback = _extract_text_and_boxes_tesseract(image_bytes)
+        paddle_reason = (
+            "Package paddleocr is not installed."
+            if _paddle_initialization_status == "not_installed"
+            else (
+                "PaddleOCR import or model initialization failed "
+                f"({_paddle_initialization_error or _paddle_initialization_status})."
+            )
+        )
         return _attach_engine_statuses(
             fallback,
             {
@@ -1462,7 +1491,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
                 "vietocr": "not_run",
                 "tesseract": "success",
             },
-            {"vietocr": "VietOCR recognition requires PaddleOCR line regions."},
+            {
+                "paddleocr": paddle_reason,
+                "vietocr": "VietOCR recognition requires PaddleOCR line regions.",
+            },
         )
 
     try:

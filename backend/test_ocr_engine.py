@@ -433,6 +433,23 @@ class DualEngineOcrTests(unittest.TestCase):
             result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
         )
 
+    def test_broken_installed_paddle_import_is_not_reported_as_not_installed(self):
+        with (
+            patch.object(ocr_engine, "_paddle_engine", None),
+            patch.object(ocr_engine, "_vietocr_engine", MagicMock()),
+            patch.object(ocr_engine, "PaddleOCR", None),
+            patch.object(ocr_engine, "_paddle_import_status", "not_initialized"),
+            patch.object(ocr_engine, "_paddle_import_error", "ModuleNotFoundError"),
+        ):
+            with self.assertRaises(ocr_engine.OcrEngineUnavailable):
+                ocr_engine._get_ocr_engines()
+            self.assertEqual(
+                ocr_engine._paddle_initialization_status, "not_initialized"
+            )
+            self.assertEqual(
+                ocr_engine._paddle_initialization_error, "ModuleNotFoundError"
+            )
+
     def test_vietocr_initialization_failure_does_not_disable_existing_paddle_detector(self):
         paddle_instance = MagicMock()
         config_loader = MagicMock()
