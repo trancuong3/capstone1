@@ -181,13 +181,16 @@ export function getWordReviewColorGroup(
     normalizeVietnameseWord(value.normalize("NFC"));
   const source = evidence.source_text;
   const reference = evidence.reference_text;
+  const hasVerifiedReferenceProvenance =
+    evidence.verification_source === "admin" ||
+    evidence.verification_source === "verified_revision";
   const trustedReference =
-    (evidence.verification_source === "admin" ||
-      evidence.verification_source === "verified_revision") &&
+    hasVerifiedReferenceProvenance &&
     typeof reference === "string" &&
     reference.trim().length > 0 &&
     ["match", "substitute"].includes(evidence.reference_alignment ?? "");
 
+  if (hasVerifiedReferenceProvenance && !trustedReference) return "yellow";
   if (trustedReference && typeof reference === "string") {
     if (normalize(word.text) === normalize(reference)) return "green";
     if (
@@ -2242,7 +2245,7 @@ export function AdminOcrReviewScreen({
               {filteredWords.length === 0 ? (
                 <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
                   {wordFilter === "review"
-                    ? "Không có từ nào có mismatch hoặc rủi ro cần ưu tiên. Nhóm trung tính vẫn chưa được xác minh độc lập."
+                    ? "Không có từ nào có mismatch hoặc thiếu bằng chứng cần ưu tiên."
                     : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "vàng" : wordFilter === "red" ? "đỏ" : wordFilter === "green" ? "xanh" : wordFilter === "disagreement" ? "engine bất đồng" : "này"}.`}
                 </p>
               ) : (

@@ -203,6 +203,17 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(getWordReviewColorGroup("confirmed_mismatch", mismatch)).toBe("red");
     expect(getWordReviewColor("confirmed_mismatch", mismatch)).toContain("border-red-600");
     expect(getWordReviewColorGroup("confirmed_mismatch")).toBe("yellow");
+    expect(
+      getWordReviewColorGroup("engine_agreement", {
+        ...consensus,
+        ocr_evidence: {
+          ...consensusEvidence("Chuyện"),
+          verification_source: "verified_revision",
+          reference_text: null,
+          reference_alignment: "unmatched",
+        },
+      }),
+    ).toBe("yellow");
     expect(getWordReviewColorGroup("verified")).toBe("green");
   });
 

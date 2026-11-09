@@ -116,6 +116,10 @@ def classify_word_evidence(
     reference_text = evidence.get("reference_text")
     verification_source = evidence.get("verification_source")
     reference_alignment = evidence.get("reference_alignment")
+    has_verified_reference_provenance = (
+        isinstance(verification_source, str)
+        and verification_source in {"admin", "verified_revision"}
+    )
     trusted_reference = (
         isinstance(verification_source, str)
         and verification_source in {"admin", "verified_revision"}
@@ -124,6 +128,10 @@ def classify_word_evidence(
         and isinstance(reference_alignment, str)
         and reference_alignment in {"match", "substitute"}
     )
+    if has_verified_reference_provenance and not trusted_reference:
+        # A verified page reference exists, but this token has no safe one-to-one
+        # reference mapping. Do not bypass that uncertainty with OCR consensus.
+        return "yellow"
     if trusted_reference and isinstance(reference_text, str):
         normalized_reference = normalize_word(unicodedata.normalize("NFC", reference_text))
         if normalized_word == normalized_reference:

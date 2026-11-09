@@ -664,6 +664,19 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify("confirmed_mismatch", verified_mismatch, "hui"), "red")
         self.assertEqual(classify("reference_match", verified_match, "lui"), "green")
         self.assertEqual(
+            classify(
+                "engine_agreement",
+                {
+                    **safe_agreement,
+                    "verification_source": "verified_revision",
+                    "reference_text": None,
+                    "reference_alignment": "unmatched",
+                },
+                "Chuyện",
+            ),
+            "yellow",
+        )
+        self.assertEqual(
             classify("confirmed_mismatch", safe_agreement, "Chuyện"), "green"
         )
         self.assertEqual(classify("verified", None, "Chuyện"), "green")
