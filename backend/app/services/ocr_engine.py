@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 import re
 import shutil
@@ -45,6 +46,15 @@ except ImportError:
     Predictor = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+from app.services.ocr_evidence import (
+    HYBRID_OCR_EVIDENCE_CONTRACT,
+    MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    OCR_PREPROCESSING_VERSION,
+    crop_word_region,
+    find_split_merge_candidates,
+    token_alignment_cost,
+)
 
 
 class OcrEngineUnavailable(RuntimeError):
@@ -194,34 +204,21 @@ def is_vietocr_reliable(
     paddle_conf: float = 0.90,
     max_cer: float = 0.40,
 ) -> bool:
-    v_clean = viet_text.strip()
-    p_clean = paddle_text.strip()
+    """Reject obvious empty/repetition outputs, not select OCR correctness.
 
-    if not v_clean:
+    A True result means only that VietOCR can be shown as a provisional draft.
+    It does not mean the candidate is better than PaddleOCR or that its words
+    are correct. Diacritic-folded CER and line-level confidence are excluded.
+    """
+    del paddle_text, paddle_conf, max_cer
+    candidate = unicodedata.normalize("NFC", viet_text).strip()
+    if not candidate:
         return False
-
-    words = v_clean.split()
+    words = candidate.split()
     if len(words) >= 3:
-        for i in range(len(words) - 2):
-            if words[i].lower() == words[i + 1].lower() == words[i + 2].lower():
+        for index in range(len(words) - 2):
+            if words[index].casefold() == words[index + 1].casefold() == words[index + 2].casefold():
                 return False
-
-    if not p_clean or paddle_conf < 0.70 or len(v_clean) > 28:
-        return True
-
-    v_no_acc = strip_accents(v_clean)
-    p_no_acc = strip_accents(p_clean)
-
-    if len(p_no_acc) >= 4:
-        cer_with_space = jiwer.cer(p_no_acc, v_no_acc)
-        p_compact = re.sub(r"\s+", "", p_no_acc)
-        v_compact = re.sub(r"\s+", "", v_no_acc)
-        cer_compact = (
-            jiwer.cer(p_compact, v_compact) if len(p_compact) >= 4 else 0.0
-        )
-        if min(cer_with_space, cer_compact) > max_cer:
-            return False
-
     return True
 
 
@@ -235,25 +232,8 @@ def _token_surface(value: str) -> str:
 
 
 def _token_alignment_cost(left: str, right: str) -> float:
-    """Return a bounded alignment cost; accent folding is only a hint."""
-    left_surface = _token_surface(left)
-    right_surface = _token_surface(right)
-    if left_surface == right_surface:
-        return 0.0
-
-    left_norm = normalize_word(left_surface)
-    right_norm = normalize_word(right_surface)
-    if left_norm and right_norm and left_norm == right_norm:
-        # Case and punctuation differences can be aligned, but are not exact.
-        return 0.1
-    if left_norm and right_norm and strip_accents(left_norm) == strip_accents(right_norm):
-        return 0.3
-
-    if not left_norm or not right_norm or max(len(left_norm), len(right_norm)) > 128:
-        return 1.1
-    distance = float(jiwer.cer(left_norm, right_norm))
-    # Unrelated tokens are cheaper to represent as a delete plus an insert.
-    return min(1.5, distance * 1.1)
+    """NFC token distance that preserves all Vietnamese diacritics."""
+    return token_alignment_cost(left, right)
 
 
 def align_ocr_tokens(
@@ -830,6 +810,187 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _package_version(distribution: str) -> str | None:
+    try:
+        return package_version(distribution)
+    except PackageNotFoundError:
+        return None
+
+
+def _raw_recognition_score(value: Any) -> object:
+    """Keep model output scores raw; never reinterpret them as accuracy."""
+    if value is None:
+        return None
+    if torch.is_tensor(value):
+        value = value.detach().cpu().tolist()
+    elif isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if np.isfinite(number) else None
+    if isinstance(value, (list, tuple)):
+        safe = []
+        for item in value[:128]:
+            if isinstance(item, bool):
+                safe.append(None)
+            elif isinstance(item, (int, float)):
+                number = float(item)
+                safe.append(number if np.isfinite(number) else None)
+            else:
+                safe.append(None)
+        return safe
+    return None
+
+
+def _recognize_uncertain_word_crops(
+    image: np.ndarray,
+    words: list[dict[str, object]],
+    paddle_engine: Any,
+    vietocr_engine: Any,
+) -> dict[str, object]:
+    """Re-recognize disputed words with already-loaded recognition models."""
+    import time
+
+    started = time.perf_counter()
+    prepared: list[tuple[dict[str, object], np.ndarray, dict[str, Any]]] = []
+    rejected_bbox = 0
+    rejected_quality = 0
+    capped = 0
+    for word in words:
+        evidence = word.get("ocr_evidence")
+        if not isinstance(evidence, dict) or evidence.get("alignment") == "match":
+            continue
+        if len(prepared) >= MAX_SELECTIVE_WORD_CROPS_PER_PAGE:
+            capped += 1
+            continue
+        crop, quality = crop_word_region(image, word.get("bbox"))
+        evidence["bbox_quality"] = quality.get("bbox_quality")
+        evidence["crop_quality"] = quality.get("crop_quality")
+        if crop is None:
+            if quality.get("bbox_quality") != "valid":
+                rejected_bbox += 1
+            else:
+                rejected_quality += 1
+            evidence["crop_evidence"] = {
+                **quality, "status": "skipped",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        if quality.get("crop_quality") != "usable":
+            rejected_quality += 1
+            evidence["crop_evidence"] = {
+                **quality, "status": "skipped",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        prepared.append((evidence, crop, quality))
+
+    paddle_failures = 0
+    vietocr_failures = 0
+    inference_calls = 0
+    for evidence, _crop, quality in prepared:
+        evidence["crop_evidence"] = {
+            **quality, "status": "pending",
+            "score_semantics": "raw_recognition_output_not_probability",
+        }
+
+    if prepared:
+        crops = [item[1] for item in prepared]
+        try:
+            # PaddleOCR 2.7.x exposes recognition-only OCR with det=False.
+            paddle_results = paddle_engine.ocr(crops, det=False, rec=True, cls=False)
+            inference_calls += 1
+            for index, (evidence, _crop, _quality) in enumerate(prepared):
+                page_result = (
+                    paddle_results[index]
+                    if isinstance(paddle_results, list) and index < len(paddle_results)
+                    else None
+                )
+                recognition = (
+                    page_result[0]
+                    if isinstance(page_result, (list, tuple)) and page_result
+                    else None
+                )
+                candidate = (
+                    recognition[0]
+                    if isinstance(recognition, (list, tuple)) and recognition
+                    else None
+                )
+                score = (
+                    recognition[1]
+                    if isinstance(recognition, (list, tuple)) and len(recognition) > 1
+                    else None
+                )
+                crop_evidence = evidence["crop_evidence"]
+                crop_evidence["paddleocr_candidate"] = (
+                    unicodedata.normalize("NFC", candidate).strip()
+                    if isinstance(candidate, str) else None
+                )
+                crop_evidence["paddle_crop_recognition_score"] = _raw_recognition_score(score)
+        except Exception as exc:
+            paddle_failures += 1
+            logger.warning("Selective PaddleOCR recognition failed: %s", type(exc).__name__)
+            for evidence, _crop, _quality in prepared:
+                evidence["crop_evidence"]["paddle_error"] = type(exc).__name__
+
+        try:
+            pil_crops = [
+                Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+                for crop in crops
+            ]
+            with torch.inference_mode():
+                if callable(getattr(vietocr_engine, "predict_batch", None)):
+                    predictions, scores = vietocr_engine.predict_batch(
+                        pil_crops, return_prob=True
+                    )
+                    inference_calls += 1
+                else:
+                    predictions, scores = [], []
+                    for pil_crop in pil_crops:
+                        try:
+                            prediction = vietocr_engine.predict(pil_crop, return_prob=True)
+                        except TypeError:
+                            prediction = vietocr_engine.predict(pil_crop)
+                        if isinstance(prediction, tuple) and len(prediction) >= 2:
+                            predictions.append(prediction[0])
+                            scores.append(prediction[1])
+                        else:
+                            predictions.append(prediction if isinstance(prediction, str) else None)
+                            scores.append(None)
+                        inference_calls += 1
+            for index, (evidence, _crop, _quality) in enumerate(prepared):
+                prediction = predictions[index] if index < len(predictions) else None
+                score = scores[index] if index < len(scores) else None
+                crop_evidence = evidence["crop_evidence"]
+                crop_evidence["vietocr_candidate"] = (
+                    unicodedata.normalize("NFC", prediction).strip()
+                    if isinstance(prediction, str) else None
+                )
+                crop_evidence["vietocr_crop_recognition_score"] = _raw_recognition_score(score)
+                crop_evidence["status"] = "completed"
+        except Exception as exc:
+            vietocr_failures += 1
+            logger.warning("Selective VietOCR recognition failed: %s", type(exc).__name__)
+            for evidence, _crop, _quality in prepared:
+                evidence["crop_evidence"]["status"] = "partial"
+                evidence["crop_evidence"]["vietocr_error"] = type(exc).__name__
+
+    return {
+        "requested": len(prepared) + rejected_bbox + rejected_quality + capped,
+        "recognized": len(prepared),
+        "rejected_bbox": rejected_bbox,
+        "rejected_crop_quality": rejected_quality,
+        "skipped_by_page_limit": capped,
+        "inference_calls": inference_calls,
+        "paddle_failures": paddle_failures,
+        "vietocr_failures": vietocr_failures,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+        "max_crops_per_page": MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    }
+
+
 def _extract_text_and_boxes_dual_engine(
     image_bytes: bytes,
     paddle_engine: Any,
@@ -967,7 +1128,15 @@ def _extract_text_and_boxes_dual_engine(
             "paddle_line_confidence": valid_line_confidence,
             "paddle_line_score_contract": PADDLE_LINE_SCORE_CONTRACT,
             "vietocr_output_used": viet_text_used,
+            "selection_reason": (
+                "vietocr_nonempty_nonrepetitive_provisional"
+                if viet_text_used
+                else "paddle_provisional_fallback_or_vietocr_rejected"
+            ),
             "alignment_operations": alignment_operations,
+            "split_merge_candidates": find_split_merge_candidates(
+                paddle_tokens, vietocr_tokens
+            ),
         })
 
         for w_idx, raw_token in enumerate(valid_words):
@@ -1011,7 +1180,7 @@ def _extract_text_and_boxes_dual_engine(
                 "ocr_review_status": review_status,
                 "ocr_score_source": None,
                 "ocr_evidence": {
-                    "contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+                    "contract": HYBRID_OCR_EVIDENCE_CONTRACT,
                     "engine_outputs": {
                         "paddleocr": paddle_token,
                         "vietocr": vietocr_token,
@@ -1021,6 +1190,15 @@ def _extract_text_and_boxes_dual_engine(
                     "calibrated_word_accuracy": None,
                     "verification_source": None,
                     "reference_text": None,
+                    "selected_engine": "vietocr" if viet_text_used else "paddleocr",
+                    "selection_reason": (
+                        "vietocr_nonempty_nonrepetitive_provisional"
+                        if viet_text_used
+                        else "paddle_provisional_fallback_or_vietocr_rejected"
+                    ),
+                    "bbox_quality": "not_checked",
+                    "crop_quality": None,
+                    "crop_evidence": None,
                     "review_reason": review_reason,
                 },
             })
@@ -1030,6 +1208,9 @@ def _extract_text_and_boxes_dual_engine(
     if not words_output:
         raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
 
+    crop_stats = _recognize_uncertain_word_crops(
+        image, words_output, paddle_engine, vietocr_engine
+    )
     formatted_text = "\n".join(lines_output)
 
     try:
@@ -1053,7 +1234,14 @@ def _extract_text_and_boxes_dual_engine(
         "metadata": {
             "engine": "paddleocr_vietocr_dual",
             "engine_version": "PP-OCRv4 + VietOCR-vgg_transformer",
-            "ocr_evidence_contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+            "engine_versions": {
+                "paddleocr": _package_version("paddleocr"),
+                "vietocr": _package_version("vietocr"),
+                "paddle_model": "PP-OCRv4",
+                "vietocr_model": "vgg_transformer",
+            },
+            "preprocessing_version": OCR_PREPROCESSING_VERSION,
+            "ocr_evidence_contract": HYBRID_OCR_EVIDENCE_CONTRACT,
             "ocr_score_contract": None,
             "language": "vi",
             "coordinate_space": "normalized_original_dimensions",
@@ -1066,6 +1254,7 @@ def _extract_text_and_boxes_dual_engine(
             "line_count": len(lines_output),
             "reading_layout": layout_type,
             "line_evidence": line_evidence,
+            "selective_crop_stats": crop_stats,
         },
     }
 
