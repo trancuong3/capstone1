@@ -53,8 +53,14 @@ import type {
 } from "@/types/admin";
 
 type LoadError = "not-found" | "unavailable" | "safe";
-type WordFilter = "all" | "review" | "red" | "yellow" | "green";
-type WordReviewColorGroup = Exclude<WordFilter, "all" | "review">;
+type WordFilter =
+  | "all"
+  | "review"
+  | "risk"
+  | "disagreement"
+  | "verified"
+  | "neutral";
+type WordReviewColorGroup = "green" | "red" | "yellow" | "neutral";
 type AiTokenChange = {
   readonly index: number;
   readonly original: string;
@@ -102,18 +108,64 @@ function hasDiacriticOnlyEngineDisagreement(
   );
 }
 
+function sourceTokenWasEdited(word: AdminRevisionWordDTO | undefined): boolean {
+  const source = word?.ocr_evidence?.source_text;
+  return (
+    typeof source === "string" &&
+    normalizeVietnameseWord(source) !== normalizeVietnameseWord(word?.text ?? "")
+  );
+}
+
 /**
- * Color represents verification, not model confidence.
- * No calibration artifact or compatibility gate is active yet.
+ * Backend review_color_group is authoritative. Legacy fallback is conservative:
+ * missing calibration/reference/metadata is neutral; only direct word-level
+ * risk evidence is yellow.
  */
 export function getWordReviewColorGroup(
   status: AdminOcrReviewStatus,
-  _word?: AdminRevisionWordDTO,
+  word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
 ): WordReviewColorGroup {
   if (status === "verified" || status === "reference_match") return "green";
   if (status === "confirmed_mismatch") return "red";
-  return "yellow";
+  if (sourceTokenWasEdited(word)) return "yellow";
+
+  const contractGroup = word?.review_color_group;
+  if (
+    contractGroup === "green" ||
+    contractGroup === "red" ||
+    contractGroup === "yellow" ||
+    contractGroup === "neutral"
+  ) {
+    return contractGroup;
+  }
+  if (status === "engine_disagreement" || status === "suspect") return "yellow";
+
+  const evidence = word?.ocr_evidence;
+  if (evidence) {
+    const riskyAlignments = new Set([
+      "substitute", "unmatched", "insert", "delete",
+      "split", "merge", "unknown", "unresolved",
+    ]);
+    if (riskyAlignments.has(evidence.alignment)) return "yellow";
+    if (Object.values(evidence.engine_statuses ?? {}).some(
+      (engineStatus) => engineStatus === "error",
+    )) return "yellow";
+    if (
+      ["rejected", "invalid", "poor"].includes(evidence.bbox_quality ?? "") ||
+      ["weak", "low", "poor", "rejected"].includes(evidence.crop_quality ?? "")
+    ) return "yellow";
+
+    const paddle = evidence.engine_outputs.paddleocr;
+    const vietocr = evidence.engine_outputs.vietocr;
+    if (
+      typeof paddle === "string" && paddle.trim() &&
+      typeof vietocr === "string" && vietocr.trim() &&
+      normalizeVietnameseWord(paddle) !== normalizeVietnameseWord(vietocr)
+    ) return "yellow";
+  }
+
+  return "neutral";
 }
 
 function matchesWordFilter(
@@ -124,8 +176,17 @@ function matchesWordFilter(
 ): boolean {
   if (filter === "all") return true;
   const group = getWordReviewColorGroup(status, word, paddleLineScore);
-  if (filter === "review") return group !== "green";
-  return filter === group;
+  if (filter === "review") return group === "red" || group === "yellow";
+  if (filter === "risk") return group === "yellow";
+  if (filter === "disagreement") {
+    return (
+      status === "engine_disagreement" ||
+      status === "suspect" ||
+      word?.ocr_evidence?.alignment === "substitute"
+    );
+  }
+  if (filter === "verified") return group === "green";
+  return group === "neutral";
 }
 
 export function getWordReviewLabel(
@@ -134,27 +195,19 @@ export function getWordReviewLabel(
   _paddleLineScore?: number | null,
 ): string {
   if (status === "verified") return "Admin đã xác minh từ";
-  if (status === "reference_match")
-    return "Khớp reference của trang đã xác minh";
-  if (status === "confirmed_mismatch")
-    return "Sai so với reference đã xác minh";
-  if (status === "engine_agreement") {
-    return "Hai engine đồng ý · chưa có xác minh độc lập";
-  }
-  if (
-    status === "engine_disagreement" &&
-    hasDiacriticOnlyEngineDisagreement(word)
-  ) {
+  if (status === "reference_match") return "Khớp reference của trang đã xác minh";
+  if (status === "confirmed_mismatch") return "Sai so với reference đã xác minh";
+  if (status === "engine_agreement") return "Hai engine đồng thuận · chưa xác minh độc lập";
+  if (status === "engine_disagreement" && hasDiacriticOnlyEngineDisagreement(word)) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
   if (status === "engine_disagreement" || status === "suspect") {
-    return "Hai engine bất đồng · chưa thể xác định từ đúng";
+    return "Hai engine bất đồng · cần đối chiếu ảnh";
   }
-  const reason = word?.ocr_evidence?.review_reason?.trim();
-  return (
-    reason ||
-    "Chưa có ground truth hoặc confidence đã hiệu chuẩn · cần Admin xem"
-  );
+  if (getWordReviewColorGroup(status, word) === "neutral") {
+    return "Chưa xác minh độc lập · chưa phát hiện rủi ro OCR";
+  }
+  return word?.ocr_evidence?.review_reason?.trim() || "Có rủi ro OCR cần Admin đối chiếu ảnh";
 }
 
 export function getWordReviewColor(
@@ -167,6 +220,7 @@ export function getWordReviewColor(
     green: "border-green-600 bg-green-400/35 text-green-900",
     red: "border-red-600 bg-red-400/35 text-red-900",
     yellow: "border-amber-600 bg-amber-300/40 text-amber-950",
+    neutral: "border-slate-300 bg-slate-100/80 text-slate-800",
   }[group];
 }
 
@@ -180,6 +234,7 @@ export function getWordReviewBadgeColor(
     green: "bg-green-100 text-green-800 border-green-300",
     red: "bg-red-100 text-red-800 border-red-300",
     yellow: "bg-amber-100 text-amber-900 border-amber-400",
+    neutral: "bg-slate-100 text-slate-700 border-slate-300",
   }[group];
 }
 
@@ -235,7 +290,7 @@ function formatRawOcrEvidence(value: unknown): string {
       )
       .join(", ");
   }
-  return "Unavailable";
+  return "Not recorded";
 }
 
 function getPaddleLineScoreLabel(
@@ -244,7 +299,7 @@ function getPaddleLineScoreLabel(
 ): string {
   const lineEvidence = metadata.line_evidence;
   if (!Array.isArray(lineEvidence)) {
-    return "PaddleOCR dòng: Unavailable";
+    return "PaddleOCR dòng: Not recorded";
   }
   const line = lineEvidence
     .map(asRecord)
@@ -256,7 +311,7 @@ function getPaddleLineScoreLabel(
     rawScore < 0 ||
     rawScore > 1
   ) {
-    return "PaddleOCR dòng: Unavailable";
+    return "PaddleOCR dòng: Not recorded";
   }
   const selectedWithVietOcr = line?.vietocr_output_used === true;
   return `PaddleOCR dòng: ${Math.round(rawScore * 100)}/100 · điểm thô · không phải xác suất đúng${selectedWithVietOcr ? " · VietOCR được dùng nên không áp màu theo điểm này" : ""}`;
