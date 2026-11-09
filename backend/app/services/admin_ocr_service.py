@@ -30,6 +30,7 @@ from app.schemas.admin_ocr import (
     normalize_ocr_bbox,
 )
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
+from app.services.ocr_evidence import HYBRID_OCR_EVIDENCE_CONTRACT
 from app.services.ocr_engine import (
     OcrEngineUnavailable,
     OcrNoTextDetected,

@@ -13,6 +13,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from app.services.admin_ocr_service import AdminOcrService, OCR_SCORE_CONTRACT
+from app.services.ocr_evidence import HYBRID_OCR_EVIDENCE_CONTRACT
 from app.services.book_service import AdminCatalogService
 
 
