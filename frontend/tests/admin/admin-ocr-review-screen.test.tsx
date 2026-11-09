@@ -326,7 +326,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh/,
     });
     const highPaddleScore = screen.getByRole("button", {
-      name: /Từ 2: chàng\. Hai engine bất đồng · chưa thể xác định từ đúng/,
+      name: /Từ 2: chàng\. Hai engine bất đồng · cần đối chiếu ảnh/,
     });
     const vietOcrSelected = screen.getByRole("button", {
       name: /Từ 3: mới\. Hai engine bất đồng/,
@@ -596,7 +596,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\. Hai engine đồng ý · chưa có xác minh độc lập/,
+      name: /Từ 1: Nội\. Hai engine đồng thuận · chưa xác minh độc lập/,
     });
     expect(matchedWord).toHaveClass("border-slate-300");
     expect(
