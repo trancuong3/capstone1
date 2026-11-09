@@ -300,7 +300,10 @@ function getEngineEvidenceDisplay(
   if (status === "not_initialized") return "Chưa khởi tạo";
   if (status === "not_run") return "Không chạy";
   if (status === "processing") return "Đang xử lý";
-  if (status === "error") return "Lỗi inference";
+  if (status === "error") {
+    const reason = evidence?.engine_errors?.[engine];
+    return reason ? `Lỗi inference · ${reason}` : "Lỗi inference";
+  }
   if (status === "disabled") return "Đã tắt cấu hình";
   return "Không ghi nhận trạng thái trong revision cũ";
 }
