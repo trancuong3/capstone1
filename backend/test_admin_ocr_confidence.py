@@ -14,7 +14,6 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from app.services.admin_ocr_service import AdminOcrService, OCR_SCORE_CONTRACT
 from app.services.ocr_evidence import HYBRID_OCR_EVIDENCE_CONTRACT
-from app.services.book_service import AdminCatalogService
 
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
@@ -120,31 +119,30 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("word_score_sources", detail.ocr_metadata)
 
-    async def test_admin_revision_read_endpoint_uses_persisted_review_evidence(self):
-        service = AdminCatalogService(MagicMock())
-        service.page = AsyncMock(return_value=page())
-        service.repository.revision = AsyncMock(
-            return_value=revision(
+    async def test_revision_detail_uses_persisted_review_evidence_without_promoting_legacy_suspect(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.96)])
+        detail = await service.revision_detail(
+            page(),
+            revision(
                 metadata={
                     "ocr_score_contract": OCR_SCORE_CONTRACT,
                     "word_review_statuses": ["suspect"],
                 }
-            )
+            ),
         )
-        service.repository.words = AsyncMock(return_value=[word(0, "ma", 0.96)])
-
-        detail = await service.revision(PAGE_ID, REVISION_ID)
 
         self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
         self.assertEqual(detail.words[0].review_color_group, "neutral")
         self.assertEqual(detail.words[0].ocr_confidence, 0.96)
         self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
 
-    async def test_revision_read_exposes_sanitized_engine_and_line_evidence(self):
-        service = AdminCatalogService(MagicMock())
-        service.page = AsyncMock(return_value=page())
-        service.repository.revision = AsyncMock(
-            return_value=revision(
+    async def test_revision_detail_exposes_sanitized_legacy_and_hybrid_engine_evidence(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "on", 0.97)])
+        detail = await service.revision_detail(
+            page(),
+            revision(
                 metadata={
                     "ocr_evidence_contract": "dual_engine_agreement_v2",
                     "word_review_statuses": ["engine_agreement"],
@@ -172,11 +170,8 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
                     ],
                     "source_image_path": "private/storage/path.jpg",
                 }
-            )
+            ),
         )
-        service.repository.words = AsyncMock(return_value=[word(0, "on", 0.97)])
-
-        detail = await service.revision(PAGE_ID, REVISION_ID)
 
         self.assertIsNone(detail.words[0].ocr_confidence)
         self.assertEqual(detail.words[0].ocr_review_status, "engine_agreement")
