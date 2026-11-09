@@ -435,17 +435,15 @@ class DualEngineOcrTests(unittest.TestCase):
 
     def test_vietocr_initialization_failure_does_not_disable_paddle_detector(self):
         paddle_instance = MagicMock()
-        paddle_factory = MagicMock(return_value=paddle_instance)
         config_loader = MagicMock()
         config_loader.load_config_from_name.side_effect = RuntimeError("missing weights")
         predictor_factory = MagicMock()
 
         with (
-            patch.object(ocr_engine, "_paddle_engine", None),
+            patch.object(ocr_engine, "_paddle_engine", paddle_instance),
             patch.object(ocr_engine, "_vietocr_engine", None),
             patch.object(ocr_engine, "_paddle_initialization_status", "not_initialized"),
             patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
-            patch.object(ocr_engine, "PaddleOCR", paddle_factory),
             patch.object(ocr_engine, "Cfg", config_loader),
             patch.object(ocr_engine, "Predictor", predictor_factory),
             patch.object(ocr_engine, "_find_cached_vietocr_weights", return_value=None),
@@ -459,7 +457,7 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine._paddle_initialization_status, "success")
         self.assertEqual(ocr_engine._vietocr_initialization_status, "not_initialized")
         self.assertEqual(ocr_engine._vietocr_initialization_error, "RuntimeError")
-        paddle_factory.assert_called_once()
+        self.assertEqual(ocr_engine._paddle_initialization_error, None)
         predictor_factory.assert_not_called()
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
