@@ -5,6 +5,10 @@ on:
       - feature/hybrid-evidence-ocr-classification-20261109
     paths:
       - ".github/workflows/temporary-ocr-format-preview.yml"
+      - "frontend/components/admin/admin-ocr-review-screen.tsx"
+      - "frontend/tests/admin/admin-ocr-review-screen.test.tsx"
+      - "frontend/lib/api/ocr-review-service.ts"
+      - "frontend/types/admin.ts"
 permissions:
   contents: read
 jobs:
@@ -21,7 +25,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - name: Format screen and print only formatter diff
+      - name: Format changed OCR frontend files and print exact diff
         run: |
-          npx prettier --write components/admin/admin-ocr-review-screen.tsx
-          git diff --no-ext-diff --unified=3 -- components/admin/admin-ocr-review-screen.tsx || true
+          npx prettier --write components/admin/admin-ocr-review-screen.tsx tests/admin/admin-ocr-review-screen.test.tsx lib/api/ocr-review-service.ts types/admin.ts
+          git diff --no-ext-diff --unified=3 -- components/admin/admin-ocr-review-screen.tsx tests/admin/admin-ocr-review-screen.test.tsx lib/api/ocr-review-service.ts types/admin.ts || true
