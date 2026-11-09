@@ -70,7 +70,8 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         result = detail.words[0]
         self.assertEqual(result.ocr_confidence, 0.97)
         self.assertEqual(result.ocr_score_source, OCR_SCORE_CONTRACT)
-        self.assertEqual(result.ocr_review_status, "engine_disagreement")
+        self.assertEqual(result.ocr_review_status, "needs_review")
+        self.assertEqual(result.review_color_group, "neutral")
         self.assertNotIn("word_review_statuses", detail.ocr_metadata)
         self.assertNotIn("word_score_sources", detail.ocr_metadata)
         self.assertNotIn("ocr_score_contract", detail.ocr_metadata)
@@ -134,7 +135,8 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
 
         detail = await service.revision(PAGE_ID, REVISION_ID)
 
-        self.assertEqual(detail.words[0].ocr_review_status, "engine_disagreement")
+        self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
+        self.assertEqual(detail.words[0].review_color_group, "neutral")
         self.assertEqual(detail.words[0].ocr_confidence, 0.96)
         self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
 
@@ -192,6 +194,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
                 metadata={
                     "word_review_statuses": ["needs_review"],
                     "word_evidence_v2": [None],
+                    "word_evidence_v2_authoritative": True,
                     "line_evidence": [
                         {
                             "line_index": 0,
@@ -467,6 +470,47 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(classify("engine_agreement", safe_agreement), "neutral")
         self.assertEqual(classify("needs_review", None), "neutral")
+        self.assertEqual(classify("engine_disagreement", None), "neutral")
+        self.assertEqual(classify("engine_disagreement", safe_agreement), "neutral")
+        self.assertEqual(
+            classify(
+                "engine_disagreement",
+                {
+                    "engine_outputs": {"paddleocr": "vé", "vietocr": "về"},
+                    "alignment": "substitute",
+                },
+            ),
+            "yellow",
+        )
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
+                    "engine_outputs": {"paddleocr": "mèo", "vietocr": None},
+                    "alignment": "unmatched",
+                    "selected_engine": "paddleocr",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "error",
+                        "tesseract": "not_run",
+                    },
+                },
+            ),
+            "neutral",
+        )
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
+                    "alignment": "not_computed",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "no_result",
+                    },
+                },
+            ),
+            "neutral",
+        )
         self.assertEqual(
             classify(
                 "needs_review",
@@ -618,6 +662,45 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["alignment"], "match")
         self.assertIsNone(AdminOcrService._line_word_evidence(metadata, 1, 0))
         self.assertIsNone(AdminOcrService._line_word_evidence({}, 0, 0))
+
+    def test_authoritative_null_word_evidence_is_recovered_on_draft_sync_when_line_is_unchanged(self):
+        source_row = word(0, "về", None)
+        revision_row = revision(metadata={
+            "word_review_statuses": ["needs_review"],
+            "word_evidence_v2": [None],
+            "word_evidence_v2_authoritative": True,
+            "line_evidence": [{
+                "line_index": 0,
+                "paddle_output": "vé",
+                "vietocr_output": "về",
+                "vietocr_output_used": True,
+                "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+                "alignment_operations": [{
+                    "operation": "substitute",
+                    "selected_token_index": 0,
+                    "paddle_token_index": 0,
+                    "vietocr_token_index": 0,
+                    "paddle_token": "vé",
+                    "vietocr_token": "về",
+                }],
+            }],
+        })
+        submitted = [{
+            "word_index": 0,
+            "line_index": 0,
+            "text": "về",
+            "bbox": source_row.BoundingBox,
+        }]
+
+        AdminOcrService._set_word_review_statuses(
+            revision_row, submitted, [source_row]
+        )
+
+        evidence = revision_row.ProcessingMeta["word_evidence_v2"][0]
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence["engine_outputs"]["paddleocr"], "vé")
+        self.assertEqual(evidence["engine_outputs"]["vietocr"], "về")
+        self.assertEqual(evidence["alignment"], "substitute")
 
     def test_hybrid_crop_evidence_is_preserved_as_raw_engine_evidence(self):
         evidence = AdminOcrService._normalize_word_evidence({

@@ -62,6 +62,50 @@ type AiTokenChange = {
   readonly proposed: string;
 };
 
+function hasEngineDisagreementEvidence(
+  word?: AdminRevisionWordDTO,
+): boolean {
+  const evidence = word?.ocr_evidence;
+  if (!evidence) return false;
+
+  const outputs = evidence.engine_outputs;
+  const paddle = outputs.paddleocr;
+  const vietocr = outputs.vietocr;
+  if (
+    typeof paddle === "string" && paddle.trim() &&
+    typeof vietocr === "string" && vietocr.trim() &&
+    normalizeVietnameseWord(paddle) !== normalizeVietnameseWord(vietocr)
+  ) {
+    return true;
+  }
+
+  const cropEvidence = evidence.crop_evidence;
+  const paddleCrop = cropEvidence?.paddleocr_candidate;
+  const vietocrCrop = cropEvidence?.vietocr_candidate;
+  if (
+    typeof paddleCrop === "string" && paddleCrop.trim() &&
+    typeof vietocrCrop === "string" && vietocrCrop.trim() &&
+    normalizeVietnameseWord(paddleCrop) !== normalizeVietnameseWord(vietocrCrop)
+  ) {
+    return true;
+  }
+
+  if (["substitute", "split", "merge"].includes(evidence.alignment)) {
+    return true;
+  }
+  if (["unmatched", "insert", "delete"].includes(evidence.alignment)) {
+    const selected = evidence.selected_engine;
+    const otherStatus =
+      selected === "paddleocr"
+        ? evidence.engine_statuses?.vietocr
+        : selected === "vietocr"
+          ? evidence.engine_statuses?.paddleocr
+          : undefined;
+    return otherStatus === "success";
+  }
+  return false;
+}
+
 export function getWordReviewStatus(
   word: AdminRevisionWordDTO,
   revisionStatus?: AdminPageRevisionDetailDTO["verification_status"],
@@ -69,7 +113,17 @@ export function getWordReviewStatus(
   if (revisionStatus === "VERIFIED") return "verified";
   const status = word.ocr_review_status;
   if (status === "matched") return "engine_agreement";
-  if (status === "suspect") return "engine_disagreement";
+  if (status === "suspect") {
+    return hasEngineDisagreementEvidence(word)
+      ? "engine_disagreement"
+      : "needs_review";
+  }
+  if (
+    status === "engine_disagreement" &&
+    !hasEngineDisagreementEvidence(word)
+  ) {
+    return "needs_review";
+  }
   return status === "engine_agreement" ||
     status === "engine_disagreement" ||
     status === "reference_match" ||
@@ -122,11 +176,6 @@ export function getWordReviewColorGroup(
   word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
 ): WordReviewColorGroup {
-  if (status === "verified" || status === "reference_match") return "green";
-  if (status === "confirmed_mismatch") return "red";
-  if (status === "engine_disagreement" || status === "suspect") return "yellow";
-  if (sourceTokenWasEdited(word)) return "yellow";
-
   const contractGroup = word?.review_color_group;
   if (
     contractGroup === "green" ||
@@ -136,6 +185,9 @@ export function getWordReviewColorGroup(
   ) {
     return contractGroup;
   }
+  if (status === "verified" || status === "reference_match") return "green";
+  if (status === "confirmed_mismatch") return "red";
+  if (sourceTokenWasEdited(word)) return "yellow";
   const evidence = word?.ocr_evidence;
   if (evidence) {
     const statuses = evidence.engine_statuses ?? {};
@@ -151,20 +203,14 @@ export function getWordReviewColorGroup(
       "substitute",
       "split",
       "merge",
-      "unknown",
       "unresolved",
     ]);
     if (riskyAlignments.has(evidence.alignment)) return "yellow";
     if (
       ["unmatched", "insert", "delete"].includes(evidence.alignment) &&
-      ["success", "no_result", "error"].includes(otherStatus ?? "")
+      otherStatus === "success"
     )
       return "yellow";
-    if (
-      Object.values(statuses).some((engineStatus) => engineStatus === "error")
-    ) {
-      return "yellow";
-    }
     if (
       ["rejected", "invalid", "poor"].includes(evidence.bbox_quality ?? "") ||
       ["weak", "low", "poor", "rejected"].includes(
@@ -202,11 +248,7 @@ function matchesWordFilter(
   if (filter === "review") return group === "red" || group === "yellow";
   if (filter === "risk") return group === "yellow";
   if (filter === "disagreement") {
-    return (
-      status === "engine_disagreement" ||
-      status === "suspect" ||
-      word?.ocr_evidence?.alignment === "substitute"
-    );
+    return hasEngineDisagreementEvidence(word);
   }
   if (filter === "verified") return group === "green";
   return group === "neutral";
@@ -226,11 +268,15 @@ export function getWordReviewLabel(
     return "Hai engine đồng thuận · chưa xác minh độc lập";
   if (
     status === "engine_disagreement" &&
+    hasEngineDisagreementEvidence(word) &&
     hasDiacriticOnlyEngineDisagreement(word)
   ) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
-  if (status === "engine_disagreement" || status === "suspect") {
+  if (
+    status === "engine_disagreement" &&
+    hasEngineDisagreementEvidence(word)
+  ) {
     return "Hai engine bất đồng · cần đối chiếu ảnh";
   }
   if (getWordReviewColorGroup(status, word) === "neutral") {
@@ -273,10 +319,19 @@ export function getWordReviewBadgeColor(
 function getEngineEvidenceDisplay(
   word: AdminRevisionWordDTO,
   engine: "paddleocr" | "vietocr" | "tesseract",
+  metadata: Record<string, unknown>,
 ): string {
   const evidence = word.ocr_evidence;
+  const line = getWordLineEvidence(word, metadata);
+  const lineStatuses = asRecord(line?.engine_statuses);
+  const pageStatuses = asRecord(metadata.engine_statuses);
+  const rawLineStatus = lineStatuses?.[engine];
+  const rawPageStatus = pageStatuses?.[engine];
+  const status =
+    evidence?.engine_statuses?.[engine] ??
+    (typeof rawLineStatus === "string" ? rawLineStatus : undefined) ??
+    (typeof rawPageStatus === "string" ? rawPageStatus : undefined);
   const candidate = evidence?.engine_outputs[engine];
-  const status = evidence?.engine_statuses?.[engine];
   const statusLabels: Record<string, string> = {
     not_installed: "chưa cài đặt",
     not_initialized: "chưa khởi tạo",
@@ -294,18 +349,23 @@ function getEngineEvidenceDisplay(
     return `${candidate} · ${statusLabel}`;
   }
   if (status === "success")
-    return "Đã chạy · không có token căn chỉnh tại vị trí này";
+    return "Đã chạy · không có token căn chỉnh an toàn cho từ này";
   if (status === "no_result") return "Đã chạy · không nhận dạng được text";
   if (status === "not_installed") return "Chưa cài đặt";
   if (status === "not_initialized") return "Chưa khởi tạo";
   if (status === "not_run") return "Không chạy";
   if (status === "processing") return "Đang xử lý";
   if (status === "error") {
-    const reason = evidence?.engine_errors?.[engine];
+    const lineErrors = asRecord(line?.engine_errors);
+    const pageReasons = asRecord(metadata.engine_status_reasons);
+    const reason =
+      evidence?.engine_errors?.[engine] ??
+      (typeof lineErrors?.[engine] === "string" ? lineErrors[engine] : undefined) ??
+      (typeof pageReasons?.[engine] === "string" ? pageReasons[engine] : undefined);
     return reason ? `Lỗi inference · ${reason}` : "Lỗi inference";
   }
   if (status === "disabled") return "Đã tắt cấu hình";
-  return "Không ghi nhận trạng thái trong revision cũ";
+  return "Không có trạng thái engine được ghi trong revision này";
 }
 
 export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
@@ -348,6 +408,28 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function getWordLineEvidence(
+  word: AdminRevisionWordDTO,
+  metadata: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const rawLines = metadata.line_evidence;
+  if (!Array.isArray(rawLines)) return null;
+  return rawLines
+    .map(asRecord)
+    .find((line) => line?.line_index === word.line_index) ?? null;
+}
+
+function getLineEngineOutput(
+  word: AdminRevisionWordDTO,
+  engine: "paddleocr" | "vietocr",
+  metadata: Record<string, unknown>,
+): string | null {
+  const line = getWordLineEvidence(word, metadata);
+  const key = engine === "paddleocr" ? "paddle_output" : "vietocr_output";
+  const output = line?.[key];
+  return typeof output === "string" && output.trim() ? output : null;
 }
 
 function formatRawOcrEvidence(value: unknown): string {
@@ -2111,10 +2193,7 @@ export function AdminOcrReviewScreen({
                         word,
                         detail?.verification_status,
                       );
-                      return (
-                        status === "engine_disagreement" ||
-                        word.ocr_evidence?.alignment === "substitute"
-                      );
+                      return hasEngineDisagreementEvidence(word);
                     }).length,
                   },
                   {
@@ -2361,14 +2440,28 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             PaddleOCR:{" "}
-                            {getEngineEvidenceDisplay(word, "paddleocr")}
+                            {getEngineEvidenceDisplay(word, "paddleocr", detail.ocr_metadata)}
                           </span>
                           <span>
-                            VietOCR: {getEngineEvidenceDisplay(word, "vietocr")}
+                            VietOCR: {getEngineEvidenceDisplay(word, "vietocr", detail.ocr_metadata)}
                           </span>
+                          {typeof word.ocr_evidence?.engine_outputs.paddleocr !== "string" &&
+                          getLineEngineOutput(word, "paddleocr", detail.ocr_metadata) ? (
+                            <span>
+                              PaddleOCR dòng gốc (không phải token căn chỉnh):{" "}
+                              {getLineEngineOutput(word, "paddleocr", detail.ocr_metadata)}
+                            </span>
+                          ) : null}
+                          {typeof word.ocr_evidence?.engine_outputs.vietocr !== "string" &&
+                          getLineEngineOutput(word, "vietocr", detail.ocr_metadata) ? (
+                            <span>
+                              VietOCR dòng gốc (không phải token căn chỉnh):{" "}
+                              {getLineEngineOutput(word, "vietocr", detail.ocr_metadata)}
+                            </span>
+                          ) : null}
                           <span>
                             Tesseract:{" "}
-                            {getEngineEvidenceDisplay(word, "tesseract")}
+                            {getEngineEvidenceDisplay(word, "tesseract", detail.ocr_metadata)}
                           </span>
                           <span>
                             OCR source token:{" "}

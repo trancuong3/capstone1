@@ -348,11 +348,13 @@ class AdminOcrService:
         if not isinstance(reference_alignment, str):
             reference_alignment = None
         alignment = value.get("alignment")
-        if not isinstance(alignment, str):
-            alignment = "unknown"
+        if not isinstance(alignment, str) or alignment == "unknown":
+            # Older serializers used "unknown" for absent metadata. Preserve
+            # genuine unsafe mappings separately as "unresolved".
+            alignment = "not_computed"
         review_reason = value.get("review_reason")
         if not isinstance(review_reason, str):
-            review_reason = "No explicit review reason was recorded."
+            review_reason = "Alignment and word-level review reasoning were not recorded in this revision."
 
         raw_engine_statuses = value.get("engine_statuses")
         allowed_engine_statuses = {
@@ -548,8 +550,8 @@ class AdminOcrService:
             item = selected_operations[word_position]
 
         operation = item.get("operation")
-        if operation not in {"match", "substitute", "delete", "insert"}:
-            operation = "unknown"
+        if operation not in {"match", "substitute", "delete", "insert", "split", "merge"}:
+            operation = "unresolved"
         paddle_token = item.get("paddle_token")
         vietocr_token = item.get("vietocr_token")
         source_text = item.get(selected_key)
@@ -820,7 +822,6 @@ class AdminOcrService:
         if not isinstance(old_evidence, list):
             old_evidence = []
         contract_fallback = metadata.get("ocr_score_contract")
-        evidence_is_authoritative = metadata.get("word_evidence_v2_authoritative") is True
 
         existing_by_bbox = AdminOcrService._existing_rows_by_bbox(words, existing_rows)
         sorted_rows = sorted(
@@ -888,11 +889,7 @@ class AdminOcrService:
                 else None
             )
             normalized_evidence = AdminOcrService._normalize_word_evidence(evidence)
-            if (
-                normalized_evidence is None
-                and source is not None
-                and not evidence_is_authoritative
-            ):
+            if normalized_evidence is None and source is not None:
                 normalized_evidence = AdminOcrService._line_word_evidence(
                     metadata,
                     int(source.LineIndex),
@@ -1446,6 +1443,55 @@ class AdminOcrService:
             raise
 
     @staticmethod
+    def _has_engine_disagreement_evidence(
+        evidence: dict[str, object] | None,
+    ) -> bool:
+        """Return true only when this word has concrete cross-engine disagreement evidence."""
+        if not isinstance(evidence, dict):
+            return False
+
+        outputs = evidence.get("engine_outputs")
+        if isinstance(outputs, dict):
+            paddle = outputs.get("paddleocr")
+            vietocr = outputs.get("vietocr")
+            if (
+                isinstance(paddle, str) and paddle.strip()
+                and isinstance(vietocr, str) and vietocr.strip()
+                and normalize_word(paddle) != normalize_word(vietocr)
+            ):
+                return True
+
+        crop_evidence = evidence.get("crop_evidence")
+        if isinstance(crop_evidence, dict):
+            paddle_crop = crop_evidence.get("paddleocr_candidate")
+            vietocr_crop = crop_evidence.get("vietocr_candidate")
+            if (
+                isinstance(paddle_crop, str) and paddle_crop.strip()
+                and isinstance(vietocr_crop, str) and vietocr_crop.strip()
+                and normalize_word(paddle_crop) != normalize_word(vietocr_crop)
+            ):
+                return True
+
+        alignment = evidence.get("alignment")
+        if alignment in {"substitute", "split", "merge"}:
+            return True
+        if alignment in {"unmatched", "delete", "insert"}:
+            selected_engine = evidence.get("selected_engine")
+            other_engine = (
+                "vietocr" if selected_engine == "paddleocr"
+                else "paddleocr" if selected_engine == "vietocr"
+                else None
+            )
+            statuses = evidence.get("engine_statuses")
+            other_status = (
+                statuses.get(other_engine)
+                if isinstance(statuses, dict) and other_engine
+                else None
+            )
+            return other_status == "success"
+        return False
+
+    @staticmethod
     def _classify_word_color_group(
         review_status: str,
         evidence: dict[str, object] | None,
@@ -1456,8 +1502,6 @@ class AdminOcrService:
             return "green"
         if review_status == "confirmed_mismatch":
             return "red"
-        if review_status == "engine_disagreement":
-            return "yellow"
         if not isinstance(evidence, dict):
             return "neutral"
 
@@ -1484,7 +1528,7 @@ class AdminOcrService:
         engine_statuses = evidence.get("engine_statuses")
         statuses = engine_statuses if isinstance(engine_statuses, dict) else {}
         if alignment in {
-            "substitute", "split", "merge", "unknown", "unresolved",
+            "substitute", "split", "merge", "unresolved",
         }:
             return "yellow"
         if alignment in {"unmatched", "delete", "insert"}:
@@ -1495,11 +1539,11 @@ class AdminOcrService:
                 else None
             )
             other_status = statuses.get(other_engine) if other_engine else None
-            if other_status in {"success", "no_result", "error"}:
+            # A missing token is a word-level disagreement only when the
+            # other engine completed this line. no_result/error/not_run mean
+            # there is no second candidate to compare, not proof of a bad word.
+            if other_status == "success":
                 return "yellow"
-
-        if any(value == "error" for value in statuses.values()):
-            return "yellow"
 
         if evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}:
             return "yellow"
@@ -1538,7 +1582,6 @@ class AdminOcrService:
             line_tokens.setdefault(int(source_row.LineIndex), []).append(
                 unicodedata.normalize("NFC", str(source_row.Text))
             )
-        evidence_is_authoritative = metadata.get("word_evidence_v2_authoritative") is True
         for row in rows:
             word_position = line_positions.get(row.LineIndex, 0)
             line_positions[row.LineIndex] = word_position + 1
@@ -1587,13 +1630,20 @@ class AdminOcrService:
                 if 0 <= row.WordIndex < len(raw_word_evidence)
                 else None
             )
-            if stored_evidence is None and not evidence_is_authoritative:
+            if stored_evidence is None:
+                # Recover from line metadata only when the selected line still
+                # matches the persisted word sequence and source token indexes.
                 stored_evidence = self._line_word_evidence(
                     metadata,
                     row.LineIndex,
                     word_position,
                     line_tokens.get(int(row.LineIndex)),
                 )
+            if (
+                review_status == "engine_disagreement"
+                and not self._has_engine_disagreement_evidence(stored_evidence)
+            ):
+                review_status = "needs_review"
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
