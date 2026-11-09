@@ -308,6 +308,70 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         return respond(route, { detail: "Invalid draft revision" }, 409);
       return respond(route, draftDetail());
     }
+    // The AI progress card is a separate feature with its own tests; here it
+    // only needs to settle quietly ("not enough data" -> no AI call is made).
+    const assessmentChild =
+      /^\/tutor\/children\/([^/]+)\/progress-assessment$/.exec(path)?.[1];
+    if (request.method() === "GET" && assessmentChild) {
+      const day = timestamp.slice(0, 10);
+      return respond(route, {
+        child_id: assessmentChild,
+        period_start: day,
+        period_end: day,
+        days: 30,
+        generated_at: timestamp,
+        data_status: "INSUFFICIENT",
+        score: {
+          overall: null,
+          previous_overall: null,
+          delta: null,
+          grade: null,
+          grade_label: null,
+          components: [],
+        },
+        metrics: {
+          sessions: 0,
+          active_days: 0,
+          reading_minutes: 0,
+          books: 0,
+          pages_compared: 0,
+          words_read: 0,
+          coverage_pct: null,
+          accuracy_pct: null,
+          skipped_rate_pct: null,
+          substitution_rate_pct: null,
+          hesitations: 0,
+          repeated_words: 0,
+          hesitations_per_100_words: null,
+          words_per_minute: null,
+          comprehension_answered: 0,
+          comprehension_first_try_pct: null,
+          comprehension_by_type: [],
+          retry_confirmed: 0,
+          retry_failed: 0,
+        },
+        weekly: [],
+        difficult_words: [],
+        assessment: {
+          source: "RULE_BASED",
+          model: null,
+          headline: "Chưa đủ dữ liệu để đánh giá",
+          summary: "Bé cần đọc thêm vài buổi để có đánh giá.",
+          strengths: [],
+          weaknesses: [],
+          actions: [
+            {
+              title: "Đọc cùng bé",
+              detail: "Dành vài phút mỗi ngày để đọc cùng bé.",
+              audience: "PARENT",
+            },
+          ],
+          practice_words: [],
+          encouragement: "Bé cố gắng lên nhé!",
+        },
+        ai_cached: false,
+      });
+    }
     if (request.method() !== "GET") {
       state.unexpected.push(`write:${request.method()}:${url.pathname}`);
       return respond(route, { detail: "Test forbids writes" }, 405);
