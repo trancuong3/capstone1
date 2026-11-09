@@ -123,10 +123,29 @@ export const adminRevisionDetailSchema = z.object({
           contract: z.enum([
             "dual_engine_agreement_v2",
             "hybrid_ocr_evidence_v3",
+            "hybrid_ocr_evidence_v4",
             "tesseract_raw_word_score_v1",
             "ocr_calibrated_word_accuracy_v1",
           ]),
           engine_outputs: z.record(z.string(), z.string().nullable()),
+          engine_statuses: z
+            .record(
+              z.string(),
+              z.enum([
+                "not_installed",
+                "not_initialized",
+                "not_run",
+                "processing",
+                "success",
+                "no_result",
+                "error",
+                "disabled",
+              ]),
+            )
+            .optional()
+            .catch({}),
+          paddle_token_index: z.number().int().nonnegative().nullable().optional(),
+          vietocr_token_index: z.number().int().nonnegative().nullable().optional(),
           source_text: z.string().nullable().optional(),
           alignment: z.string(),
           engine_agreement_score: z.number().min(0).max(1).nullable(),
