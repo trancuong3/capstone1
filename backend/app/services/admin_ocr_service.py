@@ -319,7 +319,8 @@ class AdminOcrService:
             selected_engine = value.get("selected_engine")
             source_candidate = (
                 safe_outputs.get(selected_engine)
-                if selected_engine in {"paddleocr", "vietocr", "tesseract"}
+                if isinstance(selected_engine, str)
+                and selected_engine in {"paddleocr", "vietocr", "tesseract"}
                 else None
             )
             if not isinstance(source_candidate, str):
