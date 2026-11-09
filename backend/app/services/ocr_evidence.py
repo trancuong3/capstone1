@@ -22,6 +22,17 @@ def normalize_alignment_token(value: str) -> str:
     return " ".join(token.split())
 
 
+def _strip_diacritics_for_alignment(value: str) -> str:
+    """Base-letter hint for token pairing only; never an exact-match normalizer."""
+    decomposed = unicodedata.normalize("NFD", value)
+    without_combining = "".join(
+        character
+        for character in decomposed
+        if unicodedata.category(character) != "Mn"
+    )
+    return unicodedata.normalize("NFC", without_combining).replace("đ", "d").replace("Đ", "D")
+
+
 def _edit_distance_ratio(left: str, right: str) -> float:
     if left == right:
         return 0.0
@@ -48,6 +59,12 @@ def token_alignment_cost(left: str, right: str) -> float:
         return 0.0
     if not left_token or not right_token or max(len(left_token), len(right_token)) > 128:
         return 1.1
+
+    # Vietnamese diacritic-only variants should pair as a SUBSTITUTE, not as
+    # unrelated DELETE+INSERT operations. The non-zero cost is intentional:
+    # this hint never makes the original NFC tokens exact or verifies either one.
+    if _strip_diacritics_for_alignment(left_token) == _strip_diacritics_for_alignment(right_token):
+        return 0.3
     return min(1.5, _edit_distance_ratio(left_token, right_token) * 1.1)
 
 

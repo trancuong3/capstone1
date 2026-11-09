@@ -68,7 +68,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         ocr_confidence: 0.8,
         ocr_score_source: "tesseract_raw_word_score_v1",
       }),
-    ).toContain("Điểm thô Tesseract: 80/100 · dùng làm tín hiệu màu");
+    ).toContain("Điểm thô Tesseract: 80/100 · raw recognition score");
     expect(
       getOcrScoreLabel({
         ...word,
