@@ -2236,12 +2236,7 @@ export function AdminOcrReviewScreen({
                           {word.ocr_evidence?.source_text &&
                           normalizeVietnameseWord(word.ocr_evidence.source_text) !==
                             normalizeVietnameseWord(word.text) ? (
-                            <span className="text-amber-900">
-                              Evidence engine thuộc token OCR ban đầu “
-                              {word.ocr_evidence.source_text}”; từ hiện tại “
-                              {word.text}” đã được chỉnh sửa. Candidate/score gốc
-                              không đánh giá độ đúng của bản chỉnh sửa.
-                            </span>
+                            <span className="text-amber-900">\n                              {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}\n                            </span>
                           ) : null}
                           <span>
                             Alignment:{" "}
