@@ -327,6 +327,12 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r2["verification_status"], "NEEDS_REVIEW")
             self.assertEqual(r2["draft_text"], "Ngày xưa có bé.")
             self.assertEqual(len(r2["words"]), 4)
+            self.assertTrue(
+                all(
+                    word["review_color_group"] in {"green", "yellow", "red"}
+                    for word in r2["words"]
+                )
+            )
             self.assertEqual(r2["ocr_metadata"]["source_revision_id"], str(R1_ID))
             self.assertEqual(r2["words"][0]["ocr_review_status"], "reference_match")
             self.assertEqual(

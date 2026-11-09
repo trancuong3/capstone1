@@ -237,7 +237,7 @@ class AdminRevisionWordRead(BaseModel):
     normalized_text: str
     bbox: tuple[float, float, float, float]
     ocr_confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
-    review_color_group: Literal["green", "red", "yellow", "neutral"] = "neutral"
+    review_color_group: Literal["green", "yellow", "red"] = "yellow"
     ocr_review_status: Literal[
         "matched",
         "suspect",

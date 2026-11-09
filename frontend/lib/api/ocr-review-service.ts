@@ -98,7 +98,7 @@ export const adminRevisionDetailSchema = z.object({
         ),
       ocr_confidence: z.number().min(0).max(1).nullable().catch(null),
       review_color_group: z
-        .enum(["green", "red", "yellow", "neutral"])
+        .enum(["green", "yellow", "red"])
         .optional()
         .catch(undefined),
       ocr_review_status: z
