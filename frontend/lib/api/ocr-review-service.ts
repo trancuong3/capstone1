@@ -136,11 +136,17 @@ export const adminRevisionDetailSchema = z.object({
             .nullable(),
           reference_text: z.string().nullable(),
           reference_alignment: z.string().nullable().optional(),
-          selected_engine: z.enum(["paddleocr", "vietocr", "tesseract"]).nullable().optional(),
+          selected_engine: z
+            .enum(["paddleocr", "vietocr", "tesseract"])
+            .nullable()
+            .optional(),
           selection_reason: z.string().nullable().optional(),
           bbox_quality: z.string().nullable().optional(),
           crop_quality: z.string().nullable().optional(),
-          crop_evidence: z.record(z.string(), z.unknown()).nullable().optional(),
+          crop_evidence: z
+            .record(z.string(), z.unknown())
+            .nullable()
+            .optional(),
           review_reason: z.string(),
         })
         .nullable()

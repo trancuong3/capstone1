@@ -135,17 +135,31 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
 
     for (const score of [0, 0.2, 0.49, 0.5, 0.8, 0.81, 0.99, 1]) {
-      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score))).toBe("yellow");
-      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score), 0.99)).toBe("yellow");
+      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score))).toBe(
+        "yellow",
+      );
+      expect(
+        getWordReviewColorGroup("needs_review", rawScoreWord(score), 0.99),
+      ).toBe("yellow");
     }
-    expect(getWordReviewColorGroup("engine_agreement", rawScoreWord(0.99))).toBe("yellow");
-    expect(getWordReviewColorGroup("verified", rawScoreWord(0.1))).toBe("green");
-    expect(getWordReviewColorGroup("reference_match", rawScoreWord(0.1))).toBe("green");
-    expect(getWordReviewColorGroup("confirmed_mismatch", rawScoreWord(0.99))).toBe("red");
-    expect(getWordReviewColorGroup("needs_review", {
-      ...rawScoreWord(0.99),
-      ocr_score_source: "paddle_line_score_v1",
-    })).toBe("yellow");
+    expect(
+      getWordReviewColorGroup("engine_agreement", rawScoreWord(0.99)),
+    ).toBe("yellow");
+    expect(getWordReviewColorGroup("verified", rawScoreWord(0.1))).toBe(
+      "green",
+    );
+    expect(getWordReviewColorGroup("reference_match", rawScoreWord(0.1))).toBe(
+      "green",
+    );
+    expect(
+      getWordReviewColorGroup("confirmed_mismatch", rawScoreWord(0.99)),
+    ).toBe("red");
+    expect(
+      getWordReviewColorGroup("needs_review", {
+        ...rawScoreWord(0.99),
+        ocr_score_source: "paddle_line_score_v1",
+      }),
+    ).toBe("yellow");
   });
 
   it("shows selected word engine, alignment, line score scope, and calibration availability", async () => {
@@ -213,13 +227,17 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     expect(within(evidence).getByText("PaddleOCR: on")).toBeInTheDocument();
     expect(within(evidence).getByText("VietOCR: on")).toBeInTheDocument();
-    expect(within(evidence).getByText("OCR source token: on")).toBeInTheDocument();
     expect(
-      within(evidence).getByText(/Evidence engine thuộc token OCR ban đầu “on”/),
+      within(evidence).getByText("OCR source token: on"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Từ 1: Ta\./ }),
-    ).toHaveClass("border-amber-600");
+      within(evidence).getByText(
+        /Evidence engine thuộc token OCR ban đầu “on”/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Từ 1: Ta\./ })).toHaveClass(
+      "border-amber-600",
+    );
   });
 
   it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {

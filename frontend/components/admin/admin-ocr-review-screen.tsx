@@ -2213,14 +2213,16 @@ export function AdminOcrReviewScreen({
                           <span>
                             PaddleOCR:{" "}
                             {word.ocr_evidence?.engine_outputs.paddleocr ??
-                              (word.ocr_evidence?.selected_engine === "tesseract"
+                              (word.ocr_evidence?.selected_engine ===
+                              "tesseract"
                                 ? "Not run (Tesseract fallback)"
                                 : "Unavailable")}
                           </span>
                           <span>
                             VietOCR:{" "}
                             {word.ocr_evidence?.engine_outputs.vietocr ??
-                              (word.ocr_evidence?.selected_engine === "tesseract"
+                              (word.ocr_evidence?.selected_engine ===
+                              "tesseract"
                                 ? "Not run (Tesseract fallback)"
                                 : "Unavailable")}
                           </span>
@@ -2234,9 +2236,14 @@ export function AdminOcrReviewScreen({
                             {word.ocr_evidence?.source_text ?? "Unavailable"}
                           </span>
                           {word.ocr_evidence?.source_text &&
-                          normalizeVietnameseWord(word.ocr_evidence.source_text) !==
-                            normalizeVietnameseWord(word.text) ? (
-                            <span className="text-amber-900">\n                              {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}\n                            </span>
+                          normalizeVietnameseWord(
+                            word.ocr_evidence.source_text,
+                          ) !== normalizeVietnameseWord(word.text) ? (
+                            <span className="text-amber-900">
+                              \n{" "}
+                              {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}
+                              \n{" "}
+                            </span>
                           ) : null}
                           <span>
                             Alignment:{" "}
