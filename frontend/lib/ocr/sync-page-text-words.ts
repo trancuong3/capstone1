@@ -52,8 +52,9 @@ export function tokenizePageText(value: string): string[] {
 
 /**
  * Đồng bộ văn bản trang với danh sách bounding box từ OCR khi số lượng token
- * khớp 1:1, giữ bbox và điểm OCR chỉ khi token không đổi. Token đã sửa mất
- * điểm OCR nguồn và cần được Admin xem lại trước khi xác minh.
+ * khớp 1:1, giữ bbox và evidence nhận dạng gốc. Token đã sửa mất điểm OCR
+ * áp dụng trực tiếp cho token hiện tại và cần được Admin xem lại trước khi xác minh;
+ * evidence gốc vẫn được giữ để truy vết đúng candidate mà engine từng trả về.
  */
 export function syncPageTextToWords(
   draftText: string,
@@ -80,7 +81,9 @@ export function syncPageTextToWords(
       normalized_text: normalizeVietnameseWord(token),
       ocr_confidence: tokenChanged ? null : word.ocr_confidence,
       ocr_score_source: tokenChanged ? null : word.ocr_score_source,
-      ocr_evidence: tokenChanged ? null : word.ocr_evidence,
+      // Keep immutable OCR outputs as provenance; source_text identifies the
+      // original token, so they are never mistaken for evidence about the edit.
+      ocr_evidence: word.ocr_evidence,
       ocr_review_status: tokenChanged
         ? ("needs_review" as const)
         : (word.ocr_review_status ?? "needs_review"),

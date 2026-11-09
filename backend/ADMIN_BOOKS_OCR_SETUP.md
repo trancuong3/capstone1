@@ -39,13 +39,14 @@ Chỉ cần dùng vị trí phù hợp; không tạo nhiều file chứa các kh
 
 Migration chỉ bổ sung `public.pagerevisions.drafttext TEXT` với `IF NOT EXISTS`; không xóa bảng hoặc dữ liệu. Trước khi áp dụng, xác minh schema thật và đảm bảo `public.pagerevisions` là bảng đang dùng. Không chạy script phá hủy hoặc `DROP TABLE ... CASCADE`.
 
-## OCR cục bộ
+## OCR cục bộ: PaddleOCR + VietOCR + Tesseract fallback
 
-1. Cài Tesseract OCR 5.x trên máy chạy Backend.
-2. Cài dữ liệu tiếng Việt `vie.traineddata` tương thích.
-3. Nếu Tesseract không có trong `PATH`, khai báo `TESSERACT_CMD` trỏ tới executable thực tế.
-4. Cài dependencies trong `backend/requirements.txt`.
-5. OCR chạy cục bộ bằng Tesseract và OpenCV; không có fallback OCR cloud.
+1. Cài đúng phiên bản đã pin trong `backend/requirements.txt`. Nhóm OCR hiện gồm PaddleOCR 2.7.3 + PaddlePaddle 2.6.2 làm engine phát hiện vùng/dòng, VietOCR 0.3.12 + PyTorch làm recognizer, và OpenCV/Pillow cho tiền xử lý.
+2. Backend khởi tạo model theo kiểu lazy ở request OCR đầu tiên. Package import thành công không đồng nghĩa model đã khởi tạo hoặc inference thành công; cần đọc trạng thái engine thực tế trong metadata của revision.
+3. VietOCR nhận dạng các vùng dòng do PaddleOCR phát hiện. Hai candidate được giữ độc lập; candidate được chọn không xóa output của engine còn lại.
+4. Tesseract 5.x và dữ liệu tiếng Việt `vie.traineddata` là fallback. Đặt `TESSERACT_CMD` nếu executable không nằm trong `PATH`. Fallback được dùng khi PaddleOCR không khả dụng hoặc không phát hiện được dòng; lỗi xử lý nội bộ sau khi dual-engine đã bắt đầu không được âm thầm thay bằng Tesseract.
+5. Model weights cần có trong cache hoặc runtime cần truy cập được nguồn tải model khi khởi tạo lần đầu. Nếu không tải/đọc được weights, engine phải hiển thị `not_initialized` cùng loại lỗi; không được coi package có mặt là `success`.
+6. Cả ba engine đều chạy cục bộ; không có fallback OCR cloud.
 
 ## Chẩn đoán lỗi upload HTTP 503
 

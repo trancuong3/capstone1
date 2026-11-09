@@ -1,7 +1,6 @@
 """Business services for book catalog and admin page-read endpoints."""
 from __future__ import annotations
 
-import math
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -267,200 +266,20 @@ class AdminCatalogService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
 
-    async def revision(self, page_id: UUID, revision_id: UUID):
+    async def revision(self, page_id: UUID, revision_id: UUID) -> AdminRevisionDetailRead:
+        """Delegate revision serialization to the canonical OCR evidence service.
+
+        Keep this catalog-facing method for route compatibility, but never
+        maintain a second evidence allowlist here: new hybrid evidence contracts
+        must survive revision-detail reads unchanged.
+        """
+        from app.services.admin_ocr_service import AdminOcrService
+
         page = await self.page(page_id)
         revision = await self.repository.revision(page_id, revision_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
-        raw_statuses = metadata.get("word_review_statuses")
-        if not isinstance(raw_statuses, list):
-            raw_statuses = []
-        raw_score_sources = metadata.get("word_score_sources")
-        if not isinstance(raw_score_sources, list):
-            raw_score_sources = []
-        raw_word_evidence = metadata.get("word_evidence_v2")
-        if not isinstance(raw_word_evidence, list):
-            raw_word_evidence = []
-        raw_score_contract = metadata.get("ocr_score_contract")
-        trusted_score_contracts = {
-            "tesseract_raw_word_score_v1",
-            "dual_engine_consensus_v1",
-            "paddle_line_score_v1",
-            "ocr_calibrated_word_accuracy_v1",
-        }
-        words = []
-        for word in await self.repository.words(revision_id):
-            box = word.BoundingBox
-            # New writes use [x, y, width, height]. Legacy object rows are read-only compatibility.
-            if isinstance(box, dict):
-                box = [box.get("x"), box.get("y"), box.get("width"), box.get("height")]
-            if not isinstance(box, list) or len(box) != 4:
-                raise HTTPException(status_code=501, detail="Word bounding box contract is not available yet")
-            if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in box):
-                raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
-            x, y, width, height = [float(value) for value in box]
-            if (any(value < 0 or value > 1 for value in (x, y, width, height))
-                or width <= 0 or height <= 0 or x + width > 1.000001 or y + height > 1.000001):
-                raise HTTPException(status_code=501, detail="Normalized bounding box is not available yet")
-            raw_score = word.OCRConfidence
-            try:
-                numeric_score = float(raw_score) if raw_score is not None and not isinstance(raw_score, bool) else None
-            except (TypeError, ValueError, OverflowError):
-                numeric_score = None
-            if (
-                numeric_score is None
-                or not math.isfinite(numeric_score)
-                or not 0 <= numeric_score <= 1
-            ):
-                numeric_score = None
-            status_from_evidence = (
-                raw_statuses[word.WordIndex]
-                if 0 <= word.WordIndex < len(raw_statuses)
-                else None
-            )
-            score_source = (
-                raw_score_sources[word.WordIndex]
-                if 0 <= word.WordIndex < len(raw_score_sources)
-                else raw_score_contract
-            )
-            score_source = (
-                score_source
-                if isinstance(score_source, str)
-                and score_source in trusted_score_contracts
-                else None
-            )
-            if score_source not in {
-                "tesseract_raw_word_score_v1",
-                "ocr_calibrated_word_accuracy_v1",
-            }:
-                numeric_score = None
-            review_status = (
-                "verified"
-                if revision.VerificationStatus == "VERIFIED"
-                else status_from_evidence
-                if isinstance(status_from_evidence, str)
-                and status_from_evidence in {
-                    "matched",
-                    "suspect",
-                    "needs_review",
-                    "engine_agreement",
-                    "engine_disagreement",
-                    "reference_match",
-                    "confirmed_mismatch",
-                    "verified",
-                }
-                else "needs_review"
-            )
-            if review_status == "matched":
-                review_status = "engine_agreement"
-            elif review_status == "suspect":
-                review_status = "engine_disagreement"
-            raw_evidence = (
-                raw_word_evidence[word.WordIndex]
-                if 0 <= word.WordIndex < len(raw_word_evidence)
-                else None
-            )
-            word_evidence = None
-            if isinstance(raw_evidence, dict) and raw_evidence.get("contract") in {
-                "dual_engine_agreement_v2",
-                "tesseract_raw_word_score_v1",
-            }:
-                outputs = raw_evidence.get("engine_outputs")
-                safe_outputs = {
-                    engine: outputs.get(engine)
-                    if isinstance(outputs, dict) and isinstance(outputs.get(engine), str)
-                    else None
-                    for engine in ("paddleocr", "vietocr", "tesseract")
-                }
-                agreement = raw_evidence.get("engine_agreement_score")
-                if (
-                    isinstance(agreement, bool)
-                    or not isinstance(agreement, (int, float))
-                    or not math.isfinite(float(agreement))
-                    or not 0 <= float(agreement) <= 1
-                ):
-                    agreement = None
-                calibrated = raw_evidence.get("calibrated_word_accuracy")
-                if (
-                    isinstance(calibrated, bool)
-                    or not isinstance(calibrated, (int, float))
-                    or not math.isfinite(float(calibrated))
-                    or not 0 <= float(calibrated) <= 1
-                    or raw_evidence.get("contract") != "ocr_calibrated_word_accuracy_v1"
-                ):
-                    calibrated = None
-                verification_source = raw_evidence.get("verification_source")
-                if verification_source not in {"admin", "verified_revision"}:
-                    verification_source = None
-                reference_text = raw_evidence.get("reference_text")
-                if not isinstance(reference_text, str):
-                    reference_text = None
-                reference_alignment = raw_evidence.get("reference_alignment")
-                if not isinstance(reference_alignment, str):
-                    reference_alignment = None
-                word_evidence = {
-                    "contract": raw_evidence["contract"],
-                    "engine_outputs": safe_outputs,
-                    "alignment": raw_evidence.get("alignment") if isinstance(raw_evidence.get("alignment"), str) else "unknown",
-                    "engine_agreement_score": float(agreement) if agreement is not None else None,
-                    "calibrated_word_accuracy": float(calibrated) if calibrated is not None else None,
-                    "verification_source": verification_source,
-                    "reference_text": reference_text,
-                    "reference_alignment": reference_alignment,
-                    "review_reason": raw_evidence.get("review_reason") if isinstance(raw_evidence.get("review_reason"), str) else "Evidence is unavailable.",
-                }
-            words.append({
-                "word_index": word.WordIndex,
-                "line_index": word.LineIndex,
-                "text": word.Text,
-                "normalized_text": word.NormalizedText,
-                "bbox": (x, y, width, height),
-                "ocr_confidence": numeric_score if score_source is not None else None,
-                "ocr_review_status": review_status,
-                "ocr_score_source": score_source,
-                "ocr_evidence": word_evidence,
-            })
-        raw_revision = str(revision.RevisionNo)
-        if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
-            raise HTTPException(status_code=501, detail="Revision number contract is not available yet")
-        try:
-            return AdminRevisionDetailRead(
-                page_id=page.Id,
-                page_revision_id=revision.Id,
-                revision_no=int(raw_revision),
-                verification_status=revision.VerificationStatus,
-                lifecycle_status=page.LifecycleStatus,
-                draft_text=getattr(revision, "DraftText", None) if getattr(revision, "DraftText", None) is not None else revision.VerifiedText,
-                words=words,
-                # Expose OCR diagnostics only from a strict allowlist; never return storage paths.
-                ocr_metadata={
-                    key: metadata[key]
-                    for key in (
-                        "engine",
-                        "engine_version",
-                        "ocr_evidence_contract",
-                        "ocr_score_contract",
-                        "language",
-                        "coordinate_space",
-                        "source_width",
-                        "source_height",
-                        "processed_width",
-                        "processed_height",
-                        "scale_factor",
-                        "word_count",
-                        "line_count",
-                        "reading_layout",
-                        "line_evidence",
-                        "reference_source",
-                        "reference_revision_id",
-                        "verified_reference_alignment",
-                    )
-                    if key in metadata
-                },
-                created_at=revision.CreatedAt,
-                verified_at=revision.VerifiedAt,
-                verified_by=revision.VerifiedBy,
-            )
-        except ValidationError:
-            raise HTTPException(status_code=501, detail="Revision contract is not available yet") from None
+        word_rows = await self.repository.words(revision_id)
+        return await AdminOcrService(self.repository.db).revision_detail(
+            page, revision, word_rows=word_rows
+        )

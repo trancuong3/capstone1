@@ -205,16 +205,28 @@ class AdminRevisionSummaryRead(BaseModel):
 class AdminOcrWordEvidenceRead(BaseModel):
     contract: Literal[
         "dual_engine_agreement_v2",
+        "hybrid_ocr_evidence_v3",
+        "hybrid_ocr_evidence_v4",
         "tesseract_raw_word_score_v1",
         "ocr_calibrated_word_accuracy_v1",
     ]
     engine_outputs: dict[str, str | None] = Field(default_factory=dict)
+    engine_statuses: dict[str, str] = Field(default_factory=dict)
+    engine_errors: dict[str, str] = Field(default_factory=dict)
+    paddle_token_index: int | None = Field(default=None, ge=0)
+    vietocr_token_index: int | None = Field(default=None, ge=0)
+    source_text: str | None = None
     alignment: str
     engine_agreement_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     calibrated_word_accuracy: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     verification_source: Literal["admin", "verified_revision"] | None = None
     reference_text: str | None = None
     reference_alignment: str | None = None
+    selected_engine: Literal["paddleocr", "vietocr", "tesseract"] | None = None
+    selection_reason: str | None = None
+    bbox_quality: str | None = None
+    crop_quality: str | None = None
+    crop_evidence: dict[str, object] | None = None
     review_reason: str
 
 
@@ -225,6 +237,7 @@ class AdminRevisionWordRead(BaseModel):
     normalized_text: str
     bbox: tuple[float, float, float, float]
     ocr_confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
+    review_color_group: Literal["green", "red", "yellow", "neutral"] = "neutral"
     ocr_review_status: Literal[
         "matched",
         "suspect",

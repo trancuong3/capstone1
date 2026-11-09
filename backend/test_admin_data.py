@@ -38,8 +38,12 @@ def page_row(**overrides):
 
 
 def revision_row(**overrides):
-    values = dict(Id=REVISION, PageId=PAGE, RevisionNo="2", VerificationStatus="VERIFIED", CreatedAt=NOW,
-                  VerifiedAt=NOW, VerifiedBy=ACTOR, VerifiedText="Stored verified text", OCRMetadata={"token": "private"})
+    values = dict(
+        Id=REVISION, PageId=PAGE, RevisionNo="2", VerificationStatus="VERIFIED",
+        CreatedAt=NOW, VerifiedAt=NOW, VerifiedBy=ACTOR,
+        DraftText=None, VerifiedText="Stored verified text",
+        ProcessingMeta={}, OCRMetadata={"token": "private"},
+    )
     return SimpleNamespace(**(values | overrides))
 
 
@@ -173,10 +177,14 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pixel_bbox_is_not_guessed_as_normalized(self):
         repo = catalog_repo()
-        repo.words.return_value = [SimpleNamespace(BoundingBox={"x": 120, "y": 20, "width": 40, "height": 20})]
+        repo.words.return_value = [SimpleNamespace(
+            WordIndex=0, LineIndex=0, Text="pixel", NormalizedText="pixel",
+            BoundingBox={"x": 120, "y": 20, "width": 40, "height": 20},
+            OCRConfidence=None,
+        )]
         with self.assertRaises(HTTPException) as caught:
             await AdminCatalogService(repository=repo).revision(PAGE, REVISION)
-        self.assertEqual(caught.exception.status_code, 501)
+        self.assertEqual(caught.exception.status_code, 409)
 
     async def test_revision_sql_scopes_both_page_and_revision(self):
         db = MagicMock(scalar=AsyncMock(return_value=None))

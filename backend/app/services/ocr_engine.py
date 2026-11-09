@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 import re
 import shutil
@@ -9,6 +10,15 @@ import tempfile
 import threading
 import unicodedata
 from typing import Any
+
+from app.services.ocr_evidence import (
+    HYBRID_OCR_EVIDENCE_CONTRACT,
+    MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    OCR_PREPROCESSING_VERSION,
+    crop_word_region,
+    find_split_merge_candidates,
+    token_alignment_cost,
+)
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -32,19 +42,39 @@ from pytesseract import Output
 import torch
 from PIL import Image
 
+_paddle_import_status = "success"
+_paddle_import_error: str | None = None
 try:
     from paddleocr import PaddleOCR
-except ImportError:
+except Exception as exc:
     PaddleOCR = None  # type: ignore
+    try:
+        package_version("paddleocr")
+    except PackageNotFoundError:
+        _paddle_import_status = "not_installed"
+    else:
+        # The distribution exists, but one of its imports/dependencies failed.
+        _paddle_import_status = "not_initialized"
+        _paddle_import_error = type(exc).__name__
 
+_vietocr_import_status = "success"
+_vietocr_import_error: str | None = None
 try:
     from vietocr.tool.config import Cfg
     from vietocr.tool.predictor import Predictor
-except ImportError:
+except Exception as exc:
     Cfg = None  # type: ignore
     Predictor = None  # type: ignore
+    try:
+        package_version("vietocr")
+    except PackageNotFoundError:
+        _vietocr_import_status = "not_installed"
+    else:
+        _vietocr_import_status = "not_initialized"
+        _vietocr_import_error = type(exc).__name__
 
 logger = logging.getLogger(__name__)
+
 
 
 class OcrEngineUnavailable(RuntimeError):
@@ -78,9 +108,26 @@ def normalize_text_tokens(value: str) -> list[str]:
     ]
 
 
+def _tokens_with_source_indices(value: str) -> list[tuple[int, str]]:
+    """Return valid tokens with their original whitespace-token indexes."""
+    return [
+        (index, token)
+        for index, token in enumerate(unicodedata.normalize("NFC", value).split())
+        if normalize_word(token)
+    ]
+
+
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
 _engine_lock = threading.Lock()
+# Model instances are shared by FastAPI threadpool workers. Initialization
+# locking alone does not make inference methods safe for concurrent requests.
+_paddle_inference_lock = threading.Lock()
+_vietocr_inference_lock = threading.Lock()
+_paddle_initialization_status = "not_initialized"
+_vietocr_initialization_status = "not_initialized"
+_paddle_initialization_error: str | None = None
+_vietocr_initialization_error: str | None = None
 
 
 def _find_cached_vietocr_weights() -> str | None:
@@ -97,56 +144,71 @@ def _find_cached_vietocr_weights() -> str | None:
     return None
 
 
-def _get_ocr_engines() -> tuple[PaddleOCR, Predictor]:
+def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
+    """Initialize PaddleOCR and VietOCR independently.
+
+    PaddleOCR supplies page/line detection regions. VietOCR is an optional
+    recognizer for those regions; its initialization failure must not disable
+    a working PaddleOCR detector.
+    """
     global _paddle_engine, _vietocr_engine
-    if _paddle_engine is not None and _vietocr_engine is not None:
-        return _paddle_engine, _vietocr_engine
+    global _paddle_initialization_status, _vietocr_initialization_status
+    global _paddle_initialization_error, _vietocr_initialization_error
 
     with _engine_lock:
-        if _paddle_engine is not None and _vietocr_engine is not None:
-            return _paddle_engine, _vietocr_engine
+        if _paddle_engine is None:
+            if PaddleOCR is None:
+                _paddle_initialization_status = _paddle_import_status
+                _paddle_initialization_error = _paddle_import_error
+            else:
+                try:
+                    _paddle_engine = PaddleOCR(
+                        use_angle_cls=False,
+                        lang="vi",
+                        det_limit_side_len=2048,
+                        det_db_thresh=0.25,
+                        det_db_box_thresh=0.18,
+                        det_db_unclip_ratio=1.60,
+                        det_db_score_mode="slow",
+                        drop_score=0.0,
+                        show_log=False,
+                    )
+                    _paddle_initialization_status = "success"
+                    _paddle_initialization_error = None
+                except Exception as exc:
+                    _paddle_initialization_status = "not_initialized"
+                    _paddle_initialization_error = type(exc).__name__
+                    logger.warning("PaddleOCR initialization failed: %s", type(exc).__name__)
 
-        try:
-            if PaddleOCR is None or Cfg is None or Predictor is None:
-                raise OcrEngineUnavailable(
-                    "Thư viện PaddleOCR hoặc VietOCR chưa được cài đặt trong môi trường."
-                )
+        if _vietocr_engine is None:
+            if Cfg is None or Predictor is None:
+                _vietocr_initialization_status = _vietocr_import_status
+                _vietocr_initialization_error = _vietocr_import_error
+            else:
+                try:
+                    viet_config = Cfg.load_config_from_name("vgg_transformer")
+                    target_device = "cuda" if torch.cuda.is_available() else "cpu"
+                    viet_config["device"] = target_device
+                    cached_weight = _find_cached_vietocr_weights()
+                    if cached_weight:
+                        viet_config["weights"] = cached_weight
+                    if target_device == "cpu":
+                        torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
+                    _vietocr_engine = Predictor(viet_config)
+                    _vietocr_initialization_status = "success"
+                    _vietocr_initialization_error = None
+                except Exception as exc:
+                    _vietocr_initialization_status = "not_initialized"
+                    _vietocr_initialization_error = type(exc).__name__
+                    logger.warning("VietOCR initialization failed: %s", type(exc).__name__)
 
-            paddle_inst = PaddleOCR(
-                use_angle_cls=False,
-                lang="vi",
-                det_limit_side_len=2048,
-                det_db_thresh=0.25,
-                det_db_box_thresh=0.18,
-                det_db_unclip_ratio=1.60,
-                det_db_score_mode="slow",
-                drop_score=0.0,
-                show_log=False,
-            )
-
-            viet_config = Cfg.load_config_from_name("vgg_transformer")
-            target_device = "cuda" if torch.cuda.is_available() else "cpu"
-            viet_config["device"] = target_device
-
-            cached_weight = _find_cached_vietocr_weights()
-            if cached_weight:
-                viet_config["weights"] = cached_weight
-
-            if target_device == "cpu":
-                torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
-
-            viet_inst = Predictor(viet_config)
-
-            _paddle_engine = paddle_inst
-            _vietocr_engine = viet_inst
-            logger.info("OCR Dual-Engine (PaddleOCR + VietOCR) đã nạp sẵn thành công vào RAM.")
-        except Exception as exc:
-            raise OcrEngineUnavailable(
-                f"Không thể khởi tạo engine PaddleOCR / VietOCR: {exc}"
-            ) from exc
-
+    if _paddle_engine is None:
+        raise OcrEngineUnavailable(
+            "PaddleOCR detector is unavailable "
+            f"(status={_paddle_initialization_status}, "
+            f"error={_paddle_initialization_error or 'none'})."
+        )
     return _paddle_engine, _vietocr_engine
-
 
 def warmup_ocr_engines() -> None:
     try:
@@ -155,7 +217,6 @@ def warmup_ocr_engines() -> None:
         logger.warning(f"Preload OCR Engine thất bại: {exc}")
 
 
-threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_model_preloader").start()
 
 
 def strip_accents(text: str) -> str:
@@ -194,34 +255,21 @@ def is_vietocr_reliable(
     paddle_conf: float = 0.90,
     max_cer: float = 0.40,
 ) -> bool:
-    v_clean = viet_text.strip()
-    p_clean = paddle_text.strip()
+    """Reject obvious empty/repetition outputs, not select OCR correctness.
 
-    if not v_clean:
+    A True result means only that VietOCR can be shown as a provisional draft.
+    It does not mean the candidate is better than PaddleOCR or that its words
+    are correct. Diacritic-folded CER and line-level confidence are excluded.
+    """
+    del paddle_text, paddle_conf, max_cer
+    candidate = unicodedata.normalize("NFC", viet_text).strip()
+    if not candidate:
         return False
-
-    words = v_clean.split()
+    words = candidate.split()
     if len(words) >= 3:
-        for i in range(len(words) - 2):
-            if words[i].lower() == words[i + 1].lower() == words[i + 2].lower():
+        for index in range(len(words) - 2):
+            if words[index].casefold() == words[index + 1].casefold() == words[index + 2].casefold():
                 return False
-
-    if not p_clean or paddle_conf < 0.70 or len(v_clean) > 28:
-        return True
-
-    v_no_acc = strip_accents(v_clean)
-    p_no_acc = strip_accents(p_clean)
-
-    if len(p_no_acc) >= 4:
-        cer_with_space = jiwer.cer(p_no_acc, v_no_acc)
-        p_compact = re.sub(r"\s+", "", p_no_acc)
-        v_compact = re.sub(r"\s+", "", v_no_acc)
-        cer_compact = (
-            jiwer.cer(p_compact, v_compact) if len(p_compact) >= 4 else 0.0
-        )
-        if min(cer_with_space, cer_compact) > max_cer:
-            return False
-
     return True
 
 
@@ -235,25 +283,8 @@ def _token_surface(value: str) -> str:
 
 
 def _token_alignment_cost(left: str, right: str) -> float:
-    """Return a bounded alignment cost; accent folding is only a hint."""
-    left_surface = _token_surface(left)
-    right_surface = _token_surface(right)
-    if left_surface == right_surface:
-        return 0.0
-
-    left_norm = normalize_word(left_surface)
-    right_norm = normalize_word(right_surface)
-    if left_norm and right_norm and left_norm == right_norm:
-        # Case and punctuation differences can be aligned, but are not exact.
-        return 0.1
-    if left_norm and right_norm and strip_accents(left_norm) == strip_accents(right_norm):
-        return 0.3
-
-    if not left_norm or not right_norm or max(len(left_norm), len(right_norm)) > 128:
-        return 1.1
-    distance = float(jiwer.cer(left_norm, right_norm))
-    # Unrelated tokens are cheaper to represent as a delete plus an insert.
-    return min(1.5, distance * 1.1)
+    """NFC token distance that preserves all Vietnamese diacritics."""
+    return token_alignment_cost(left, right)
 
 
 def align_ocr_tokens(
@@ -352,6 +383,60 @@ def align_ocr_tokens(
             raise RuntimeError("OCR token alignment has an invalid backtrace")
     aligned.reverse()
     return aligned
+
+
+def _split_merge_operations_by_source_index(
+    candidates: list[dict[str, object]],
+    selected_engine: str,
+    paddle_entries: list[tuple[int, str]],
+    vietocr_entries: list[tuple[int, str]],
+) -> dict[int, str]:
+    """Map split/merge candidates back to original indexes of the selected engine.
+
+    Candidate indexes are positions in filtered token arrays. Word evidence
+    indexes refer to original whitespace tokens, so this mapping must pass
+    through the engine's source-index entries. Invalid mappings are not guessed.
+    """
+    if selected_engine == "paddleocr":
+        selected_key = "primary_indices"
+        selected_entries = paddle_entries
+    elif selected_engine == "vietocr":
+        selected_key = "secondary_indices"
+        selected_entries = vietocr_entries
+    else:
+        return {}
+
+    operations_by_source_index: dict[int, set[str]] = {}
+    for candidate in candidates:
+        operation = candidate.get("operation")
+        indexes = candidate.get(selected_key)
+        if operation not in {"split", "merge"} or not isinstance(indexes, (list, tuple)) or not indexes:
+            continue
+        mapped_indexes: list[int] = []
+        safe_mapping = True
+        for compact_index in indexes:
+            if (
+                isinstance(compact_index, bool)
+                or not isinstance(compact_index, int)
+                or compact_index < 0
+                or compact_index >= len(selected_entries)
+            ):
+                safe_mapping = False
+                break
+            source_index = selected_entries[compact_index][0]
+            if isinstance(source_index, bool) or not isinstance(source_index, int) or source_index < 0:
+                safe_mapping = False
+                break
+            mapped_indexes.append(source_index)
+        if not safe_mapping:
+            continue
+        for source_index in mapped_indexes:
+            operations_by_source_index.setdefault(source_index, set()).add(str(operation))
+
+    return {
+        source_index: next(iter(operations)) if len(operations) == 1 else "unresolved"
+        for source_index, operations in operations_by_source_index.items()
+    }
 
 
 def _word_engine_evidence(
@@ -802,6 +887,9 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             "ocr_evidence": {
                 "contract": "tesseract_raw_word_score_v1",
                 "engine_outputs": {"tesseract": token},
+                "source_text": token,
+                "selected_engine": "tesseract",
+                "selection_reason": "dual_engine_unavailable_tesseract_fallback",
                 "alignment": "single_engine",
                 "engine_agreement_score": None,
                 "calibrated_word_accuracy": None,
@@ -830,10 +918,258 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _package_version(distribution: str) -> str | None:
+    try:
+        return package_version(distribution)
+    except PackageNotFoundError:
+        return None
+
+
+def _raw_recognition_score(value: Any) -> object:
+    """Keep model output scores raw; never reinterpret them as accuracy."""
+    if value is None:
+        return None
+    if torch.is_tensor(value):
+        value = value.detach().cpu().tolist()
+    elif isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if np.isfinite(number) else None
+    if isinstance(value, (list, tuple)):
+        safe = []
+        for item in value[:128]:
+            if isinstance(item, bool):
+                safe.append(None)
+            elif isinstance(item, (int, float)):
+                number = float(item)
+                safe.append(number if np.isfinite(number) else None)
+            else:
+                safe.append(None)
+        return safe
+    return None
+
+
+def _recognize_uncertain_word_crops(
+    image: np.ndarray,
+    words: list[dict[str, object]],
+    paddle_engine: Any,
+    vietocr_engine: Any | None,
+) -> dict[str, object]:
+    """Re-recognize disputed words with already-loaded recognition models."""
+    import time
+
+    started = time.perf_counter()
+    prepared: list[tuple[dict[str, object], np.ndarray, dict[str, Any]]] = []
+    rejected_bbox = 0
+    rejected_quality = 0
+    capped = 0
+    bbox_validated = 0
+    for word in words:
+        evidence = word.get("ocr_evidence")
+        if not isinstance(evidence, dict):
+            continue
+
+        # Validate geometry and image signal even when the full-line engines agree.
+        # Agreement is not correctness and must not hide a clipped/invalid word box.
+        crop, quality = crop_word_region(image, word.get("bbox"))
+        bbox_validated += 1
+        evidence["bbox_quality"] = quality.get("bbox_quality")
+        evidence["crop_quality"] = quality.get("crop_quality")
+
+        engine_agrees = evidence.get("alignment") == "match"
+        if engine_agrees and quality.get("bbox_quality") == "valid" and quality.get("crop_quality") == "usable":
+            evidence["crop_evidence"] = {
+                **quality,
+                "status": "not_needed",
+                "reason": "engines_agree_but_agreement_is_not_verification",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+
+        if crop is None:
+            if quality.get("bbox_quality") != "valid":
+                rejected_bbox += 1
+            else:
+                rejected_quality += 1
+            evidence["crop_evidence"] = {
+                **quality, "status": "skipped",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        if quality.get("crop_quality") != "usable":
+            rejected_quality += 1
+            evidence["crop_evidence"] = {
+                **quality, "status": "skipped",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        if len(prepared) >= MAX_SELECTIVE_WORD_CROPS_PER_PAGE:
+            capped += 1
+            evidence["crop_evidence"] = {
+                **quality,
+                "status": "skipped",
+                "reason": "per_page_selective_crop_limit_reached",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        prepared.append((evidence, crop, quality))
+
+    paddle_failures = 0
+    vietocr_failures = 0
+    inference_calls = 0
+    for evidence, _crop, quality in prepared:
+        evidence["crop_evidence"] = {
+            **quality, "status": "pending",
+            "score_semantics": "raw_recognition_output_not_probability",
+        }
+
+    if prepared:
+        crops = [item[1] for item in prepared]
+        try:
+            # PaddleOCR 2.7.x exposes recognition-only OCR with det=False.
+            with _paddle_inference_lock:
+                paddle_results = paddle_engine.ocr(crops, det=False, rec=True, cls=False)
+            inference_calls += 1
+            for index, (evidence, _crop, _quality) in enumerate(prepared):
+                page_result = (
+                    paddle_results[index]
+                    if isinstance(paddle_results, list) and index < len(paddle_results)
+                    else None
+                )
+                recognition = (
+                    page_result[0]
+                    if isinstance(page_result, (list, tuple)) and page_result
+                    else None
+                )
+                candidate = (
+                    recognition[0]
+                    if isinstance(recognition, (list, tuple)) and recognition
+                    else None
+                )
+                score = (
+                    recognition[1]
+                    if isinstance(recognition, (list, tuple)) and len(recognition) > 1
+                    else None
+                )
+                crop_evidence = evidence["crop_evidence"]
+                crop_evidence["paddleocr_candidate"] = (
+                    unicodedata.normalize("NFC", candidate).strip()
+                    if isinstance(candidate, str) else None
+                )
+                crop_evidence["paddle_crop_recognition_score"] = _raw_recognition_score(score)
+        except Exception as exc:
+            paddle_failures += 1
+            logger.warning("Selective PaddleOCR recognition failed: %s", type(exc).__name__)
+            for evidence, _crop, _quality in prepared:
+                evidence["crop_evidence"]["paddle_error"] = type(exc).__name__
+
+        if vietocr_engine is None:
+            for evidence, _crop, _quality in prepared:
+                evidence["crop_evidence"]["vietocr_status"] = _vietocr_initialization_status
+        else:
+            try:
+                pil_crops = [
+                    Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+                    for crop in crops
+                ]
+                predictor_config = getattr(vietocr_engine, "config", None)
+                prediction_options = (
+                    predictor_config.get("predictor")
+                    if isinstance(predictor_config, dict)
+                    else None
+                )
+                beam_search_enabled = (
+                    isinstance(prediction_options, dict)
+                    and prediction_options.get("beamsearch") is True
+                )
+                crop_evidence_decoding_mode = (
+                    "beam_search" if beam_search_enabled else "standard_batch_or_predict"
+                )
+                with torch.inference_mode(), _vietocr_inference_lock:
+                    can_batch = (
+                        not beam_search_enabled
+                        and callable(getattr(vietocr_engine, "predict_batch", None))
+                    )
+                    if can_batch:
+                        try:
+                            batch_result = vietocr_engine.predict_batch(
+                                pil_crops, return_prob=True
+                            )
+                        except TypeError:
+                            # The pinned Predictor supports this keyword, but wrappers
+                            # and alternate builds may expose only the text-only form.
+                            batch_result = vietocr_engine.predict_batch(pil_crops)
+                        inference_calls += 1
+                        if isinstance(batch_result, tuple) and len(batch_result) >= 2:
+                            predictions, scores = batch_result[0], batch_result[1]
+                        else:
+                            predictions = (
+                                list(batch_result)
+                                if isinstance(batch_result, (list, tuple))
+                                else [batch_result]
+                            )
+                            scores = [None] * len(pil_crops)
+                    else:
+                        # Predictor.predict honors the configured beam-search decoder.
+                        # In that mode the library's own return_prob is None by design.
+                        predictions, scores = [], []
+                        for pil_crop in pil_crops:
+                            try:
+                                prediction = vietocr_engine.predict(
+                                    pil_crop, return_prob=True
+                                )
+                            except TypeError:
+                                prediction = vietocr_engine.predict(pil_crop)
+                            if isinstance(prediction, tuple) and len(prediction) >= 2:
+                                predictions.append(prediction[0])
+                                scores.append(prediction[1])
+                            else:
+                                predictions.append(
+                                    prediction if isinstance(prediction, str) else None
+                                )
+                                scores.append(None)
+                            inference_calls += 1
+                for index, (evidence, _crop, _quality) in enumerate(prepared):
+                    prediction = predictions[index] if index < len(predictions) else None
+                    score = scores[index] if index < len(scores) else None
+                    crop_evidence = evidence["crop_evidence"]
+                    crop_evidence["vietocr_candidate"] = (
+                        unicodedata.normalize("NFC", prediction).strip()
+                        if isinstance(prediction, str) else None
+                    )
+                    crop_evidence["vietocr_crop_recognition_score"] = _raw_recognition_score(score)
+                    crop_evidence["vietocr_decoding_mode"] = crop_evidence_decoding_mode
+                    crop_evidence["status"] = "completed"
+            except Exception as exc:
+                vietocr_failures += 1
+                logger.warning("Selective VietOCR recognition failed: %s", type(exc).__name__)
+                for evidence, _crop, _quality in prepared:
+                    evidence["crop_evidence"]["status"] = "partial"
+                    evidence["crop_evidence"]["vietocr_error"] = type(exc).__name__
+    
+
+    return {
+        "bbox_validated": bbox_validated,
+        "requested": len(prepared) + rejected_bbox + rejected_quality + capped,
+        "recognized": len(prepared),
+        "rejected_bbox": rejected_bbox,
+        "rejected_crop_quality": rejected_quality,
+        "skipped_by_page_limit": capped,
+        "inference_calls": inference_calls,
+        "paddle_failures": paddle_failures,
+        "vietocr_failures": vietocr_failures,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+        "max_crops_per_page": MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    }
+
+
 def _extract_text_and_boxes_dual_engine(
     image_bytes: bytes,
     paddle_engine: Any,
-    vietocr_engine: Any,
+    vietocr_engine: Any | None,
 ) -> dict[str, object]:
     array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
@@ -855,7 +1191,8 @@ def _extract_text_and_boxes_dual_engine(
         proc_image = image
 
     try:
-        ocr_res = paddle_engine.ocr(proc_image, cls=False)
+        with _paddle_inference_lock:
+            ocr_res = paddle_engine.ocr(proc_image, cls=False)
     except Exception as exc:
         raise OcrEngineUnavailable(f"PaddleOCR xử lý hình ảnh thất bại: {exc}") from exc
 
@@ -897,19 +1234,27 @@ def _extract_text_and_boxes_dual_engine(
         chosen_text = paddle_text
         viet_text_candidate: str | None = None
         viet_text_used = False
+        vietocr_status = _vietocr_initialization_status if vietocr_engine is None else "not_run"
+        vietocr_error = _vietocr_initialization_error if vietocr_engine is None else None
 
-        try:
-            with torch.inference_mode():
-                viet_text = vietocr_engine.predict(line_img_pil)
-            if isinstance(viet_text, str):
-                viet_text_candidate = viet_text.strip()
-                if is_vietocr_reliable(
-                    viet_text_candidate, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
-                ):
-                    chosen_text = viet_text_candidate
-                    viet_text_used = True
-        except Exception:
-            pass
+        if vietocr_engine is not None:
+            try:
+                with torch.inference_mode(), _vietocr_inference_lock:
+                    viet_text = vietocr_engine.predict(line_img_pil)
+                if isinstance(viet_text, str) and viet_text.strip():
+                    viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
+                    vietocr_status = "success"
+                    if is_vietocr_reliable(
+                        viet_text_candidate, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
+                    ):
+                        chosen_text = viet_text_candidate
+                        viet_text_used = True
+                else:
+                    vietocr_status = "no_result"
+            except Exception as exc:
+                vietocr_status = "error"
+                vietocr_error = type(exc).__name__
+                logger.warning("VietOCR line inference failed: %s", type(exc).__name__)
 
         if viet_text_used:
             chosen_text = _transfer_punctuation(chosen_text, paddle_text)
@@ -918,22 +1263,34 @@ def _extract_text_and_boxes_dual_engine(
         if not chosen_text:
             continue
 
-        valid_words = [w for w in chosen_text.split() if normalize_word(w)]
+        selected_entries = _tokens_with_source_indices(chosen_text)
+        valid_words = [token for _source_index, token in selected_entries]
+        selected_source_indices = [source_index for source_index, _token in selected_entries]
         if not valid_words:
             continue
 
         line_boxes = _map_curved_word_boxes(valid_words, item, orig_width, orig_height)
-        paddle_tokens = [w for w in paddle_text.split() if normalize_word(w)]
-        vietocr_tokens = [
-            w for w in (viet_text_candidate or "").split() if normalize_word(w)
-        ]
-        other_engine_tokens = paddle_tokens if viet_text_used else vietocr_tokens
+        paddle_entries = _tokens_with_source_indices(paddle_text)
+        vietocr_entries = _tokens_with_source_indices(viet_text_candidate or "")
+        paddle_tokens = [token for _source_index, token in paddle_entries]
+        vietocr_tokens = [token for _source_index, token in vietocr_entries]
+        other_entries = paddle_entries if viet_text_used else vietocr_entries
+        other_engine_tokens = [token for _source_index, token in other_entries]
+        other_source_indices = [source_index for source_index, _token in other_entries]
         alignment = align_ocr_tokens(valid_words, other_engine_tokens)
         by_primary_index = {
             int(step["primary_index"]): step
             for step in alignment
             if step["primary_index"] is not None
         }
+        selected_engine_name = "vietocr" if viet_text_used else "paddleocr"
+        split_merge_candidates = find_split_merge_candidates(paddle_tokens, vietocr_tokens)
+        split_merge_by_source_index = _split_merge_operations_by_source_index(
+            split_merge_candidates,
+            selected_engine_name,
+            paddle_entries,
+            vietocr_entries,
+        )
         line_index = len(lines_output)
         valid_line_confidence = None
         try:
@@ -955,19 +1312,49 @@ def _extract_text_and_boxes_dual_engine(
                 if secondary_index is not None
                 else None
             )
+            primary_source_index = (
+                selected_source_indices[int(primary_index)]
+                if primary_index is not None
+                else None
+            )
+            secondary_source_index = (
+                other_source_indices[int(secondary_index)]
+                if secondary_index is not None
+                else None
+            )
             alignment_operations.append({
                 "operation": step["operation"],
                 "paddle_token": secondary_token if viet_text_used else primary_token,
                 "vietocr_token": primary_token if viet_text_used else secondary_token,
+                "selected_token_index": primary_source_index,
+                "paddle_token_index": secondary_source_index if viet_text_used else primary_source_index,
+                "vietocr_token_index": primary_source_index if viet_text_used else secondary_source_index,
             })
+        line_engine_statuses = {
+            "paddleocr": (
+                "success"
+                if isinstance(paddle_text, str) and paddle_text.strip()
+                else "no_result"
+            ),
+            "vietocr": vietocr_status,
+            "tesseract": "not_run",
+        }
         line_evidence.append({
             "line_index": line_index,
             "paddle_output": paddle_text,
             "vietocr_output": viet_text_candidate,
+            "engine_statuses": line_engine_statuses,
+            "engine_errors": {"vietocr": vietocr_error} if vietocr_error else {},
             "paddle_line_confidence": valid_line_confidence,
             "paddle_line_score_contract": PADDLE_LINE_SCORE_CONTRACT,
             "vietocr_output_used": viet_text_used,
+            "selection_reason": (
+                "vietocr_nonempty_nonrepetitive_provisional"
+                if viet_text_used
+                else "paddle_provisional_fallback_or_vietocr_rejected"
+            ),
             "alignment_operations": alignment_operations,
+            "split_merge_candidates": split_merge_candidates,
         })
 
         for w_idx, raw_token in enumerate(valid_words):
@@ -989,9 +1376,38 @@ def _extract_text_and_boxes_dual_engine(
             if operation == "delete":
                 operation = "unmatched"
 
+            selected_source_index = selected_source_indices[w_idx] if w_idx < len(selected_source_indices) else None
+            secondary_source_index = (
+                other_source_indices[secondary_index]
+                if secondary_index is not None and secondary_index < len(other_source_indices)
+                else None
+            )
+            split_merge_operation = (
+                split_merge_by_source_index.get(selected_source_index)
+                if selected_source_index is not None
+                else None
+            )
             paddle_token = raw_token if not viet_text_used else matched_other_token
             vietocr_token = raw_token if viet_text_used else matched_other_token
-            if operation == "insert":
+            paddle_source_index = secondary_source_index if viet_text_used else selected_source_index
+            vietocr_source_index = selected_source_index if viet_text_used else secondary_source_index
+
+            if split_merge_operation is not None:
+                # A 1:N/N:1 candidate has no safe one-to-one token on the
+                # opposite engine. Keep selected-token provenance only; the
+                # complete group mapping remains in line_evidence.
+                operation = split_merge_operation
+                agreement = None
+                review_status = "engine_disagreement"
+                paddle_token = raw_token if selected_engine_name == "paddleocr" else None
+                vietocr_token = raw_token if selected_engine_name == "vietocr" else None
+                paddle_source_index = selected_source_index if selected_engine_name == "paddleocr" else None
+                vietocr_source_index = selected_source_index if selected_engine_name == "vietocr" else None
+                review_reason = (
+                    "Phát hiện candidate split/merge giữa hai engine; không có ánh xạ một-một an toàn. "
+                    "Đối chiếu nhóm token trong line evidence."
+                )
+            elif operation == "insert":
                 review_reason = "Engine còn lại có thêm token; hệ thống không ghép theo vị trí."
             elif operation == "unmatched":
                 review_reason = "Không tìm thấy từ tương ứng đáng tin cậy ở engine còn lại."
@@ -1011,16 +1427,33 @@ def _extract_text_and_boxes_dual_engine(
                 "ocr_review_status": review_status,
                 "ocr_score_source": None,
                 "ocr_evidence": {
-                    "contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+                    "contract": HYBRID_OCR_EVIDENCE_CONTRACT,
                     "engine_outputs": {
                         "paddleocr": paddle_token,
                         "vietocr": vietocr_token,
                     },
+                    "engine_statuses": line_engine_statuses,
+                    "engine_errors": (
+                        {"vietocr": vietocr_error}
+                        if vietocr_error is not None
+                        else {}
+                    ),
+                    "paddle_token_index": paddle_source_index,
+                    "vietocr_token_index": vietocr_source_index,
                     "alignment": operation,
                     "engine_agreement_score": agreement,
                     "calibrated_word_accuracy": None,
                     "verification_source": None,
                     "reference_text": None,
+                    "selected_engine": selected_engine_name,
+                    "selection_reason": (
+                        "vietocr_nonempty_nonrepetitive_provisional"
+                        if viet_text_used
+                        else "paddle_provisional_fallback_or_vietocr_rejected"
+                    ),
+                    "bbox_quality": "not_checked",
+                    "crop_quality": None,
+                    "crop_evidence": None,
                     "review_reason": review_reason,
                 },
             })
@@ -1030,6 +1463,9 @@ def _extract_text_and_boxes_dual_engine(
     if not words_output:
         raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
 
+    crop_stats = _recognize_uncertain_word_crops(
+        image, words_output, paddle_engine, vietocr_engine
+    )
     formatted_text = "\n".join(lines_output)
 
     try:
@@ -1053,7 +1489,14 @@ def _extract_text_and_boxes_dual_engine(
         "metadata": {
             "engine": "paddleocr_vietocr_dual",
             "engine_version": "PP-OCRv4 + VietOCR-vgg_transformer",
-            "ocr_evidence_contract": DUAL_ENGINE_EVIDENCE_CONTRACT,
+            "engine_versions": {
+                "paddleocr": _package_version("paddleocr"),
+                "vietocr": _package_version("vietocr"),
+                "paddle_model": "PP-OCRv4",
+                "vietocr_model": "vgg_transformer",
+            },
+            "preprocessing_version": OCR_PREPROCESSING_VERSION,
+            "ocr_evidence_contract": HYBRID_OCR_EVIDENCE_CONTRACT,
             "ocr_score_contract": None,
             "language": "vi",
             "coordinate_space": "normalized_original_dimensions",
@@ -1066,19 +1509,104 @@ def _extract_text_and_boxes_dual_engine(
             "line_count": len(lines_output),
             "reading_layout": layout_type,
             "line_evidence": line_evidence,
+            "engine_statuses": {
+                "paddleocr": "success",
+                "vietocr": (
+                    "success"
+                    if any(line.get("engine_statuses", {}).get("vietocr") == "success" for line in line_evidence)
+                    else "error"
+                    if any(line.get("engine_statuses", {}).get("vietocr") == "error" for line in line_evidence)
+                    else _vietocr_initialization_status if vietocr_engine is None
+                    else "no_result"
+                ),
+                "tesseract": "not_run",
+            },
+            "selective_crop_stats": crop_stats,
         },
     }
 
 
+def _attach_engine_statuses(
+    result: dict[str, object],
+    statuses: dict[str, str],
+    reasons: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """Attach observed engine lifecycle states to a Tesseract fallback result."""
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata["engine_statuses"] = dict(statuses)
+    if reasons:
+        metadata["engine_status_reasons"] = dict(reasons)
+    result["metadata"] = metadata
+    raw_words = result.get("words")
+    if isinstance(raw_words, list):
+        for word in raw_words:
+            if not isinstance(word, dict):
+                continue
+            evidence = word.get("ocr_evidence")
+            if isinstance(evidence, dict):
+                evidence["engine_statuses"] = dict(statuses)
+                if reasons:
+                    evidence["engine_errors"] = {
+                        name: reason
+                        for name, reason in reasons.items()
+                        if name in {"paddleocr", "vietocr", "tesseract"}
+                        and isinstance(reason, str)
+                    }
+    return result
+
+
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
-    """Chạy quy trình OCR: ưu tiên Dual-Engine, tự động fallback Tesseract cho CI/headless."""
+    """Run Paddle page detection and optional VietOCR recognition with truthful fallback states."""
     try:
         paddle_engine, vietocr_engine = _get_ocr_engines()
-        return _extract_text_and_boxes_dual_engine(image_bytes, paddle_engine, vietocr_engine)
-    except (OcrEngineUnavailable, OcrNoTextDetected):
-        return _extract_text_and_boxes_tesseract(image_bytes)
+    except OcrEngineUnavailable:
+        fallback = _extract_text_and_boxes_tesseract(image_bytes)
+        paddle_reason = (
+            "Package paddleocr is not installed."
+            if _paddle_initialization_status == "not_installed"
+            else (
+                "PaddleOCR import or model initialization failed "
+                f"({_paddle_initialization_error or _paddle_initialization_status})."
+            )
+        )
+        return _attach_engine_statuses(
+            fallback,
+            {
+                "paddleocr": _paddle_initialization_status,
+                "vietocr": "not_run",
+                "tesseract": "success",
+            },
+            {
+                "paddleocr": paddle_reason,
+                "vietocr": "VietOCR recognition requires PaddleOCR line regions.",
+            },
+        )
+
+    try:
+        return _extract_text_and_boxes_dual_engine(
+            image_bytes, paddle_engine, vietocr_engine
+        )
+    except OcrNoTextDetected:
+        fallback = _extract_text_and_boxes_tesseract(image_bytes)
+        return _attach_engine_statuses(
+            fallback,
+            {"paddleocr": "no_result", "vietocr": "not_run", "tesseract": "success"},
+            {"vietocr": "PaddleOCR did not produce line regions for VietOCR."},
+        )
+    except OcrEngineUnavailable:
+        fallback = _extract_text_and_boxes_tesseract(image_bytes)
+        return _attach_engine_statuses(
+            fallback,
+            {"paddleocr": "error", "vietocr": "not_run", "tesseract": "success"},
+            {"vietocr": "PaddleOCR failed before VietOCR received line regions."},
+        )
     except Exception:
-        try:
-            return _extract_text_and_boxes_tesseract(image_bytes)
-        except Exception:
-            raise
+        # A post-initialization pipeline bug is not proof that either OCR engine
+        # failed. Do not silently discard dual-engine evidence for Tesseract output.
+        logger.exception(
+            "Hybrid OCR processing failed after engine initialization; "
+            "refusing to replace dual-engine processing with Tesseract fallback"
+        )
+        raise

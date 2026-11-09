@@ -113,18 +113,40 @@ export type AdminOcrScoreSource =
   | "paddle_line_score_v1"
   | "ocr_calibrated_word_accuracy_v1";
 
+export type AdminOcrEngineStatus =
+  | "not_installed"
+  | "not_initialized"
+  | "not_run"
+  | "processing"
+  | "success"
+  | "no_result"
+  | "error"
+  | "disabled";
+
 export interface AdminOcrWordEvidenceDTO {
   readonly contract:
     | "dual_engine_agreement_v2"
+    | "hybrid_ocr_evidence_v3"
+    | "hybrid_ocr_evidence_v4"
     | "tesseract_raw_word_score_v1"
     | "ocr_calibrated_word_accuracy_v1";
   readonly engine_outputs: Readonly<Record<string, string | null>>;
+  readonly engine_statuses?: Readonly<Record<string, AdminOcrEngineStatus>>;
+  readonly engine_errors?: Readonly<Record<string, string>>;
+  readonly paddle_token_index?: number | null;
+  readonly vietocr_token_index?: number | null;
+  readonly source_text?: string | null;
   readonly alignment: string;
   readonly engine_agreement_score: number | null;
   readonly calibrated_word_accuracy: number | null;
   readonly verification_source: "admin" | "verified_revision" | null;
   readonly reference_text: string | null;
   readonly reference_alignment?: string | null;
+  readonly selected_engine?: "paddleocr" | "vietocr" | "tesseract" | null;
+  readonly selection_reason?: string | null;
+  readonly bbox_quality?: string | null;
+  readonly crop_quality?: string | null;
+  readonly crop_evidence?: Readonly<Record<string, unknown>> | null;
   readonly review_reason: string;
 }
 
@@ -135,6 +157,7 @@ export interface AdminRevisionWordDTO {
   readonly normalized_text: string;
   readonly bbox: readonly [number, number, number, number];
   readonly ocr_confidence: number | null;
+  readonly review_color_group?: "green" | "red" | "yellow" | "neutral";
   readonly ocr_review_status?: AdminOcrReviewStatus;
   readonly ocr_score_source?: AdminOcrScoreSource | null;
   readonly ocr_evidence?: AdminOcrWordEvidenceDTO | null;

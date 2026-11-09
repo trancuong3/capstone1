@@ -171,8 +171,12 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             revision.ProcessingMeta["word_review_statuses"],
-            ["verified"] * len(source_words),
+            ["reference_match"] * len(source_words),
         )
+        # This unit fixture intentionally mocks revision_detail; the full
+        # response serializer and green reference-match classification are
+        # asserted in test_admin_ocr_postgres_integration.py.
+        service.revision_detail.assert_awaited_once()
         self.assertEqual(
             [word["bbox"] for word in copied_words],
             [

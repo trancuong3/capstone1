@@ -97,6 +97,10 @@ export const adminRevisionDetailSchema = z.object({
           "Bounding box must have positive size and remain within the image.",
         ),
       ocr_confidence: z.number().min(0).max(1).nullable().catch(null),
+      review_color_group: z
+        .enum(["green", "red", "yellow", "neutral"])
+        .optional()
+        .catch(undefined),
       ocr_review_status: z
         .enum([
           "matched",
@@ -122,10 +126,44 @@ export const adminRevisionDetailSchema = z.object({
         .object({
           contract: z.enum([
             "dual_engine_agreement_v2",
+            "hybrid_ocr_evidence_v3",
+            "hybrid_ocr_evidence_v4",
             "tesseract_raw_word_score_v1",
             "ocr_calibrated_word_accuracy_v1",
           ]),
           engine_outputs: z.record(z.string(), z.string().nullable()),
+          engine_statuses: z
+            .record(
+              z.string(),
+              z.enum([
+                "not_installed",
+                "not_initialized",
+                "not_run",
+                "processing",
+                "success",
+                "no_result",
+                "error",
+                "disabled",
+              ]),
+            )
+            .optional()
+            .catch({}),
+          engine_errors: z.record(z.string(), z.string()).optional().catch({}),
+          paddle_token_index: z
+            .number()
+            .int()
+            .nonnegative()
+            .nullable()
+            .optional()
+            .catch(null),
+          vietocr_token_index: z
+            .number()
+            .int()
+            .nonnegative()
+            .nullable()
+            .optional()
+            .catch(null),
+          source_text: z.string().nullable().optional(),
           alignment: z.string(),
           engine_agreement_score: z.number().min(0).max(1).nullable(),
           calibrated_word_accuracy: z.number().min(0).max(1).nullable(),
@@ -134,6 +172,17 @@ export const adminRevisionDetailSchema = z.object({
             .nullable(),
           reference_text: z.string().nullable(),
           reference_alignment: z.string().nullable().optional(),
+          selected_engine: z
+            .enum(["paddleocr", "vietocr", "tesseract"])
+            .nullable()
+            .optional(),
+          selection_reason: z.string().nullable().optional(),
+          bbox_quality: z.string().nullable().optional(),
+          crop_quality: z.string().nullable().optional(),
+          crop_evidence: z
+            .record(z.string(), z.unknown())
+            .nullable()
+            .optional(),
           review_reason: z.string(),
         })
         .nullable()

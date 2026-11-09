@@ -5,7 +5,10 @@ Mocked engine output tests without requiring GPU, live models, or external servi
 from __future__ import annotations
 
 import os
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
@@ -49,6 +52,12 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine.normalize_word("..."), "")  # Dấu chấm câu được loại bỏ sạch
         self.assertEqual(ocr_engine.normalize_word("-"), "-")   # Giữ lại bullet gạch đầu dòng
         self.assertEqual(ocr_engine.normalize_word("Việt-Nam"), "việt-nam")
+
+    def test_source_token_indexes_survive_empty_token_filtering(self):
+        self.assertEqual(
+            ocr_engine._tokens_with_source_indices("một !!! hai"),
+            [(0, "một"), (2, "hai")],
+        )
 
     def test_clean_ocr_punctuation(self):
         """Kiểm tra làm sạch dấu câu tất định."""
@@ -112,6 +121,23 @@ class DualEngineOcrTests(unittest.TestCase):
             [word["ocr_evidence"]["alignment"] for word in result["words"]],
             ["substitute", "substitute"],
         )
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in result["words"]],
+            [
+                {"paddleocr": "Chu", "vietocr": "Chú"},
+                {"paddleocr": "meo", "vietocr": "mèo"},
+            ],
+        )
+        self.assertEqual(
+            result["metadata"]["engine_statuses"],
+            {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_statuses"],
+            {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+        )
+        self.assertEqual(result["words"][0]["ocr_evidence"]["paddle_token_index"], 0)
+        self.assertEqual(result["words"][0]["ocr_evidence"]["vietocr_token_index"], 0)
 
         # Bounding box chuẩn hóa trong không gian [0, 1]
         bbox = first_word["bbox"]
@@ -129,7 +155,7 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
         self.assertIsNone(meta["ocr_score_contract"])
-        self.assertEqual(meta["ocr_evidence_contract"], "dual_engine_agreement_v2")
+        self.assertEqual(meta["ocr_evidence_contract"], "hybrid_ocr_evidence_v4")
         self.assertEqual(meta["line_evidence"][0]["paddle_line_confidence"], 0.95)
         self.assertEqual(
             meta["line_evidence"][0]["paddle_line_score_contract"],
@@ -160,6 +186,122 @@ class DualEngineOcrTests(unittest.TestCase):
             all(word["ocr_confidence"] is None for word in result["words"]),
             "The raw Paddle line score must not be duplicated into word probability.",
         )
+
+    def test_split_merge_candidates_are_attached_to_each_selected_source_token(self):
+        quad = [[20.0, 30.0], [380.0, 30.0], [380.0, 90.0], [20.0, 90.0]]
+
+        # One PaddleOCR token corresponds to two VietOCR tokens. Keep selected
+        # source indexes and avoid inventing a one-to-one opposite-engine token.
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("xinchao", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "xin chao"
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=True),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            merged = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual([word["text"] for word in merged["words"]], ["xin", "chao"])
+        self.assertEqual([word["ocr_evidence"]["alignment"] for word in merged["words"]], ["merge", "merge"])
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in merged["words"]],
+            [
+                {"paddleocr": None, "vietocr": "xin"},
+                {"paddleocr": None, "vietocr": "chao"},
+            ],
+        )
+        self.assertEqual([word["ocr_evidence"]["vietocr_token_index"] for word in merged["words"]], [0, 1])
+        self.assertEqual([word["ocr_evidence"]["paddle_token_index"] for word in merged["words"]], [None, None])
+        self.assertEqual(
+            merged["metadata"]["line_evidence"][0]["split_merge_candidates"],
+            [{"operation": "merge", "primary_indices": [0], "secondary_indices": [0, 1]}],
+        )
+
+        # Reverse direction: two PaddleOCR tokens correspond to one VietOCR token.
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("xin chao", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "xinchao"
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=False),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            split = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual([word["text"] for word in split["words"]], ["xin", "chao"])
+        self.assertEqual([word["ocr_evidence"]["alignment"] for word in split["words"]], ["split", "split"])
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in split["words"]],
+            [
+                {"paddleocr": "xin", "vietocr": None},
+                {"paddleocr": "chao", "vietocr": None},
+            ],
+        )
+        self.assertEqual([word["ocr_evidence"]["paddle_token_index"] for word in split["words"]], [0, 1])
+        self.assertEqual([word["ocr_evidence"]["vietocr_token_index"] for word in split["words"]], [None, None])
+        self.assertEqual(
+            split["metadata"]["line_evidence"][0]["split_merge_candidates"],
+            [{"operation": "split", "primary_indices": [0, 1], "secondary_indices": [0]}],
+        )
+
+    def test_shared_models_serialize_inference_across_concurrent_requests(self):
+        counters = {
+            name: {"guard": threading.Lock(), "active": 0, "max_active": 0}
+            for name in ("paddle", "vietocr")
+        }
+
+        def tracked(counter, result_factory):
+            with counter["guard"]:
+                counter["active"] += 1
+                counter["max_active"] = max(counter["max_active"], counter["active"])
+            time.sleep(0.02)
+            try:
+                return result_factory()
+            finally:
+                with counter["guard"]:
+                    counter["active"] -= 1
+
+        def paddle_result():
+            # A fresh box is needed because the extraction path normalizes
+            # PaddleOCR coordinates in-place after detection.
+            quad = [[20.0, 30.0], [380.0, 30.0], [380.0, 90.0], [20.0, 90.0]]
+            return [[[quad, ("Xin chao", 0.95)]]]
+
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.side_effect = lambda *_args, **_kwargs: tracked(
+            counters["paddle"], paddle_result
+        )
+        mock_viet = MagicMock()
+        mock_viet.predict.side_effect = lambda *_args, **_kwargs: tracked(
+            counters["vietocr"], lambda: "Xin chao"
+        )
+        image_bytes = sample_png_bytes(400, 200)
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=True),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(
+                    executor.map(
+                        lambda _index: ocr_engine.extract_text_and_boxes(image_bytes),
+                        range(4),
+                    )
+                )
+
+        self.assertEqual(len(results), 4)
+        self.assertTrue(all(result["text"] == "Xin chao" for result in results))
+        self.assertEqual(mock_paddle.ocr.call_count, 4)
+        self.assertEqual(mock_viet.predict.call_count, 4)
+        self.assertEqual(counters["paddle"]["max_active"], 1)
+        self.assertEqual(counters["vietocr"]["max_active"], 1)
 
     def test_invalid_paddle_line_scores_remain_unavailable_at_line_scope(self):
         quad = [[40.0, 30.0], [160.0, 30.0], [160.0, 70.0], [40.0, 70.0]]
@@ -232,6 +374,24 @@ class DualEngineOcrTests(unittest.TestCase):
             [word["ocr_review_status"] for word in verified_words],
             ["reference_match", "reference_match", "reference_match"],
         )
+
+    def test_user_examples_remain_unresolved_engine_disagreements(self):
+        for paddle_token, vietocr_token in (("lui", "hui"), ("vé", "về")):
+            with self.subTest(paddle=paddle_token, vietocr=vietocr_token):
+                aligned = ocr_engine.align_ocr_tokens(
+                    [paddle_token], [vietocr_token]
+                )
+                self.assertEqual(aligned[0]["operation"], "substitute")
+                score, status = ocr_engine._word_engine_evidence(
+                    paddle_token, vietocr_token
+                )
+                self.assertIsNotNone(score)
+                self.assertLess(score, 1.0)
+                self.assertEqual(status, "engine_disagreement")
+                confidence, _review_status, _source = ocr_engine._word_ocr_evidence(
+                    paddle_token, vietocr_token, 0.999
+                )
+                self.assertIsNone(confidence)
 
     def test_vietnamese_diacritics_are_alignment_hints_not_exact_matches(self):
         pairs = (
@@ -330,6 +490,139 @@ class DualEngineOcrTests(unittest.TestCase):
             "tesseract_raw_word_score_v1",
         )
 
+    def test_paddle_output_survives_vietocr_inference_error(self):
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("công chúa", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.side_effect = RuntimeError("model failure")
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(
+                ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)
+            ),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+        self.assertEqual(result["text"], "công chúa")
+        self.assertEqual(
+            result["metadata"]["engine_statuses"]["paddleocr"], "success"
+        )
+        self.assertEqual(result["metadata"]["engine_statuses"]["vietocr"], "error")
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_errors"]["vietocr"],
+            "RuntimeError",
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["paddleocr"],
+            "công",
+        )
+        self.assertIsNone(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
+        )
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_statuses"]["vietocr"],
+            "error",
+        )
+
+    def test_paddle_recognition_remains_available_when_vietocr_was_not_initialized(self):
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("một hai", 0.95)]]]
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, None)),
+            patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
+        ):
+            result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
+
+        self.assertEqual(result["text"], "một hai")
+        self.assertEqual(result["metadata"]["engine_statuses"]["paddleocr"], "success")
+        self.assertEqual(result["metadata"]["engine_statuses"]["vietocr"], "not_initialized")
+        self.assertEqual(result["metadata"]["engine_statuses"]["tesseract"], "not_run")
+        self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["paddleocr"],
+            "một",
+        )
+        self.assertIsNone(
+            result["words"][0]["ocr_evidence"]["engine_outputs"]["vietocr"]
+        )
+
+    def test_broken_installed_paddle_import_is_not_reported_as_not_installed(self):
+        with (
+            patch.object(ocr_engine, "_paddle_engine", None),
+            patch.object(ocr_engine, "_vietocr_engine", MagicMock()),
+            patch.object(ocr_engine, "PaddleOCR", None),
+            patch.object(ocr_engine, "_paddle_import_status", "not_initialized"),
+            patch.object(ocr_engine, "_paddle_import_error", "ModuleNotFoundError"),
+            # _get_ocr_engines mutates this lifecycle field; restore it after
+            # this simulated import failure so later tests see isolated state.
+            patch.object(ocr_engine, "_paddle_initialization_error", None),
+        ):
+            with self.assertRaises(ocr_engine.OcrEngineUnavailable):
+                ocr_engine._get_ocr_engines()
+            self.assertEqual(
+                ocr_engine._paddle_initialization_status, "not_initialized"
+            )
+            self.assertEqual(
+                ocr_engine._paddle_initialization_error, "ModuleNotFoundError"
+            )
+
+    def test_vietocr_initialization_failure_does_not_disable_existing_paddle_detector(self):
+        paddle_instance = MagicMock()
+        config_loader = MagicMock()
+        config_loader.load_config_from_name.side_effect = RuntimeError("missing weights")
+        predictor_factory = MagicMock()
+
+        with (
+            patch.object(ocr_engine, "_paddle_engine", paddle_instance),
+            patch.object(ocr_engine, "_vietocr_engine", None),
+            patch.object(ocr_engine, "_paddle_initialization_status", "success"),
+            patch.object(ocr_engine, "_paddle_initialization_error", None),
+            patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
+            patch.object(ocr_engine, "_vietocr_initialization_error", None),
+            patch.object(ocr_engine, "Cfg", config_loader),
+            patch.object(ocr_engine, "Predictor", predictor_factory),
+            patch.object(ocr_engine, "_find_cached_vietocr_weights", return_value=None),
+            patch.object(ocr_engine.torch.cuda, "is_available", return_value=False),
+            patch.object(ocr_engine.torch, "set_num_threads"),
+        ):
+            paddle, viet = ocr_engine._get_ocr_engines()
+
+            # Assert while patches are active. After the context exits, patch
+            # correctly restores the pre-test module state.
+            self.assertIs(paddle, paddle_instance)
+            self.assertIsNone(viet)
+            self.assertEqual(ocr_engine._paddle_initialization_status, "success")
+            self.assertEqual(ocr_engine._vietocr_initialization_status, "not_initialized")
+            self.assertEqual(ocr_engine._vietocr_initialization_error, "RuntimeError")
+            self.assertEqual(ocr_engine._paddle_initialization_error, None)
+            predictor_factory.assert_not_called()
+
+    def test_unexpected_dual_pipeline_error_is_not_replaced_by_tesseract(self):
+        mock_paddle = MagicMock()
+        mock_vietocr = MagicMock()
+        with (
+            patch.object(
+                ocr_engine,
+                "_get_ocr_engines",
+                return_value=(mock_paddle, mock_vietocr),
+            ),
+            patch.object(
+                ocr_engine,
+                "_extract_text_and_boxes_dual_engine",
+                side_effect=RuntimeError("alignment processing bug"),
+            ),
+            patch.object(ocr_engine, "_extract_text_and_boxes_tesseract") as tesseract,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "alignment processing bug"):
+                ocr_engine.extract_text_and_boxes(sample_png_bytes())
+        tesseract.assert_not_called()
+
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""
         mock_tesseract_result = {
@@ -359,6 +652,14 @@ class DualEngineOcrTests(unittest.TestCase):
                 result = ocr_engine.extract_text_and_boxes(sample_png_bytes())
                 self.assertEqual(result["metadata"]["engine"], "tesseract")
                 self.assertEqual(result["text"], "Con mèo trèo cây cau")
+                self.assertEqual(
+                    result["metadata"]["engine_statuses"],
+                    {
+                        "paddleocr": ocr_engine._paddle_initialization_status,
+                        "vietocr": "not_run",
+                        "tesseract": "success",
+                    },
+                )
 
 
 if __name__ == "__main__":
