@@ -1,0 +1,28 @@
+name: Temporary OCR test formatter
+on:
+  push:
+    branches:
+      - feature/hybrid-evidence-ocr-classification-20261109
+    paths:
+      - ".github/workflows/temporary-ocr-test-format.yml"
+      - "frontend/tests/admin/admin-ocr-review-screen.test.tsx"
+permissions:
+  contents: read
+jobs:
+  format-preview:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Format OCR review tests and print exact diff
+        run: |
+          npx prettier --write tests/admin/admin-ocr-review-screen.test.tsx
+          git diff --no-ext-diff --unified=3 -- tests/admin/admin-ocr-review-screen.test.tsx || true
