@@ -156,6 +156,7 @@ export interface AdminRevisionWordDTO {
   readonly normalized_text: string;
   readonly bbox: readonly [number, number, number, number];
   readonly ocr_confidence: number | null;
+  readonly review_color_group?: "green" | "red" | "yellow" | "neutral";
   readonly ocr_review_status?: AdminOcrReviewStatus;
   readonly ocr_score_source?: AdminOcrScoreSource | null;
   readonly ocr_evidence?: AdminOcrWordEvidenceDTO | null;
