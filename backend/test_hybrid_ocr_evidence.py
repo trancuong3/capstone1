@@ -92,6 +92,48 @@ class HybridOcrEvidenceTests(unittest.TestCase):
         self.assertEqual(stats["recognized"], 1)
         self.assertLessEqual(stats["max_crops_per_page"], MAX_SELECTIVE_WORD_CROPS_PER_PAGE)
 
+    def test_beam_search_uses_predict_instead_of_predict_batch(self):
+        image = np.full((180, 360, 3), 255, dtype=np.uint8)
+        cv2.putText(image, "ve", (100, 105), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+        word = {
+            "bbox": [0.27, 0.35, 0.2, 0.3],
+            "ocr_evidence": {"alignment": "substitute"},
+        }
+        paddle = MagicMock()
+        paddle.ocr.return_value = [[("về", 0.82)]]
+        vietocr = MagicMock()
+        vietocr.config = {"predictor": {"beamsearch": True}}
+        vietocr.predict.return_value = ("vé", None)
+
+        _recognize_uncertain_word_crops(image, [word], paddle, vietocr)
+
+        vietocr.predict_batch.assert_not_called()
+        vietocr.predict.assert_called_once()
+        crop_evidence = word["ocr_evidence"]["crop_evidence"]
+        self.assertEqual(crop_evidence["vietocr_candidate"], "vé")
+        self.assertIsNone(crop_evidence["vietocr_crop_recognition_score"])
+        self.assertEqual(crop_evidence["vietocr_decoding_mode"], "beam_search")
+
+    def test_paddle_crop_failure_does_not_discard_vietocr_evidence(self):
+        image = np.full((180, 360, 3), 255, dtype=np.uint8)
+        cv2.putText(image, "ve", (100, 105), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+        word = {
+            "bbox": [0.27, 0.35, 0.2, 0.3],
+            "ocr_evidence": {"alignment": "substitute"},
+        }
+        paddle = MagicMock()
+        paddle.ocr.side_effect = RuntimeError("recognition unavailable")
+        vietocr = MagicMock()
+        vietocr.predict_batch.return_value = (["vé"], [float("nan")])
+
+        _recognize_uncertain_word_crops(image, [word], paddle, vietocr)
+
+        crop_evidence = word["ocr_evidence"]["crop_evidence"]
+        self.assertEqual(crop_evidence["paddle_error"], "RuntimeError")
+        self.assertEqual(crop_evidence["vietocr_candidate"], "vé")
+        self.assertIsNone(crop_evidence["vietocr_crop_recognition_score"])
+        self.assertEqual(crop_evidence["status"], "completed")
+
     def test_invalid_bbox_never_calls_crop_engines(self):
         image = np.full((180, 360, 3), 255, dtype=np.uint8)
         word = {

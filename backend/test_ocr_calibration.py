@@ -16,7 +16,7 @@ from app.services.ocr_calibration import (
 )
 
 
-def make_rows(book_count: int = 5, per_book: int = 30):
+def make_rows(book_count: int = 10, per_book: int = 30):
     rows = []
     for book in range(book_count):
         for index in range(per_book):

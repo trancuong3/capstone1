@@ -963,14 +963,32 @@ def _recognize_uncertain_word_crops(
                 Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
                 for crop in crops
             ]
+            predictor_config = getattr(vietocr_engine, "config", None)
+            prediction_options = (
+                predictor_config.get("predictor")
+                if isinstance(predictor_config, dict)
+                else None
+            )
+            beam_search_enabled = (
+                isinstance(prediction_options, dict)
+                and prediction_options.get("beamsearch") is True
+            )
+            crop_evidence_decoding_mode = (
+                "beam_search" if beam_search_enabled else "standard_batch_or_predict"
+            )
             with torch.inference_mode():
-                if callable(getattr(vietocr_engine, "predict_batch", None)):
+                can_batch = (
+                    not beam_search_enabled
+                    and callable(getattr(vietocr_engine, "predict_batch", None))
+                )
+                if can_batch:
                     try:
                         batch_result = vietocr_engine.predict_batch(
                             pil_crops, return_prob=True
                         )
                     except TypeError:
-                        # Older/beam-search configurations may not expose probabilities.
+                        # The pinned Predictor supports this keyword, but wrappers
+                        # and alternate builds may expose only the text-only form.
                         batch_result = vietocr_engine.predict_batch(pil_crops)
                     inference_calls += 1
                     if isinstance(batch_result, tuple) and len(batch_result) >= 2:
@@ -983,6 +1001,8 @@ def _recognize_uncertain_word_crops(
                         )
                         scores = [None] * len(pil_crops)
                 else:
+                    # Predictor.predict honors the configured beam-search decoder.
+                    # In that mode the library's own return_prob is None by design.
                     predictions, scores = [], []
                     for pil_crop in pil_crops:
                         try:
@@ -1009,6 +1029,7 @@ def _recognize_uncertain_word_crops(
                     if isinstance(prediction, str) else None
                 )
                 crop_evidence["vietocr_crop_recognition_score"] = _raw_recognition_score(score)
+                crop_evidence["vietocr_decoding_mode"] = crop_evidence_decoding_mode
                 crop_evidence["status"] = "completed"
         except Exception as exc:
             vietocr_failures += 1

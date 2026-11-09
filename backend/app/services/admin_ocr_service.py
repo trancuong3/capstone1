@@ -360,7 +360,7 @@ class AdminOcrService:
             for key in (
                 "status", "reason", "preprocessing", "score_semantics",
                 "paddle_error", "vietocr_error", "bbox_quality", "crop_quality",
-                "paddleocr_candidate", "vietocr_candidate",
+                "paddleocr_candidate", "vietocr_candidate", "vietocr_decoding_mode",
             ):
                 field_value = raw_crop.get(key)
                 if isinstance(field_value, str):

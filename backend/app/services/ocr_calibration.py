@@ -410,9 +410,9 @@ def build_calibration_artifact(
         raise CalibrationDatasetError(
             f"need at least {minimum_samples} verified word examples; found {len(prepared)}"
         )
-    if len(book_ids) < 5:
+    if len(book_ids) < 10:
         raise CalibrationDatasetError(
-            f"need at least 5 distinct books for book-disjoint evaluation; found {len(book_ids)}"
+            f"need at least 10 distinct books for train/validation/test generalization; found {len(book_ids)}"
         )
 
     compatibility = {
