@@ -1576,7 +1576,9 @@ class AdminOcrService:
             if review_status == "matched":
                 review_status = "engine_agreement"
             elif review_status == "suspect":
-                review_status = "engine_disagreement"
+                # Legacy suspect may have been assigned from a raw line score.
+                # Do not call it engine disagreement without current word evidence.
+                review_status = "needs_review"
             word_score = self._normalize_confidence(row.OCRConfidence)
             if score_source not in RAW_WORD_SCORE_CONTRACTS | WORD_PROBABILITY_SCORE_CONTRACTS:
                 word_score = None
