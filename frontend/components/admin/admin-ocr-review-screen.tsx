@@ -2345,7 +2345,7 @@ export function AdminOcrReviewScreen({
                               null ||
                             word.ocr_evidence?.engine_agreement_score ===
                               undefined
-                              ? "Unavailable"
+                              ? "Not computed"
                               : `${Math.round(word.ocr_evidence.engine_agreement_score * 100)}/100 · heuristic, không phải xác suất`}
                           </span>
                           <span>
@@ -2420,7 +2420,7 @@ export function AdminOcrReviewScreen({
                                 {typeof word.ocr_evidence.crop_evidence
                                   .status === "string"
                                   ? word.ocr_evidence.crop_evidence.status
-                                  : "No crop candidate recorded"}
+                                  : "Not processed"}
                               </span>
                               <span>
                                 VietOCR decoding mode:{" "}
@@ -2428,7 +2428,7 @@ export function AdminOcrReviewScreen({
                                   .vietocr_decoding_mode === "string"
                                   ? word.ocr_evidence.crop_evidence
                                       .vietocr_decoding_mode
-                                  : "No crop candidate recorded"}
+                                  : "Not applicable"}
                               </span>
                               <span>
                                 Crop contrast (standard deviation):{" "}
@@ -2450,7 +2450,7 @@ export function AdminOcrReviewScreen({
                                       .padding_clipped
                                     ? "Yes"
                                     : "No"
-                                  : "No crop candidate recorded"}
+                                  : "Not assessed"}
                               </span>
                             </>
                           ) : null}
