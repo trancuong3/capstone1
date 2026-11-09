@@ -314,6 +314,17 @@ class AdminOcrService:
             for engine in ("paddleocr", "vietocr", "tesseract"):
                 token = outputs.get(engine)
                 safe_outputs[engine] = token if isinstance(token, str) else None
+        source_text = value.get("source_text")
+        if not isinstance(source_text, str):
+            selected_engine = value.get("selected_engine")
+            source_candidate = (
+                safe_outputs.get(selected_engine)
+                if selected_engine in {"paddleocr", "vietocr", "tesseract"}
+                else None
+            )
+            if not isinstance(source_candidate, str):
+                source_candidate = safe_outputs.get("tesseract")
+            source_text = source_candidate if isinstance(source_candidate, str) else None
         agreement = value.get("engine_agreement_score")
         if isinstance(agreement, bool) or not isinstance(agreement, (int, float)):
             agreement = None
@@ -408,6 +419,7 @@ class AdminOcrService:
         return {
             "contract": value["contract"],
             "engine_outputs": safe_outputs,
+            "source_text": source_text,
             "alignment": alignment,
             "engine_agreement_score": float(agreement) if agreement is not None else None,
             "calibrated_word_accuracy": float(calibrated) if calibrated is not None else None,
@@ -482,6 +494,7 @@ class AdminOcrService:
                 "verification_source": None,
                 "reference_text": None,
                 "reference_alignment": None,
+                "source_text": str(word["text"]),
                 "review_reason": "Bằng chứng từ engine không khả dụng.",
             }
             evidence.update({
@@ -611,9 +624,12 @@ class AdminOcrService:
         for word in words:
             index = int(word["word_index"])
             source = existing_by_index.get(index)
-            unchanged = (
+            same_position = (
                 source is not None
                 and source.LineIndex == int(word["line_index"])
+            )
+            unchanged = (
+                same_position
                 and unicodedata.normalize("NFC", str(source.Text))
                 == unicodedata.normalize("NFC", str(word["text"]))
             )
@@ -643,12 +659,24 @@ class AdminOcrService:
                 and previous_source in OCR_SCORE_CONTRACTS
                 else None
             )
+            # Keep original engine outputs as immutable recognition provenance
+            # when an Admin edits the displayed token at the same word position.
+            # The text change still clears word scores and review status above.
             evidence = (
                 old_evidence[index]
-                if unchanged and index < len(old_evidence)
+                if same_position and index < len(old_evidence)
                 else None
             )
-            evidence_items.append(AdminOcrService._normalize_word_evidence(evidence))
+            normalized_evidence = AdminOcrService._normalize_word_evidence(evidence)
+            if (
+                normalized_evidence is not None
+                and normalized_evidence.get("source_text") is None
+                and source is not None
+            ):
+                normalized_evidence["source_text"] = unicodedata.normalize(
+                    "NFC", str(source.Text)
+                )
+            evidence_items.append(normalized_evidence)
         metadata["word_review_statuses"] = statuses
         metadata["word_score_sources"] = score_sources
         metadata["word_evidence_v2"] = evidence_items
