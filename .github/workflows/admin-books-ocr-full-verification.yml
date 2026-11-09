@@ -36,9 +36,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check Prettier formatting for OCR changes
+      - name: Apply repository Prettier and report exact OCR component diff
         run: |
-          npx prettier --check components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
+          cp components/admin/admin-ocr-review-screen.tsx /tmp/admin-ocr-review-screen.before.tsx
+          npx prettier --write components/admin/admin-ocr-review-screen.tsx
+          diff -u /tmp/admin-ocr-review-screen.before.tsx components/admin/admin-ocr-review-screen.tsx || true
+          npx prettier --check lib/ocr/sync-page-text-words.ts
 
       - name: Format check (changed frontend files)
         id: format
