@@ -225,6 +225,17 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "Sai so với reference đã xác minh",
     );
     expect(getWordReviewColorGroup("verified", mismatch)).toBe("red");
+    expect(
+      getWordReviewColorGroup("verified", {
+        ...consensus,
+        ocr_evidence: {
+          ...consensusEvidence("Chuyện"),
+          verification_source: "verified_revision",
+          reference_text: null,
+          reference_alignment: "unmatched",
+        },
+      }),
+    ).toBe("yellow");
     expect(getWordReviewColor("verified", mismatch)).toContain("border-red-600");
     expect(getWordReviewLabel("verified", mismatch)).toBe(
       "Sai so với reference đã xác minh",
