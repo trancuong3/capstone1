@@ -352,7 +352,7 @@ class AdminOcrService:
             alignment = "unknown"
         review_reason = value.get("review_reason")
         if not isinstance(review_reason, str):
-            review_reason = "Evidence is unavailable."
+            review_reason = "No explicit review reason was recorded."
 
         raw_engine_statuses = value.get("engine_statuses")
         allowed_engine_statuses = {
@@ -1427,6 +1427,7 @@ class AdminOcrService:
     def _classify_word_color_group(
         review_status: str,
         evidence: dict[str, object] | None,
+        word_text: str | None = None,
     ) -> str:
         """One server-authoritative word color contract; missing metadata is not a risk."""
         if review_status in {"verified", "reference_match"}:
@@ -1437,6 +1438,14 @@ class AdminOcrService:
             return "yellow"
         if not isinstance(evidence, dict):
             return "neutral"
+
+        source_text = evidence.get("source_text")
+        if (
+            isinstance(word_text, str)
+            and isinstance(source_text, str)
+            and normalize_word(word_text) != normalize_word(source_text)
+        ):
+            return "yellow"
 
         alignment = evidence.get("alignment")
         engine_statuses = evidence.get("engine_statuses")
@@ -1557,7 +1566,7 @@ class AdminOcrService:
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
                 "review_color_group": self._classify_word_color_group(
-                    review_status, stored_evidence
+                    review_status, stored_evidence, row.Text
                 ),
                 "ocr_score_source": score_source,
                 "ocr_evidence": stored_evidence,
