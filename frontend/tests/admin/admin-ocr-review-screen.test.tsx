@@ -181,6 +181,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
   it("requires word-level evidence before classifying a legacy disagreement or failed second engine as yellow", () => {
     const baseWord = {
       ...adminR1Fixture.words[0]!,
+      text: "mèo",
+      normalized_text: "mèo",
       review_color_group: undefined,
       ocr_review_status: "engine_disagreement" as const,
     };
