@@ -662,6 +662,9 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "reference_alignment": "match",
         }
         self.assertEqual(classify("confirmed_mismatch", verified_mismatch, "hui"), "red")
+        self.assertEqual(
+            classify("needs_review", verified_mismatch, "hui"), "yellow"
+        )
         self.assertEqual(classify("reference_match", verified_match, "lui"), "green")
         self.assertEqual(
             classify(

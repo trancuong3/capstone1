@@ -194,6 +194,7 @@ export function getWordReviewColorGroup(
   if (trustedReference && typeof reference === "string") {
     if (normalize(word.text) === normalize(reference)) return "green";
     if (
+      status === "confirmed_mismatch" &&
       evidence.reference_alignment === "substitute" &&
       typeof source === "string" &&
       normalize(source) === normalize(word.text)

@@ -141,7 +141,13 @@ def classify_word_evidence(
             normalize_word(unicodedata.normalize("NFC", source_text))
             if isinstance(source_text, str) else None
         )
-        if reference_alignment == "substitute" and normalized_source == normalized_word:
+        if (
+            review_status == "confirmed_mismatch"
+            and reference_alignment == "substitute"
+            and normalized_source == normalized_word
+        ):
+            # _apply_verified_reference sets confirmed_mismatch only when the
+            # page-level token alignment is unambiguous and one-to-one.
             return "red"
         return "yellow"
 

@@ -202,6 +202,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     };
     expect(getWordReviewColorGroup("confirmed_mismatch", mismatch)).toBe("red");
     expect(getWordReviewColor("confirmed_mismatch", mismatch)).toContain("border-red-600");
+    expect(getWordReviewColorGroup("needs_review", mismatch)).toBe("yellow");
     expect(getWordReviewColorGroup("confirmed_mismatch")).toBe("yellow");
     expect(
       getWordReviewColorGroup("engine_agreement", {
