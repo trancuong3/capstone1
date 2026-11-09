@@ -236,7 +236,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         },
       }),
     ).toBe("yellow");
-    expect(getWordReviewColor("verified", mismatch)).toContain("border-red-600");
+    expect(getWordReviewColor("verified", mismatch)).toContain(
+      "border-red-600",
+    );
     expect(getWordReviewLabel("verified", mismatch)).toBe(
       "Sai so với reference đã xác minh",
     );
