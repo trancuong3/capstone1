@@ -440,6 +440,9 @@ class DualEngineOcrTests(unittest.TestCase):
             patch.object(ocr_engine, "PaddleOCR", None),
             patch.object(ocr_engine, "_paddle_import_status", "not_initialized"),
             patch.object(ocr_engine, "_paddle_import_error", "ModuleNotFoundError"),
+            # _get_ocr_engines mutates this lifecycle field; restore it after
+            # this simulated import failure so later tests see isolated state.
+            patch.object(ocr_engine, "_paddle_initialization_error", None),
         ):
             with self.assertRaises(ocr_engine.OcrEngineUnavailable):
                 ocr_engine._get_ocr_engines()
@@ -460,7 +463,9 @@ class DualEngineOcrTests(unittest.TestCase):
             patch.object(ocr_engine, "_paddle_engine", paddle_instance),
             patch.object(ocr_engine, "_vietocr_engine", None),
             patch.object(ocr_engine, "_paddle_initialization_status", "success"),
+            patch.object(ocr_engine, "_paddle_initialization_error", None),
             patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
+            patch.object(ocr_engine, "_vietocr_initialization_error", None),
             patch.object(ocr_engine, "Cfg", config_loader),
             patch.object(ocr_engine, "Predictor", predictor_factory),
             patch.object(ocr_engine, "_find_cached_vietocr_weights", return_value=None),
