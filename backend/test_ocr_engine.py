@@ -452,13 +452,15 @@ class DualEngineOcrTests(unittest.TestCase):
         ):
             paddle, viet = ocr_engine._get_ocr_engines()
 
-        self.assertIs(paddle, paddle_instance)
-        self.assertIsNone(viet)
-        self.assertEqual(ocr_engine._paddle_initialization_status, "success")
-        self.assertEqual(ocr_engine._vietocr_initialization_status, "not_initialized")
-        self.assertEqual(ocr_engine._vietocr_initialization_error, "RuntimeError")
-        self.assertEqual(ocr_engine._paddle_initialization_error, None)
-        predictor_factory.assert_not_called()
+            # Assert while patches are active. After the context exits, patch
+            # correctly restores the pre-test module state.
+            self.assertIs(paddle, paddle_instance)
+            self.assertIsNone(viet)
+            self.assertEqual(ocr_engine._paddle_initialization_status, "success")
+            self.assertEqual(ocr_engine._vietocr_initialization_status, "not_initialized")
+            self.assertEqual(ocr_engine._vietocr_initialization_error, "RuntimeError")
+            self.assertEqual(ocr_engine._paddle_initialization_error, None)
+            predictor_factory.assert_not_called()
 
     def test_fallback_to_tesseract_when_dual_engine_unavailable(self):
         """Khi Dual-Engine không có trong môi trường, hệ thống tự động fallback Tesseract."""

@@ -908,7 +908,7 @@ class AdminOcrService:
                 not verified
                 and same_token
                 and previous == "suspect"
-                and self._has_engine_disagreement_evidence(normalized_evidence)
+                and AdminOcrService._has_engine_disagreement_evidence(normalized_evidence)
             ):
                 current = "engine_disagreement"
                 statuses[-1] = current
