@@ -107,7 +107,8 @@ function sourceTokenWasEdited(word: AdminRevisionWordDTO | undefined): boolean {
   const source = word?.ocr_evidence?.source_text;
   return (
     typeof source === "string" &&
-    normalizeVietnameseWord(source) !== normalizeVietnameseWord(word?.text ?? "")
+    normalizeVietnameseWord(source) !==
+      normalizeVietnameseWord(word?.text ?? "")
   );
 }
 
@@ -281,12 +282,13 @@ function getEngineEvidenceDisplay(
     disabled: "đã tắt cấu hình",
   };
   const statusLabel = status
-    ? statusLabels[status] ?? status
+    ? (statusLabels[status] ?? status)
     : "trạng thái chưa được ghi trong revision cũ";
   if (typeof candidate === "string" && candidate.trim()) {
     return `${candidate} · ${statusLabel}`;
   }
-  if (status === "success") return "Đã chạy · không có token căn chỉnh tại vị trí này";
+  if (status === "success")
+    return "Đã chạy · không có token căn chỉnh tại vị trí này";
   if (status === "no_result") return "Đã chạy · không nhận dạng được text";
   if (status === "not_installed") return "Chưa cài đặt";
   if (status === "not_initialized") return "Chưa khởi tạo";
@@ -2344,13 +2346,15 @@ export function AdminOcrReviewScreen({
                               .join(", ")}
                           </span>
                           <span>
-                            PaddleOCR: {getEngineEvidenceDisplay(word, "paddleocr")}
+                            PaddleOCR:{" "}
+                            {getEngineEvidenceDisplay(word, "paddleocr")}
                           </span>
                           <span>
                             VietOCR: {getEngineEvidenceDisplay(word, "vietocr")}
                           </span>
                           <span>
-                            Tesseract: {getEngineEvidenceDisplay(word, "tesseract")}
+                            Tesseract:{" "}
+                            {getEngineEvidenceDisplay(word, "tesseract")}
                           </span>
                           <span>
                             OCR source token:{" "}
