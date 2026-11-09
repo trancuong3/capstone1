@@ -658,7 +658,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
-    setWordFilter("review");
+    setWordFilter("all");
     setWords(
       next.words.map((word) => ({
         ...word,
