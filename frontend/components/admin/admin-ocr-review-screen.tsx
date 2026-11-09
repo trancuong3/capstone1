@@ -1566,13 +1566,14 @@ export function AdminOcrReviewScreen({
             Chỉ từ được Admin xác minh hoặc khớp một-một với reference của
             revision đã xác minh mới được tô xanh. Chỉ mismatch rõ ràng với
             reference mới được tô đỏ. Đồng thuận engine, bất đồng dấu, Paddle
-            line score và raw crop score đều không tự quyết định màu; các trường
-            hợp chưa đủ bằng chứng tiếp tục màu vàng. Chưa bật auto-green vì
-            chưa có calibration artifact phù hợp. OCR không gọi AI.
+            line score và raw crop score không tự quyết định màu. Engine đồng
+            thuận an toàn hoặc chỉ có một engine chạy mà không có dấu hiệu rủi ro
+            sẽ ở nhóm trung tính; vàng chỉ dành cho bất đồng/alignment/inference
+            hoặc chất lượng crop có vấn đề. Chưa bật auto-green từ confidence.
           </p>
           <div
             aria-label="Thống kê trạng thái từ OCR"
-            className="mt-4 grid grid-cols-3 gap-2"
+            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
             role="group"
           >
             {(
@@ -1591,9 +1592,15 @@ export function AdminOcrReviewScreen({
                 },
                 {
                   id: "yellow",
-                  label: "Vàng · chưa đủ bằng chứng",
+                  label: "Vàng · có rủi ro OCR",
                   count: colorCounts.yellow,
                   cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
+                },
+                {
+                  id: "neutral",
+                  label: "Trung tính · chưa xác minh",
+                  count: colorCounts.neutral,
+                  cardClass: "border-slate-400/60 bg-slate-50 text-slate-800",
                 },
               ] as const
             ).map((state) => (
