@@ -153,7 +153,7 @@ def classify_word_evidence(
     if review_status == "verified":
         return "green"
 
-    source_text = evidence.get("source_text"
+    source_text = evidence.get("source_text")
     if not isinstance(source_text, str):
         return "yellow"
     normalized_source = normalize_word(unicodedata.normalize("NFC", source_text))
