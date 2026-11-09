@@ -395,7 +395,7 @@ class AdminOcrService:
             crop_evidence = {}
             for key in (
                 "status", "reason", "preprocessing", "score_semantics",
-                "paddle_error", "vietocr_error", "bbox_quality", "crop_quality",
+                "paddle_error", "vietocr_error", "vietocr_status", "bbox_quality", "crop_quality",
                 "paddleocr_candidate", "vietocr_candidate", "vietocr_decoding_mode",
             ):
                 field_value = raw_crop.get(key)
@@ -1423,6 +1423,47 @@ class AdminOcrService:
             )
             raise
 
+    @staticmethod
+    def _classify_word_color_group(
+        review_status: str,
+        evidence: dict[str, object] | None,
+    ) -> str:
+        """One server-authoritative word color contract; missing metadata is not a risk."""
+        if review_status in {"verified", "reference_match"}:
+            return "green"
+        if review_status == "confirmed_mismatch":
+            return "red"
+        if review_status in {"engine_disagreement", "suspect"}:
+            return "yellow"
+        if not isinstance(evidence, dict):
+            return "neutral"
+
+        alignment = evidence.get("alignment")
+        if alignment in {
+            "substitute", "unmatched", "delete", "insert",
+            "split", "merge", "unknown", "unresolved",
+        }:
+            return "yellow"
+
+        engine_statuses = evidence.get("engine_statuses")
+        if isinstance(engine_statuses, dict) and any(
+            value == "error" for value in engine_statuses.values()
+        ):
+            return "yellow"
+
+        if evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}:
+            return "yellow"
+        if evidence.get("crop_quality") in {"weak", "low", "poor", "rejected"}:
+            return "yellow"
+        crop_evidence = evidence.get("crop_evidence")
+        if isinstance(crop_evidence, dict) and (
+            crop_evidence.get("crop_quality") in {"weak", "low", "poor", "rejected"}
+            or crop_evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}
+        ):
+            return "yellow"
+
+        return "neutral"
+
     async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
         rows = await self.repo.words(revision.Id)
         metadata = dict(revision.ProcessingMeta or {})
@@ -1504,6 +1545,9 @@ class AdminOcrService:
                 "bbox": tuple(box),
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
+                "review_color_group": self._classify_word_color_group(
+                    review_status, stored_evidence
+                ),
                 "ocr_score_source": score_source,
                 "ocr_evidence": stored_evidence,
             })
