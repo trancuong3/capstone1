@@ -210,6 +210,7 @@ class AdminOcrWordEvidenceRead(BaseModel):
         "ocr_calibrated_word_accuracy_v1",
     ]
     engine_outputs: dict[str, str | None] = Field(default_factory=dict)
+    source_text: str | None = None
     alignment: str
     engine_agreement_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     calibrated_word_accuracy: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
