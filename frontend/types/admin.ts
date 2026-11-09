@@ -113,13 +113,27 @@ export type AdminOcrScoreSource =
   | "paddle_line_score_v1"
   | "ocr_calibrated_word_accuracy_v1";
 
+export type AdminOcrEngineStatus =
+  | "not_installed"
+  | "not_initialized"
+  | "not_run"
+  | "processing"
+  | "success"
+  | "no_result"
+  | "error"
+  | "disabled";
+
 export interface AdminOcrWordEvidenceDTO {
   readonly contract:
     | "dual_engine_agreement_v2"
     | "hybrid_ocr_evidence_v3"
+    | "hybrid_ocr_evidence_v4"
     | "tesseract_raw_word_score_v1"
     | "ocr_calibrated_word_accuracy_v1";
   readonly engine_outputs: Readonly<Record<string, string | null>>;
+  readonly engine_statuses?: Readonly<Record<string, AdminOcrEngineStatus>>;
+  readonly paddle_token_index?: number | null;
+  readonly vietocr_token_index?: number | null;
   readonly source_text?: string | null;
   readonly alignment: string;
   readonly engine_agreement_score: number | null;
