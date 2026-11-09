@@ -18,6 +18,9 @@ import type {
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const dateTimeSchema = z.string().datetime({ offset: true });
+const phaseSchema = z
+  .enum(["UPCOMING", "RUNNING", "EXPIRED", "FINISHED"])
+  .default("RUNNING");
 const goalSchema = z.object({
   id: z.string().uuid(),
   child_id: z.string().uuid(),
@@ -34,6 +37,10 @@ const goalSchema = z.object({
   completed_at: dateTimeSchema.nullable().optional(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
+  phase: phaseSchema,
+  streak_cycles: z.number().int().nonnegative().default(0),
+  cycle_starts_on: dateSchema.nullable().default(null),
+  cycle_ends_on: dateSchema.nullable().default(null),
 });
 const planSchema = z.object({
   id: z.string().uuid(),
@@ -53,6 +60,10 @@ const planSchema = z.object({
   completed_at: dateTimeSchema.nullable(),
   created_at: dateTimeSchema,
   updated_at: dateTimeSchema,
+  phase: phaseSchema,
+  next_scheduled_date: dateSchema.nullable().default(null),
+  is_scheduled_today: z.boolean().default(false),
+  minutes_today: z.number().int().nonnegative().default(0),
 });
 const collectionSchema = z.object({
   id: z.string().uuid(),

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.repositories.reading_management_repository import ReadingManagementRepository
+from app.services.reading_management_rules import conflict_detail
 from app.services.reading_management_service import ReadingManagementService, ManagementNotFound, ManagementForbidden, ManagementConflict
 from app.schemas.reading_management import (
     ReadingGoalCreate, ReadingGoalUpdate, ReadingGoalTransition, ReadingGoalRead,
@@ -27,7 +28,7 @@ def map_domain_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ManagementNotFound):
         return HTTPException(status_code=404, detail="Resource not found")
     if isinstance(exc, ManagementConflict):
-        return HTTPException(status_code=409, detail="The requested state transition is not allowed")
+        return HTTPException(status_code=409, detail=conflict_detail(exc.reason))
     return HTTPException(status_code=500, detail="Internal server error")
 
 

@@ -5,6 +5,8 @@ export type ReadingPlanStatus = "ACTIVE" | "PAUSED" | "COMPLETED" | "ENDED";
 export type ReadingReminderEmailStatus =
   "NOT_REQUESTED" | "PENDING" | "SENDING" | "RETRY" | "SENT" | "FAILED";
 export type BookCollectionType = "FAVORITE" | "WANT_TO_READ";
+/** Derived from dates and status by the backend (not stored). */
+export type ReadingItemPhase = "UPCOMING" | "RUNNING" | "EXPIRED" | "FINISHED";
 
 export interface ReadingGoalDTO {
   id: string;
@@ -22,6 +24,10 @@ export interface ReadingGoalDTO {
   completed_at?: string | null;
   created_at: string;
   updated_at: string;
+  phase?: ReadingItemPhase;
+  streak_cycles?: number;
+  cycle_starts_on?: string | null;
+  cycle_ends_on?: string | null;
 }
 export interface ReadingPlanDTO {
   id: string;
@@ -41,6 +47,10 @@ export interface ReadingPlanDTO {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  phase?: ReadingItemPhase;
+  next_scheduled_date?: string | null;
+  is_scheduled_today?: boolean;
+  minutes_today?: number;
 }
 export interface BookSummaryDTO {
   id: string;
