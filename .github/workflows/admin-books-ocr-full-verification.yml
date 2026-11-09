@@ -38,8 +38,8 @@ jobs:
 
       - name: Render Prettier formatting diff for OCR changes
         run: |
-          npx prettier --write components/admin/admin-ocr-review-screen.tsx lib/ocr/sync-page-text-words.ts
-          git -C .. diff --no-color -- frontend/components/admin/admin-ocr-review-screen.tsx
+          npx prettier --write components/admin/admin-ocr-review-screen.tsx tests/admin/admin-ocr-review-screen.test.tsx lib/ocr/sync-page-text-words.ts
+          git -C .. diff --no-color -- frontend/components/admin/admin-ocr-review-screen.tsx frontend/tests/admin/admin-ocr-review-screen.test.tsx
 
       - name: Format check (changed frontend files)
         id: format
