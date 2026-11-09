@@ -366,6 +366,14 @@ class AdminOcrService:
                 if isinstance(status_value, str) and status_value in allowed_engine_statuses:
                     engine_statuses[engine_name] = status_value
 
+        raw_engine_errors = value.get("engine_errors")
+        engine_errors: dict[str, str] = {}
+        if isinstance(raw_engine_errors, dict):
+            for engine_name in ("paddleocr", "vietocr", "tesseract"):
+                error_reason = raw_engine_errors.get(engine_name)
+                if isinstance(error_reason, str):
+                    engine_errors[engine_name] = error_reason[:160]
+
         def safe_token_index(name: str) -> int | None:
             token_index = value.get(name)
             return (
@@ -445,6 +453,7 @@ class AdminOcrService:
             "contract": value["contract"],
             "engine_outputs": safe_outputs,
             "engine_statuses": engine_statuses,
+            "engine_errors": engine_errors,
             "paddle_token_index": safe_token_index("paddle_token_index"),
             "vietocr_token_index": safe_token_index("vietocr_token_index"),
             "source_text": source_text,
@@ -566,6 +575,11 @@ class AdminOcrService:
             "engine_statuses": (
                 line.get("engine_statuses")
                 if isinstance(line.get("engine_statuses"), dict)
+                else {}
+            ),
+            "engine_errors": (
+                line.get("engine_errors")
+                if isinstance(line.get("engine_errors"), dict)
                 else {}
             ),
             "paddle_token_index": item.get("paddle_token_index"),
