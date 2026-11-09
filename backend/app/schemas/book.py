@@ -212,6 +212,7 @@ class AdminOcrWordEvidenceRead(BaseModel):
     ]
     engine_outputs: dict[str, str | None] = Field(default_factory=dict)
     engine_statuses: dict[str, str] = Field(default_factory=dict)
+    engine_errors: dict[str, str] = Field(default_factory=dict)
     paddle_token_index: int | None = Field(default=None, ge=0)
     vietocr_token_index: int | None = Field(default=None, ge=0)
     source_text: str | None = None
