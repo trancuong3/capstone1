@@ -55,11 +55,6 @@ import type {
 type LoadError = "not-found" | "unavailable" | "safe";
 type WordFilter = "all" | "review" | "red" | "yellow" | "green";
 type WordReviewColorGroup = Exclude<WordFilter, "all" | "review">;
-type WordScoreSignal = {
-  readonly band: WordReviewColorGroup;
-  readonly score: number;
-  readonly source: "calibrated" | "tesseract" | "paddle_line";
-};
 type AiTokenChange = {
   readonly index: number;
   readonly original: string;
@@ -1492,6 +1487,34 @@ export function AdminOcrReviewScreen({
                 <span>{state.label}</span>
               </div>
             ))}
+          </div>
+          <div
+            aria-label="Chi tiết trạng thái evidence OCR"
+            className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted"
+          >
+            <span>
+              Đã xác minh:{" "}
+              {words.filter((word) => {
+                const status = getWordReviewStatus(word, detail.verification_status);
+                return status === "verified" || status === "reference_match";
+              }).length}
+            </span>
+            <span>
+              Engine đồng ý, chưa xác minh:{" "}
+              {words.filter((word) =>
+                getWordReviewStatus(word, detail.verification_status) === "engine_agreement"
+              ).length}
+            </span>
+            <span>
+              Engine bất đồng:{" "}
+              {words.filter((word) =>
+                getWordReviewStatus(word, detail.verification_status) === "engine_disagreement"
+              ).length}
+            </span>
+            <span>
+              Chưa có calibrated accuracy:{" "}
+              {words.filter((word) => word.ocr_evidence?.calibrated_word_accuracy == null).length}
+            </span>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button

@@ -858,16 +858,29 @@ def _recognize_uncertain_word_crops(
     rejected_bbox = 0
     rejected_quality = 0
     capped = 0
+    bbox_validated = 0
     for word in words:
         evidence = word.get("ocr_evidence")
-        if not isinstance(evidence, dict) or evidence.get("alignment") == "match":
+        if not isinstance(evidence, dict):
             continue
-        if len(prepared) >= MAX_SELECTIVE_WORD_CROPS_PER_PAGE:
-            capped += 1
-            continue
+
+        # Validate geometry and image signal even when the full-line engines agree.
+        # Agreement is not correctness and must not hide a clipped/invalid word box.
         crop, quality = crop_word_region(image, word.get("bbox"))
+        bbox_validated += 1
         evidence["bbox_quality"] = quality.get("bbox_quality")
         evidence["crop_quality"] = quality.get("crop_quality")
+
+        engine_agrees = evidence.get("alignment") == "match"
+        if engine_agrees and quality.get("bbox_quality") == "valid" and quality.get("crop_quality") == "usable":
+            evidence["crop_evidence"] = {
+                **quality,
+                "status": "not_needed",
+                "reason": "engines_agree_but_agreement_is_not_verification",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+
         if crop is None:
             if quality.get("bbox_quality") != "valid":
                 rejected_bbox += 1
@@ -882,6 +895,15 @@ def _recognize_uncertain_word_crops(
             rejected_quality += 1
             evidence["crop_evidence"] = {
                 **quality, "status": "skipped",
+                "score_semantics": "raw_recognition_output_not_probability",
+            }
+            continue
+        if len(prepared) >= MAX_SELECTIVE_WORD_CROPS_PER_PAGE:
+            capped += 1
+            evidence["crop_evidence"] = {
+                **quality,
+                "status": "skipped",
+                "reason": "per_page_selective_crop_limit_reached",
                 "score_semantics": "raw_recognition_output_not_probability",
             }
             continue
@@ -978,6 +1000,7 @@ def _recognize_uncertain_word_crops(
                 evidence["crop_evidence"]["vietocr_error"] = type(exc).__name__
 
     return {
+        "bbox_validated": bbox_validated,
         "requested": len(prepared) + rejected_bbox + rejected_quality + capped,
         "recognized": len(prepared),
         "rejected_bbox": rejected_bbox,
