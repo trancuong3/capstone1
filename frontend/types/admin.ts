@@ -116,6 +116,7 @@ export type AdminOcrScoreSource =
 export interface AdminOcrWordEvidenceDTO {
   readonly contract:
     | "dual_engine_agreement_v2"
+    | "hybrid_ocr_evidence_v3"
     | "tesseract_raw_word_score_v1"
     | "ocr_calibrated_word_accuracy_v1";
   readonly engine_outputs: Readonly<Record<string, string | null>>;
@@ -125,6 +126,11 @@ export interface AdminOcrWordEvidenceDTO {
   readonly verification_source: "admin" | "verified_revision" | null;
   readonly reference_text: string | null;
   readonly reference_alignment?: string | null;
+  readonly selected_engine?: "paddleocr" | "vietocr" | "tesseract" | null;
+  readonly selection_reason?: string | null;
+  readonly bbox_quality?: string | null;
+  readonly crop_quality?: string | null;
+  readonly crop_evidence?: Readonly<Record<string, unknown>> | null;
   readonly review_reason: string;
 }
 

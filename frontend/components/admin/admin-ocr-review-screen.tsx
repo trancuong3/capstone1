@@ -83,65 +83,6 @@ export function getWordReviewStatus(
     : "needs_review";
 }
 
-const HIGH_WORD_SCORE_CUTOFF = 0.8;
-const LOW_WORD_SCORE_CUTOFF = 0.5;
-
-function getWordScoreSignal(
-  word: AdminRevisionWordDTO | undefined,
-  paddleLineScore?: number | null,
-): WordScoreSignal | null {
-  if (!word) return null;
-
-  let score: number;
-  let source: WordScoreSignal["source"];
-  if (
-    paddleLineScore !== null &&
-    paddleLineScore !== undefined &&
-    Number.isFinite(paddleLineScore) &&
-    paddleLineScore >= 0 &&
-    paddleLineScore <= 1
-  ) {
-    // When Paddle's text is the selected OCR result, apply its requested line
-    // score band consistently. Accent-only disagreement is handled as yellow
-    // by the caller before this signal can determine the color.
-    score = paddleLineScore;
-    source = "paddle_line";
-  } else if (
-    word.ocr_score_source === "tesseract_raw_word_score_v1" &&
-    word.ocr_confidence !== null &&
-    word.ocr_confidence !== undefined &&
-    Number.isFinite(word.ocr_confidence) &&
-    word.ocr_confidence >= 0 &&
-    word.ocr_confidence <= 1
-  ) {
-    score = word.ocr_confidence;
-    source = "tesseract";
-  } else if (
-    word.ocr_score_source === "ocr_calibrated_word_accuracy_v1" &&
-    word.ocr_evidence?.contract === "ocr_calibrated_word_accuracy_v1" &&
-    word.ocr_evidence.calibrated_word_accuracy !== null &&
-    Number.isFinite(word.ocr_evidence.calibrated_word_accuracy) &&
-    word.ocr_evidence.calibrated_word_accuracy >= 0 &&
-    word.ocr_evidence.calibrated_word_accuracy <= 1
-  ) {
-    score = word.ocr_evidence.calibrated_word_accuracy;
-    source = "calibrated";
-  } else {
-    return null;
-  }
-
-  return {
-    band:
-      score > HIGH_WORD_SCORE_CUTOFF
-        ? "green"
-        : score < LOW_WORD_SCORE_CUTOFF
-          ? "red"
-          : "yellow",
-    score,
-    source,
-  };
-}
-
 function foldVietnameseDiacritics(value: string): string {
   return normalizeVietnameseWord(value)
     .normalize("NFD")
@@ -157,7 +98,6 @@ function hasDiacriticOnlyEngineDisagreement(
   const paddle = outputs?.paddleocr;
   const vietocr = outputs?.vietocr;
   if (typeof paddle !== "string" || typeof vietocr !== "string") return false;
-
   const normalizedPaddle = normalizeVietnameseWord(paddle);
   const normalizedViet = normalizeVietnameseWord(vietocr);
   return (
@@ -167,30 +107,18 @@ function hasDiacriticOnlyEngineDisagreement(
   );
 }
 
+/**
+ * Color represents verification, not model confidence.
+ * No calibration artifact or compatibility gate is active yet.
+ */
 export function getWordReviewColorGroup(
   status: AdminOcrReviewStatus,
-  word?: AdminRevisionWordDTO,
-  paddleLineScore?: number | null,
+  _word?: AdminRevisionWordDTO,
+  _paddleLineScore?: number | null,
 ): WordReviewColorGroup {
   if (status === "verified" || status === "reference_match") return "green";
   if (status === "confirmed_mismatch") return "red";
-  const scoreSignal = getWordScoreSignal(word, paddleLineScore);
-  const scoreBand = scoreSignal?.band;
-  if (status === "engine_disagreement") {
-    if (hasDiacriticOnlyEngineDisagreement(word)) return "yellow";
-    if (scoreSignal?.source === "paddle_line") return scoreSignal.band;
-    return scoreBand === "red" ? "red" : "yellow";
-  }
-  if (scoreSignal?.source === "paddle_line") return scoreSignal.band;
-  if (status === "engine_agreement") return "green";
-  if (
-    status === "needs_review" &&
-    word?.ocr_evidence?.verification_source === "verified_revision" &&
-    scoreBand !== "red"
-  ) {
-    return "yellow";
-  }
-  return scoreBand ?? "yellow";
+  return "yellow";
 }
 
 function matchesWordFilter(
@@ -208,65 +136,22 @@ function matchesWordFilter(
 export function getWordReviewLabel(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
-  paddleLineScore?: number | null,
+  _paddleLineScore?: number | null,
 ): string {
-  const scoreSignal = getWordScoreSignal(word, paddleLineScore);
-  if (
-    status === "engine_disagreement" &&
-    hasDiacriticOnlyEngineDisagreement(word)
-  ) {
-    return "Hai engine chỉ khác dấu tiếng Việt · cần xem";
+  if (status === "verified") return "Admin đã xác minh từ";
+  if (status === "reference_match") return "Khớp reference của trang đã xác minh";
+  if (status === "confirmed_mismatch") return "Sai so với reference đã xác minh";
+  if (status === "engine_agreement") {
+    return "Hai engine đồng ý · chưa có xác minh độc lập";
   }
-  if (
-    status === "needs_review" &&
-    word?.ocr_evidence?.verification_source === "verified_revision" &&
-    scoreSignal?.band !== "red"
-  ) {
-    return "Chưa ghép chắc chắn với bản Admin đã xác minh · cần xem";
+  if (status === "engine_disagreement" && hasDiacriticOnlyEngineDisagreement(word)) {
+    return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
-  if (scoreSignal?.source === "paddle_line") {
-    if (scoreSignal.band === "green") {
-      return status === "engine_disagreement"
-        ? "PaddleOCR dòng >80/100 · hai engine còn khác"
-        : "PaddleOCR dòng >80/100 · xanh";
-    }
-    if (scoreSignal.band === "red") {
-      return "PaddleOCR dòng <50/100 · ưu tiên kiểm tra";
-    }
-    return status === "engine_disagreement"
-      ? "PaddleOCR dòng 50–80/100 · hai engine còn khác"
-      : "PaddleOCR dòng 50–80/100 · cần xem";
+  if (status === "engine_disagreement" || status === "suspect") {
+    return "Hai engine bất đồng · chưa thể xác định từ đúng";
   }
-  if (status === "engine_disagreement" && scoreSignal?.band === "red") {
-    return `Điểm OCR rất thấp · hai engine còn bất đồng (${Math.round(scoreSignal.score * 100)}/100)`;
-  }
-  if (status === "engine_disagreement" && scoreSignal) {
-    return "Hai engine bất đồng · chưa thể phân xử bằng điểm này";
-  }
-  if (status === "needs_review" && scoreSignal) {
-    if (scoreSignal.source === "calibrated") {
-      return scoreSignal.band === "green"
-        ? "Độ chính xác đã hiệu chuẩn >80% · xanh"
-        : scoreSignal.band === "red"
-          ? "Độ chính xác đã hiệu chuẩn <50% · ưu tiên kiểm tra"
-          : "Độ chính xác đã hiệu chuẩn 50–80% · cần xem";
-    }
-    return scoreSignal.band === "green"
-      ? "Điểm Tesseract >80/100 · tín hiệu mạnh"
-      : scoreSignal.band === "red"
-        ? "Điểm Tesseract <50/100 · ưu tiên kiểm tra"
-        : "Điểm Tesseract 50–80/100 · nghi vấn";
-  }
-  return {
-    verified: "Admin đã xác nhận ảnh",
-    reference_match: "Khớp văn bản Admin đã xác minh",
-    confirmed_mismatch: "Không khớp văn bản Admin đã xác minh",
-    engine_agreement: "Khả năng đúng cao · hai engine cùng đọc",
-    engine_disagreement: "Hai engine OCR bất đồng · chưa biết từ nào đúng",
-    matched: "Khả năng đúng cao · hai engine cùng đọc",
-    suspect: "Hai engine OCR bất đồng · chưa biết từ nào đúng",
-    needs_review: "Chưa đủ evidence để kết luận · cần Admin xem xét",
-  }[status];
+  const reason = word?.ocr_evidence?.review_reason?.trim();
+  return reason || "Chưa có ground truth hoặc confidence đã hiệu chuẩn · cần Admin xem";
 }
 
 export function getWordReviewColor(
@@ -335,6 +220,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function formatRawOcrEvidence(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) {
+    return value.slice(0, 12).map((item) =>
+      typeof item === "number" && Number.isFinite(item) ? String(item) : "—",
+    ).join(", ");
+  }
+  return "Unavailable";
 }
 
 function getPaddleLineScoreLabel(
@@ -1555,11 +1450,12 @@ export function AdminOcrReviewScreen({
             words={words}
           />
           <p className="mt-3 text-sm leading-6 text-muted">
-            PaddleOCR dòng trên 80/100 tô xanh khi văn bản Paddle được dùng;
-            nghi vấn khác dấu vẫn vàng. Điểm 50–80 tô vàng, dưới 50 tô đỏ. Nếu
-            VietOCR thay văn bản Paddle, điểm dòng Paddle không đổi màu. Điểm
-            OCR thô chỉ là tín hiệu phân loại, không phải xác suất đúng. Quét
-            OCR không gọi AI.
+            Chỉ từ được Admin xác minh hoặc khớp một-một với reference của
+            revision đã xác minh mới được tô xanh. Chỉ mismatch rõ ràng với
+            reference mới được tô đỏ. Đồng thuận engine, bất đồng dấu, Paddle
+            line score và raw crop score đều không tự quyết định màu; các trường
+            hợp chưa đủ bằng chứng tiếp tục màu vàng. Chưa bật auto-green vì
+            chưa có calibration artifact phù hợp. OCR không gọi AI.
           </p>
           <div
             aria-label="Thống kê trạng thái từ OCR"
@@ -1570,19 +1466,19 @@ export function AdminOcrReviewScreen({
               [
                 {
                   id: "green",
-                  label: "Xanh · điểm cao / xác minh",
+                  label: "Xanh · Admin/reference đã xác minh",
                   count: colorCounts.green,
                   cardClass: "border-green-600/50 bg-green-50 text-green-900",
                 },
                 {
                   id: "red",
-                  label: "Đỏ · điểm thấp / sai",
+                  label: "Đỏ · reference xác nhận sai",
                   count: colorCounts.red,
                   cardClass: "border-red-600/50 bg-red-50 text-red-900",
                 },
                 {
                   id: "yellow",
-                  label: "Vàng · nghi vấn",
+                  label: "Vàng · chưa đủ bằng chứng",
                   count: colorCounts.yellow,
                   cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
                 },
@@ -2018,7 +1914,7 @@ export function AdminOcrReviewScreen({
                   },
                   {
                     id: "red",
-                    label: "Đỏ · điểm thấp / sai",
+                    label: "Đỏ · reference xác nhận sai",
                     count: colorCounts.red,
                   },
                   {
@@ -2028,7 +1924,7 @@ export function AdminOcrReviewScreen({
                   },
                   {
                     id: "green",
-                    label: "Xanh · điểm cao / xác minh",
+                    label: "Xanh · Admin/reference đã xác minh",
                     count: colorCounts.green,
                   },
                 ] as const satisfies readonly {
@@ -2301,6 +2197,50 @@ export function AdminOcrReviewScreen({
                               ? `${Math.round(word.ocr_confidence * 100)}%`
                               : "Unavailable · chưa có calibration evidence"}
                           </span>
+                          <span>
+                            Engine dùng cho bản nháp:{" "}
+                            {word.ocr_evidence?.selected_engine ?? "Unavailable"} ·
+                            lựa chọn tạm thời, chưa phải verified
+                          </span>
+                          <span>
+                            Lý do chọn candidate:{" "}
+                            {word.ocr_evidence?.selection_reason ?? "Unavailable"}
+                          </span>
+                          <span>
+                            Bounding box quality:{" "}
+                            {word.ocr_evidence?.bbox_quality ?? "Unavailable"}
+                          </span>
+                          <span>
+                            Crop quality:{" "}
+                            {word.ocr_evidence?.crop_quality ?? "Not processed"}
+                          </span>
+                          {word.ocr_evidence?.crop_evidence ? (
+                            <>
+                              <span>
+                                Crop PaddleOCR:{" "}
+                                {typeof word.ocr_evidence.crop_evidence.paddleocr_candidate === "string"
+                                  ? word.ocr_evidence.crop_evidence.paddleocr_candidate : "Unavailable"}
+                              </span>
+                              <span>
+                                Crop VietOCR:{" "}
+                                {typeof word.ocr_evidence.crop_evidence.vietocr_candidate === "string"
+                                  ? word.ocr_evidence.crop_evidence.vietocr_candidate : "Unavailable"}
+                              </span>
+                              <span>
+                                Paddle crop raw recognition score:{" "}
+                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.paddle_crop_recognition_score)} · not probability
+                              </span>
+                              <span>
+                                VietOCR crop raw recognition score:{" "}
+                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.vietocr_crop_recognition_score)} · not probability
+                              </span>
+                              <span>
+                                Crop status:{" "}
+                                {typeof word.ocr_evidence.crop_evidence.status === "string"
+                                  ? word.ocr_evidence.crop_evidence.status : "Unavailable"}
+                              </span>
+                            </>
+                          ) : null}
                           <span>
                             Lý do trạng thái:{" "}
                             {word.ocr_evidence?.review_reason ?? "Unavailable"}

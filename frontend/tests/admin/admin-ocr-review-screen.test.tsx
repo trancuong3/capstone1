@@ -103,7 +103,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(parsed.words[0]?.ocr_score_source).toBeNull();
   });
 
-  it("uses green for automatic engine agreement, amber for uncertainty, and red for confirmed mismatch", () => {
+  it("uses green only for verified/reference matches, amber for engine evidence, and red for confirmed mismatch", () => {
     for (const text of ["sư", "đồ", "cửa"]) {
       const status = getWordReviewStatus({
         ...adminR1Fixture.words[0]!,
@@ -119,14 +119,14 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       "border-amber-600",
     );
     expect(getWordReviewColor("engine_agreement")).toContain(
-      "border-green-600",
+      "border-amber-600",
     );
     expect(getWordReviewColor("confirmed_mismatch")).toContain(
       "border-red-600",
     );
   });
 
-  it("uses the requested raw-score triage bands without treating engine disagreement as proof", () => {
+  it("never uses raw engine or line scores to select a verification color", () => {
     const rawScoreWord = (score: number) => ({
       ...adminR1Fixture.words[0]!,
       ocr_confidence: score,
@@ -134,51 +134,18 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ocr_score_source: "tesseract_raw_word_score_v1" as const,
     });
 
-    expect(getWordReviewColorGroup("needs_review", rawScoreWord(0.81))).toBe(
-      "green",
-    );
-    expect(getWordReviewColorGroup("needs_review", rawScoreWord(0.8))).toBe(
-      "yellow",
-    );
-    expect(getWordReviewColorGroup("needs_review", rawScoreWord(0.5))).toBe(
-      "yellow",
-    );
-    expect(getWordReviewColorGroup("needs_review", rawScoreWord(0.49))).toBe(
-      "red",
-    );
-    expect(
-      getWordReviewColorGroup("needs_review", rawScoreWord(0.2), 0.81),
-    ).toBe("green");
-    expect(
-      getWordReviewColorGroup("needs_review", rawScoreWord(0.99), 0.8),
-    ).toBe("yellow");
-    expect(
-      getWordReviewColorGroup("needs_review", rawScoreWord(0.99), 0.49),
-    ).toBe("red");
-    expect(
-      getWordReviewColorGroup("needs_review", {
-        ...rawScoreWord(0.99),
-        ocr_score_source: "paddle_line_score_v1",
-      }),
-    ).toBe("yellow");
-    expect(
-      getWordReviewColorGroup("engine_disagreement", rawScoreWord(0.95)),
-    ).toBe("yellow");
-    expect(
-      getWordReviewColorGroup("engine_disagreement", {
-        ...rawScoreWord(0.2),
-        ocr_evidence: {
-          contract: "dual_engine_agreement_v2",
-          engine_outputs: { paddleocr: "đừng", vietocr: "dung" },
-          alignment: "substitute",
-          engine_agreement_score: 0,
-          calibrated_word_accuracy: null,
-          verification_source: null,
-          reference_text: null,
-          review_reason: "Hai engine khác dấu tiếng Việt.",
-        },
-      }),
-    ).toBe("yellow");
+    for (const score of [0, 0.2, 0.49, 0.5, 0.8, 0.81, 0.99, 1]) {
+      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score))).toBe("yellow");
+      expect(getWordReviewColorGroup("needs_review", rawScoreWord(score), 0.99)).toBe("yellow");
+    }
+    expect(getWordReviewColorGroup("engine_agreement", rawScoreWord(0.99))).toBe("yellow");
+    expect(getWordReviewColorGroup("verified", rawScoreWord(0.1))).toBe("green");
+    expect(getWordReviewColorGroup("reference_match", rawScoreWord(0.1))).toBe("green");
+    expect(getWordReviewColorGroup("confirmed_mismatch", rawScoreWord(0.99))).toBe("red");
+    expect(getWordReviewColorGroup("needs_review", {
+      ...rawScoreWord(0.99),
+      ocr_score_source: "paddle_line_score_v1",
+    })).toBe("yellow");
   });
 
   it("shows selected word engine, alignment, line score scope, and calibration availability", async () => {
@@ -222,11 +189,6 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     await user.click(
-      await screen.findByRole("button", {
-        name: /Xanh · điểm cao \/ xác minh \(1\)/,
-      }),
-    );
-    await user.click(
       await screen.findByRole("button", { name: "Từ #0 · Dòng 0" }),
     );
     const evidence = screen.getByRole("region", {
@@ -245,7 +207,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses high Paddle line scores only for Paddle-selected text and keeps accent-only conflicts yellow", async () => {
+  it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {
     const services = createAdminServiceFixture();
     const makeDisputedWord = (
       wordIndex: number,
@@ -323,22 +285,22 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       name: /Từ 1: đừng\. Hai engine chỉ khác dấu tiếng Việt · cần xem/,
     });
     const highPaddleScore = screen.getByRole("button", {
-      name: /Từ 2: chàng\. PaddleOCR dòng >80\/100 · hai engine còn khác/,
+      name: /Từ 2: chàng\. Hai engine bất đồng · chưa thể xác định từ đúng/,
     });
     const vietOcrSelected = screen.getByRole("button", {
-      name: /Từ 3: mới\. Hai engine OCR bất đồng/,
+      name: /Từ 3: mới\. Hai engine bất đồng/,
     });
 
     expect(accentDifference).toHaveClass("border-amber-600");
-    expect(highPaddleScore).toHaveClass("border-green-600");
+    expect(highPaddleScore).toHaveClass("border-amber-600");
     expect(vietOcrSelected).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: "Cần xem (2)" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     expect(
-      screen.queryByRole("button", { name: "Từ #1 · Dòng 1" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Từ #1 · Dòng 1" }),
+    ).toBeInTheDocument();
   });
 
   it("returns safe not-found for a page outside the requested book without fetching its content", async () => {
@@ -667,7 +629,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(high).toHaveClass("border-green-600");
     expect(medium).toHaveClass("border-amber-600");
     expect(low).toHaveClass("border-red-600");
-    expect(screen.getByRole("button", { name: "Cần xem (2)" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

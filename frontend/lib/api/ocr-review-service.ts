@@ -122,6 +122,7 @@ export const adminRevisionDetailSchema = z.object({
         .object({
           contract: z.enum([
             "dual_engine_agreement_v2",
+            "hybrid_ocr_evidence_v3",
             "tesseract_raw_word_score_v1",
             "ocr_calibrated_word_accuracy_v1",
           ]),
@@ -134,6 +135,11 @@ export const adminRevisionDetailSchema = z.object({
             .nullable(),
           reference_text: z.string().nullable(),
           reference_alignment: z.string().nullable().optional(),
+          selected_engine: z.enum(["paddleocr", "vietocr", "tesseract"]).nullable().optional(),
+          selection_reason: z.string().nullable().optional(),
+          bbox_quality: z.string().nullable().optional(),
+          crop_quality: z.string().nullable().optional(),
+          crop_evidence: z.record(z.string(), z.unknown()).nullable().optional(),
           review_reason: z.string(),
         })
         .nullable()
