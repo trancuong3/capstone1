@@ -1,0 +1,49 @@
+name: Temporary OCR Prettier
+
+on:
+  push:
+    branches:
+      - feature/hybrid-evidence-ocr-classification-20261109
+    paths:
+      - ".github/workflows/temporary-ocr-prettier.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OCR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hybrid-evidence-ocr-classification-20261109
+          persist-credentials: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Format touched frontend files
+        working-directory: frontend
+        run: >-
+          npx prettier --write
+          components/admin/admin-ocr-review-screen.tsx
+          lib/api/ocr-review-service.ts
+          lib/ocr/sync-page-text-words.ts
+          tests/admin/admin-ocr-review-screen.test.tsx
+          tests/admin/ocr-text-word-sync.test.ts
+          types/admin.ts
+      - name: Commit formatted files
+        run: |
+          if git diff --quiet; then
+            echo "No Prettier changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/components/admin/admin-ocr-review-screen.tsx frontend/lib/api/ocr-review-service.ts frontend/lib/ocr/sync-page-text-words.ts frontend/tests/admin/admin-ocr-review-screen.test.tsx frontend/tests/admin/ocr-text-word-sync.test.ts frontend/types/admin.ts
+          git commit -m "style(ocr): format hybrid evidence UI"
+          git push origin HEAD:feature/hybrid-evidence-ocr-classification-20261109
