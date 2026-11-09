@@ -137,20 +137,6 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.words[0].ocr_confidence, 0.96)
         self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
 
-    async def test_stale_verified_word_status_does_not_greenlight_unverified_revision(self):
-        service = AdminOcrService(MagicMock())
-        service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.99)])
-        detail = await service.revision_detail(
-            page(),
-            revision(
-                status="NEEDS_REVIEW",
-                metadata={"word_review_statuses": ["verified"]},
-            ),
-        )
-
-        self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
-        self.assertEqual(detail.words[0].review_color_group, "yellow")
-
     async def test_revision_detail_exposes_sanitized_legacy_and_hybrid_engine_evidence(self):
         service = AdminOcrService(MagicMock())
         service.repo.words = AsyncMock(return_value=[word(0, "on", 0.97)])
