@@ -143,17 +143,32 @@ export function getWordReviewColorGroup(
 
   const evidence = word?.ocr_evidence;
   if (evidence) {
+    const statuses = evidence.engine_statuses ?? {};
+    const selectedEngine = evidence.selected_engine;
+    const otherEngine =
+      selectedEngine === "paddleocr"
+        ? "vietocr"
+        : selectedEngine === "vietocr"
+          ? "paddleocr"
+          : null;
+    const otherStatus = otherEngine ? statuses[otherEngine] : undefined;
     const riskyAlignments = new Set([
-      "substitute", "unmatched", "insert", "delete",
-      "split", "merge", "unknown", "unresolved",
+      "substitute", "split", "merge", "unknown", "unresolved",
     ]);
     if (riskyAlignments.has(evidence.alignment)) return "yellow";
-    if (Object.values(evidence.engine_statuses ?? {}).some(
-      (engineStatus) => engineStatus === "error",
-    )) return "yellow";
+    if (
+      ["unmatched", "insert", "delete"].includes(evidence.alignment) &&
+      ["success", "no_result", "error"].includes(otherStatus ?? "")
+    ) return "yellow";
+    if (Object.values(statuses).some((engineStatus) => engineStatus === "error")) {
+      return "yellow";
+    }
     if (
       ["rejected", "invalid", "poor"].includes(evidence.bbox_quality ?? "") ||
-      ["weak", "low", "poor", "rejected"].includes(evidence.crop_quality ?? "")
+      ["weak", "low", "poor", "rejected"].includes(evidence.crop_quality ?? "") ||
+      evidence.crop_evidence?.status === "partial" ||
+      typeof evidence.crop_evidence?.paddle_error === "string" ||
+      typeof evidence.crop_evidence?.vietocr_error === "string"
     ) return "yellow";
 
     const paddle = evidence.engine_outputs.paddleocr;
