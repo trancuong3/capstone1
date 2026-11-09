@@ -1,0 +1,47 @@
+name: Temporary OCR test formatter
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/tests/admin/admin-ocr-review-screen.test.tsx"
+      - ".github/workflows/temporary-ocr-three-color-format.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Format OCR review files
+        working-directory: frontend
+        run: npx prettier --write tests/admin/admin-ocr-review-screen.test.tsx components/admin/admin-ocr-review-screen.tsx
+      - name: Commit formatted OCR files
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git add -f frontend/tests/admin/admin-ocr-review-screen.test.tsx frontend/components/admin/admin-ocr-review-screen.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --cached --quiet; then
+            echo "No Prettier changes."
+          else
+            git commit -m "style(ocr): format final reference mismatch tests"
+            git push "https://x-access-token:${TOKEN}@github.com/trancuong3/capstone1.git" "HEAD:${HEAD_REF}"
+          fi
