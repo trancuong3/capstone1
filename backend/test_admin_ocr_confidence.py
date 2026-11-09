@@ -246,8 +246,14 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         )
         existing = [word(0, "ma", 0.94), word(1, "ba", 0.81)]
         submitted = [
-            {"word_index": 0, "line_index": 0, "text": "má", "ocr_confidence": 1.0},
-            {"word_index": 1, "line_index": 0, "text": "ba", "ocr_confidence": 0.01},
+            {
+                "word_index": 0, "line_index": 0, "text": "má",
+                "bbox": existing[0].BoundingBox, "ocr_confidence": 1.0,
+            },
+            {
+                "word_index": 1, "line_index": 0, "text": "ba",
+                "bbox": existing[1].BoundingBox, "ocr_confidence": 0.01,
+            },
         ]
 
         AdminOcrService._preserve_trusted_word_scores(
@@ -313,7 +319,10 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         })
         AdminOcrService._set_word_review_statuses(
             unchanged_revision,
-            [{"word_index": 0, "line_index": 0, "text": "vé"}],
+            [{
+                "word_index": 0, "line_index": 0, "text": "vé",
+                "bbox": word(0, "vé", None).BoundingBox,
+            }],
             [word(0, "vé", None)],
         )
         preserved = unchanged_revision.ProcessingMeta["word_evidence_v2"][0]
@@ -329,7 +338,10 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         })
         AdminOcrService._set_word_review_statuses(
             changed_revision,
-            [{"word_index": 0, "line_index": 0, "text": "về"}],
+            [{
+                "word_index": 0, "line_index": 0, "text": "về",
+                "bbox": word(0, "vé", None).BoundingBox,
+            }],
             [word(0, "vé", None)],
         )
         edited_evidence = changed_revision.ProcessingMeta["word_evidence_v2"][0]
@@ -342,6 +354,190 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             changed_revision.ProcessingMeta["word_review_statuses"][0],
             "needs_review",
+        )
+
+
+    def test_bbox_identity_keeps_evidence_attached_after_inserting_at_line_start(self):
+        old_rows = [word(0, "ma", 0.94), word(1, "ba", 0.81)]
+        first_evidence = {
+            "contract": "dual_engine_agreement_v2",
+            "engine_outputs": {"paddleocr": "ma", "vietocr": "ma"},
+            "alignment": "match",
+            "source_text": "ma",
+            "review_reason": "Engine agreement only; not verified.",
+        }
+        second_evidence = {
+            "contract": "dual_engine_agreement_v2",
+            "engine_outputs": {"paddleocr": "ba", "vietocr": "ba"},
+            "alignment": "match",
+            "source_text": "ba",
+            "review_reason": "Engine agreement only; not verified.",
+        }
+        revision_row = revision(metadata={
+            "ocr_score_contract": OCR_SCORE_CONTRACT,
+            "word_review_statuses": ["engine_agreement", "engine_disagreement"],
+            "word_score_sources": [OCR_SCORE_CONTRACT, OCR_SCORE_CONTRACT],
+            "word_evidence_v2": [first_evidence, second_evidence],
+        })
+        inserted_bbox = [0.02, 0.1, 0.06, 0.05]
+        submitted = [
+            {
+                "word_index": 0, "line_index": 0, "text": "mới",
+                "bbox": inserted_bbox, "ocr_confidence": 0.99,
+            },
+            {
+                "word_index": 1, "line_index": 0, "text": "ma",
+                "bbox": old_rows[0].BoundingBox,
+            },
+            {
+                "word_index": 2, "line_index": 0, "text": "ba",
+                "bbox": old_rows[1].BoundingBox,
+            },
+        ]
+
+        AdminOcrService._preserve_trusted_word_scores(
+            revision_row, submitted, old_rows
+        )
+        AdminOcrService._set_word_review_statuses(
+            revision_row, submitted, old_rows
+        )
+
+        self.assertEqual([item["ocr_confidence"] for item in submitted], [None, 0.94, 0.81])
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_review_statuses"],
+            ["needs_review", "engine_agreement", "engine_disagreement"],
+        )
+        evidence = revision_row.ProcessingMeta["word_evidence_v2"]
+        self.assertIsNone(evidence[0])
+        self.assertEqual(evidence[1]["source_text"], "ma")
+        self.assertEqual(evidence[2]["source_text"], "ba")
+
+    def test_bbox_identity_keeps_remaining_candidate_after_deleting_first_word(self):
+        old_rows = [word(0, "ma", 0.94), word(1, "ba", 0.81)]
+        evidence_items = [
+            {
+                "contract": "dual_engine_agreement_v2",
+                "engine_outputs": {"paddleocr": "ma", "vietocr": "ma"},
+                "alignment": "match",
+                "source_text": "ma",
+                "review_reason": "Both engines agreed.",
+            },
+            {
+                "contract": "dual_engine_agreement_v2",
+                "engine_outputs": {"paddleocr": "ba", "vietocr": "ba"},
+                "alignment": "match",
+                "source_text": "ba",
+                "review_reason": "Both engines agreed.",
+            },
+        ]
+        revision_row = revision(metadata={
+            "word_review_statuses": ["engine_agreement", "engine_disagreement"],
+            "word_score_sources": [None, None],
+            "word_evidence_v2": evidence_items,
+        })
+        remaining = [{
+            "word_index": 0,
+            "line_index": 0,
+            "text": "ba",
+            "bbox": old_rows[1].BoundingBox,
+        }]
+        AdminOcrService._set_word_review_statuses(
+            revision_row, remaining, old_rows
+        )
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_review_statuses"],
+            ["engine_disagreement"],
+        )
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_evidence_v2"][0]["source_text"],
+            "ba",
+        )
+
+    def test_word_color_group_does_not_turn_missing_metadata_into_risk(self):
+        classify = AdminOcrService._classify_word_color_group
+        safe_agreement = {
+            "alignment": "match",
+            "engine_statuses": {
+                "paddleocr": "success",
+                "vietocr": "success",
+                "tesseract": "not_run",
+            },
+            "calibrated_word_accuracy": None,
+            "reference_text": None,
+        }
+        self.assertEqual(classify("engine_agreement", safe_agreement), "neutral")
+        self.assertEqual(classify("needs_review", None), "neutral")
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
+                    "alignment": "unmatched",
+                    "selected_engine": "paddleocr",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "not_initialized",
+                        "tesseract": "not_run",
+                    },
+                },
+            ),
+            "neutral",
+        )
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
+                    "alignment": "substitute",
+                    "selected_engine": "paddleocr",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "not_run",
+                    },
+                },
+            ),
+            "yellow",
+        )
+        self.assertEqual(classify("confirmed_mismatch", safe_agreement), "red")
+        self.assertEqual(classify("reference_match", safe_agreement), "green")
+        self.assertEqual(classify("verified", safe_agreement), "green")
+        self.assertEqual(
+            classify("needs_review", {"alignment": "match", "crop_quality": "low"}),
+            "yellow",
+        )
+
+    def test_legacy_recovery_refuses_to_map_evidence_after_line_edit_or_insert(self):
+        metadata = {
+            "line_evidence": [{
+                "line_index": 0,
+                "paddle_output": "ve ban",
+                "vietocr_output": "về bạn",
+                "vietocr_output_used": True,
+                "alignment_operations": [{
+                    "operation": "match",
+                    "selected_token_index": 0,
+                    "paddle_token_index": 0,
+                    "vietocr_token_index": 0,
+                    "paddle_token": "ve",
+                    "vietocr_token": "về",
+                }, {
+                    "operation": "match",
+                    "selected_token_index": 1,
+                    "paddle_token_index": 1,
+                    "vietocr_token_index": 1,
+                    "paddle_token": "ban",
+                    "vietocr_token": "bạn",
+                }],
+            }]
+        }
+        self.assertIsNone(
+            AdminOcrService._line_word_evidence(
+                metadata, 0, 0, ["thêm", "về", "bạn"]
+            )
+        )
+        self.assertIsNone(
+            AdminOcrService._line_word_evidence(
+                metadata, 0, 1, ["về", "bạn", "mới"]
+            )
         )
 
     def test_reconstructs_legacy_word_evidence_from_line_metadata(self):
