@@ -6,8 +6,10 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
+import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
 import type { WordTimestamp } from "@/lib/api/speech-service";
 import {
@@ -1205,6 +1207,14 @@ export function ReadingScreen({
     assistantAudioPlayingRef.current = false;
   }
 
+  function handleVoicePreview(sample: string): void {
+    void speechPlayer
+      .playWithWordTimings(sample.split(" "), {}, () =>
+        speechPlayer.play(sample),
+      )
+      .catch(() => undefined);
+  }
+
   async function handleReadSample() {
     if (retryModeRef.current) {
       const candidate = retryCandidatesRef.current[retryPositionRef.current];
@@ -1262,35 +1272,60 @@ export function ReadingScreen({
     try {
       await playAssistantAudio(
         () =>
-          speechPlayer.play(fullText, {
-            onPlay: () => {
-              if (!mountedRef.current) return;
-              setCurrentWordId(words[0].word_id);
+          speechPlayer.playWithWordTimings(
+            words.map((word) => word.text),
+            {
+              onPlay: () => {
+                if (!mountedRef.current) return;
+                setCurrentWordId(words[0].word_id);
+              },
+              onWordChange: (index) => {
+                if (!mountedRef.current) return;
+                const targetWord = words[index];
+                if (targetWord) setCurrentWordId(targetWord.word_id);
+              },
+              onEnded: () => {
+                if (!mountedRef.current) return;
+                setCurrentWordId(
+                  alignmentEngineRef.current?.getSnapshot().currentWordId ??
+                    readingCursorBeforeSample,
+                );
+              },
             },
-            onTimeUpdate: (currentTime, duration) => {
-              if (!mountedRef.current || !duration || duration <= 0) return;
-              const progress = Math.min(
-                0.999,
-                Math.max(0, currentTime / duration),
-              );
-              const targetWeight = progress * totalWeight;
-              let idx = cumulativeWeights.findIndex((cw) => cw >= targetWeight);
-              if (idx < 0) idx = 0;
-              if (idx >= words.length) idx = words.length - 1;
+            // No word timings available: keep the previous estimated highlight.
+            () =>
+              speechPlayer.play(fullText, {
+                onPlay: () => {
+                  if (!mountedRef.current) return;
+                  setCurrentWordId(words[0].word_id);
+                },
+                onTimeUpdate: (currentTime, duration) => {
+                  if (!mountedRef.current || !duration || duration <= 0) return;
+                  const progress = Math.min(
+                    0.999,
+                    Math.max(0, currentTime / duration),
+                  );
+                  const targetWeight = progress * totalWeight;
+                  let idx = cumulativeWeights.findIndex(
+                    (cw) => cw >= targetWeight,
+                  );
+                  if (idx < 0) idx = 0;
+                  if (idx >= words.length) idx = words.length - 1;
 
-              const targetWord = words[idx];
-              if (targetWord) {
-                setCurrentWordId(targetWord.word_id);
-              }
-            },
-            onEnded: () => {
-              if (!mountedRef.current) return;
-              setCurrentWordId(
-                alignmentEngineRef.current?.getSnapshot().currentWordId ??
-                  readingCursorBeforeSample,
-              );
-            },
-          }),
+                  const targetWord = words[idx];
+                  if (targetWord) {
+                    setCurrentWordId(targetWord.word_id);
+                  }
+                },
+                onEnded: () => {
+                  if (!mountedRef.current) return;
+                  setCurrentWordId(
+                    alignmentEngineRef.current?.getSnapshot().currentWordId ??
+                      readingCursorBeforeSample,
+                  );
+                },
+              }),
+          ),
         true,
       );
     } catch (error) {
@@ -3069,7 +3104,12 @@ export function ReadingScreen({
       retryModeRef.current = false;
       setRetryMode(false);
       speechRecorder.cancel();
-      setUiState("complete");
+      setUiState(
+        await resolvePostFinishUiState(
+          services.comprehensionService,
+          sessionId,
+        ),
+      );
     } catch (error) {
       console.error("Lỗi khi kết thúc buổi đọc:", error);
       finishStartedRef.current = false;
@@ -3462,6 +3502,14 @@ export function ReadingScreen({
               null)
         }
         exitHref={detailHref}
+        voiceSettings={
+          <ReadingVoiceSettings
+            disabled={isMicRecording}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={handleVoicePreview}
+            onStopPreview={() => speechPlayer.stop()}
+          />
+        }
         isCurrentWordMispronounced={Boolean(
           currentWordId && mispronouncedWordIds.has(currentWordId),
         )}

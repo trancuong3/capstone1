@@ -358,6 +358,9 @@ export interface ComprehensionQuestionViewModelUI {
   readonly question: ComprehensionQuestionDTO;
   readonly progress_label: string;
   readonly choices: readonly ComprehensionChoiceUI[];
+  /** 1-based question number and question count; absent for single-question sources. */
+  readonly position?: number;
+  readonly total?: number;
 }
 
 export interface ManualPageOptionUI {

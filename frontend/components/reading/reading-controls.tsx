@@ -1,6 +1,9 @@
 import { Check, CircleHelp, Mic, Pause, Volume2, VolumeX } from "lucide-react";
 
+import type { ReactNode } from "react";
+
 import { Button } from "@/components/common/button";
+import { cn } from "@/lib/utils/cn";
 
 interface ReadingControlsProps {
   disabled?: boolean;
@@ -12,6 +15,8 @@ interface ReadingControlsProps {
   onReadSample?: () => void;
   onToggleListening?: () => void;
   retryMode?: boolean;
+  /** Extra control (voice settings) placed right after the sample button. */
+  voiceSettings?: ReactNode;
 }
 
 export function ReadingControls({
@@ -24,13 +29,17 @@ export function ReadingControls({
   onReadSample,
   onToggleListening,
   retryMode = false,
+  voiceSettings,
 }: ReadingControlsProps) {
   const finishDisabled = disabled;
 
   return (
     <nav
       aria-label="Điều khiển buổi đọc"
-      className="grid w-full grid-cols-5 gap-2 rounded-card bg-white p-2 sm:mx-auto sm:max-w-[1008px] sm:gap-3"
+      className={cn(
+        "grid w-full gap-2 rounded-card bg-white p-2 sm:mx-auto sm:max-w-[1008px] sm:gap-3",
+        voiceSettings ? "grid-cols-6" : "grid-cols-5",
+      )}
     >
       <Button
         aria-label="Tạm dừng buổi đọc"
@@ -73,6 +82,7 @@ export function ReadingControls({
               : "Đọc cả đoạn"}
         </span>
       </Button>
+      {voiceSettings}
       <Button
         aria-label={
           isListening

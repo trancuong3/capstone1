@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createSpeechService } from "@/lib/api/speech-service";
+import {
+  createVoiceStudioService,
+  type TimedSpeech,
+} from "@/lib/api/voice-studio-service";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  findActiveWordIndex,
+  HIGHLIGHT_LEAD_SECONDS,
+} from "@/lib/reading/word-timeline";
 
 export interface SpeechPlayOptions {
   onPlay?: (duration: number) => void;
@@ -10,9 +19,26 @@ export interface SpeechPlayOptions {
   onEnded?: () => void;
 }
 
+export interface WordTimedPlayOptions {
+  onPlay?: () => void;
+  /** Called whenever the spoken word changes, with its index in `words`. */
+  onWordChange?: (index: number) => void;
+  onEnded?: () => void;
+}
+
 export interface SpeechPlayer {
   readonly isPlaying: boolean;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
+  /**
+   * Plays `words` with the chosen voice and speed and reports the exact word
+   * being spoken. When word timings are unavailable nothing is played and
+   * `fallback` runs instead, so reading a sample never gets worse than before.
+   */
+  playWithWordTimings(
+    words: readonly string[],
+    options: WordTimedPlayOptions,
+    fallback: () => Promise<void>,
+  ): Promise<void>;
   stop(): void;
 }
 
@@ -49,10 +75,15 @@ function estimateSpeechDuration(text: string): number {
 }
 
 const SERVER_TTS_RETRY_DELAY_MS = 60_000;
+const TIMED_TTS_RETRY_DELAY_MS = 30_000;
+const TIMED_CACHE_LIMIT = 6;
 
 /** Uses server TTS when available, with the device's Vietnamese voice as fallback. */
 export function useSpeechPlayer(): SpeechPlayer {
   const speechService = useMemo(() => createSpeechService(), []);
+  const voiceStudio = useMemo(() => createVoiceStudioService(), []);
+  const timedUnavailableUntilRef = useRef(0);
+  const timedCacheRef = useRef(new Map<string, TimedSpeech>());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const activePlaybackRef = useRef<ActivePlayback | null>(null);
@@ -223,7 +254,10 @@ export function useSpeechPlayer(): SpeechPlayer {
 
       let source: Blob;
       try {
-        source = await speechService.synthesize(text);
+        const voiceId = getSpeechPreferences().voiceId;
+        source = await (voiceId
+          ? speechService.synthesize(text, { voiceId })
+          : speechService.synthesize(text));
         serverTtsRetryAfterRef.current = 0;
       } catch (error) {
         serverTtsRetryAfterRef.current = Date.now() + SERVER_TTS_RETRY_DELAY_MS;
@@ -358,5 +392,156 @@ export function useSpeechPlayer(): SpeechPlayer {
     [speechService, stop],
   );
 
-  return { isPlaying, play, stop };
+  const playWithWordTimings = useCallback(
+    async (
+      words: readonly string[],
+      options: WordTimedPlayOptions,
+      fallback: () => Promise<void>,
+    ) => {
+      if (!mountedRef.current) {
+        throw playbackError("Audio player is not ready.");
+      }
+      stop();
+      const generation = playGenerationRef.current;
+      if (words.length === 0 || Date.now() < timedUnavailableUntilRef.current) {
+        return fallback();
+      }
+
+      const { voiceId, speed } = getSpeechPreferences();
+      const cacheKey = `${voiceId ?? ""}|${speed}|${words.join(" ")}`;
+      const cache = timedCacheRef.current;
+      let timed = cache.get(cacheKey);
+      if (!timed) {
+        try {
+          timed = await voiceStudio.synthesizeTimed(words, { voiceId, speed });
+        } catch {
+          if (!mountedRef.current || generation !== playGenerationRef.current) {
+            throw playbackStoppedError();
+          }
+          timedUnavailableUntilRef.current =
+            Date.now() + TIMED_TTS_RETRY_DELAY_MS;
+          return fallback();
+        }
+        cache.set(cacheKey, timed);
+        if (cache.size > TIMED_CACHE_LIMIT) {
+          const oldest = cache.keys().next().value;
+          if (oldest !== undefined) cache.delete(oldest);
+        }
+      }
+      if (!mountedRef.current || generation !== playGenerationRef.current) {
+        throw playbackStoppedError();
+      }
+
+      const timeline = timed.words;
+      let objectUrl: string | null = null;
+      let audio: HTMLAudioElement;
+      try {
+        objectUrl = URL.createObjectURL(timed.audio);
+        audio = new Audio(objectUrl);
+      } catch {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        return fallback();
+      }
+      const url = objectUrl;
+      objectUrlRef.current = url;
+      audioRef.current = audio;
+      setIsPlaying(true);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const playback: ActivePlayback = {
+            audio,
+            objectUrl: url,
+            reject,
+            settled: false,
+          };
+          activePlaybackRef.current = playback;
+          let lastIndex = -1;
+
+          const finish = (error?: Error) => {
+            if (playback.settled) return;
+            playback.settled = true;
+            if (activePlaybackRef.current === playback) {
+              activePlaybackRef.current = null;
+              audioRef.current = null;
+              objectUrlRef.current = null;
+            }
+            audio.onended = null;
+            audio.onerror = null;
+            if (animFrameRef.current !== null) {
+              cancelAnimationFrame(animFrameRef.current);
+              animFrameRef.current = null;
+            }
+            audio.pause();
+            audio.src = "";
+            URL.revokeObjectURL(url);
+            if (mountedRef.current) setIsPlaying(false);
+            if (error) reject(error);
+            else resolve();
+          };
+
+          // Drive the highlight from the audio clock, not from an estimate.
+          const tick = () => {
+            if (
+              activePlaybackRef.current !== playback ||
+              audio.paused ||
+              audio.ended
+            ) {
+              return;
+            }
+            const index = findActiveWordIndex(
+              timeline,
+              audio.currentTime + HIGHLIGHT_LEAD_SECONDS,
+            );
+            if (index >= 0 && index !== lastIndex) {
+              lastIndex = index;
+              options.onWordChange?.(index);
+            }
+            animFrameRef.current = requestAnimationFrame(tick);
+          };
+
+          audio.onended = () => {
+            try {
+              options.onEnded?.();
+            } finally {
+              finish();
+            }
+          };
+          audio.onerror = () =>
+            finish(
+              playbackError("Không thể phát âm thanh. Bé thử nghe lại nhé."),
+            );
+
+          void audio
+            .play()
+            .then(() => {
+              if (activePlaybackRef.current !== playback) return;
+              options.onPlay?.();
+              animFrameRef.current = requestAnimationFrame(tick);
+            })
+            .catch((error: unknown) => {
+              finish(
+                error instanceof Error
+                  ? error
+                  : playbackError(
+                      "Không thể phát âm thanh. Bé thử nghe lại nhé.",
+                    ),
+              );
+            });
+        });
+      } catch (error) {
+        if (
+          isAbortError(error) ||
+          !mountedRef.current ||
+          generation !== playGenerationRef.current
+        ) {
+          throw error;
+        }
+        return fallback();
+      }
+    },
+    [stop, voiceStudio],
+  );
+
+  return { isPlaying, play, playWithWordTimings, stop };
 }

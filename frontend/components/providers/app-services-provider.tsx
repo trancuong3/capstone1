@@ -6,6 +6,7 @@ import type { BookService } from "@/lib/api/book-service";
 import type { BookContentReportService } from "@/lib/api/book-content-report-service";
 import type { ChildService } from "@/lib/api/child-service";
 import type { ComprehensionService } from "@/lib/api/comprehension-service";
+import { createComprehensionService } from "@/lib/api/tutor-question-service";
 import type { DevicePermissionService } from "@/lib/api/device-permission-service";
 import type { DifficultWordService } from "@/lib/api/difficult-word-service";
 import type { PageMatchService } from "@/lib/api/page-match-service";
@@ -95,9 +96,11 @@ export function AppServicesProvider({
       reportService: createReportService(),
       sessionService: createSessionService(),
 
-      comprehensionService: createUnavailableService<ComprehensionService>(
-        "ComprehensionService",
-      ),
+      comprehensionService: isReadingEnabled
+        ? createComprehensionService()
+        : createUnavailableService<ComprehensionService>(
+            "ComprehensionService",
+          ),
 
       readingService: isReadingEnabled
         ? createReadingService()

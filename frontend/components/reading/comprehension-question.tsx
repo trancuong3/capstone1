@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, Check, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
+import { FireworksBurst } from "@/components/reading/fireworks-burst";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { cn } from "@/lib/utils/cn";
@@ -41,6 +42,10 @@ export function ComprehensionQuestion({
     null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progress, setProgress] = useState<{
+    position?: number;
+    total?: number;
+  }>({});
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -55,7 +60,9 @@ export function ComprehensionQuestion({
     void comprehensionService
       .getQuestion(sessionId)
       .then((value) => {
-        if (active) setLoadState({ status: "ready", value });
+        if (!active) return;
+        setProgress({ position: value.position, total: value.total });
+        setLoadState({ status: "ready", value });
       })
       .catch(() => {
         if (active) setLoadState({ status: "error" });
@@ -86,6 +93,26 @@ export function ComprehensionQuestion({
     }
   }
 
+  // Remembered across reloads so the progress bar does not jump while loading.
+  const questionPosition = progress.position;
+  const questionTotal = progress.total;
+  const hasNextQuestion =
+    questionPosition !== undefined &&
+    questionTotal !== undefined &&
+    questionPosition < questionTotal;
+
+  function showNextQuestion() {
+    // Questions from the AI tutor come as a set; legacy sources are single.
+    if (!hasNextQuestion) {
+      onComplete();
+      return;
+    }
+    setSelectedAnswer(null);
+    setResult(null);
+    setLoadState({ status: "loading" });
+    setLoadKey((key) => key + 1);
+  }
+
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
@@ -95,11 +122,17 @@ export function ComprehensionQuestion({
         </h1>
         <div
           aria-hidden="true"
-          className="mx-auto hidden w-[392px] grid-cols-5 gap-1 sm:grid"
+          className="mx-auto hidden w-[392px] gap-1 sm:grid"
+          style={{
+            gridTemplateColumns: `repeat(${questionTotal ?? 5}, minmax(0, 1fr))`,
+          }}
         >
-          {[0, 1, 2, 3, 4].map((step) => (
+          {Array.from({ length: questionTotal ?? 5 }, (_, step) => (
             <span
-              className={cn("h-2", step < 2 ? "bg-primary" : "bg-border")}
+              className={cn(
+                "h-2",
+                step < (questionPosition ?? 2) ? "bg-primary" : "bg-border",
+              )}
               key={step}
             />
           ))}
@@ -146,9 +179,16 @@ export function ComprehensionQuestion({
                   <button
                     aria-pressed={selected}
                     className={cn(
-                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 bg-white p-4 text-left text-body font-bold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-left text-body font-bold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                      // Hover only applies to answers that can still be chosen.
+                      "enabled:cursor-pointer enabled:hover:-translate-y-0.5 enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-extrabold enabled:hover:shadow-md enabled:active:translate-y-0",
+                      !correct && !(selected && result) && "bg-white",
                       selected && "border-primary",
-                      correct && "bg-success-surface text-success-ink",
+                      selected &&
+                        result?.is_correct === false &&
+                        "border-warning bg-warning-surface",
+                      correct &&
+                        "border-success-ink bg-success-surface font-extrabold text-success-ink",
                     )}
                     disabled={isSubmitting || result?.is_correct === true}
                     key={choice.id}
@@ -159,10 +199,20 @@ export function ComprehensionQuestion({
                       {choice.id}
                     </span>
                     <span className="flex-1 text-center">{choice.label}</span>
+                    {correct ? (
+                      <Check
+                        aria-hidden="true"
+                        className="size-6 shrink-0 text-success-ink"
+                      />
+                    ) : null}
                   </button>
                 );
               })}
             </div>
+
+            {result?.is_correct ? (
+              <FireworksBurst key={result.answer_id} />
+            ) : null}
 
             {result ? (
               <StatusMessage tone={result.is_correct ? "success" : "warning"}>
@@ -177,8 +227,13 @@ export function ComprehensionQuestion({
             )}
 
             {result?.is_correct ? (
-              <Button className="mx-auto max-w-[360px]" onClick={onComplete}>
-                Câu tiếp theo
+              <Button
+                className="mx-auto max-w-[360px]"
+                onClick={showNextQuestion}
+              >
+                {questionTotal !== undefined && !hasNextQuestion
+                  ? "Hoàn thành"
+                  : "Câu tiếp theo"}
                 <ArrowRight aria-hidden="true" className="size-5" />
               </Button>
             ) : null}
