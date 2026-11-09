@@ -615,7 +615,7 @@ export function AdminOcrReviewScreen({
   const [words, setWords] = useState<AdminRevisionWordDTO[]>([]);
   const [wordSyncError, setWordSyncError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
-  const [wordFilter, setWordFilter] = useState<WordFilter>("review");
+  const [wordFilter, setWordFilter] = useState<WordFilter>("all");
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
