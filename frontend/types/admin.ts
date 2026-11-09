@@ -120,6 +120,7 @@ export interface AdminOcrWordEvidenceDTO {
     | "tesseract_raw_word_score_v1"
     | "ocr_calibrated_word_accuracy_v1";
   readonly engine_outputs: Readonly<Record<string, string | null>>;
+  readonly source_text?: string | null;
   readonly alignment: string;
   readonly engine_agreement_score: number | null;
   readonly calibrated_word_accuracy: number | null;
