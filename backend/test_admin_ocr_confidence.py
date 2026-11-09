@@ -182,6 +182,46 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.ocr_metadata["line_evidence"][0]["paddle_line_confidence"], 0.81)
         self.assertNotIn("source_image_path", detail.ocr_metadata)
 
+    async def test_revision_detail_recovers_word_evidence_from_legacy_line_metadata(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "về", None)])
+        detail = await service.revision_detail(
+            page(),
+            revision(
+                metadata={
+                    "word_review_statuses": ["needs_review"],
+                    "word_evidence_v2": [None],
+                    "line_evidence": [
+                        {
+                            "line_index": 0,
+                            "paddle_output": "vé",
+                            "vietocr_output": "về",
+                            "vietocr_output_used": True,
+                            "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+                            "alignment_operations": [
+                                {
+                                    "operation": "substitute",
+                                    "paddle_token": "vé",
+                                    "vietocr_token": "về",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+        )
+
+        evidence = detail.words[0].ocr_evidence
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.engine_outputs["paddleocr"], "vé")
+        self.assertEqual(evidence.engine_outputs["vietocr"], "về")
+        self.assertEqual(evidence.source_text, "về")
+        self.assertEqual(evidence.selected_engine, "vietocr")
+        self.assertEqual(evidence.alignment, "substitute")
+        self.assertIsNone(evidence.engine_agreement_score)
+        self.assertIsNone(evidence.calibrated_word_accuracy)
+        self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
+
     async def test_admin_verification_is_the_only_green_state_for_legacy_words(self):
         service = AdminOcrService(MagicMock())
         service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.99)])
