@@ -132,6 +132,7 @@ export interface AdminOcrWordEvidenceDTO {
     | "ocr_calibrated_word_accuracy_v1";
   readonly engine_outputs: Readonly<Record<string, string | null>>;
   readonly engine_statuses?: Readonly<Record<string, AdminOcrEngineStatus>>;
+  readonly engine_errors?: Readonly<Record<string, string>>;
   readonly paddle_token_index?: number | null;
   readonly vietocr_token_index?: number | null;
   readonly source_text?: string | null;
