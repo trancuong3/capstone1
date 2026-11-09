@@ -575,6 +575,196 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("renders a 20-word mixed-evidence page without spreading yellow across safe words", async () => {
+    const services = createAdminServiceFixture();
+    type ReviewStatus =
+      NonNullable<AdminPageRevisionDetailDTO["words"][number]["ocr_review_status"]>;
+    type ColorGroup = "green" | "red" | "yellow" | "neutral";
+    const makeWord = (
+      wordIndex: number,
+      status: ReviewStatus,
+      colorGroup: ColorGroup,
+      evidence: AdminPageRevisionDetailDTO["words"][number]["ocr_evidence"],
+    ) => {
+      const text = `từ${wordIndex + 1}`;
+      return {
+        ...adminR1Fixture.words[0]!,
+        word_index: wordIndex,
+        line_index: 0,
+        text,
+        normalized_text: text,
+        bbox: [0.02 + wordIndex * 0.043, 0.1, 0.035, 0.04] as [
+          number,
+          number,
+          number,
+          number,
+        ],
+        ocr_confidence: null,
+        ocr_score_source: null,
+        ocr_review_status: status,
+        review_color_group: colorGroup,
+        ocr_evidence: evidence,
+      };
+    };
+    const evidence = (
+      text: string,
+      overrides: Partial<
+        NonNullable<AdminPageRevisionDetailDTO["words"][number]["ocr_evidence"]>
+      > = {},
+    ): NonNullable<
+      AdminPageRevisionDetailDTO["words"][number]["ocr_evidence"]
+    > => ({
+      contract: "hybrid_ocr_evidence_v4",
+      engine_outputs: { paddleocr: text, vietocr: text, tesseract: null },
+      engine_statuses: {
+        paddleocr: "success",
+        vietocr: "success",
+        tesseract: "not_run",
+      },
+      paddle_token_index: 0,
+      vietocr_token_index: 0,
+      source_text: text,
+      alignment: "match",
+      engine_agreement_score: 1,
+      calibrated_word_accuracy: null,
+      verification_source: null,
+      reference_text: null,
+      selected_engine: "vietocr",
+      selection_reason: "both_engines_nonempty_same_word",
+      bbox_quality: "valid",
+      crop_quality: "usable",
+      review_reason: "No review risk detected",
+      ...overrides,
+    });
+
+    const words = [
+      ...Array.from({ length: 8 }, (_, index) =>
+        makeWord(
+          index,
+          "engine_agreement",
+          "neutral",
+          evidence(`từ${index + 1}`),
+        ),
+      ),
+      ...Array.from({ length: 3 }, (_, index) =>
+        makeWord(
+          index + 8,
+          "verified",
+          "green",
+          evidence(`từ${index + 9}`, {
+            verification_source: "admin",
+          }),
+        ),
+      ),
+      ...Array.from({ length: 2 }, (_, index) =>
+        makeWord(
+          index + 11,
+          "confirmed_mismatch",
+          "red",
+          evidence(`từ${index + 12}`, {
+            reference_text: "ground-truth",
+            review_reason: "Admin xác nhận mismatch với reference.",
+          }),
+        ),
+      ),
+      ...Array.from({ length: 3 }, (_, index) =>
+        makeWord(
+          index + 13,
+          "engine_disagreement",
+          "yellow",
+          evidence(`từ${index + 14}`, {
+            engine_outputs: {
+              paddleocr: `từ${index + 14}`,
+              vietocr: `từ${index + 14} sai`,
+              tesseract: null,
+            },
+            alignment: "substitute",
+            engine_agreement_score: 0,
+            review_reason: "Hai engine OCR bất đồng.",
+          }),
+        ),
+      ),
+      ...Array.from({ length: 2 }, (_, index) =>
+        makeWord(
+          index + 16,
+          "needs_review",
+          "neutral",
+          evidence(`từ${index + 17}`, {
+            engine_outputs: {
+              paddleocr: `từ${index + 17}`,
+              vietocr: null,
+              tesseract: null,
+            },
+            engine_statuses: {
+              paddleocr: "success",
+              vietocr: "not_initialized",
+              tesseract: "not_run",
+            },
+            selected_engine: "paddleocr",
+            alignment: "unmatched",
+            review_reason: "Only PaddleOCR ran; no word-level risk detected.",
+          }),
+        ),
+      ),
+      makeWord(
+        18,
+        "needs_review",
+        "yellow",
+        evidence("từ19", {
+          crop_quality: "low",
+          review_reason: "Crop quality thấp, cần Admin xem lại.",
+        }),
+      ),
+      makeWord(19, "needs_review", "neutral", null),
+    ];
+    services.ocr.getRevision.mockResolvedValue({
+      ...adminR2Fixture,
+      verification_status: "NEEDS_REVIEW",
+      draft_text: words.map((word) => word.text).join(" "),
+      words,
+    });
+
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    const wordButtons = await screen.findAllByRole("button", {
+      name: /^Từ \\d+:/,
+    });
+    expect(wordButtons).toHaveLength(20);
+    expect(screen.getByRole("button", { name: /Từ 1: từ1\\. Hai engine đồng thuận/ }))
+      .toHaveClass("border-slate-300");
+    expect(screen.getByRole("button", { name: /Từ 9: từ9\\. Admin đã xác minh từ/ }))
+      .toHaveClass("border-green-600");
+    expect(screen.getByRole("button", { name: /Từ 12: từ12\\. Sai so với reference/ }))
+      .toHaveClass("border-red-600");
+    expect(screen.getByRole("button", { name: /Từ 14: từ14\\. Hai engine bất đồng/ }))
+      .toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /Từ 17: từ17\\. Chưa xác minh độc lập/ }))
+      .toHaveClass("border-slate-300");
+    expect(screen.getByRole("button", { name: /Từ 19: từ19\\. Crop quality thấp/ }))
+      .toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /Từ 20: từ20\\. Chưa xác minh độc lập/ }))
+      .toHaveClass("border-slate-300");
+
+    const stats = screen.getByRole("group", {
+      name: "Thống kê trạng thái từ OCR",
+    });
+    expect(stats).toHaveTextContent(/3\\s*Xanh/);
+    expect(stats).toHaveTextContent(/2\\s*Đỏ/);
+    expect(stats).toHaveTextContent(/4\\s*Vàng/);
+    expect(stats).toHaveTextContent(/11\\s*Trung tính/);
+
+    await user.click(screen.getByRole("button", { name: "Rủi ro cao (4)" }));
+    expect(
+      screen.getAllByRole("button", { name: /^Từ \\d+:/ }),
+    ).toHaveLength(4);
+  });
+
   it("keeps exact engine agreement neutral until Admin verification", async () => {
     const services = createAdminServiceFixture();
     services.ocr.getRevision.mockResolvedValue({
