@@ -862,7 +862,7 @@ class AdminOcrService:
             elif same_token and isinstance(previous, str) and previous in OCR_REVIEW_STATUSES:
                 current = (
                     "engine_agreement" if previous == "matched"
-                    else "engine_disagreement" if previous == "suspect"
+                    else "needs_review" if previous == "suspect"
                     else previous
                 )
             else:
@@ -1456,7 +1456,7 @@ class AdminOcrService:
             return "green"
         if review_status == "confirmed_mismatch":
             return "red"
-        if review_status in {"engine_disagreement", "suspect"}:
+        if review_status == "engine_disagreement":
             return "yellow"
         if not isinstance(evidence, dict):
             return "neutral"
@@ -1468,6 +1468,17 @@ class AdminOcrService:
             and normalize_word(word_text) != normalize_word(source_text)
         ):
             return "yellow"
+
+        outputs = evidence.get("engine_outputs")
+        if isinstance(outputs, dict):
+            paddle = outputs.get("paddleocr")
+            vietocr = outputs.get("vietocr")
+            if (
+                isinstance(paddle, str) and paddle.strip()
+                and isinstance(vietocr, str) and vietocr.strip()
+                and normalize_word(paddle) != normalize_word(vietocr)
+            ):
+                return "yellow"
 
         alignment = evidence.get("alignment")
         engine_statuses = evidence.get("engine_statuses")
