@@ -239,6 +239,60 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(AdminOcrService._normalize_confidence(True))
         self.assertIsNone(AdminOcrService._normalize_confidence("bad score"))
 
+    def test_hybrid_crop_evidence_is_preserved_for_unchanged_tokens_and_cleared_on_edit(self):
+        source_evidence = {
+            "contract": "hybrid_ocr_evidence_v3",
+            "engine_outputs": {"paddleocr": "vé", "vietocr": "về"},
+            "alignment": "substitute",
+            "engine_agreement_score": 0.5,
+            "calibrated_word_accuracy": None,
+            "selected_engine": "vietocr",
+            "selection_reason": "provisional_candidate",
+            "bbox_quality": "valid",
+            "crop_quality": "usable",
+            "crop_evidence": {
+                "status": "completed",
+                "paddleocr_candidate": "về",
+                "vietocr_candidate": "vé",
+                "paddle_crop_recognition_score": 0.82,
+                "vietocr_crop_recognition_score": 0.73,
+                "score_semantics": "raw_recognition_output_not_probability",
+            },
+            "review_reason": "Two engines disagree.",
+        }
+
+        unchanged_revision = revision(metadata={
+            "word_review_statuses": ["engine_disagreement"],
+            "word_score_sources": [None],
+            "word_evidence_v2": [source_evidence],
+        })
+        AdminOcrService._set_word_review_statuses(
+            unchanged_revision,
+            [{"word_index": 0, "line_index": 0, "text": "vé"}],
+            [word(0, "vé", None)],
+        )
+        preserved = unchanged_revision.ProcessingMeta["word_evidence_v2"][0]
+        self.assertEqual(preserved["contract"], "hybrid_ocr_evidence_v3")
+        self.assertEqual(
+            preserved["crop_evidence"]["vietocr_crop_recognition_score"], 0.73
+        )
+
+        changed_revision = revision(metadata={
+            "word_review_statuses": ["engine_disagreement"],
+            "word_score_sources": [None],
+            "word_evidence_v2": [source_evidence],
+        })
+        AdminOcrService._set_word_review_statuses(
+            changed_revision,
+            [{"word_index": 0, "line_index": 0, "text": "về"}],
+            [word(0, "vé", None)],
+        )
+        self.assertIsNone(changed_revision.ProcessingMeta["word_evidence_v2"][0])
+        self.assertEqual(
+            changed_revision.ProcessingMeta["word_review_statuses"][0],
+            "needs_review",
+        )
+
     def test_hybrid_crop_evidence_is_preserved_as_raw_engine_evidence(self):
         evidence = AdminOcrService._normalize_word_evidence({
             "contract": "hybrid_ocr_evidence_v3",

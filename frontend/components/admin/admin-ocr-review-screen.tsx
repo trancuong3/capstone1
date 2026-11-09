@@ -2262,6 +2262,25 @@ export function AdminOcrReviewScreen({
                                 {typeof word.ocr_evidence.crop_evidence.status === "string"
                                   ? word.ocr_evidence.crop_evidence.status : "Unavailable"}
                               </span>
+                              <span>
+                                VietOCR decoding mode:{" "}
+                                {typeof word.ocr_evidence.crop_evidence.vietocr_decoding_mode === "string"
+                                  ? word.ocr_evidence.crop_evidence.vietocr_decoding_mode : "Unavailable"}
+                              </span>
+                              <span>
+                                Crop contrast (standard deviation):{" "}
+                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.contrast_std)}
+                              </span>
+                              <span>
+                                Ink ratio:{" "}
+                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.ink_ratio)}
+                              </span>
+                              <span>
+                                Padding clipped by page boundary:{" "}
+                                {typeof word.ocr_evidence.crop_evidence.padding_clipped === "boolean"
+                                  ? word.ocr_evidence.crop_evidence.padding_clipped ? "Yes" : "No"
+                                  : "Unavailable"}
+                              </span>
                             </>
                           ) : null}
                           <span>
