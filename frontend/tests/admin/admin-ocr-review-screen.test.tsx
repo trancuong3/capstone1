@@ -101,7 +101,14 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(parsed.words[0]?.ocr_confidence).toBeNull();
     expect(parsed.words[0]?.ocr_review_status).toBe("needs_review");
     expect(parsed.words[0]?.ocr_score_source).toBeNull();
-    expect(parsed.words[0]?.review_color_group).toBe("neutral");
+    expect(parsed.words[0]?.review_color_group).toBeUndefined();
+    expect(
+      getWordReviewColorGroup(
+        parsed.words[0]?.ocr_review_status ?? "needs_review",
+        parsed.words[0],
+      ),
+    ).toBe("neutral");
+    expect(getWordReviewColor("engine_disagreement")).toContain("border-amber-600");
   });
 
   it("uses green for verified words, red for confirmed mismatch, yellow for disagreement and neutral for agreement", () => {
