@@ -238,6 +238,40 @@ export function getWordReviewBadgeColor(
   }[group];
 }
 
+function getEngineEvidenceDisplay(
+  word: AdminRevisionWordDTO,
+  engine: "paddleocr" | "vietocr" | "tesseract",
+): string {
+  const evidence = word.ocr_evidence;
+  const candidate = evidence?.engine_outputs[engine];
+  const status = evidence?.engine_statuses?.[engine];
+  const statusLabels: Record<string, string> = {
+    not_installed: "chưa cài đặt",
+    not_initialized: "chưa khởi tạo",
+    not_run: "không chạy",
+    processing: "đang xử lý",
+    success: "đã chạy",
+    no_result: "đã chạy nhưng không nhận dạng được",
+    error: "lỗi inference",
+    disabled: "đã tắt cấu hình",
+  };
+  const statusLabel = status
+    ? statusLabels[status] ?? status
+    : "trạng thái chưa được ghi trong revision cũ";
+  if (typeof candidate === "string" && candidate.trim()) {
+    return `${candidate} · ${statusLabel}`;
+  }
+  if (status === "success") return "Đã chạy · không có token căn chỉnh tại vị trí này";
+  if (status === "no_result") return "Đã chạy · không nhận dạng được text";
+  if (status === "not_installed") return "Chưa cài đặt";
+  if (status === "not_initialized") return "Chưa khởi tạo";
+  if (status === "not_run") return "Không chạy";
+  if (status === "processing") return "Đang xử lý";
+  if (status === "error") return "Lỗi inference";
+  if (status === "disabled") return "Đã tắt cấu hình";
+  return "Không ghi nhận trạng thái trong revision cũ";
+}
+
 export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
   if (
     word.ocr_score_source === null ||
@@ -2085,8 +2119,8 @@ export function AdminOcrReviewScreen({
               {filteredWords.length === 0 ? (
                 <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
                   {wordFilter === "review"
-                    ? "Không có từ đỏ hoặc vàng cần chú ý. Bạn có thể xem nhóm xanh nếu cần kiểm tra lại."
-                    : `Không có từ nào trong nhóm ${wordFilter === "red" ? "đỏ" : wordFilter === "yellow" ? "vàng" : wordFilter === "green" ? "xanh" : "này"}.`}
+                    ? "Không có từ nào có mismatch hoặc rủi ro cần ưu tiên. Nhóm trung tính vẫn chưa được xác minh độc lập."
+                    : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "rủi ro" : wordFilter === "disagreement" ? "engine bất đồng" : wordFilter === "verified" ? "đã xác minh" : wordFilter === "neutral" ? "trung tính" : "này"}.`}
                 </p>
               ) : (
                 filteredWords.map((word) => {
@@ -2173,15 +2207,15 @@ export function AdminOcrReviewScreen({
                           ) : (
                             <>
                               <span className="font-bold">
-                                Điểm OCR rất thấp · ưu tiên kiểm tra
+                                Reference mismatch đã được xác nhận
                               </span>
                               <span className="break-words">
                                 Từ OCR: “{word.text}” ·{" "}
                                 {getWordScoreLabel(word, detail.ocr_metadata)}
                               </span>
                               <span className="text-xs">
-                                Màu đỏ theo ngưỡng điểm thấp, chưa phải xác nhận
-                                sai nếu chưa có reference đã xác minh.
+                                Màu đỏ chỉ dùng cho mismatch đã được Admin
+                                hoặc reference đáng tin cậy xác nhận.
                               </span>
                             </>
                           )}
@@ -2279,29 +2313,17 @@ export function AdminOcrReviewScreen({
                               .join(", ")}
                           </span>
                           <span>
-                            PaddleOCR:{" "}
-                            {word.ocr_evidence?.engine_outputs.paddleocr ??
-                              (word.ocr_evidence?.selected_engine ===
-                              "tesseract"
-                                ? "Not run (Tesseract fallback)"
-                                : "Unavailable")}
+                            PaddleOCR: {getEngineEvidenceDisplay(word, "paddleocr")}
                           </span>
                           <span>
-                            VietOCR:{" "}
-                            {word.ocr_evidence?.engine_outputs.vietocr ??
-                              (word.ocr_evidence?.selected_engine ===
-                              "tesseract"
-                                ? "Not run (Tesseract fallback)"
-                                : "Unavailable")}
+                            VietOCR: {getEngineEvidenceDisplay(word, "vietocr")}
                           </span>
                           <span>
-                            Tesseract:{" "}
-                            {word.ocr_evidence?.engine_outputs.tesseract ??
-                              "Not run"}
+                            Tesseract: {getEngineEvidenceDisplay(word, "tesseract")}
                           </span>
                           <span>
                             OCR source token:{" "}
-                            {word.ocr_evidence?.source_text ?? "Unavailable"}
+                            {word.ocr_evidence?.source_text ?? "Not recorded"}
                           </span>
                           {word.ocr_evidence?.source_text &&
                           normalizeVietnameseWord(
@@ -2315,7 +2337,7 @@ export function AdminOcrReviewScreen({
                           ) : null}
                           <span>
                             Alignment:{" "}
-                            {word.ocr_evidence?.alignment ?? "Unavailable"}
+                            {word.ocr_evidence?.alignment ?? "Not computed"}
                           </span>
                           <span>
                             Điểm tương đồng giữa engine:{" "}
@@ -2328,12 +2350,11 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             Reference text:{" "}
-                            {word.ocr_evidence?.reference_text ?? "Unavailable"}
+                            {word.ocr_evidence?.reference_text ?? "Not provided"}
                           </span>
                           <span>
                             Nguồn xác minh:{" "}
-                            {word.ocr_evidence?.verification_source ??
-                              "Unavailable"}
+                            {word.ocr_evidence?.verification_source ?? "None"}
                           </span>
                           <span>
                             Calibrated accuracy:{" "}
@@ -2341,22 +2362,20 @@ export function AdminOcrReviewScreen({
                               "ocr_calibrated_word_accuracy_v1" &&
                             word.ocr_confidence !== null
                               ? `${Math.round(word.ocr_confidence * 100)}%`
-                              : "Unavailable · chưa có calibration evidence"}
+                              : "Not calibrated · chưa có calibration evidence"}
                           </span>
                           <span>
                             Engine dùng cho bản nháp:{" "}
-                            {word.ocr_evidence?.selected_engine ??
-                              "Unavailable"}{" "}
+                            {word.ocr_evidence?.selected_engine ?? "Not selected"}{" "}
                             · lựa chọn tạm thời, chưa phải verified
                           </span>
                           <span>
                             Lý do chọn candidate:{" "}
-                            {word.ocr_evidence?.selection_reason ??
-                              "Unavailable"}
+                            {word.ocr_evidence?.selection_reason ?? "Not recorded"}
                           </span>
                           <span>
                             Bounding box quality:{" "}
-                            {word.ocr_evidence?.bbox_quality ?? "Unavailable"}
+                            {word.ocr_evidence?.bbox_quality ?? "Not assessed"}
                           </span>
                           <span>
                             Crop quality:{" "}
@@ -2370,7 +2389,7 @@ export function AdminOcrReviewScreen({
                                   .paddleocr_candidate === "string"
                                   ? word.ocr_evidence.crop_evidence
                                       .paddleocr_candidate
-                                  : "Unavailable"}
+                                  : "No crop candidate recorded"}
                               </span>
                               <span>
                                 Crop VietOCR:{" "}
@@ -2378,7 +2397,7 @@ export function AdminOcrReviewScreen({
                                   .vietocr_candidate === "string"
                                   ? word.ocr_evidence.crop_evidence
                                       .vietocr_candidate
-                                  : "Unavailable"}
+                                  : "No crop candidate recorded"}
                               </span>
                               <span>
                                 Paddle crop raw recognition score:{" "}
@@ -2401,7 +2420,7 @@ export function AdminOcrReviewScreen({
                                 {typeof word.ocr_evidence.crop_evidence
                                   .status === "string"
                                   ? word.ocr_evidence.crop_evidence.status
-                                  : "Unavailable"}
+                                  : "No crop candidate recorded"}
                               </span>
                               <span>
                                 VietOCR decoding mode:{" "}
@@ -2409,7 +2428,7 @@ export function AdminOcrReviewScreen({
                                   .vietocr_decoding_mode === "string"
                                   ? word.ocr_evidence.crop_evidence
                                       .vietocr_decoding_mode
-                                  : "Unavailable"}
+                                  : "No crop candidate recorded"}
                               </span>
                               <span>
                                 Crop contrast (standard deviation):{" "}
@@ -2431,13 +2450,16 @@ export function AdminOcrReviewScreen({
                                       .padding_clipped
                                     ? "Yes"
                                     : "No"
-                                  : "Unavailable"}
+                                  : "No crop candidate recorded"}
                               </span>
                             </>
                           ) : null}
                           <span>
                             Lý do trạng thái:{" "}
-                            {word.ocr_evidence?.review_reason ?? "Unavailable"}
+                            {word.ocr_evidence?.review_reason ??
+                              (colorGroup === "neutral"
+                                ? "No review risk detected"
+                                : "No explicit review reason recorded")}
                           </span>
                           <span>
                             {getPaddleLineScoreLabel(
