@@ -302,7 +302,11 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edited_evidence["alignment"], "match")
         self.assertEqual(
             revision_row.ProcessingMeta["word_evidence_v2"][1]["alignment"],
-            "match",
+            "substitute",
+        )
+        self.assertEqual(
+            revision_row.ProcessingMeta["word_evidence_v2"][1]["engine_outputs"],
+            {"paddleocr": "ba", "vietocr": "bà", "tesseract": None},
         )
 
     async def test_invalid_stored_scores_are_removed(self):
