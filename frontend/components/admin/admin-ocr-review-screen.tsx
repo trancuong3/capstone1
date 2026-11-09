@@ -135,8 +135,6 @@ export function getWordReviewColorGroup(
   ) {
     return contractGroup;
   }
-  if (status === "engine_disagreement" || status === "suspect") return "yellow";
-
   const evidence = word?.ocr_evidence;
   if (evidence) {
     const statuses = evidence.engine_statuses ?? {};
@@ -824,9 +822,7 @@ export function AdminOcrReviewScreen({
           paddleLineScore,
         )
       ) {
-        setWordFilter(
-          getWordReviewColorGroup(selectedStatus, selected, paddleLineScore),
-        );
+        setWordFilter("review");
       }
 
       const element =
