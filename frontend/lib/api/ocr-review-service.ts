@@ -100,7 +100,7 @@ export const adminRevisionDetailSchema = z.object({
       review_color_group: z
         .enum(["green", "red", "yellow", "neutral"])
         .optional()
-        .catch("neutral"),
+        .catch(undefined),
       ocr_review_status: z
         .enum([
           "matched",
