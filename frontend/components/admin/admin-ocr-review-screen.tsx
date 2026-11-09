@@ -2104,9 +2104,14 @@ export function AdminOcrReviewScreen({
                     id: "disagreement",
                     label: "Engine bất đồng",
                     count: words.filter((word) => {
-                      const status = getWordReviewStatus(word, detail?.verification_status);
-                      return status === "engine_disagreement" ||
-                        word.ocr_evidence?.alignment === "substitute";
+                      const status = getWordReviewStatus(
+                        word,
+                        detail?.verification_status,
+                      );
+                      return (
+                        status === "engine_disagreement" ||
+                        word.ocr_evidence?.alignment === "substitute"
+                      );
                     }).length,
                   },
                   {
