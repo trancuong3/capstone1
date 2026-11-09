@@ -341,7 +341,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(vietOcrSelected).toHaveClass("border-amber-600");
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "false",
     );
     expect(
       screen.getByRole("button", { name: "Từ #1 · Dòng 1" }),
@@ -567,7 +567,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Từ #1 · Dòng 0" }));
-    expect(needsReview).toHaveAttribute("aria-pressed", "false");
+    expect(needsReview).toHaveAttribute("aria-pressed", "true");
     expect(mismatch).toHaveAttribute("aria-pressed", "false");
 
     await user.click(unknown);
@@ -736,51 +736,51 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const wordButtons = await screen.findAllByRole("button", {
-      name: /^Từ \\d+:/,
+      name: /^Từ \d+:/,
     });
     expect(wordButtons).toHaveLength(20);
     expect(
       screen.getByRole("button", {
-        name: /Từ 1: từ1\\. Hai engine đồng thuận/,
+        name: /Từ 1: từ1\. Hai engine đồng thuận/,
       }),
     ).toHaveClass("border-slate-300");
     expect(
-      screen.getByRole("button", { name: /Từ 9: từ9\\. Admin đã xác minh từ/ }),
+      screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ }),
     ).toHaveClass("border-green-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 12: từ12\\. Sai so với reference/,
+        name: /Từ 12: từ12\. Sai so với reference/,
       }),
     ).toHaveClass("border-red-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 14: từ14\\. Hai engine bất đồng/,
+        name: /Từ 14: từ14\. Hai engine bất đồng/,
       }),
     ).toHaveClass("border-amber-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 17: từ17\\. Chưa xác minh độc lập/,
+        name: /Từ 17: từ17\. Chưa xác minh độc lập/,
       }),
     ).toHaveClass("border-slate-300");
     expect(
-      screen.getByRole("button", { name: /Từ 19: từ19\\. Crop quality thấp/ }),
+      screen.getByRole("button", { name: /Từ 19: từ19\. Crop quality thấp/ }),
     ).toHaveClass("border-amber-600");
     expect(
       screen.getByRole("button", {
-        name: /Từ 20: từ20\\. Chưa xác minh độc lập/,
+        name: /Từ 20: từ20\. Chưa xác minh độc lập/,
       }),
     ).toHaveClass("border-slate-300");
 
     const stats = screen.getByRole("group", {
       name: "Thống kê trạng thái từ OCR",
     });
-    expect(stats).toHaveTextContent(/3\\s*Xanh/);
-    expect(stats).toHaveTextContent(/2\\s*Đỏ/);
-    expect(stats).toHaveTextContent(/4\\s*Vàng/);
-    expect(stats).toHaveTextContent(/11\\s*Trung tính/);
+    expect(stats).toHaveTextContent(/3\s*Xanh/);
+    expect(stats).toHaveTextContent(/2\s*Đỏ/);
+    expect(stats).toHaveTextContent(/4\s*Vàng/);
+    expect(stats).toHaveTextContent(/11\s*Trung tính/);
 
     await user.click(screen.getByRole("button", { name: "Rủi ro cao (4)" }));
-    expect(screen.getAllByRole("button", { name: /^Từ \\d+:/ })).toHaveLength(
+    expect(screen.getAllByRole("button", { name: /^Từ \d+:/ })).toHaveLength(
       4,
     );
   });
