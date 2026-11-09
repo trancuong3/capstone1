@@ -773,7 +773,9 @@ export function AdminOcrReviewScreen({
         ocr_score_source: tokenChanged
           ? null
           : (patch.ocr_score_source ?? word.ocr_score_source),
-        ocr_evidence: tokenChanged ? null : word.ocr_evidence,
+        // Keep the original OCR candidates for audit. source_text makes it clear
+        // that this evidence belongs to the engine output, not the edited token.
+        ocr_evidence: word.ocr_evidence,
         ocr_review_status: tokenChanged
           ? ("needs_review" as const)
           : (word.ocr_review_status ?? "needs_review"),
@@ -2211,13 +2213,36 @@ export function AdminOcrReviewScreen({
                           <span>
                             PaddleOCR:{" "}
                             {word.ocr_evidence?.engine_outputs.paddleocr ??
-                              "Unavailable"}
+                              (word.ocr_evidence?.selected_engine === "tesseract"
+                                ? "Not run (Tesseract fallback)"
+                                : "Unavailable")}
                           </span>
                           <span>
                             VietOCR:{" "}
                             {word.ocr_evidence?.engine_outputs.vietocr ??
-                              "Unavailable"}
+                              (word.ocr_evidence?.selected_engine === "tesseract"
+                                ? "Not run (Tesseract fallback)"
+                                : "Unavailable")}
                           </span>
+                          <span>
+                            Tesseract:{" "}
+                            {word.ocr_evidence?.engine_outputs.tesseract ??
+                              "Not run"}
+                          </span>
+                          <span>
+                            OCR source token:{" "}
+                            {word.ocr_evidence?.source_text ?? "Unavailable"}
+                          </span>
+                          {word.ocr_evidence?.source_text &&
+                          normalizeVietnameseWord(word.ocr_evidence.source_text) !==
+                            normalizeVietnameseWord(word.text) ? (
+                            <span className="text-amber-900">
+                              Evidence engine thuộc token OCR ban đầu “
+                              {word.ocr_evidence.source_text}”; từ hiện tại “
+                              {word.text}” đã được chỉnh sửa. Candidate/score gốc
+                              không đánh giá độ đúng của bản chỉnh sửa.
+                            </span>
+                          ) : null}
                           <span>
                             Alignment:{" "}
                             {word.ocr_evidence?.alignment ?? "Unavailable"}
