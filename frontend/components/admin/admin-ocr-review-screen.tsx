@@ -134,19 +134,27 @@ export function getWordReviewLabel(
   _paddleLineScore?: number | null,
 ): string {
   if (status === "verified") return "Admin đã xác minh từ";
-  if (status === "reference_match") return "Khớp reference của trang đã xác minh";
-  if (status === "confirmed_mismatch") return "Sai so với reference đã xác minh";
+  if (status === "reference_match")
+    return "Khớp reference của trang đã xác minh";
+  if (status === "confirmed_mismatch")
+    return "Sai so với reference đã xác minh";
   if (status === "engine_agreement") {
     return "Hai engine đồng ý · chưa có xác minh độc lập";
   }
-  if (status === "engine_disagreement" && hasDiacriticOnlyEngineDisagreement(word)) {
+  if (
+    status === "engine_disagreement" &&
+    hasDiacriticOnlyEngineDisagreement(word)
+  ) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
   if (status === "engine_disagreement" || status === "suspect") {
     return "Hai engine bất đồng · chưa thể xác định từ đúng";
   }
   const reason = word?.ocr_evidence?.review_reason?.trim();
-  return reason || "Chưa có ground truth hoặc confidence đã hiệu chuẩn · cần Admin xem";
+  return (
+    reason ||
+    "Chưa có ground truth hoặc confidence đã hiệu chuẩn · cần Admin xem"
+  );
 }
 
 export function getWordReviewColor(
@@ -220,9 +228,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function formatRawOcrEvidence(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (Array.isArray(value)) {
-    return value.slice(0, 12).map((item) =>
-      typeof item === "number" && Number.isFinite(item) ? String(item) : "—",
-    ).join(", ");
+    return value
+      .slice(0, 12)
+      .map((item) =>
+        typeof item === "number" && Number.isFinite(item) ? String(item) : "—",
+      )
+      .join(", ");
   }
   return "Unavailable";
 }
@@ -1494,26 +1505,43 @@ export function AdminOcrReviewScreen({
           >
             <span>
               Đã xác minh:{" "}
-              {words.filter((word) => {
-                const status = getWordReviewStatus(word, detail.verification_status);
-                return status === "verified" || status === "reference_match";
-              }).length}
+              {
+                words.filter((word) => {
+                  const status = getWordReviewStatus(
+                    word,
+                    detail.verification_status,
+                  );
+                  return status === "verified" || status === "reference_match";
+                }).length
+              }
             </span>
             <span>
               Engine đồng ý, chưa xác minh:{" "}
-              {words.filter((word) =>
-                getWordReviewStatus(word, detail.verification_status) === "engine_agreement"
-              ).length}
+              {
+                words.filter(
+                  (word) =>
+                    getWordReviewStatus(word, detail.verification_status) ===
+                    "engine_agreement",
+                ).length
+              }
             </span>
             <span>
               Engine bất đồng:{" "}
-              {words.filter((word) =>
-                getWordReviewStatus(word, detail.verification_status) === "engine_disagreement"
-              ).length}
+              {
+                words.filter(
+                  (word) =>
+                    getWordReviewStatus(word, detail.verification_status) ===
+                    "engine_disagreement",
+                ).length
+              }
             </span>
             <span>
               Chưa có calibrated accuracy:{" "}
-              {words.filter((word) => word.ocr_evidence?.calibrated_word_accuracy == null).length}
+              {
+                words.filter(
+                  (word) => word.ocr_evidence?.calibrated_word_accuracy == null,
+                ).length
+              }
             </span>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -2222,12 +2250,14 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             Engine dùng cho bản nháp:{" "}
-                            {word.ocr_evidence?.selected_engine ?? "Unavailable"} ·
-                            lựa chọn tạm thời, chưa phải verified
+                            {word.ocr_evidence?.selected_engine ??
+                              "Unavailable"}{" "}
+                            · lựa chọn tạm thời, chưa phải verified
                           </span>
                           <span>
                             Lý do chọn candidate:{" "}
-                            {word.ocr_evidence?.selection_reason ?? "Unavailable"}
+                            {word.ocr_evidence?.selection_reason ??
+                              "Unavailable"}
                           </span>
                           <span>
                             Bounding box quality:{" "}
@@ -2241,44 +2271,71 @@ export function AdminOcrReviewScreen({
                             <>
                               <span>
                                 Crop PaddleOCR:{" "}
-                                {typeof word.ocr_evidence.crop_evidence.paddleocr_candidate === "string"
-                                  ? word.ocr_evidence.crop_evidence.paddleocr_candidate : "Unavailable"}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .paddleocr_candidate === "string"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .paddleocr_candidate
+                                  : "Unavailable"}
                               </span>
                               <span>
                                 Crop VietOCR:{" "}
-                                {typeof word.ocr_evidence.crop_evidence.vietocr_candidate === "string"
-                                  ? word.ocr_evidence.crop_evidence.vietocr_candidate : "Unavailable"}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .vietocr_candidate === "string"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .vietocr_candidate
+                                  : "Unavailable"}
                               </span>
                               <span>
                                 Paddle crop raw recognition score:{" "}
-                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.paddle_crop_recognition_score)} · not probability
+                                {formatRawOcrEvidence(
+                                  word.ocr_evidence.crop_evidence
+                                    .paddle_crop_recognition_score,
+                                )}{" "}
+                                · not probability
                               </span>
                               <span>
                                 VietOCR crop raw recognition score:{" "}
-                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.vietocr_crop_recognition_score)} · not probability
+                                {formatRawOcrEvidence(
+                                  word.ocr_evidence.crop_evidence
+                                    .vietocr_crop_recognition_score,
+                                )}{" "}
+                                · not probability
                               </span>
                               <span>
                                 Crop status:{" "}
-                                {typeof word.ocr_evidence.crop_evidence.status === "string"
-                                  ? word.ocr_evidence.crop_evidence.status : "Unavailable"}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .status === "string"
+                                  ? word.ocr_evidence.crop_evidence.status
+                                  : "Unavailable"}
                               </span>
                               <span>
                                 VietOCR decoding mode:{" "}
-                                {typeof word.ocr_evidence.crop_evidence.vietocr_decoding_mode === "string"
-                                  ? word.ocr_evidence.crop_evidence.vietocr_decoding_mode : "Unavailable"}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .vietocr_decoding_mode === "string"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .vietocr_decoding_mode
+                                  : "Unavailable"}
                               </span>
                               <span>
                                 Crop contrast (standard deviation):{" "}
-                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.contrast_std)}
+                                {formatRawOcrEvidence(
+                                  word.ocr_evidence.crop_evidence.contrast_std,
+                                )}
                               </span>
                               <span>
                                 Ink ratio:{" "}
-                                {formatRawOcrEvidence(word.ocr_evidence.crop_evidence.ink_ratio)}
+                                {formatRawOcrEvidence(
+                                  word.ocr_evidence.crop_evidence.ink_ratio,
+                                )}
                               </span>
                               <span>
                                 Padding clipped by page boundary:{" "}
-                                {typeof word.ocr_evidence.crop_evidence.padding_clipped === "boolean"
-                                  ? word.ocr_evidence.crop_evidence.padding_clipped ? "Yes" : "No"
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .padding_clipped === "boolean"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .padding_clipped
+                                    ? "Yes"
+                                    : "No"
                                   : "Unavailable"}
                               </span>
                             </>
@@ -2391,4 +2448,3 @@ export function AdminOcrReviewScreen({
     </>
   );
 }
-
