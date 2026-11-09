@@ -54,12 +54,7 @@ import type {
 
 type LoadError = "not-found" | "unavailable" | "safe";
 type WordFilter =
-  | "all"
-  | "review"
-  | "risk"
-  | "disagreement"
-  | "verified"
-  | "neutral";
+  "all" | "review" | "risk" | "disagreement" | "verified" | "neutral";
 type WordReviewColorGroup = "green" | "red" | "yellow" | "neutral";
 type AiTokenChange = {
   readonly index: number;
@@ -154,31 +149,44 @@ export function getWordReviewColorGroup(
           : null;
     const otherStatus = otherEngine ? statuses[otherEngine] : undefined;
     const riskyAlignments = new Set([
-      "substitute", "split", "merge", "unknown", "unresolved",
+      "substitute",
+      "split",
+      "merge",
+      "unknown",
+      "unresolved",
     ]);
     if (riskyAlignments.has(evidence.alignment)) return "yellow";
     if (
       ["unmatched", "insert", "delete"].includes(evidence.alignment) &&
       ["success", "no_result", "error"].includes(otherStatus ?? "")
-    ) return "yellow";
-    if (Object.values(statuses).some((engineStatus) => engineStatus === "error")) {
+    )
+      return "yellow";
+    if (
+      Object.values(statuses).some((engineStatus) => engineStatus === "error")
+    ) {
       return "yellow";
     }
     if (
       ["rejected", "invalid", "poor"].includes(evidence.bbox_quality ?? "") ||
-      ["weak", "low", "poor", "rejected"].includes(evidence.crop_quality ?? "") ||
+      ["weak", "low", "poor", "rejected"].includes(
+        evidence.crop_quality ?? "",
+      ) ||
       evidence.crop_evidence?.status === "partial" ||
       typeof evidence.crop_evidence?.paddle_error === "string" ||
       typeof evidence.crop_evidence?.vietocr_error === "string"
-    ) return "yellow";
+    )
+      return "yellow";
 
     const paddle = evidence.engine_outputs.paddleocr;
     const vietocr = evidence.engine_outputs.vietocr;
     if (
-      typeof paddle === "string" && paddle.trim() &&
-      typeof vietocr === "string" && vietocr.trim() &&
+      typeof paddle === "string" &&
+      paddle.trim() &&
+      typeof vietocr === "string" &&
+      vietocr.trim() &&
       normalizeVietnameseWord(paddle) !== normalizeVietnameseWord(vietocr)
-    ) return "yellow";
+    )
+      return "yellow";
   }
 
   return "neutral";
@@ -223,7 +231,10 @@ export function getWordReviewLabel(
   if (getWordReviewColorGroup(status, word) === "neutral") {
     return "Chưa xác minh độc lập · chưa phát hiện rủi ro OCR";
   }
-  return word?.ocr_evidence?.review_reason?.trim() || "Có rủi ro OCR cần Admin đối chiếu ảnh";
+  return (
+    word?.ocr_evidence?.review_reason?.trim() ||
+    "Có rủi ro OCR cần Admin đối chiếu ảnh"
+  );
 }
 
 export function getWordReviewColor(
@@ -1568,9 +1579,10 @@ export function AdminOcrReviewScreen({
             revision đã xác minh mới được tô xanh. Chỉ mismatch rõ ràng với
             reference mới được tô đỏ. Đồng thuận engine, bất đồng dấu, Paddle
             line score và raw crop score không tự quyết định màu. Engine đồng
-            thuận an toàn hoặc chỉ có một engine chạy mà không có dấu hiệu rủi ro
-            sẽ ở nhóm trung tính; vàng chỉ dành cho bất đồng/alignment/inference
-            hoặc chất lượng crop có vấn đề. Chưa bật auto-green từ confidence.
+            thuận an toàn hoặc chỉ có một engine chạy mà không có dấu hiệu rủi
+            ro sẽ ở nhóm trung tính; vàng chỉ dành cho bất
+            đồng/alignment/inference hoặc chất lượng crop có vấn đề. Chưa bật
+            auto-green từ confidence.
           </p>
           <div
             aria-label="Thống kê trạng thái từ OCR"
@@ -2237,8 +2249,8 @@ export function AdminOcrReviewScreen({
                                 {getWordScoreLabel(word, detail.ocr_metadata)}
                               </span>
                               <span className="text-xs">
-                                Màu đỏ chỉ dùng cho mismatch đã được Admin
-                                hoặc reference đáng tin cậy xác nhận.
+                                Màu đỏ chỉ dùng cho mismatch đã được Admin hoặc
+                                reference đáng tin cậy xác nhận.
                               </span>
                             </>
                           )}
@@ -2353,9 +2365,7 @@ export function AdminOcrReviewScreen({
                             word.ocr_evidence.source_text,
                           ) !== normalizeVietnameseWord(word.text) ? (
                             <span className="text-amber-900">
-                              \n{" "}
                               {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}
-                              \n{" "}
                             </span>
                           ) : null}
                           <span>
@@ -2373,7 +2383,8 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             Reference text:{" "}
-                            {word.ocr_evidence?.reference_text ?? "Not provided"}
+                            {word.ocr_evidence?.reference_text ??
+                              "Not provided"}
                           </span>
                           <span>
                             Nguồn xác minh:{" "}
