@@ -45,7 +45,7 @@ class TutorQuestionConfig:
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_fallback_model: str = "gemini-3.1-flash-lite"
     groq_model: str = "qwen/qwen3.8-27b"
-    timeout_seconds: int = 40
+    timeout_seconds: int = 20
     # Each lesson gets a random number of questions in [min, max], limited by
     # how much text the child actually read.
     min_questions: int = 5
@@ -66,7 +66,7 @@ class TutorQuestionConfig:
                 "TUTOR_QUESTIONS_GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite"
             ),
             groq_model=_model("TUTOR_QUESTIONS_GROQ_MODEL", "qwen/qwen3.8-27b"),
-            timeout_seconds=_int("TUTOR_QUESTIONS_TIMEOUT_SECONDS", 40, 1, 120),
+            timeout_seconds=_int("TUTOR_QUESTIONS_TIMEOUT_SECONDS", 20, 1, 120),
             min_questions=minimum,
             max_questions=maximum,
             max_source_chars=_int("TUTOR_QUESTIONS_MAX_SOURCE_CHARS", 6000, 500, 20000),

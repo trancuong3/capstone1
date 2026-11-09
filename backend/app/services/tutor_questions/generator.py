@@ -109,12 +109,9 @@ class TutorQuestionGenerator:
                 )
             except QuestionProviderError as error:
                 attempts.append(f"{provider.name}:{error.code}")
-                # The same key/quota fails for every model of that vendor.
-                if error.code in {
-                    "PROVIDER_AUTHENTICATION",
-                    "PROVIDER_QUOTA",
-                    "PROVIDER_UNAVAILABLE",
-                }:
+                # A bad key or exhausted quota fails every model of that vendor; a 5xx
+                # (overload) is per model, so the fallback model is still worth trying.
+                if error.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}:
                     skip_families.add(family)
                 continue
             questions = validate_drafts(payload, pages, count=count, seed=seed)

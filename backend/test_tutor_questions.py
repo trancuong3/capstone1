@@ -218,6 +218,22 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual(calls.count("generativelanguage.googleapis.com"), 1)
         self.assertIn("gemini-fallback:SKIPPED_FAMILY", result.attempts)
 
+    def test_overloaded_primary_model_still_tries_the_fallback_model(self):
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path.split("/")[-1])
+            if len(calls) == 1:
+                return httpx.Response(503)
+            return httpx.Response(200, json=gemini_body([good_item()]))
+
+        generator = TutorQuestionGenerator(
+            self.config(groq_api_key=None), transport=httpx.MockTransport(handler)
+        )
+        result = run(generator.generate([make_page()], seed="s"))
+        self.assertEqual((result.source, result.provider), ("AI", "gemini-fallback"))
+        self.assertEqual(len(calls), 2)
+
     def test_hallucinated_output_falls_back_to_rule_based(self):
         bad = good_item(evidence="Một đoạn không có trong bài đọc")
         generator = TutorQuestionGenerator(

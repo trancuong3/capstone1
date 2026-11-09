@@ -363,3 +363,151 @@ Phạm vi test: ánh xạ ký tự → từ (chính xác, đơn điệu, dữ li
 - Kiểm tra key Gemini: hoạt động. Cả ba bộ câu hỏi đã lưu trong DB từ lúc bạn thử (2–3 câu) đều có `generation.source = AI`, `provider = gemini-primary`, tức là do Gemini sinh chứ không phải fallback điền từ.
 - Thử thật với truyện ngắn 2 trang (131 từ), 3 lần: 6, 5, 5 câu, trộn đủ `FACTUAL`/`CLOZE`/`VOCABULARY`, mỗi lần 3,5–5,4 giây, câu hỏi bám đúng bài. Với văn bản đủ dài số câu có thể lên tới 10.
 - Điểm cần lưu ý: Gemini nhận yêu cầu "đúng N câu" nhưng đôi khi trả ít hơn, và validator loại câu có trích dẫn không nằm trong bài, nên số câu thực tế có thể thấp hơn số bốc ngẫu nhiên. Chưa làm bước "bù thêm" bằng câu điền từ tự tạo.
+
+---
+
+# Phụ lục: Tiến bộ của bé, đánh giá, chấm điểm và nhận xét bằng AI
+
+> Cùng nhánh `tu`. Mục tiêu: ba mẹ mở trang "Tiến bộ của bé" là thấy ngay bé đang đọc tốt ở đâu, yếu ở đâu và cần làm gì để tốt hơn, dựa trên dữ liệu đọc thật của bé.
+
+## A. Vấn đề trước đây
+
+Màn hình "Tiến bộ của bé" chỉ hiển thị các dòng đã lưu sẵn trong bảng `progressreports`. Không có đoạn code nào tạo ra các dòng đó, nên phần lớn bé thấy "Chưa có báo cáo đã lưu". Dữ liệu đọc thật (`readingsessions`, `readingcomparisonreports`, `readingevents`, `comprehensionanswers`) có nhưng không được tổng hợp, và không có đánh giá hay lời khuyên nào.
+
+## B. Nguyên tắc thiết kế
+
+1. **Điểm do hệ thống tính, AI chỉ viết nhận xét.** Điểm là công thức minh bạch trên dữ liệu thật; AI không được tự chấm hay đổi điểm, nên điểm giống nhau giữa các lần và có thể giải thích được.
+2. **Luôn có kết quả.** Nếu AI lỗi, hết quota hoặc chưa có key, hệ thống tự sinh nhận xét từ số liệu (nguồn `RULE_BASED`) và gắn nhãn rõ "Nhận xét tự động".
+3. **Tiết kiệm chi phí**: chỉ gọi AI khi cần; kết quả được cache theo dữ liệu, dữ liệu không đổi thì không gọi lại.
+4. **Riêng tư**: chỉ gửi cho AI các số liệu tổng hợp và các từ khó của sách; không gửi tên bé, ID, tên phụ huynh hay nội dung lời nói.
+
+## C. Kiến trúc
+
+```mermaid
+flowchart TD
+    subgraph FE[Frontend: trang Tiến bộ của bé]
+        CARD[child-progress-assessment.tsx] -->|1 GET nhanh| S[child-progress-service.ts]
+        CARD -->|2 tự gọi POST nếu chưa có nhận xét AI| S
+    end
+    S --> R[routes/child_progress.py<br/>GET/POST /tutor/children/id/progress-assessment]
+    R --> SV[child_progress_service.py]
+    SV --> REPO[child_progress_repository.py]
+    REPO --> DB[(PostgreSQL<br/>readingsessions<br/>readingcomparisonreports<br/>readingevents<br/>comprehensionanswers)]
+    SV --> M[child_progress/metrics.py<br/>số liệu]
+    SV --> SC[child_progress/scoring.py<br/>điểm 0-100]
+    SV --> RB[child_progress/assessor.py<br/>nhận xét offline]
+    SV --> AI[child_progress/ai.py<br/>Gemini -> Gemini dự phòng -> Groq]
+    SV --> CACHE[(cache trong RAM<br/>theo dữ liệu)]
+```
+
+Tuân thủ `BACKEND_FLOW_STANDARD.md`: Router -> Schema -> Service -> Repository -> Model -> PostgreSQL. Repository chỉ có truy vấn đọc; transaction DB được nhả trước khi gọi AI.
+
+## D. Cách hoạt động
+
+1. Frontend gọi `GET` -> backend tính số liệu và điểm (khoảng 2 giây) và trả ngay kèm nhận xét AI đã cache hoặc nhận xét offline.
+2. Nếu chưa có nhận xét AI, frontend tự gọi `POST`; trong lúc chờ, điểm và nhận xét offline vẫn hiển thị và nút báo "AI đang viết nhận xét…". Xong thì nhận xét AI thay thế.
+3. Kỳ đánh giá chọn 7/30/90 ngày (theo giờ Việt Nam), so sánh với kỳ liền trước cùng độ dài để cho biết tăng hay giảm.
+
+### Số liệu (`metrics.py`, hàm thuần, có test)
+
+| Nhóm | Cách tính |
+|---|---|
+| Đọc đúng | Từ bảng so sánh lời đọc với văn bản (MATCH/SUBSTITUTE/DELETE/INSERT). **Từ nằm sau từ cuối cùng bé đọc tới không bị tính là sai** (bé chưa đọc tới); chỉ tính bỏ sót các từ trước đó. Độ chính xác = số từ đúng / số từ đã đọc tới |
+| Phủ trang | Số từ đã đọc tới / tổng số từ của trang |
+| Đọc nhầm, bỏ sót | Tỉ lệ trên số từ đã đọc tới |
+| Ngập ngừng, lặp từ | Số lần dừng lâu hơn 1 giây và số lần lặp từ trong báo cáo so sánh |
+| Hiểu bài | **Chỉ tính lần trả lời đầu tiên** của mỗi câu hỏi (thử lại không làm lần đầu tốt hơn); thống kê theo loại câu hỏi |
+| Chăm chỉ | Số ngày có buổi đọc hoàn thành, số buổi, số phút (mỗi buổi tối đa 90 phút để buổi bị quên đóng không làm sai số) |
+| Từ khó | Từ bé hay đọc nhầm hoặc bỏ sót nhiều nhất, kèm từ bé thường đọc thành |
+| Luyện từ | Số lần đọc lại đúng/sai từng từ |
+
+### Điểm (`scoring.py`)
+
+| Thành phần | Công thức | Trọng số |
+|---|---|---|
+| Đọc đúng | % từ đọc đúng (cần ít nhất 20 từ) | 40% |
+| Hiểu bài | % câu trả lời đúng lần đầu (cần ít nhất 3 câu) | 25% |
+| Đọc trôi chảy | 100 trừ 5 điểm cho mỗi lần ngập ngừng/lặp từ trên 100 từ | 20% |
+| Chăm chỉ | ngày có đọc / mục tiêu 3 ngày mỗi tuần, tối đa 100 | 15% |
+
+Điểm tổng là trung bình có trọng số **trên các thành phần có dữ liệu** (trọng số được chuẩn hóa lại), và cần có dữ liệu đọc đúng hoặc hiểu bài (chỉ đi học đều chưa phải điểm đọc). Xếp loại: từ 85 Xuất sắc, từ 70 Tốt, từ 55 Khá, dưới 55 Cần luyện thêm. Thiếu dữ liệu thì hiện "Chưa đủ dữ liệu", không đoán.
+
+### Nhận xét AI (`ai.py`)
+
+- Chuỗi: Gemini chính -> Gemini dự phòng -> Groq. Lỗi khóa/hết quota thì bỏ cả họ model; lỗi quá tải 5xx thì vẫn thử model dự phòng. Timeout 20 giây mỗi lần.
+- Dùng structured output (JSON schema). Prompt yêu cầu: chỉ dùng số liệu được cung cấp, mỗi điểm yếu phải kèm bằng chứng bằng số, gợi ý làm được tại nhà trong 5–15 phút, không chẩn đoán y khoa, gọi trẻ là "bé" và người đọc là "ba mẹ", nói rõ khi dữ liệu thiếu.
+- Kết quả được **kiểm tra và làm sạch**: giới hạn độ dài, loại gợi ý sai đối tượng, và chỉ giữ từ luyện tập nằm trong danh sách từ khó thật. Nếu thiếu phần cốt lõi thì coi như lỗi và dùng nhận xét offline.
+- Nội dung nhận xét: tiêu đề, tóm tắt, điểm bé làm tốt, điểm cần cải thiện (kèm bằng chứng), việc ba mẹ làm và việc bé làm, từ nên luyện thêm, một câu động viên cho bé.
+
+### Cache
+
+Khóa cache = (bé, số ngày, dấu vân tay của toàn bộ số liệu). Số liệu không đổi thì trả lại nhận xét cũ (không tốn lượt gọi AI); có buổi đọc mới thì tự tạo nhận xét mới. Nút "Nhờ AI nhận xét lại" có thời gian chờ 60 giây để tránh bấm liên tục. Cache nằm trong RAM của backend, hết hạn sau 24 giờ.
+
+## E. API
+
+Đều cần đăng nhập; phụ huynh chỉ xem được bé của mình (sai chủ thì trả 404).
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| GET | `/tutor/children/{child_id}/progress-assessment?days=7..90` | Điểm, số liệu, biểu đồ tuần, từ khó và nhận xét (AI đã cache hoặc offline). Không gọi AI |
+| POST | `/tutor/children/{child_id}/progress-assessment` body `{days, refresh}` | Gọi AI viết nhận xét (có cache); `refresh` bắt AI viết lại |
+
+Kết quả chứa: `data_status` (`OK`/`INSUFFICIENT`), `score` (tổng, xếp loại, thay đổi so với kỳ trước, 4 thành phần), `metrics`, `weekly`, `difficult_words`, `assessment` (`source` = `AI`/`RULE_BASED`, `model`), `ai_cached`.
+
+## F. Giao diện
+
+Thẻ "Đánh giá bằng AI" nằm đầu trang Tiến bộ của bé (trước phần báo cáo đã lưu), gồm: chọn kỳ 7/30/90 ngày, vòng tròn điểm tổng kèm xếp loại và mũi tên tăng/giảm so với kỳ trước, 4 thanh điểm thành phần kèm giải thích, 4 ô thống kê (buổi đọc, phút, từ đã đọc, % đọc đúng), biểu đồ phút đọc theo tuần kèm % đọc đúng, khung nhận xét (có nhãn "Nhận xét do AI viết" hoặc "Nhận xét tự động từ số liệu"), các mục Bé làm tốt, Bé cần cải thiện, Cần làm gì (chia việc cho ba mẹ và việc cho bé), Từ bé nên luyện thêm và câu động viên. Có trạng thái đang tải, lỗi kèm nút thử lại, và hỗ trợ trình đọc màn hình (`progressbar`, `aria-live`, bảng tóm tắt cho biểu đồ). Thẻ chỉ hiển thị khi service được cung cấp, nên các màn hình/test hiện có không bị ảnh hưởng.
+
+## G. Công nghệ
+
+Backend: FastAPI, SQLAlchemy async (chỉ truy vấn đọc), Pydantic v2, `httpx` gọi Gemini/Groq (cùng khóa `GEMINI_API_KEY`/`GROQ_API_KEY` đang dùng cho tính năng khác). Frontend: React 19, TypeScript, `zod`, Tailwind, SVG tự vẽ cho vòng điểm (không thêm thư viện).
+
+Cấu hình (`backend/.env`, đều có mặc định): `CHILD_PROGRESS_AI_ENABLED` (true), `CHILD_PROGRESS_GEMINI_MODEL` / `_GEMINI_FALLBACK_MODEL` / `_GROQ_MODEL`, `CHILD_PROGRESS_TIMEOUT_SECONDS` (20), `CHILD_PROGRESS_CACHE_TTL_SECONDS` (86400), `CHILD_PROGRESS_REFRESH_COOLDOWN_SECONDS` (60). Không có migration mới.
+
+## H. File
+
+**Mới:**
+
+```
+backend/app/schemas/child_progress.py
+backend/app/repositories/child_progress_repository.py
+backend/app/services/child_progress_service.py
+backend/app/services/child_progress/{__init__,metrics,scoring,assessor,ai}.py
+backend/app/api/routes/child_progress.py
+backend/test_child_progress.py
+frontend/lib/api/child-progress-service.ts
+frontend/components/reports/child-progress-assessment.tsx
+frontend/tests/reports/{child-progress-service.test.ts, child-progress-assessment.test.tsx}
+```
+
+**Sửa file có sẵn (nhỏ):** `backend/app/api/router.py` (+2 dòng), `frontend/components/providers/app-services-provider.tsx` (thêm `childProgressService` tùy chọn), `frontend/components/reports/progress-report-screen.tsx` (+1 import và 1 dòng gắn thẻ). Ngoài ra sửa nhỏ ở `tutor_questions/generator.py` và `config.py` (xem mục J).
+
+## I. Kiểm thử
+
+| Bộ test | Kết quả |
+|---|---|
+| `backend/test_child_progress.py` (mới, 41 test) | OK |
+| Toàn bộ backend | chỉ còn 1 lỗi cũ không liên quan (`test_database_session`, do Python 3.10) |
+| Frontend `npx vitest run` | **93 file, 740 test pass** |
+| `tsc --noEmit`, ESLint, Prettier | 0 lỗi |
+
+Test phủ: tính từ đọc tới đâu (phần đuôi chưa đọc không bị phạt), bỏ sót/đọc nhầm, múi giờ Việt Nam, giới hạn 90 phút, lần trả lời đầu tiên, tuần, từ khó, công thức điểm và chuẩn hóa trọng số, nhận xét offline cho từng trường hợp, kiểm tra và làm sạch kết quả AI, chuỗi Gemini -> Groq (hết quota, quá tải, JSON sai), không gọi mạng khi tắt AI, cache và thời gian chờ, lỗi AI không bị cache, dữ liệu không đủ thì không gọi AI, quyền sở hữu, xác thực, kiểm tra tham số; phía frontend: service, thẻ hiển thị (điểm trước, nhận xét AI sau; AI lỗi; chưa đủ dữ liệu; đổi kỳ; làm mới; thử lại).
+
+**Chạy thật** với dữ liệu thật và Gemini: bé có nhiều buổi đọc nhất (29 buổi/30 ngày) được 68/100 (Khá); đọc đúng 76%, trôi chảy 56, chăm chỉ 62; AI trả về nhận xét đúng số liệu, nêu 3 điểm cần cải thiện kèm bằng chứng và gợi ý cụ thể; gọi lại trúng cache (2 giây). Lần chạy thật cũng cho thấy:
+- Khi Gemini quá tải (503), hệ thống rơi về nhận xét offline ngay (nhưng ban đầu bỏ luôn model dự phòng, nay đã sửa để thử model Gemini dự phòng, đã thấy hoạt động).
+- Một lần gọi bị treo gần 40 giây nên timeout đã giảm xuống 20 giây.
+- Lần đầu AI viết "con" thay vì "bé", prompt đã sửa và kiểm tra lại.
+
+## J. Thay đổi liên quan ở tính năng câu hỏi
+
+Cùng lỗi 503 cũng có ở bộ sinh câu hỏi: nay chỉ bỏ model còn lại của cùng nhà cung cấp khi lỗi khóa/hết quota (lỗi quá tải vẫn thử model dự phòng), và timeout mỗi nhà cung cấp giảm 40 -> 20 giây để tổng thời gian chờ ở nút "Xong" không vượt quá 45 giây của frontend. Đã thêm test.
+
+## K. Hạn chế
+
+- **Cache nhận xét AI nằm trong RAM**: mất khi backend khởi động lại và không chia sẻ giữa nhiều process (tốn thêm một lần gọi AI, không sai dữ liệu). Lưu bền cần bảng mới (migration), chưa làm vì cần đội DB chạy migration đồng bộ.
+- Độ trôi chảy dựa vào số lần dừng trên 1 giây trong báo cáo so sánh; các bé đọc rất chậm sẽ bị điểm này thấp. Ngưỡng 5 điểm/lần và mục tiêu 3 ngày/tuần là giá trị hợp lý ban đầu, nên chỉnh theo phản hồi thực tế của giáo viên.
+- Điểm so sánh kỳ trước chỉ có khi kỳ trước đủ dữ liệu.
+- Từ khó có thể gồm lỗi OCR của sách (ví dụ "môt" thay cho "một"); đó là dấu hiệu nên báo admin sửa văn bản trang.
+- Tốc độ đọc (từ/phút) có tính nhưng không dùng chấm điểm và không gửi AI, vì thời lượng buổi đọc gồm cả thời gian nghe mẫu và chờ.
+- Chưa xem được giao diện thẻ này trên trang thật (cần đăng nhập); mới kiểm tra bằng test.
+- Nút "Nhờ AI nhận xét lại" và cả lần tự động đều tốn lượt gọi Gemini; đã giới hạn bằng cache và thời gian chờ.

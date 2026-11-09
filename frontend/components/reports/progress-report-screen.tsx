@@ -6,6 +6,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ChildProgressAssessmentCard } from "@/components/reports/child-progress-assessment";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
@@ -269,6 +270,7 @@ function ProgressReportContent({
           </ButtonLink>
         }
       />
+      <ChildProgressAssessmentCard childId={child.id} childName={child.alias} />
       <ProgressReportFilters
         childrenProfiles={children}
         childId={child.id}

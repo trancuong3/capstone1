@@ -31,6 +31,10 @@ import { createPageMatchService } from "@/lib/api/page-match-service";
 import { createDevicePermissionService } from "@/lib/api/device-permission-service";
 import { createReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
 import { createTutorService } from "@/lib/api/tutor-service";
+import {
+  createChildProgressService,
+  type ChildProgressService,
+} from "@/lib/api/child-progress-service";
 
 import type { AppMockScenario } from "@/types/ui-state";
 import type { Group5DemoState } from "@/types/reports";
@@ -38,6 +42,8 @@ import type { Group5DemoState } from "@/types/reports";
 export interface AppServices {
   bookService: BookService;
   bookContentReportService: BookContentReportService;
+  /** AI progress assessment; absent in tests and demos. */
+  childProgressService?: ChildProgressService;
   childService: ChildService;
   comprehensionService: ComprehensionService;
   devicePermissionService: DevicePermissionService;
@@ -89,6 +95,9 @@ export function AppServicesProvider({
   const services = useMemo<AppServices>(
     () => ({
       childService: createChildService(),
+      childProgressService: isReadingEnabled
+        ? createChildProgressService()
+        : undefined,
       profileService: createProfileService(),
       bookService: createBookService(),
       bookContentReportService: createBookContentReportService(),
