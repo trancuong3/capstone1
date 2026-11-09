@@ -381,6 +381,60 @@ def align_ocr_tokens(
     return aligned
 
 
+def _split_merge_operations_by_source_index(
+    candidates: list[dict[str, object]],
+    selected_engine: str,
+    paddle_entries: list[tuple[int, str]],
+    vietocr_entries: list[tuple[int, str]],
+) -> dict[int, str]:
+    """Map split/merge candidates back to original indexes of the selected engine.
+
+    Candidate indexes are positions in filtered token arrays. Word evidence
+    indexes refer to original whitespace tokens, so this mapping must pass
+    through the engine's source-index entries. Invalid mappings are not guessed.
+    """
+    if selected_engine == "paddleocr":
+        selected_key = "primary_indices"
+        selected_entries = paddle_entries
+    elif selected_engine == "vietocr":
+        selected_key = "secondary_indices"
+        selected_entries = vietocr_entries
+    else:
+        return {}
+
+    operations_by_source_index: dict[int, set[str]] = {}
+    for candidate in candidates:
+        operation = candidate.get("operation")
+        indexes = candidate.get(selected_key)
+        if operation not in {"split", "merge"} or not isinstance(indexes, (list, tuple)) or not indexes:
+            continue
+        mapped_indexes: list[int] = []
+        safe_mapping = True
+        for compact_index in indexes:
+            if (
+                isinstance(compact_index, bool)
+                or not isinstance(compact_index, int)
+                or compact_index < 0
+                or compact_index >= len(selected_entries)
+            ):
+                safe_mapping = False
+                break
+            source_index = selected_entries[compact_index][0]
+            if isinstance(source_index, bool) or not isinstance(source_index, int) or source_index < 0:
+                safe_mapping = False
+                break
+            mapped_indexes.append(source_index)
+        if not safe_mapping:
+            continue
+        for source_index in mapped_indexes:
+            operations_by_source_index.setdefault(source_index, set()).add(str(operation))
+
+    return {
+        source_index: next(iter(operations)) if len(operations) == 1 else "unresolved"
+        for source_index, operations in operations_by_source_index.items()
+    }
+
+
 def _word_engine_evidence(
     recognized_word: str,
     other_engine_word: str | None,
@@ -1223,6 +1277,14 @@ def _extract_text_and_boxes_dual_engine(
             for step in alignment
             if step["primary_index"] is not None
         }
+        selected_engine_name = "vietocr" if viet_text_used else "paddleocr"
+        split_merge_candidates = find_split_merge_candidates(paddle_tokens, vietocr_tokens)
+        split_merge_by_source_index = _split_merge_operations_by_source_index(
+            split_merge_candidates,
+            selected_engine_name,
+            paddle_entries,
+            vietocr_entries,
+        )
         line_index = len(lines_output)
         valid_line_confidence = None
         try:
@@ -1286,9 +1348,7 @@ def _extract_text_and_boxes_dual_engine(
                 else "paddle_provisional_fallback_or_vietocr_rejected"
             ),
             "alignment_operations": alignment_operations,
-            "split_merge_candidates": find_split_merge_candidates(
-                paddle_tokens, vietocr_tokens
-            ),
+            "split_merge_candidates": split_merge_candidates,
         })
 
         for w_idx, raw_token in enumerate(valid_words):
@@ -1310,17 +1370,38 @@ def _extract_text_and_boxes_dual_engine(
             if operation == "delete":
                 operation = "unmatched"
 
-            paddle_token = raw_token if not viet_text_used else matched_other_token
-            vietocr_token = raw_token if viet_text_used else matched_other_token
             selected_source_index = selected_source_indices[w_idx] if w_idx < len(selected_source_indices) else None
             secondary_source_index = (
                 other_source_indices[secondary_index]
                 if secondary_index is not None and secondary_index < len(other_source_indices)
                 else None
             )
+            split_merge_operation = (
+                split_merge_by_source_index.get(selected_source_index)
+                if selected_source_index is not None
+                else None
+            )
+            paddle_token = raw_token if not viet_text_used else matched_other_token
+            vietocr_token = raw_token if viet_text_used else matched_other_token
             paddle_source_index = secondary_source_index if viet_text_used else selected_source_index
             vietocr_source_index = selected_source_index if viet_text_used else secondary_source_index
-            if operation == "insert":
+
+            if split_merge_operation is not None:
+                # A 1:N/N:1 candidate has no safe one-to-one token on the
+                # opposite engine. Keep selected-token provenance only; the
+                # complete group mapping remains in line_evidence.
+                operation = split_merge_operation
+                agreement = None
+                review_status = "engine_disagreement"
+                paddle_token = raw_token if selected_engine_name == "paddleocr" else None
+                vietocr_token = raw_token if selected_engine_name == "vietocr" else None
+                paddle_source_index = selected_source_index if selected_engine_name == "paddleocr" else None
+                vietocr_source_index = selected_source_index if selected_engine_name == "vietocr" else None
+                review_reason = (
+                    "Phát hiện candidate split/merge giữa hai engine; không có ánh xạ một-một an toàn. "
+                    "Đối chiếu nhóm token trong line evidence."
+                )
+            elif operation == "insert":
                 review_reason = "Engine còn lại có thêm token; hệ thống không ghép theo vị trí."
             elif operation == "unmatched":
                 review_reason = "Không tìm thấy từ tương ứng đáng tin cậy ở engine còn lại."
@@ -1358,7 +1439,7 @@ def _extract_text_and_boxes_dual_engine(
                     "calibrated_word_accuracy": None,
                     "verification_source": None,
                     "reference_text": None,
-                    "selected_engine": "vietocr" if viet_text_used else "paddleocr",
+                    "selected_engine": selected_engine_name,
                     "selection_reason": (
                         "vietocr_nonempty_nonrepetitive_provisional"
                         if viet_text_used

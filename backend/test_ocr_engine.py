@@ -184,6 +184,68 @@ class DualEngineOcrTests(unittest.TestCase):
             "The raw Paddle line score must not be duplicated into word probability.",
         )
 
+    def test_split_merge_candidates_are_attached_to_each_selected_source_token(self):
+        quad = [[20.0, 30.0], [380.0, 30.0], [380.0, 90.0], [20.0, 90.0]]
+
+        # One PaddleOCR token corresponds to two VietOCR tokens. Keep selected
+        # source indexes and avoid inventing a one-to-one opposite-engine token.
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("xinchao", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "xin chao"
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=True),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            merged = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual([word["text"] for word in merged["words"]], ["xin", "chao"])
+        self.assertEqual([word["ocr_evidence"]["alignment"] for word in merged["words"]], ["merge", "merge"])
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in merged["words"]],
+            [
+                {"paddleocr": None, "vietocr": "xin"},
+                {"paddleocr": None, "vietocr": "chao"},
+            ],
+        )
+        self.assertEqual([word["ocr_evidence"]["vietocr_token_index"] for word in merged["words"]], [0, 1])
+        self.assertEqual([word["ocr_evidence"]["paddle_token_index"] for word in merged["words"]], [None, None])
+        self.assertEqual(
+            merged["metadata"]["line_evidence"][0]["split_merge_candidates"],
+            [{"operation": "merge", "primary_indices": [0], "secondary_indices": [0, 1]}],
+        )
+
+        # Reverse direction: two PaddleOCR tokens correspond to one VietOCR token.
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("xin chao", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "xinchao"
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "is_vietocr_reliable", return_value=False),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            split = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+
+        self.assertEqual([word["text"] for word in split["words"]], ["xin", "chao"])
+        self.assertEqual([word["ocr_evidence"]["alignment"] for word in split["words"]], ["split", "split"])
+        self.assertEqual(
+            [word["ocr_evidence"]["engine_outputs"] for word in split["words"]],
+            [
+                {"paddleocr": "xin", "vietocr": None},
+                {"paddleocr": "chao", "vietocr": None},
+            ],
+        )
+        self.assertEqual([word["ocr_evidence"]["paddle_token_index"] for word in split["words"]], [0, 1])
+        self.assertEqual([word["ocr_evidence"]["vietocr_token_index"] for word in split["words"]], [None, None])
+        self.assertEqual(
+            split["metadata"]["line_evidence"][0]["split_merge_candidates"],
+            [{"operation": "split", "primary_indices": [0, 1], "secondary_indices": [0]}],
+        )
+
     def test_invalid_paddle_line_scores_remain_unavailable_at_line_scope(self):
         quad = [[40.0, 30.0], [160.0, 30.0], [160.0, 70.0], [40.0, 70.0]]
         for invalid_score in (float("nan"), float("inf"), True, -0.1, 1.1):

@@ -474,6 +474,93 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r2_row.VerifiedText, "Ngày xưa có em.")
             self.assertIsNone(r3_row.VerifiedText)
 
+    async def test_split_merge_word_evidence_survives_postgres_and_revision_api(self):
+        async with self.sessions() as session:
+            draft = await AdminOcrService(session).create_edit_draft(
+                ACTOR, PAGE_ID, R1_ID
+            )
+            revision_id = draft.page_revision_id
+            merge_evidence = {
+                "contract": "hybrid_ocr_evidence_v4",
+                "engine_outputs": {
+                    "paddleocr": None,
+                    "vietocr": "Ngày",
+                    "tesseract": None,
+                },
+                "engine_statuses": {
+                    "paddleocr": "success",
+                    "vietocr": "success",
+                    "tesseract": "not_run",
+                },
+                "engine_errors": {},
+                "paddle_token_index": None,
+                "vietocr_token_index": 0,
+                "source_text": "Ngày",
+                "alignment": "merge",
+                "engine_agreement_score": None,
+                "calibrated_word_accuracy": None,
+                "verification_source": None,
+                "reference_text": None,
+                "reference_alignment": None,
+                "selected_engine": "vietocr",
+                "selection_reason": "split_merge_candidate",
+                "bbox_quality": "valid",
+                "crop_quality": "usable",
+                "crop_evidence": None,
+                "review_reason": "One-to-many candidate; no safe one-to-one match.",
+            }
+            await session.execute(
+                text("""
+                    UPDATE pagerevisions
+                    SET processingmeta = jsonb_set(
+                        jsonb_set(
+                            processingmeta,
+                            '{word_evidence_v2,0}',
+                            CAST(:evidence AS jsonb),
+                            true
+                        ),
+                        '{word_review_statuses,0}',
+                        '"needs_review"'::jsonb,
+                        true
+                    )
+                    WHERE id = :revision
+                """),
+                {
+                    "evidence": json.dumps(merge_evidence),
+                    "revision": revision_id,
+                },
+            )
+            await session.commit()
+
+        app = self._test_app()
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(
+                f"/books/admin/pages/{PAGE_ID}/revisions/{revision_id}"
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        first_word = response.json()["words"][0]
+        self.assertEqual(first_word["ocr_evidence"]["alignment"], "merge")
+        self.assertEqual(
+            first_word["ocr_evidence"]["engine_outputs"],
+            {"paddleocr": None, "vietocr": "Ngày", "tesseract": None},
+        )
+        self.assertEqual(first_word["ocr_evidence"]["vietocr_token_index"], 0)
+        self.assertIsNone(first_word["ocr_evidence"]["paddle_token_index"])
+        self.assertEqual(first_word["ocr_review_status"], "needs_review")
+        self.assertEqual(first_word["review_color_group"], "yellow")
+
+        async with self.sessions() as session:
+            persisted = await session.get(PageRevision, revision_id)
+            self.assertEqual(
+                persisted.ProcessingMeta["word_evidence_v2"][0]["alignment"],
+                "merge",
+            )
+            self.assertEqual(
+                persisted.ProcessingMeta["word_evidence_v2"][0]["engine_outputs"]["vietocr"],
+                "Ngày",
+            )
+
     async def test_partial_dual_engine_evidence_survives_postgres_revision_api_read(self):
         partial_evidence = {
             "contract": "hybrid_ocr_evidence_v4",
