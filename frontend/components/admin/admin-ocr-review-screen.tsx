@@ -128,6 +128,7 @@ export function getWordReviewColorGroup(
 ): WordReviewColorGroup {
   if (status === "verified" || status === "reference_match") return "green";
   if (status === "confirmed_mismatch") return "red";
+  if (status === "engine_disagreement" || status === "suspect") return "yellow";
   if (sourceTokenWasEdited(word)) return "yellow";
 
   const contractGroup = word?.review_color_group;
