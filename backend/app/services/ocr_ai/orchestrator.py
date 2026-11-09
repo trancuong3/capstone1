@@ -67,15 +67,6 @@ class OcrCorrectionOrchestrator:
                     timeout_seconds=self.config.cloud_timeout_seconds,
                 )
             )
-        if self.config.groq_enabled:
-            assert self.config.groq_api_key is not None
-            providers.append(
-                GroqOcrProvider(
-                    model=self.config.groq_model,
-                    api_key=self.config.groq_api_key,
-                    timeout_seconds=self.config.cloud_timeout_seconds,
-                )
-            )
         if self.config.gemini_enabled:
             assert self.config.gemini_api_key is not None
             providers.append(
@@ -83,6 +74,15 @@ class OcrCorrectionOrchestrator:
                     name="gemini_3_1",
                     model=self.config.gemini_fallback_model,
                     api_key=self.config.gemini_api_key,
+                    timeout_seconds=self.config.cloud_timeout_seconds,
+                )
+            )
+        if self.config.groq_enabled:
+            assert self.config.groq_api_key is not None
+            providers.append(
+                GroqOcrProvider(
+                    model=self.config.groq_model,
+                    api_key=self.config.groq_api_key,
                     timeout_seconds=self.config.cloud_timeout_seconds,
                 )
             )

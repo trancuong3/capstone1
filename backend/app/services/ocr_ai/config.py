@@ -45,6 +45,8 @@ def _read_model(name: str, default: str) -> str:
     value = os.getenv(name, default).strip()
     if not _MODEL_PATTERN.fullmatch(value):
         raise OcrConfigurationError("INVALID_CLOUD_MODEL")
+    if value != default:
+        raise OcrConfigurationError("UNSUPPORTED_CLOUD_MODEL")
     return value
 
 

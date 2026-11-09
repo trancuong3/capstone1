@@ -362,6 +362,15 @@ class AdminOcrService:
         ]
         recognized_tokens = [str(word["text"]) for word in words]
         alignment = align_ocr_tokens(reference_tokens, recognized_tokens)
+        reference_alignment_is_unambiguous = (
+            len(reference_tokens) == len(recognized_tokens)
+            and len(alignment) == len(recognized_tokens)
+            and all(
+                step["primary_index"] == index
+                and step["secondary_index"] == index
+                for index, step in enumerate(alignment)
+            )
+        )
         by_recognized_index = {
             int(step["secondary_index"]): step
             for step in alignment
@@ -381,8 +390,14 @@ class AdminOcrService:
             )
             exact_match = (
                 reference_token is not None
-                and unicodedata.normalize("NFC", str(word["text"])).strip()
-                == reference_token
+                and normalize_word(str(word["text"]))
+                == normalize_word(reference_token)
+            )
+            confirmed_mismatch = (
+                not exact_match
+                and reference_alignment_is_unambiguous
+                and step is not None
+                and step["operation"] == "substitute"
             )
             evidence = AdminOcrService._normalize_word_evidence(
                 word.get("ocr_evidence")
@@ -404,14 +419,22 @@ class AdminOcrService:
                     str(step["operation"]) if step is not None else "unmatched"
                 ),
                 "review_reason": (
-                    "Token khớp chính xác với revision đã được Admin xác minh của trang này."
+                    "Token khớp với revision đã xác minh sau khi chuẩn hóa dấu câu và chữ hoa/thường."
                     if exact_match
-                    else "Token khác với revision đã được Admin xác minh của trang này."
+                    else (
+                        "Token không khớp với reference trong căn chỉnh một-một rõ ràng."
+                        if confirmed_mismatch
+                        else "Chưa thể ghép token với reference một cách chắc chắn; cần xem lại."
+                    )
                 ),
             })
             word["ocr_evidence"] = evidence
             word["ocr_review_status"] = (
-                "reference_match" if exact_match else "confirmed_mismatch"
+                "reference_match"
+                if exact_match
+                else "confirmed_mismatch"
+                if confirmed_mismatch
+                else "needs_review"
             )
         return [
             {
@@ -940,6 +963,16 @@ class AdminOcrService:
             ) from exc
 
         processing_meta = dict(ocr["metadata"])
+        processing_meta["word_review_statuses"] = [
+            str(word.get("ocr_review_status", "needs_review")) for word in words
+        ]
+        processing_meta["word_score_sources"] = self._word_score_sources(
+            words, processing_meta
+        )
+        processing_meta["word_evidence_v2"] = [
+            self._normalize_word_evidence(word.get("ocr_evidence"))
+            for word in words
+        ]
         processing_meta.update({
             "source_image_path": object_path,
             "source_image_width": width,
