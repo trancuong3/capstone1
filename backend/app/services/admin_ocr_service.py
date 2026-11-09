@@ -435,6 +435,99 @@ class AdminOcrService:
         }
 
     @staticmethod
+    def _line_word_evidence(
+        metadata: dict[str, object],
+        line_index: int,
+        word_position: int,
+    ) -> dict[str, object] | None:
+        """Recover immutable engine candidates from line metadata for legacy revisions.
+
+        Older draft saves could clear word_evidence_v2 after a token edit, while
+        line_evidence remained intact. Rebuild the per-word candidate pair using
+        the selected engine's original token order; never rebuild scores or
+        verification labels from line confidence.
+        """
+        raw_lines = metadata.get("line_evidence")
+        if not isinstance(raw_lines, list):
+            return None
+        line = next(
+            (
+                item
+                for item in raw_lines
+                if isinstance(item, dict) and item.get("line_index") == line_index
+            ),
+            None,
+        )
+        if not isinstance(line, dict):
+            return None
+        operations = line.get("alignment_operations")
+        if not isinstance(operations, list):
+            return None
+
+        selected_engine = (
+            "vietocr" if line.get("vietocr_output_used") is True else "paddleocr"
+        )
+        selected_key = "vietocr_token" if selected_engine == "vietocr" else "paddle_token"
+        selected_operations = [
+            item
+            for item in operations
+            if isinstance(item, dict)
+            and isinstance(item.get(selected_key), str)
+            and str(item[selected_key]).strip()
+        ]
+        if word_position < 0 or word_position >= len(selected_operations):
+            return None
+
+        item = selected_operations[word_position]
+        operation = item.get("operation")
+        if operation not in {"match", "substitute", "delete", "insert"}:
+            operation = "unknown"
+        paddle_token = item.get("paddle_token")
+        vietocr_token = item.get("vietocr_token")
+        source_text = item.get(selected_key)
+        selection_reason = line.get("selection_reason")
+        if not isinstance(selection_reason, str):
+            selection_reason = "reconstructed_from_immutable_line_evidence"
+
+        if operation == "match":
+            review_reason = (
+                "Khôi phục từ line_evidence: hai engine từng trả về cùng token; "
+                "điều này chưa xác minh token là đúng."
+            )
+        elif operation == "substitute":
+            review_reason = (
+                "Khôi phục từ line_evidence: hai engine từng bất đồng; "
+                "candidate gốc cần Admin đối chiếu ảnh."
+            )
+        else:
+            review_reason = (
+                "Khôi phục từ line_evidence: chỉ có candidate từ engine được chọn; "
+                "không có ground truth độc lập."
+            )
+
+        return {
+            "contract": HYBRID_OCR_EVIDENCE_CONTRACT,
+            "engine_outputs": {
+                "paddleocr": paddle_token if isinstance(paddle_token, str) else None,
+                "vietocr": vietocr_token if isinstance(vietocr_token, str) else None,
+                "tesseract": None,
+            },
+            "source_text": source_text,
+            "alignment": str(operation),
+            "engine_agreement_score": None,
+            "calibrated_word_accuracy": None,
+            "verification_source": None,
+            "reference_text": None,
+            "reference_alignment": None,
+            "selected_engine": selected_engine,
+            "selection_reason": selection_reason,
+            "bbox_quality": None,
+            "crop_quality": None,
+            "crop_evidence": None,
+            "review_reason": review_reason,
+        }
+
+    @staticmethod
     def _apply_verified_reference(
         words: list[dict[str, object]], reference_text: str
     ) -> list[dict[str, object]]:
@@ -621,8 +714,12 @@ class AdminOcrService:
         statuses: list[str] = []
         score_sources: list[str | None] = []
         evidence_items: list[dict[str, object] | None] = []
+        line_positions: dict[int, int] = {}
         for word in words:
             index = int(word["word_index"])
+            line_index = int(word["line_index"])
+            word_position = line_positions.get(line_index, 0)
+            line_positions[line_index] = word_position + 1
             source = existing_by_index.get(index)
             same_position = (
                 source is not None
@@ -668,6 +765,10 @@ class AdminOcrService:
                 else None
             )
             normalized_evidence = AdminOcrService._normalize_word_evidence(evidence)
+            if normalized_evidence is None and same_position:
+                normalized_evidence = AdminOcrService._line_word_evidence(
+                    metadata, line_index, word_position
+                )
             if (
                 normalized_evidence is not None
                 and normalized_evidence.get("source_text") is None
@@ -1224,7 +1325,10 @@ class AdminOcrService:
         raw_score_source = metadata.get("ocr_score_contract")
         score_contract = raw_score_source if raw_score_source in OCR_SCORE_CONTRACTS else None
         words = []
+        line_positions: dict[int, int] = {}
         for row in rows:
+            word_position = line_positions.get(row.LineIndex, 0)
+            line_positions[row.LineIndex] = word_position + 1
             try:
                 box = normalize_ocr_bbox(row.BoundingBox)
             except (TypeError, ValueError) as exc:
@@ -1270,10 +1374,13 @@ class AdminOcrService:
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
                 "ocr_score_source": score_source,
-                "ocr_evidence": self._normalize_word_evidence(
-                    raw_word_evidence[row.WordIndex]
-                    if 0 <= row.WordIndex < len(raw_word_evidence)
-                    else None
+                "ocr_evidence": (
+                    self._normalize_word_evidence(
+                        raw_word_evidence[row.WordIndex]
+                        if 0 <= row.WordIndex < len(raw_word_evidence)
+                        else None
+                    )
+                    or self._line_word_evidence(metadata, row.LineIndex, word_position)
                 ),
             })
         raw_revision = str(revision.RevisionNo)
