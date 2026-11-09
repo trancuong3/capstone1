@@ -142,12 +142,11 @@ def classify_word_evidence(
             if isinstance(source_text, str) else None
         )
         if (
-            review_status == "confirmed_mismatch"
-            and reference_alignment == "substitute"
+            reference_alignment == "substitute"
             and normalized_source == normalized_word
         ):
-            # _apply_verified_reference sets confirmed_mismatch only when the
-            # page-level token alignment is unambiguous and one-to-one.
+            # Trusted reference provenance plus a one-to-one substitution is
+            # decisive even when a persisted review status is stale.
             return "red"
         return "yellow"
 
