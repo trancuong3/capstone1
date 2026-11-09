@@ -206,10 +206,14 @@ class AdminOcrWordEvidenceRead(BaseModel):
     contract: Literal[
         "dual_engine_agreement_v2",
         "hybrid_ocr_evidence_v3",
+        "hybrid_ocr_evidence_v4",
         "tesseract_raw_word_score_v1",
         "ocr_calibrated_word_accuracy_v1",
     ]
     engine_outputs: dict[str, str | None] = Field(default_factory=dict)
+    engine_statuses: dict[str, str] = Field(default_factory=dict)
+    paddle_token_index: int | None = Field(default=None, ge=0)
+    vietocr_token_index: int | None = Field(default=None, ge=0)
     source_text: str | None = None
     alignment: str
     engine_agreement_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
