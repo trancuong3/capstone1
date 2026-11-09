@@ -1796,6 +1796,7 @@ class AdminOcrService:
                 else status_from_evidence
                 if isinstance(status_from_evidence, str)
                 and status_from_evidence in OCR_REVIEW_STATUSES
+                and status_from_evidence != "verified"
                 else "needs_review"
             )
             if review_status == "matched":
