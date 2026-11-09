@@ -61,6 +61,7 @@ RAW_WORD_SCORE_CONTRACTS = {OCR_SCORE_CONTRACT}
 OCR_EVIDENCE_CONTRACTS = {
     "dual_engine_agreement_v2",
     "hybrid_ocr_evidence_v3",
+    "hybrid_ocr_evidence_v4",
     "tesseract_raw_word_score_v1",
     "ocr_calibrated_word_accuracy_v1",
 }
@@ -353,6 +354,28 @@ class AdminOcrService:
         if not isinstance(review_reason, str):
             review_reason = "Evidence is unavailable."
 
+        raw_engine_statuses = value.get("engine_statuses")
+        allowed_engine_statuses = {
+            "not_installed", "not_initialized", "not_run", "processing",
+            "success", "no_result", "error", "disabled",
+        }
+        engine_statuses: dict[str, str] = {}
+        if isinstance(raw_engine_statuses, dict):
+            for engine_name in ("paddleocr", "vietocr", "tesseract"):
+                status_value = raw_engine_statuses.get(engine_name)
+                if isinstance(status_value, str) and status_value in allowed_engine_statuses:
+                    engine_statuses[engine_name] = status_value
+
+        def safe_token_index(name: str) -> int | None:
+            token_index = value.get(name)
+            return (
+                token_index
+                if isinstance(token_index, int)
+                and not isinstance(token_index, bool)
+                and token_index >= 0
+                else None
+            )
+
         selected_engine = value.get("selected_engine")
         if selected_engine not in {"paddleocr", "vietocr", "tesseract"}:
             selected_engine = None
@@ -421,6 +444,9 @@ class AdminOcrService:
         return {
             "contract": value["contract"],
             "engine_outputs": safe_outputs,
+            "engine_statuses": engine_statuses,
+            "paddle_token_index": safe_token_index("paddle_token_index"),
+            "vietocr_token_index": safe_token_index("vietocr_token_index"),
             "source_text": source_text,
             "alignment": alignment,
             "engine_agreement_score": float(agreement) if agreement is not None else None,
@@ -441,21 +467,15 @@ class AdminOcrService:
         metadata: dict[str, object],
         line_index: int,
         word_position: int,
+        expected_line_tokens: list[str] | None = None,
     ) -> dict[str, object] | None:
-        """Recover immutable engine candidates from line metadata for legacy revisions.
-
-        Older draft saves could clear word_evidence_v2 after a token edit, while
-        line_evidence remained intact. Rebuild the per-word candidate pair using
-        the selected engine's original token order; never rebuild scores or
-        verification labels from line confidence.
-        """
+        """Recover legacy OCR candidates only when the stored line is unchanged."""
         raw_lines = metadata.get("line_evidence")
         if not isinstance(raw_lines, list):
             return None
         line = next(
             (
-                item
-                for item in raw_lines
+                item for item in raw_lines
                 if isinstance(item, dict) and item.get("line_index") == line_index
             ),
             None,
@@ -466,21 +486,50 @@ class AdminOcrService:
         if not isinstance(operations, list):
             return None
 
-        selected_engine = (
-            "vietocr" if line.get("vietocr_output_used") is True else "paddleocr"
-        )
+        selected_engine = "vietocr" if line.get("vietocr_output_used") is True else "paddleocr"
         selected_key = "vietocr_token" if selected_engine == "vietocr" else "paddle_token"
-        selected_operations = [
-            item
-            for item in operations
-            if isinstance(item, dict)
-            and isinstance(item.get(selected_key), str)
-            and str(item[selected_key]).strip()
-        ]
-        if word_position < 0 or word_position >= len(selected_operations):
-            return None
+        output_key = "vietocr_output" if selected_engine == "vietocr" else "paddle_output"
+        selected_output = line.get(output_key)
+        if expected_line_tokens is not None:
+            if not isinstance(selected_output, str):
+                return None
+            expected = [normalize_word(token) for token in expected_line_tokens]
+            observed = normalize_text_tokens(selected_output)
+            if expected != observed:
+                return None
 
-        item = selected_operations[word_position]
+        if not isinstance(selected_output, str):
+            return None
+        original_indexes = [
+            index
+            for index, token in enumerate(selected_output.split())
+            if normalize_word(token)
+        ]
+        if word_position < 0 or word_position >= len(original_indexes):
+            return None
+        selected_source_index = original_indexes[word_position]
+
+        item = next(
+            (
+                candidate for candidate in operations
+                if isinstance(candidate, dict)
+                and candidate.get("selected_token_index") == selected_source_index
+                and isinstance(candidate.get(selected_key), str)
+                and str(candidate[selected_key]).strip()
+            ),
+            None,
+        )
+        if item is None:
+            selected_operations = [
+                candidate for candidate in operations
+                if isinstance(candidate, dict)
+                and isinstance(candidate.get(selected_key), str)
+                and str(candidate[selected_key]).strip()
+            ]
+            if word_position >= len(selected_operations):
+                return None
+            item = selected_operations[word_position]
+
         operation = item.get("operation")
         if operation not in {"match", "substitute", "delete", "insert"}:
             operation = "unknown"
@@ -489,7 +538,7 @@ class AdminOcrService:
         source_text = item.get(selected_key)
         selection_reason = line.get("selection_reason")
         if not isinstance(selection_reason, str):
-            selection_reason = "reconstructed_from_immutable_line_evidence"
+            selection_reason = "reconstructed_from_unchanged_line_evidence"
 
         if operation == "match":
             review_reason = (
@@ -514,6 +563,13 @@ class AdminOcrService:
                 "vietocr": vietocr_token if isinstance(vietocr_token, str) else None,
                 "tesseract": None,
             },
+            "engine_statuses": (
+                line.get("engine_statuses")
+                if isinstance(line.get("engine_statuses"), dict)
+                else {}
+            ),
+            "paddle_token_index": item.get("paddle_token_index"),
+            "vietocr_token_index": item.get("vietocr_token_index"),
             "source_text": source_text,
             "alignment": str(operation),
             "engine_agreement_score": None,
@@ -653,29 +709,59 @@ class AdminOcrService:
         return sources
 
     @staticmethod
+    def _existing_rows_by_bbox(
+        words: list[dict[str, object]],
+        existing_rows: list[Any],
+    ) -> dict[int, Any]:
+        """Match source rows only by a unique normalized bbox."""
+        rows_by_bbox: dict[tuple[float, float, float, float], list[Any]] = {}
+        for row in existing_rows:
+            try:
+                key = tuple(
+                    round(value, 6)
+                    for value in normalize_ocr_bbox(row.BoundingBox)
+                )
+            except (AttributeError, TypeError, ValueError):
+                continue
+            rows_by_bbox.setdefault(key, []).append(row)
+
+        matched: dict[int, Any] = {}
+        for word in words:
+            try:
+                key = tuple(
+                    round(value, 6)
+                    for value in normalize_ocr_bbox(word["bbox"])
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidates = rows_by_bbox.get(key, [])
+            if len(candidates) == 1:
+                matched[int(word["word_index"])] = candidates[0]
+        return matched
+
+    @staticmethod
     def _preserve_trusted_word_scores(
         revision: PageRevision,
         words: list[dict[str, object]],
         existing_rows: list[Any],
     ) -> None:
-        """Treat OCR scores as immutable engine evidence, never client input."""
+        """Never transfer a raw score to a different token or ambiguous bbox."""
         metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
         raw_sources = metadata.get("word_score_sources")
         if not isinstance(raw_sources, list):
             raw_sources = []
         contract_fallback = metadata.get("ocr_score_contract")
-        existing_by_index = {row.WordIndex: row for row in existing_rows}
+        existing_by_bbox = AdminOcrService._existing_rows_by_bbox(words, existing_rows)
         for word in words:
-            index = int(word["word_index"])
-            source_row = existing_by_index.get(index)
+            source_row = existing_by_bbox.get(int(word["word_index"]))
+            source_index = int(source_row.WordIndex) if source_row is not None else -1
             score_source = (
-                raw_sources[index]
-                if index < len(raw_sources)
+                raw_sources[source_index]
+                if 0 <= source_index < len(raw_sources)
                 else contract_fallback
             )
             same_token = (
                 source_row is not None
-                and source_row.LineIndex == int(word["line_index"])
                 and unicodedata.normalize("NFC", str(source_row.Text))
                 == unicodedata.normalize("NFC", str(word["text"]))
             )
@@ -700,7 +786,7 @@ class AdminOcrService:
         *,
         verified: bool = False,
     ) -> None:
-        """Persist review evidence by word index in the revision metadata."""
+        """Persist provenance against source bbox identity, never shifted word indexes."""
         metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
         old_statuses = metadata.get("word_review_statuses")
         if not isinstance(old_statuses, list):
@@ -712,64 +798,84 @@ class AdminOcrService:
         if not isinstance(old_evidence, list):
             old_evidence = []
         contract_fallback = metadata.get("ocr_score_contract")
-        existing_by_index = {row.WordIndex: row for row in existing_rows}
+        evidence_is_authoritative = metadata.get("word_evidence_v2_authoritative") is True
+
+        existing_by_bbox = AdminOcrService._existing_rows_by_bbox(words, existing_rows)
+        sorted_rows = sorted(
+            existing_rows,
+            key=lambda row: (int(row.LineIndex), int(row.WordIndex)),
+        )
+        line_tokens: dict[int, list[str]] = {}
+        line_positions: dict[int, int] = {}
+        source_line_positions: dict[int, int] = {}
+        for row in sorted_rows:
+            line_index = int(row.LineIndex)
+            word_index = int(row.WordIndex)
+            source_line_positions[word_index] = line_positions.get(line_index, 0)
+            line_positions[line_index] = source_line_positions[word_index] + 1
+            line_tokens.setdefault(line_index, []).append(
+                unicodedata.normalize("NFC", str(row.Text))
+            )
+
         statuses: list[str] = []
         score_sources: list[str | None] = []
         evidence_items: list[dict[str, object] | None] = []
-        line_positions: dict[int, int] = {}
         for word in words:
             index = int(word["word_index"])
-            line_index = int(word["line_index"])
-            word_position = line_positions.get(line_index, 0)
-            line_positions[line_index] = word_position + 1
-            source = existing_by_index.get(index)
-            same_position = (
+            source = existing_by_bbox.get(index)
+            source_index = int(source.WordIndex) if source is not None else -1
+            same_token = (
                 source is not None
-                and source.LineIndex == int(word["line_index"])
-            )
-            unchanged = (
-                same_position
                 and unicodedata.normalize("NFC", str(source.Text))
                 == unicodedata.normalize("NFC", str(word["text"]))
             )
-            previous = old_statuses[index] if index < len(old_statuses) else None
+
+            previous = (
+                old_statuses[source_index]
+                if 0 <= source_index < len(old_statuses)
+                else None
+            )
             if verified:
                 current = "verified"
-            elif unchanged and isinstance(previous, str) and previous in OCR_REVIEW_STATUSES:
+            elif same_token and isinstance(previous, str) and previous in OCR_REVIEW_STATUSES:
                 current = (
-                    "engine_agreement"
-                    if previous == "matched"
-                    else "engine_disagreement"
-                    if previous == "suspect"
+                    "engine_agreement" if previous == "matched"
+                    else "engine_disagreement" if previous == "suspect"
                     else previous
                 )
             else:
                 current = "needs_review"
             statuses.append(current)
+
             previous_source = (
-                old_sources[index]
-                if index < len(old_sources)
+                old_sources[source_index]
+                if 0 <= source_index < len(old_sources)
                 else contract_fallback
             )
             score_sources.append(
                 previous_source
-                if unchanged
+                if same_token
                 and isinstance(previous_source, str)
                 and previous_source in OCR_SCORE_CONTRACTS
                 else None
             )
-            # Keep original engine outputs as immutable recognition provenance
-            # when an Admin edits the displayed token at the same word position.
-            # The text change still clears word scores and review status above.
+
             evidence = (
-                old_evidence[index]
-                if same_position and index < len(old_evidence)
+                old_evidence[source_index]
+                if 0 <= source_index < len(old_evidence)
                 else None
             )
             normalized_evidence = AdminOcrService._normalize_word_evidence(evidence)
-            if normalized_evidence is None and same_position:
+            if (
+                normalized_evidence is None
+                and source is not None
+                and not evidence_is_authoritative
+            ):
                 normalized_evidence = AdminOcrService._line_word_evidence(
-                    metadata, line_index, word_position
+                    metadata,
+                    int(source.LineIndex),
+                    source_line_positions.get(source_index, 0),
+                    line_tokens.get(int(source.LineIndex)),
                 )
             if (
                 normalized_evidence is not None
@@ -780,10 +886,13 @@ class AdminOcrService:
                     "NFC", str(source.Text)
                 )
             evidence_items.append(normalized_evidence)
+
         metadata["word_review_statuses"] = statuses
         metadata["word_score_sources"] = score_sources
         metadata["word_evidence_v2"] = evidence_items
+        metadata["word_evidence_v2_authoritative"] = True
         revision.ProcessingMeta = metadata
+
 
     async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
         """Normalize ACTIVE pages and PROCESSING reservations to 1..N in page order."""
@@ -904,6 +1013,7 @@ class AdminOcrService:
                     self._normalize_word_evidence(word.get("ocr_evidence"))
                     for word in words
                 ]
+                metadata["word_evidence_v2_authoritative"] = True
                 content_hash = hashlib.sha256(
                     json.dumps(
                         {"text": text_value, "words": words},
@@ -1176,6 +1286,7 @@ class AdminOcrService:
             self._normalize_word_evidence(word.get("ocr_evidence"))
             for word in words
         ]
+        processing_meta["word_evidence_v2_authoritative"] = True
         processing_meta.update({
             "source_image_path": object_path,
             "source_image_width": width,
@@ -1328,6 +1439,12 @@ class AdminOcrService:
         score_contract = raw_score_source if raw_score_source in OCR_SCORE_CONTRACTS else None
         words = []
         line_positions: dict[int, int] = {}
+        line_tokens: dict[int, list[str]] = {}
+        for source_row in sorted(rows, key=lambda item: (int(item.LineIndex), int(item.WordIndex))):
+            line_tokens.setdefault(int(source_row.LineIndex), []).append(
+                unicodedata.normalize("NFC", str(source_row.Text))
+            )
+        evidence_is_authoritative = metadata.get("word_evidence_v2_authoritative") is True
         for row in rows:
             word_position = line_positions.get(row.LineIndex, 0)
             line_positions[row.LineIndex] = word_position + 1
@@ -1369,6 +1486,18 @@ class AdminOcrService:
             word_score = self._normalize_confidence(row.OCRConfidence)
             if score_source not in RAW_WORD_SCORE_CONTRACTS | WORD_PROBABILITY_SCORE_CONTRACTS:
                 word_score = None
+            stored_evidence = self._normalize_word_evidence(
+                raw_word_evidence[row.WordIndex]
+                if 0 <= row.WordIndex < len(raw_word_evidence)
+                else None
+            )
+            if stored_evidence is None and not evidence_is_authoritative:
+                stored_evidence = self._line_word_evidence(
+                    metadata,
+                    row.LineIndex,
+                    word_position,
+                    line_tokens.get(int(row.LineIndex)),
+                )
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
@@ -1376,14 +1505,7 @@ class AdminOcrService:
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
                 "ocr_score_source": score_source,
-                "ocr_evidence": (
-                    self._normalize_word_evidence(
-                        raw_word_evidence[row.WordIndex]
-                        if 0 <= row.WordIndex < len(raw_word_evidence)
-                        else None
-                    )
-                    or self._line_word_evidence(metadata, row.LineIndex, word_position)
-                ),
+                "ocr_evidence": stored_evidence,
             })
         raw_revision = str(revision.RevisionNo)
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
@@ -1400,6 +1522,7 @@ class AdminOcrService:
         metadata.pop("word_review_statuses", None)
         metadata.pop("word_score_sources", None)
         metadata.pop("word_evidence_v2", None)
+        metadata.pop("word_evidence_v2_authoritative", None)
         metadata.pop("ocr_score_contract", None)
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
@@ -1532,6 +1655,7 @@ class AdminOcrService:
                     if isinstance(source_metadata.get("word_evidence_v2"), list)
                     else [None] * len(words)
                 ),
+                "word_evidence_v2_authoritative": True,
                 "ocr_score_contract": score_contract,
             },
         )
@@ -1724,6 +1848,7 @@ class AdminOcrService:
         processing_meta["word_evidence_v2"] = [
             self._normalize_word_evidence(word.get("ocr_evidence")) for word in words
         ]
+        processing_meta["word_evidence_v2_authoritative"] = True
         if reference_text is not None and verified_reference is not None:
             processing_meta["verified_reference_alignment"] = self._apply_verified_reference(
                 words, reference_text
