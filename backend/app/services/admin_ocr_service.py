@@ -59,6 +59,7 @@ WORD_PROBABILITY_SCORE_CONTRACTS = {"ocr_calibrated_word_accuracy_v1"}
 RAW_WORD_SCORE_CONTRACTS = {OCR_SCORE_CONTRACT}
 OCR_EVIDENCE_CONTRACTS = {
     "dual_engine_agreement_v2",
+    "hybrid_ocr_evidence_v3",
     "tesseract_raw_word_score_v1",
     "ocr_calibrated_word_accuracy_v1",
 }
@@ -338,6 +339,72 @@ class AdminOcrService:
         review_reason = value.get("review_reason")
         if not isinstance(review_reason, str):
             review_reason = "Evidence is unavailable."
+
+        selected_engine = value.get("selected_engine")
+        if selected_engine not in {"paddleocr", "vietocr", "tesseract"}:
+            selected_engine = None
+        selection_reason = value.get("selection_reason")
+        if not isinstance(selection_reason, str):
+            selection_reason = None
+        bbox_quality = value.get("bbox_quality")
+        if not isinstance(bbox_quality, str):
+            bbox_quality = None
+        crop_quality = value.get("crop_quality")
+        if not isinstance(crop_quality, str):
+            crop_quality = None
+
+        raw_crop = value.get("crop_evidence")
+        crop_evidence = None
+        if isinstance(raw_crop, dict):
+            crop_evidence = {}
+            for key in (
+                "status", "reason", "preprocessing", "score_semantics",
+                "paddle_error", "vietocr_error", "bbox_quality", "crop_quality",
+                "paddleocr_candidate", "vietocr_candidate",
+            ):
+                field_value = raw_crop.get(key)
+                if isinstance(field_value, str):
+                    crop_evidence[key] = field_value
+            clipped = raw_crop.get("padding_clipped")
+            if isinstance(clipped, bool):
+                crop_evidence["padding_clipped"] = clipped
+            for key in ("contrast_std", "ink_ratio"):
+                field_value = raw_crop.get(key)
+                if (
+                    isinstance(field_value, (int, float))
+                    and not isinstance(field_value, bool)
+                    and math.isfinite(float(field_value))
+                ):
+                    crop_evidence[key] = float(field_value)
+
+            def safe_raw_score(raw_value: object) -> object:
+                if isinstance(raw_value, bool):
+                    return None
+                if isinstance(raw_value, (int, float)):
+                    number = float(raw_value)
+                    return number if math.isfinite(number) else None
+                if isinstance(raw_value, (list, tuple)):
+                    safe_values = []
+                    for element in raw_value[:128]:
+                        if isinstance(element, bool):
+                            safe_values.append(None)
+                        elif isinstance(element, (int, float)):
+                            number = float(element)
+                            safe_values.append(number if math.isfinite(number) else None)
+                        else:
+                            safe_values.append(None)
+                    return safe_values
+                return None
+
+            for key in (
+                "paddle_crop_recognition_score",
+                "vietocr_crop_recognition_score",
+            ):
+                if key in raw_crop:
+                    crop_evidence[key] = safe_raw_score(raw_crop.get(key))
+            if not crop_evidence:
+                crop_evidence = None
+
         return {
             "contract": value["contract"],
             "engine_outputs": safe_outputs,
@@ -347,6 +414,11 @@ class AdminOcrService:
             "verification_source": verification_source,
             "reference_text": reference_text,
             "reference_alignment": reference_alignment,
+            "selected_engine": selected_engine,
+            "selection_reason": selection_reason,
+            "bbox_quality": bbox_quality,
+            "crop_quality": crop_quality,
+            "crop_evidence": crop_evidence,
             "review_reason": review_reason,
         }
 

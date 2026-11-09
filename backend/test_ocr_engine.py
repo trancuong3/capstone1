@@ -129,7 +129,7 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(meta["word_count"], 2)
         self.assertEqual(meta["line_count"], 1)
         self.assertIsNone(meta["ocr_score_contract"])
-        self.assertEqual(meta["ocr_evidence_contract"], "dual_engine_agreement_v2")
+        self.assertEqual(meta["ocr_evidence_contract"], "hybrid_ocr_evidence_v3")
         self.assertEqual(meta["line_evidence"][0]["paddle_line_confidence"], 0.95)
         self.assertEqual(
             meta["line_evidence"][0]["paddle_line_score_contract"],
@@ -232,6 +232,24 @@ class DualEngineOcrTests(unittest.TestCase):
             [word["ocr_review_status"] for word in verified_words],
             ["reference_match", "reference_match", "reference_match"],
         )
+
+    def test_user_examples_remain_unresolved_engine_disagreements(self):
+        for paddle_token, vietocr_token in (("lui", "hui"), ("vé", "về")):
+            with self.subTest(paddle=paddle_token, vietocr=vietocr_token):
+                aligned = ocr_engine.align_ocr_tokens(
+                    [paddle_token], [vietocr_token]
+                )
+                self.assertEqual(aligned[0]["operation"], "substitute")
+                score, status = ocr_engine._word_engine_evidence(
+                    paddle_token, vietocr_token
+                )
+                self.assertIsNotNone(score)
+                self.assertLess(score, 1.0)
+                self.assertEqual(status, "engine_disagreement")
+                confidence, _review_status, _source = ocr_engine._word_ocr_evidence(
+                    paddle_token, vietocr_token, 0.999
+                )
+                self.assertIsNone(confidence)
 
     def test_vietnamese_diacritics_are_alignment_hints_not_exact_matches(self):
         pairs = (

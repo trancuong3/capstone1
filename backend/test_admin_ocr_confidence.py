@@ -239,6 +239,40 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(AdminOcrService._normalize_confidence(True))
         self.assertIsNone(AdminOcrService._normalize_confidence("bad score"))
 
+    def test_hybrid_crop_evidence_is_preserved_as_raw_engine_evidence(self):
+        evidence = AdminOcrService._normalize_word_evidence({
+            "contract": "hybrid_ocr_evidence_v3",
+            "engine_outputs": {"paddleocr": "vé", "vietocr": "về"},
+            "alignment": "substitute",
+            "engine_agreement_score": 0.5,
+            "calibrated_word_accuracy": None,
+            "selected_engine": "vietocr",
+            "selection_reason": "provisional_candidate",
+            "bbox_quality": "valid",
+            "crop_quality": "usable",
+            "crop_evidence": {
+                "status": "completed",
+                "paddleocr_candidate": "về",
+                "vietocr_candidate": "vé",
+                "paddle_crop_recognition_score": 0.82,
+                "vietocr_crop_recognition_score": 0.73,
+                "score_semantics": "raw_recognition_output_not_probability",
+                "contrast_std": 44.2,
+                "ink_ratio": 0.08,
+            },
+            "review_reason": "Two engines disagree.",
+        })
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence["contract"], "hybrid_ocr_evidence_v3")
+        self.assertEqual(evidence["selected_engine"], "vietocr")
+        self.assertEqual(evidence["crop_evidence"]["paddleocr_candidate"], "về")
+        self.assertEqual(
+            evidence["crop_evidence"]["score_semantics"],
+            "raw_recognition_output_not_probability",
+        )
+        self.assertIsNone(evidence["calibrated_word_accuracy"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

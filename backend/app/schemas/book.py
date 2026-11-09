@@ -205,6 +205,7 @@ class AdminRevisionSummaryRead(BaseModel):
 class AdminOcrWordEvidenceRead(BaseModel):
     contract: Literal[
         "dual_engine_agreement_v2",
+        "hybrid_ocr_evidence_v3",
         "tesseract_raw_word_score_v1",
         "ocr_calibrated_word_accuracy_v1",
     ]
@@ -215,6 +216,11 @@ class AdminOcrWordEvidenceRead(BaseModel):
     verification_source: Literal["admin", "verified_revision"] | None = None
     reference_text: str | None = None
     reference_alignment: str | None = None
+    selected_engine: Literal["paddleocr", "vietocr", "tesseract"] | None = None
+    selection_reason: str | None = None
+    bbox_quality: str | None = None
+    crop_quality: str | None = None
+    crop_evidence: dict[str, object] | None = None
     review_reason: str
 
 
