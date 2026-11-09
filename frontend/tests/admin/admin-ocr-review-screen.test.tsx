@@ -175,6 +175,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
             calibrated_word_accuracy: null,
             verification_source: null,
             reference_text: null,
+            source_text: "on",
             review_reason: "Both engines returned the same token.",
           },
         },
@@ -205,6 +206,20 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(
       within(evidence).getByText(/Unavailable · chưa có calibration evidence/),
     ).toBeInTheDocument();
+
+    const pageText = screen.getByLabelText("Nội dung trang");
+    await user.clear(pageText);
+    await user.type(pageText, "Ta");
+
+    expect(within(evidence).getByText("PaddleOCR: on")).toBeInTheDocument();
+    expect(within(evidence).getByText("VietOCR: on")).toBeInTheDocument();
+    expect(within(evidence).getByText("OCR source token: on")).toBeInTheDocument();
+    expect(
+      within(evidence).getByText(/Evidence engine thuộc token OCR ban đầu “on”/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Từ 1: Ta\./ }),
+    ).toHaveClass("border-amber-600");
   });
 
   it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {
