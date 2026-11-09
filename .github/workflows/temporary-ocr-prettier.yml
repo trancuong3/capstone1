@@ -1,0 +1,41 @@
+name: Temporary OCR Prettier formatter
+
+on:
+  push:
+    branches:
+      - feature/hybrid-evidence-ocr-classification-20261109
+    paths:
+      - frontend/components/admin/admin-ocr-review-screen.tsx
+
+permissions:
+  contents: write
+
+jobs:
+  format-admin-ocr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hybrid-evidence-ocr-classification-20261109
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Format OCR review screen
+        working-directory: frontend
+        run: npx prettier --write components/admin/admin-ocr-review-screen.tsx
+      - name: Commit formatting only when changed
+        run: |
+          if git diff --quiet -- frontend/components/admin/admin-ocr-review-screen.tsx; then
+            echo "The OCR screen is already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/components/admin/admin-ocr-review-screen.tsx
+          git commit -m "style(admin-ocr): apply Prettier formatting"
+          git push origin HEAD:feature/hybrid-evidence-ocr-classification-20261109
