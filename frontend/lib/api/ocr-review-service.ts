@@ -97,6 +97,10 @@ export const adminRevisionDetailSchema = z.object({
           "Bounding box must have positive size and remain within the image.",
         ),
       ocr_confidence: z.number().min(0).max(1).nullable().catch(null),
+      review_color_group: z
+        .enum(["green", "red", "yellow", "neutral"])
+        .optional()
+        .catch("neutral"),
       ocr_review_status: z
         .enum([
           "matched",
