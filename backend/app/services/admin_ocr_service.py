@@ -535,6 +535,14 @@ class AdminOcrService:
                 and isinstance(candidate.get(selected_key), str)
                 and str(candidate[selected_key]).strip()
             ]
+            # Legacy operations without source indexes are safe only if they
+            # preserve every selected-side token in the exact original order.
+            operation_tokens = normalize_text_tokens(
+                " ".join(str(candidate[selected_key]) for candidate in selected_operations)
+            )
+            source_tokens = normalize_text_tokens(selected_output)
+            if operation_tokens != source_tokens:
+                return None
             if word_position >= len(selected_operations):
                 return None
             item = selected_operations[word_position]
