@@ -1,9 +1,8 @@
 name: Temporary OCR Prettier
 
 on:
-  push:
-    branches:
-      - feature/hybrid-evidence-ocr-classification-20261109
+  pull_request:
+    types: [opened, synchronize, reopened]
     paths:
       - ".github/workflows/temporary-ocr-prettier.yml"
 
