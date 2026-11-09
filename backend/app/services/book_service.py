@@ -279,4 +279,7 @@ class AdminCatalogService:
         revision = await self.repository.revision(page_id, revision_id)
         if revision is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        return await AdminOcrService(self.repository.db).revision_detail(page, revision)
+        word_rows = await self.repository.words(revision_id)
+        return await AdminOcrService(self.repository.db).revision_detail(
+            page, revision, word_rows=word_rows
+        )

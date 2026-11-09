@@ -62,9 +62,7 @@ type AiTokenChange = {
   readonly proposed: string;
 };
 
-function hasEngineDisagreementEvidence(
-  word?: AdminRevisionWordDTO,
-): boolean {
+function hasEngineDisagreementEvidence(word?: AdminRevisionWordDTO): boolean {
   const evidence = word?.ocr_evidence;
   if (!evidence) return false;
 
@@ -72,8 +70,10 @@ function hasEngineDisagreementEvidence(
   const paddle = outputs.paddleocr;
   const vietocr = outputs.vietocr;
   if (
-    typeof paddle === "string" && paddle.trim() &&
-    typeof vietocr === "string" && vietocr.trim() &&
+    typeof paddle === "string" &&
+    paddle.trim() &&
+    typeof vietocr === "string" &&
+    vietocr.trim() &&
     normalizeVietnameseWord(paddle) !== normalizeVietnameseWord(vietocr)
   ) {
     return true;
@@ -83,8 +83,10 @@ function hasEngineDisagreementEvidence(
   const paddleCrop = cropEvidence?.paddleocr_candidate;
   const vietocrCrop = cropEvidence?.vietocr_candidate;
   if (
-    typeof paddleCrop === "string" && paddleCrop.trim() &&
-    typeof vietocrCrop === "string" && vietocrCrop.trim() &&
+    typeof paddleCrop === "string" &&
+    paddleCrop.trim() &&
+    typeof vietocrCrop === "string" &&
+    vietocrCrop.trim() &&
     normalizeVietnameseWord(paddleCrop) !== normalizeVietnameseWord(vietocrCrop)
   ) {
     return true;
@@ -273,10 +275,7 @@ export function getWordReviewLabel(
   ) {
     return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
   }
-  if (
-    status === "engine_disagreement" &&
-    hasEngineDisagreementEvidence(word)
-  ) {
+  if (status === "engine_disagreement" && hasEngineDisagreementEvidence(word)) {
     return "Hai engine bất đồng · cần đối chiếu ảnh";
   }
   if (getWordReviewColorGroup(status, word) === "neutral") {
@@ -360,8 +359,12 @@ function getEngineEvidenceDisplay(
     const pageReasons = asRecord(metadata.engine_status_reasons);
     const reason =
       evidence?.engine_errors?.[engine] ??
-      (typeof lineErrors?.[engine] === "string" ? lineErrors[engine] : undefined) ??
-      (typeof pageReasons?.[engine] === "string" ? pageReasons[engine] : undefined);
+      (typeof lineErrors?.[engine] === "string"
+        ? lineErrors[engine]
+        : undefined) ??
+      (typeof pageReasons?.[engine] === "string"
+        ? pageReasons[engine]
+        : undefined);
     return reason ? `Lỗi inference · ${reason}` : "Lỗi inference";
   }
   if (status === "disabled") return "Đã tắt cấu hình";
@@ -416,9 +419,11 @@ function getWordLineEvidence(
 ): Record<string, unknown> | null {
   const rawLines = metadata.line_evidence;
   if (!Array.isArray(rawLines)) return null;
-  return rawLines
-    .map(asRecord)
-    .find((line) => line?.line_index === word.line_index) ?? null;
+  return (
+    rawLines
+      .map(asRecord)
+      .find((line) => line?.line_index === word.line_index) ?? null
+  );
 }
 
 function getLineEngineOutput(
@@ -2440,28 +2445,59 @@ export function AdminOcrReviewScreen({
                           </span>
                           <span>
                             PaddleOCR:{" "}
-                            {getEngineEvidenceDisplay(word, "paddleocr", detail.ocr_metadata)}
+                            {getEngineEvidenceDisplay(
+                              word,
+                              "paddleocr",
+                              detail.ocr_metadata,
+                            )}
                           </span>
                           <span>
-                            VietOCR: {getEngineEvidenceDisplay(word, "vietocr", detail.ocr_metadata)}
+                            VietOCR:{" "}
+                            {getEngineEvidenceDisplay(
+                              word,
+                              "vietocr",
+                              detail.ocr_metadata,
+                            )}
                           </span>
-                          {typeof word.ocr_evidence?.engine_outputs.paddleocr !== "string" &&
-                          getLineEngineOutput(word, "paddleocr", detail.ocr_metadata) ? (
+                          {typeof word.ocr_evidence?.engine_outputs
+                            .paddleocr !== "string" &&
+                          getLineEngineOutput(
+                            word,
+                            "paddleocr",
+                            detail.ocr_metadata,
+                          ) ? (
                             <span>
                               PaddleOCR dòng gốc (không phải token căn chỉnh):{" "}
-                              {getLineEngineOutput(word, "paddleocr", detail.ocr_metadata)}
+                              {getLineEngineOutput(
+                                word,
+                                "paddleocr",
+                                detail.ocr_metadata,
+                              )}
                             </span>
                           ) : null}
-                          {typeof word.ocr_evidence?.engine_outputs.vietocr !== "string" &&
-                          getLineEngineOutput(word, "vietocr", detail.ocr_metadata) ? (
+                          {typeof word.ocr_evidence?.engine_outputs.vietocr !==
+                            "string" &&
+                          getLineEngineOutput(
+                            word,
+                            "vietocr",
+                            detail.ocr_metadata,
+                          ) ? (
                             <span>
                               VietOCR dòng gốc (không phải token căn chỉnh):{" "}
-                              {getLineEngineOutput(word, "vietocr", detail.ocr_metadata)}
+                              {getLineEngineOutput(
+                                word,
+                                "vietocr",
+                                detail.ocr_metadata,
+                              )}
                             </span>
                           ) : null}
                           <span>
                             Tesseract:{" "}
-                            {getEngineEvidenceDisplay(word, "tesseract", detail.ocr_metadata)}
+                            {getEngineEvidenceDisplay(
+                              word,
+                              "tesseract",
+                              detail.ocr_metadata,
+                            )}
                           </span>
                           <span>
                             OCR source token:{" "}

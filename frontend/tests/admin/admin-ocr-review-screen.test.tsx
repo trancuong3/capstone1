@@ -216,7 +216,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         selection_reason: "paddle_provisional",
         bbox_quality: "valid",
         crop_quality: "usable",
-        review_reason: "VietOCR inference failed; PaddleOCR candidate remains available.",
+        review_reason:
+          "VietOCR inference failed; PaddleOCR candidate remains available.",
       },
     };
     expect(getWordReviewStatus(oneEngineOnly)).toBe("needs_review");
@@ -238,6 +239,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       },
     };
     expect(getWordReviewStatus(disputed)).toBe("engine_disagreement");
+    expect(
+      getWordReviewStatus({
+        ...disputed,
+        ocr_review_status: "suspect",
+      }),
+    ).toBe("engine_disagreement");
     expect(getWordReviewColorGroup("engine_disagreement", disputed)).toBe(
       "yellow",
     );
@@ -335,27 +342,31 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
           vietocr: "success",
           tesseract: "not_run",
         },
-        line_evidence: [{
-          line_index: 0,
-          paddle_output: "công chúa",
-          vietocr_output: "công chú",
-          engine_statuses: {
-            paddleocr: "success",
-            vietocr: "success",
-            tesseract: "not_run",
+        line_evidence: [
+          {
+            line_index: 0,
+            paddle_output: "công chúa",
+            vietocr_output: "công chú",
+            engine_statuses: {
+              paddleocr: "success",
+              vietocr: "success",
+              tesseract: "not_run",
+            },
           },
-        }],
+        ],
       },
-      words: [{
-        ...adminR1Fixture.words[0]!,
-        word_index: 0,
-        line_index: 0,
-        text: "công",
-        normalized_text: "công",
-        ocr_review_status: "needs_review",
-        review_color_group: "neutral",
-        ocr_evidence: null,
-      }],
+      words: [
+        {
+          ...adminR1Fixture.words[0]!,
+          word_index: 0,
+          line_index: 0,
+          text: "công",
+          normalized_text: "công",
+          ocr_review_status: "needs_review",
+          review_color_group: "neutral",
+          ocr_evidence: null,
+        },
+      ],
     });
     const user = userEvent.setup();
     render(
@@ -371,18 +382,26 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const evidence = screen.getByRole("region", {
       name: "Bằng chứng OCR từ 1",
     });
-    expect(within(evidence).getByText(
-      "PaddleOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-    )).toBeInTheDocument();
-    expect(within(evidence).getByText(
-      "VietOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
-    )).toBeInTheDocument();
-    expect(within(evidence).getByText(
-      "PaddleOCR dòng gốc (không phải token căn chỉnh): công chúa",
-    )).toBeInTheDocument();
-    expect(within(evidence).getByText(
-      "VietOCR dòng gốc (không phải token căn chỉnh): công chú",
-    )).toBeInTheDocument();
+    expect(
+      within(evidence).getByText(
+        "PaddleOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(evidence).getByText(
+        "VietOCR: Đã chạy · không có token căn chỉnh an toàn cho từ này",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(evidence).getByText(
+        "PaddleOCR dòng gốc (không phải token căn chỉnh): công chúa",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(evidence).getByText(
+        "VietOCR dòng gốc (không phải token căn chỉnh): công chú",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("keeps Paddle line scores and all engine disagreements amber until verified", async () => {

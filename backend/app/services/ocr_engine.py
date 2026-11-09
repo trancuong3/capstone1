@@ -192,7 +192,6 @@ def warmup_ocr_engines() -> None:
         logger.warning(f"Preload OCR Engine thất bại: {exc}")
 
 
-threading.Thread(target=warmup_ocr_engines, daemon=True, name="ocr_model_preloader").start()
 
 
 def strip_accents(text: str) -> str:

@@ -904,6 +904,14 @@ class AdminOcrService:
                 normalized_evidence["source_text"] = unicodedata.normalize(
                     "NFC", str(source.Text)
                 )
+            if (
+                not verified
+                and same_token
+                and previous == "suspect"
+                and self._has_engine_disagreement_evidence(normalized_evidence)
+            ):
+                current = "engine_disagreement"
+                statuses[-1] = current
             evidence_items.append(normalized_evidence)
 
         metadata["word_review_statuses"] = statuses
@@ -1561,8 +1569,14 @@ class AdminOcrService:
 
         return "neutral"
 
-    async def revision_detail(self, page: BookPage, revision: PageRevision) -> AdminRevisionDetailRead:
-        rows = await self.repo.words(revision.Id)
+    async def revision_detail(
+        self,
+        page: BookPage,
+        revision: PageRevision,
+        *,
+        word_rows: list[Any] | None = None,
+    ) -> AdminRevisionDetailRead:
+        rows = word_rows if word_rows is not None else await self.repo.words(revision.Id)
         metadata = dict(revision.ProcessingMeta or {})
         raw_statuses = metadata.get("word_review_statuses")
         if not isinstance(raw_statuses, list):
@@ -1618,10 +1632,6 @@ class AdminOcrService:
             )
             if review_status == "matched":
                 review_status = "engine_agreement"
-            elif review_status == "suspect":
-                # Legacy suspect may have been assigned from a raw line score.
-                # Do not call it engine disagreement without current word evidence.
-                review_status = "needs_review"
             word_score = self._normalize_confidence(row.OCRConfidence)
             if score_source not in RAW_WORD_SCORE_CONTRACTS | WORD_PROBABILITY_SCORE_CONTRACTS:
                 word_score = None
@@ -1638,6 +1648,15 @@ class AdminOcrService:
                     row.LineIndex,
                     word_position,
                     line_tokens.get(int(row.LineIndex)),
+                )
+            if review_status == "suspect":
+                # A legacy suspect label is not evidence by itself. Preserve it
+                # as an actual disagreement only if this word has conflicting
+                # PaddleOCR/VietOCR candidates or an explicit risky alignment.
+                review_status = (
+                    "engine_disagreement"
+                    if self._has_engine_disagreement_evidence(stored_evidence)
+                    else "needs_review"
                 )
             if (
                 review_status == "engine_disagreement"

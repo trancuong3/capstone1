@@ -221,6 +221,26 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(evidence.calibrated_word_accuracy)
         self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
 
+    async def test_revision_detail_preserves_suspect_only_when_word_candidates_disagree(self):
+        service = AdminOcrService(MagicMock())
+        service.repo.words = AsyncMock(return_value=[word(0, "bà", None)])
+        detail = await service.revision_detail(
+            page(),
+            revision(metadata={
+                "word_review_statuses": ["suspect"],
+                "word_evidence_v2": [{
+                    "contract": "hybrid_ocr_evidence_v4",
+                    "engine_outputs": {"paddleocr": "ba", "vietocr": "bà"},
+                    "alignment": "substitute",
+                }],
+            }),
+        )
+
+        self.assertEqual(detail.words[0].ocr_review_status, "engine_disagreement")
+        self.assertEqual(detail.words[0].review_color_group, "yellow")
+        self.assertEqual(detail.words[0].ocr_evidence.engine_outputs["paddleocr"], "ba")
+        self.assertEqual(detail.words[0].ocr_evidence.engine_outputs["vietocr"], "bà")
+
     async def test_admin_verification_is_the_only_green_state_for_legacy_words(self):
         service = AdminOcrService(MagicMock())
         service.repo.words = AsyncMock(return_value=[word(0, "ma", 0.99)])
@@ -238,7 +258,11 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
                 "word_review_statuses": ["suspect", "suspect"],
                 "word_evidence_v2": [
                     {"contract": "dual_engine_agreement_v2", "engine_outputs": {}, "alignment": "match"},
-                    {"contract": "dual_engine_agreement_v2", "engine_outputs": {}, "alignment": "match"},
+                    {
+                        "contract": "hybrid_ocr_evidence_v4",
+                        "engine_outputs": {"paddleocr": "ba", "vietocr": "bà"},
+                        "alignment": "substitute",
+                    },
                 ],
             }
         )
