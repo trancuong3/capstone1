@@ -7,7 +7,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-HYBRID_OCR_EVIDENCE_CONTRACT = "hybrid_ocr_evidence_v3"
+HYBRID_OCR_EVIDENCE_CONTRACT = "hybrid_ocr_evidence_v4"
 OCR_PREPROCESSING_VERSION = "vi_word_crop_nfc_v1"
 MAX_SELECTIVE_WORD_CROPS_PER_PAGE = 12
 
