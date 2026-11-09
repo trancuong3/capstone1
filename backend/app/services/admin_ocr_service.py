@@ -104,14 +104,12 @@ def classify_word_evidence(
     word_text: str | None = None,
 ) -> str:
     """Classify one OCR word as green, yellow or red using auditable evidence."""
-    if review_status == "verified":
-        return "green"
     if not isinstance(evidence, dict) or not isinstance(word_text, str):
-        return "yellow"
+        return "green" if review_status == "verified" else "yellow"
 
     normalized_word = normalize_word(unicodedata.normalize("NFC", word_text))
     if not normalized_word:
-        return "yellow"
+        return "green" if review_status == "verified" else "yellow"
 
     reference_text = evidence.get("reference_text")
     verification_source = evidence.get("verification_source")
@@ -150,7 +148,12 @@ def classify_word_evidence(
             return "red"
         return "yellow"
 
-    source_text = evidence.get("source_text")
+    # Explicit word-level Admin verification remains green unless a trusted
+    # verified reference above directly contradicts the current OCR token.
+    if review_status == "verified":
+        return "green"
+
+    source_text = evidence.get("source_text"
     if not isinstance(source_text, str):
         return "yellow"
     normalized_source = normalize_word(unicodedata.normalize("NFC", source_text))

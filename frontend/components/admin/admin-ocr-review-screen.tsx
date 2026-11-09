@@ -174,8 +174,7 @@ export function getWordReviewColorGroup(
     contractGroup === "red"
   )
     return contractGroup;
-  if (status === "verified") return "green";
-  if (!word?.ocr_evidence) return "yellow";
+  if (!word?.ocr_evidence) return status === "verified" ? "green" : "yellow";
 
   const evidence = word.ocr_evidence;
   const normalize = (value: string) =>
@@ -202,6 +201,9 @@ export function getWordReviewColorGroup(
       return "red";
     return "yellow";
   }
+  // Word-level Admin verification is valid unless a trusted verified reference
+  // above directly contradicts the OCR source token.
+  if (status === "verified") return "green";
   if (
     typeof source !== "string" ||
     normalize(source) !== normalize(word.text)

@@ -662,9 +662,11 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "reference_alignment": "match",
         }
         self.assertEqual(classify("confirmed_mismatch", verified_mismatch, "hui"), "red")
-        # A trusted verified reference outranks a stale pending/disagreement status.
+        # Trusted reference mismatch outranks any stale word-review status.
         self.assertEqual(classify("needs_review", verified_mismatch, "hui"), "red")
         self.assertEqual(classify("engine_disagreement", verified_mismatch, "hui"), "red")
+        self.assertEqual(classify("verified", verified_mismatch, "hui"), "red")
+        self.assertEqual(classify("verified", verified_match, "lui"), "green")
         self.assertEqual(classify("reference_match", verified_match, "lui"), "green")
         self.assertEqual(
             classify(
