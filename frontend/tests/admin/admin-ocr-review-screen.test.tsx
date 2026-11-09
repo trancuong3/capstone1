@@ -732,19 +732,19 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const mismatch = await screen.findByRole("button", {
-      name: /Từ 1: Cao\\. Sai so với reference đã xác minh/,
+      name: /Từ 1: Cao\. Sai so với reference đã xác minh/,
     });
     const needsReview = screen.getByRole("button", {
-      name: /Từ 2: Vừa\\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
+      name: /Từ 2: Vừa\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
     });
     const verified = screen.getByRole("button", {
-      name: /Từ 3: Thấp\\. Admin đã xác minh từ/,
+      name: /Từ 3: Thấp\. Admin đã xác minh từ/,
     });
     const unknown = screen.getByRole("button", {
-      name: /Từ 4: Chưa rõ\\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
+      name: /Từ 4: Chưa rõ\. Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh/,
     });
     const engineAgreement = screen.getByRole("button", {
-      name: /Từ 5: Khớp\\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 5: Khớp\. Hai OCR đồng thuận · chưa đối chiếu reference/,
     });
     expect(mismatch).toHaveClass("border-red-600");
     expect(needsReview).toHaveClass("border-amber-600");
@@ -752,9 +752,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(unknown).toHaveClass("border-amber-600");
     expect(engineAgreement).toHaveClass("border-green-600");
     const stats = screen.getByRole("group", { name: "Thống kê trạng thái từ OCR" });
-    expect(stats).toHaveTextContent(/2\\s*Xanh · evidence tốt/);
-    expect(stats).toHaveTextContent(/1\\s*Đỏ · reference xác nhận sai/);
-    expect(stats).toHaveTextContent(/2\\s*Vàng · cần kiểm tra/);
+    expect(stats).toHaveTextContent(/2\s*Xanh · evidence tốt/);
+    expect(stats).toHaveTextContent(/1\s*Đỏ · reference xác nhận sai/);
+    expect(stats).toHaveTextContent(/2\s*Vàng · cần kiểm tra/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     expect(screen.getByRole("button", { name: "Cần xem (3)" })).toHaveAttribute(
       "aria-pressed", "false",
@@ -872,23 +872,23 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         services,
       ),
     );
-    const wordButtons = await screen.findAllByRole("button", { name: /^Từ \\d+:/ });
+    const wordButtons = await screen.findAllByRole("button", { name: /^Từ \d+:/ });
     expect(wordButtons).toHaveLength(20);
-    expect(screen.getByRole("button", { name: /Từ 1: từ1\\. Hai OCR đồng thuận/ })).toHaveClass("border-green-600");
-    expect(screen.getByRole("button", { name: /Từ 9: từ9\\. Admin đã xác minh từ/ })).toHaveClass("border-green-600");
-    expect(screen.getByRole("button", { name: /Từ 12: từ12\\. Sai so với reference/ })).toHaveClass("border-red-600");
-    expect(screen.getByRole("button", { name: /Từ 14: từ14\\. Hai OCR bất đồng/ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /^Từ 17: từ17\\./ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /Từ 19: từ19\\. Crop quality thấp/ })).toHaveClass("border-amber-600");
-    expect(screen.getByRole("button", { name: /Từ 20: từ20\\. Chưa đủ bằng chứng OCR/ })).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /Từ 1: từ1\. Hai OCR đồng thuận/ })).toHaveClass("border-green-600");
+    expect(screen.getByRole("button", { name: /Từ 9: từ9\. Admin đã xác minh từ/ })).toHaveClass("border-green-600");
+    expect(screen.getByRole("button", { name: /Từ 12: từ12\. Sai so với reference/ })).toHaveClass("border-red-600");
+    expect(screen.getByRole("button", { name: /Từ 14: từ14\. Hai OCR bất đồng/ })).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /^Từ 17: từ17\./ })).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /Từ 19: từ19\. Crop quality thấp/ })).toHaveClass("border-amber-600");
+    expect(screen.getByRole("button", { name: /Từ 20: từ20\. Chưa đủ bằng chứng OCR/ })).toHaveClass("border-amber-600");
 
     const stats = screen.getByRole("group", { name: "Thống kê trạng thái từ OCR" });
-    expect(stats).toHaveTextContent(/11\\s*Xanh/);
-    expect(stats).toHaveTextContent(/2\\s*Đỏ/);
-    expect(stats).toHaveTextContent(/7\\s*Vàng/);
+    expect(stats).toHaveTextContent(/11\s*Xanh/);
+    expect(stats).toHaveTextContent(/2\s*Đỏ/);
+    expect(stats).toHaveTextContent(/7\s*Vàng/);
     expect(stats).not.toHaveTextContent(/Trung tính|Neutral/i);
     await user.click(screen.getByRole("button", { name: "Rủi ro cao (7)" }));
-    expect(screen.getAllByRole("button", { name: /^Từ #\\d+ · Dòng \\d+$/ })).toHaveLength(7);
+    expect(screen.getAllByRole("button", { name: /^Từ #\d+ · Dòng \d+$/ })).toHaveLength(7);
     expect(screen.getByText("Đang hiện 7/20 từ")).toBeInTheDocument();
   });
 
@@ -913,7 +913,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     );
     const matchedWord = await screen.findByRole("button", {
-      name: /Từ 1: Nội\\. Hai OCR đồng thuận · chưa đối chiếu reference/,
+      name: /Từ 1: Nội\. Hai OCR đồng thuận · chưa đối chiếu reference/,
     });
     expect(matchedWord).toHaveClass("border-green-600");
     expect(screen.getByRole("button", { name: "Cần xem (0)" })).toHaveAttribute(
