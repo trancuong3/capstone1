@@ -198,6 +198,64 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
 
+            dual_engine_evidence = []
+            for index, (word, _normalized, _confidence, _bbox) in enumerate(word_rows):
+                dual_engine_evidence.append({
+                    "contract": "hybrid_ocr_evidence_v4",
+                    "engine_outputs": {
+                        "paddleocr": word,
+                        "vietocr": word,
+                        "tesseract": None,
+                    },
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "not_run",
+                    },
+                    "paddle_token_index": index,
+                    "vietocr_token_index": index,
+                    "source_text": word,
+                    "alignment": "match",
+                    "engine_agreement_score": 1.0,
+                    "calibrated_word_accuracy": None,
+                    "verification_source": None,
+                    "reference_text": None,
+                    "reference_alignment": None,
+                    "selected_engine": "vietocr",
+                    "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+                    "bbox_quality": "valid",
+                    "crop_quality": "usable",
+                    "crop_evidence": {
+                        "status": "not_needed",
+                        "reason": "engines_agree_but_agreement_is_not_verification",
+                    },
+                    "review_reason": "Both OCR engines agreed; no independent verification.",
+                })
+            await connection.execute(
+                text(
+                    """
+                    UPDATE pagerevisions
+                    SET processingmeta = CAST(:metadata AS jsonb)
+                    WHERE id = :revision
+                    """
+                ),
+                {
+                    "revision": R1_ID,
+                    "metadata": json.dumps({
+                        "ocr_evidence_contract": "hybrid_ocr_evidence_v4",
+                        "engine_statuses": {
+                            "paddleocr": "success",
+                            "vietocr": "success",
+                            "tesseract": "not_run",
+                        },
+                        "word_review_statuses": ["verified"] * len(word_rows),
+                        "word_score_sources": [None] * len(word_rows),
+                        "word_evidence_v2": dual_engine_evidence,
+                        "word_evidence_v2_authoritative": True,
+                    }),
+                },
+            )
+
     async def asyncTearDown(self):
         await self.engine.dispose()
         async with self.admin_engine.begin() as connection:
@@ -271,6 +329,17 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(r2["words"]), 4)
             self.assertEqual(r2["ocr_metadata"]["source_revision_id"], str(R1_ID))
             self.assertEqual(r2["words"][2]["ocr_confidence"], None)
+            self.assertEqual(
+                r2["words"][0]["ocr_evidence"]["engine_outputs"],
+                {"paddleocr": "Ngày", "vietocr": "Ngày", "tesseract": None},
+            )
+            self.assertEqual(
+                r2["words"][0]["ocr_evidence"]["engine_statuses"],
+                {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+            )
+            self.assertEqual(r2["words"][0]["ocr_evidence"]["paddle_token_index"], 0)
+            self.assertEqual(r2["words"][0]["ocr_evidence"]["vietocr_token_index"], 0)
+            self.assertEqual(r2["words"][0]["review_color_group"], "green")
 
             changed_words = r2["words"]
             changed_words[3]["text"] = "em."
@@ -281,6 +350,15 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(saved.status_code, 200, saved.text)
             self.assertEqual(saved.json()["draft_text"], "Ngày xưa có em.")
+            edited_word = saved.json()["words"][3]
+            self.assertEqual(edited_word["ocr_review_status"], "needs_review")
+            self.assertEqual(edited_word["review_color_group"], "yellow")
+            self.assertIsNone(edited_word["ocr_confidence"])
+            self.assertEqual(edited_word["ocr_evidence"]["source_text"], "bé.")
+            self.assertEqual(
+                edited_word["ocr_evidence"]["engine_outputs"],
+                {"paddleocr": "bé.", "vietocr": "bé.", "tesseract": None},
+            )
 
             verified = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/verify",
@@ -296,6 +374,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [word["ocr_review_status"] for word in verified.json()["words"]],
                 ["verified"] * 4,
+            )
+            self.assertEqual(
+                [word["review_color_group"] for word in verified.json()["words"]],
+                ["green"] * 4,
             )
 
             async with self.sessions() as session:
@@ -357,6 +439,14 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [word["ocr_review_status"] for word in r2_detail.json()["words"]],
                 ["verified"] * 4,
+            )
+            self.assertEqual(
+                r2_detail.json()["words"][3]["ocr_evidence"]["engine_statuses"],
+                {"paddleocr": "success", "vietocr": "success", "tesseract": "not_run"},
+            )
+            self.assertEqual(
+                r2_detail.json()["words"][3]["ocr_evidence"]["source_text"],
+                "bé.",
             )
 
         async with self.sessions() as session:
