@@ -192,7 +192,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.words[0].ocr_review_status, "verified")
         self.assertIsNone(detail.words[0].ocr_confidence)
 
-    async def test_client_cannot_rewrite_scores_and_accent_edits_clear_old_evidence(self):
+    async def test_client_cannot_rewrite_scores_but_keeps_original_engine_evidence(self):
         revision_row = revision(
             metadata={
                 "ocr_score_contract": OCR_SCORE_CONTRACT,
@@ -227,7 +227,10 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             revision_row.ProcessingMeta["word_score_sources"],
             [None, OCR_SCORE_CONTRACT],
         )
-        self.assertIsNone(revision_row.ProcessingMeta["word_evidence_v2"][0])
+        edited_evidence = revision_row.ProcessingMeta["word_evidence_v2"][0]
+        self.assertIsNotNone(edited_evidence)
+        self.assertEqual(edited_evidence["source_text"], "ma")
+        self.assertEqual(edited_evidence["alignment"], "match")
         self.assertEqual(
             revision_row.ProcessingMeta["word_evidence_v2"][1]["alignment"],
             "match",
@@ -239,7 +242,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(AdminOcrService._normalize_confidence(True))
         self.assertIsNone(AdminOcrService._normalize_confidence("bad score"))
 
-    def test_hybrid_crop_evidence_is_preserved_for_unchanged_tokens_and_cleared_on_edit(self):
+    def test_hybrid_crop_evidence_is_preserved_as_original_provenance_after_edit(self):
         source_evidence = {
             "contract": "hybrid_ocr_evidence_v3",
             "engine_outputs": {"paddleocr": "vé", "vietocr": "về"},
@@ -247,6 +250,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "engine_agreement_score": 0.5,
             "calibrated_word_accuracy": None,
             "selected_engine": "vietocr",
+            "source_text": "vé",
             "selection_reason": "provisional_candidate",
             "bbox_quality": "valid",
             "crop_quality": "usable",
@@ -287,7 +291,13 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             [{"word_index": 0, "line_index": 0, "text": "về"}],
             [word(0, "vé", None)],
         )
-        self.assertIsNone(changed_revision.ProcessingMeta["word_evidence_v2"][0])
+        edited_evidence = changed_revision.ProcessingMeta["word_evidence_v2"][0]
+        self.assertIsNotNone(edited_evidence)
+        self.assertEqual(edited_evidence["source_text"], "vé")
+        self.assertEqual(
+            edited_evidence["crop_evidence"]["vietocr_crop_recognition_score"],
+            0.73,
+        )
         self.assertEqual(
             changed_revision.ProcessingMeta["word_review_statuses"][0],
             "needs_review",
