@@ -393,6 +393,10 @@ class DualEngineOcrTests(unittest.TestCase):
         )
         self.assertEqual(result["metadata"]["engine_statuses"]["vietocr"], "error")
         self.assertEqual(
+            result["words"][0]["ocr_evidence"]["engine_errors"]["vietocr"],
+            "RuntimeError",
+        )
+        self.assertEqual(
             result["words"][0]["ocr_evidence"]["engine_outputs"]["paddleocr"],
             "công",
         )
