@@ -21,6 +21,13 @@ class CalibrationDatasetError(ValueError):
     """Raised when ground-truth provenance or calibration compatibility is unsafe."""
 
 
+SUPPORTED_CALIBRATION_SOURCES = {
+    "paddle_crop_recognition_score",
+    "vietocr_crop_recognition_score",
+    "tesseract_raw_word_score",
+}
+
+
 def normalize_exact_text(value: str) -> str:
     """NFC, casefold and outer-punctuation normalization without accent folding."""
     token = unicodedata.normalize("NFC", str(value)).casefold().strip()
@@ -78,6 +85,19 @@ def validate_ground_truth_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str,
                 raise CalibrationDatasetError(
                     f"row {row_number}: {key} must be a non-empty string"
                 )
+        image_hash = source["source_image_hash"]
+        if (
+            len(image_hash) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in image_hash)
+        ):
+            raise CalibrationDatasetError(
+                f"row {row_number}: source_image_hash must be a 64-character SHA-256 hex digest"
+            )
+        if source["calibration_source"] not in SUPPORTED_CALIBRATION_SOURCES:
+            raise CalibrationDatasetError(
+                f"row {row_number}: calibration_source must be a word-level recognition score; "
+                "line confidence and engine-agreement features are not accepted as raw word scores"
+            )
 
         verification_source = source["verification_source"]
         review_status = source["word_review_status"]
@@ -410,8 +430,16 @@ def build_calibration_artifact(
     train = split["train"]
     validation = split["validation"]
     test = split["test"]
-    if len({row["is_exact_match"] for row in train}) < 2:
-        raise CalibrationDatasetError("training books must contain correct and incorrect OCR candidates")
+    for split_name, split_rows in (
+        ("train", train),
+        ("validation", validation),
+        ("test", test),
+    ):
+        if len({row["is_exact_match"] for row in split_rows}) < 2:
+            raise CalibrationDatasetError(
+                f"{split_name} books must contain both correct and incorrect candidates "
+                "to fit/evaluate calibration without single-class ambiguity"
+            )
 
     model = fit_platt_scaling(
         [row["calibration_score"] for row in train],

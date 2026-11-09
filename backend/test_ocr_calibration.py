@@ -1,6 +1,7 @@
 """Tests for the book-disjoint OCR calibration pipeline."""
 from __future__ import annotations
 
+import hashlib
 import unittest
 
 from app.services.ocr_calibration import (
@@ -26,7 +27,9 @@ def make_rows(book_count: int = 5, per_book: int = 30):
             rows.append({
                 "book_id": f"book-{book}",
                 "page_revision_id": f"revision-{book}-{index // 10}",
-                "source_image_hash": f"hash-{book}-{index // 10}",
+                "source_image_hash": hashlib.sha256(
+                    f"image-{book}-{index // 10}".encode("utf-8")
+                ).hexdigest(),
                 "word_index": index,
                 "line_index": index // 10,
                 "bbox": [0.1, 0.2, 0.1, 0.05],
@@ -56,6 +59,18 @@ class OcrCalibrationTests(unittest.TestCase):
         rows[0]["word_review_status"] = "needs_review"
         with self.assertRaises(CalibrationDatasetError):
             validate_ground_truth_rows(rows)
+
+    def test_line_confidence_cannot_be_used_as_word_calibration_score(self):
+        row = make_rows(book_count=1, per_book=2)[0]
+        row["calibration_source"] = "paddle_line_confidence"
+        with self.assertRaises(CalibrationDatasetError):
+            validate_ground_truth_rows([row])
+
+    def test_invalid_source_image_hash_is_rejected(self):
+        row = make_rows(book_count=1, per_book=2)[0]
+        row["source_image_hash"] = "not-a-sha256"
+        with self.assertRaises(CalibrationDatasetError):
+            validate_ground_truth_rows([row])
 
     def test_split_is_book_disjoint(self):
         split = split_books(make_rows())
@@ -96,14 +111,16 @@ class OcrCalibrationTests(unittest.TestCase):
         rows = make_rows()
         artifact = build_calibration_artifact(
             rows,
-            dataset_hash="test-dataset-hash",
+            dataset_hash=hashlib.sha256(b"test-dataset").hexdigest(),
             minimum_green_decisions=5,
             minimum_samples=100,
         )
         self.assertEqual(artifact["method"], "platt_scaling")
         self.assertFalse(artifact["runtime_enabled"])
         self.assertFalse(artifact["auto_red_enabled"])
-        self.assertEqual(artifact["dataset_sha256"], "test-dataset-hash")
+        self.assertEqual(
+            artifact["dataset_sha256"], hashlib.sha256(b"test-dataset").hexdigest()
+        )
         rows[0]["preprocessing_version"] = "different-preprocessing"
         with self.assertRaises(CalibrationDatasetError):
             build_calibration_artifact(
