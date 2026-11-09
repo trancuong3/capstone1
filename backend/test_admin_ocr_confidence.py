@@ -471,6 +471,17 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             classify(
                 "needs_review",
                 {
+                    "source_text": "bé",
+                    "alignment": "match",
+                },
+                "em",
+            ),
+            "yellow",
+        )
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
                     "alignment": "unmatched",
                     "selected_engine": "paddleocr",
                     "engine_statuses": {
