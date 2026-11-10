@@ -263,7 +263,10 @@ export function AppShell({ children }: AppShellProps) {
               size="md"
             />
             {!isChildOnboarding ? (
-              <div className="relative z-50 shrink-0 lg:order-3" ref={accountMenuRef}>
+              <div
+                className="relative z-50 shrink-0 lg:order-3"
+                ref={accountMenuRef}
+              >
                 <button
                   aria-controls="parent-account-menu"
                   aria-expanded={isAccountMenuVisible}
@@ -309,7 +312,9 @@ export function AppShell({ children }: AppShellProps) {
                   onKeyDown={handleMenuKeyDown}
                   role="menu"
                 >
-                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
+                  <div
+                    className="flex flex-col items-center gap-2 px-3 py-3 text-center"
+                  >
                     <ProfileAvatar
                       ariaLabel="Ảnh đại diện tài khoản"
                       displayName={displayName}
@@ -334,7 +339,9 @@ export function AppShell({ children }: AppShellProps) {
                   <div className="my-2 border-t border-border" />
                   <Link
                     aria-current={
-                      routeMatchesPath(pathname, "/profile") ? "page" : undefined
+                      routeMatchesPath(pathname, "/profile")
+                        ? "page"
+                        : undefined
                     }
                     className={cn(
                       "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
@@ -357,7 +364,9 @@ export function AppShell({ children }: AppShellProps) {
                   </Link>
                   <Link
                     aria-current={
-                      routeMatchesPath(pathname, "/children") ? "page" : undefined
+                      routeMatchesPath(pathname, "/children")
+                        ? "page"
+                        : undefined
                     }
                     className={cn(
                       "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
@@ -382,7 +391,9 @@ export function AppShell({ children }: AppShellProps) {
                   <div className="my-2 border-t border-border" />
                   <Link
                     aria-current={
-                      routeMatchesPath(pathname, "/settings") ? "page" : undefined
+                      routeMatchesPath(pathname, "/settings")
+                        ? "page"
+                        : undefined
                     }
                     className={cn(
                       "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
