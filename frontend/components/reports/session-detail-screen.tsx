@@ -212,6 +212,19 @@ export function SessionDetailScreen({
     );
   }
 
+  if (state.status !== "ready") {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang tải chi tiết buổi đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-72 rounded-card" />
+      </section>
+    );
+  }
+
   const { detail } = state;
   const metrics = detail.fluency_assessment?.metrics;
   const rangeIsPartial =
