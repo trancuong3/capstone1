@@ -208,11 +208,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     ).toBeInTheDocument();
   });
   it("shows owned history for retired books without requesting current catalog", async () => {
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={1} />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<SessionHistoryScreen page={1} />);
     expect(
       await screen.findByRole("heading", { name: book.title }),
     ).toBeInTheDocument();
@@ -278,11 +274,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
         ? Response.json([])
         : readyResponse(url),
     );
-    render(
-      <AppServicesProvider>
-        <DifficultWordsScreen />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<DifficultWordsScreen />);
     expect(
       await screen.findByRole("heading", { name: "Chưa có từ cần luyện" }),
     ).toBeInTheDocument();
