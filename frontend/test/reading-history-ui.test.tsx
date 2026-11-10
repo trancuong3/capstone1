@@ -264,7 +264,7 @@ describe("Reading history detail", () => {
     expect(screen.queryByText("Dữ liệu đang dở dang")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Lịch sử" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}&page=3`,
+      "/sessions?page=3",
     );
   });
   it("does not expose a detail belonging to another child selected from Dashboard", async () => {
@@ -277,6 +277,9 @@ describe("Reading history detail", () => {
     await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
     expect(screen.queryByRole("heading", { name: "Buổi đọc đã hoàn thành" }))
       .not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).endsWith("/book")),
+    ).toBe(false);
     expect(screen.getByRole("link", { name: "Về lịch sử" })).toHaveAttribute(
       "href",
       "/sessions",
@@ -409,8 +412,10 @@ describe("Reading history detail", () => {
     expect(screen.queryByText("Chưa có câu trả lời")).not.toBeInTheDocument();
   });
   it("foreign session has a safe not-found state", async () => {
-    fetchMock.mockResolvedValue(
-      Response.json({ detail: "private" }, { status: 404 }),
+    fetchMock.mockImplementation(async (url: string) =>
+      new URL(url).pathname === `/reading/history/${TEST_SESSION_ID}`
+        ? Response.json({ detail: "private" }, { status: 404 })
+        : respond(url),
     );
     render(
       withSelectedChild(
