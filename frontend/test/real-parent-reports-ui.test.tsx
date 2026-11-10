@@ -2,16 +2,19 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { AppStoreProvider } from "@/components/providers/app-store-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import { SessionHistoryScreen } from "@/components/reports/session-history-screen";
 import { SessionDetailScreen } from "@/components/reports/session-detail-screen";
 import { ProgressReportScreen } from "@/components/reports/progress-report-screen";
 import { DifficultWordsScreen } from "@/components/reports/difficult-words-screen";
 import { DifficultWordItem } from "@/components/reports/difficult-word-item";
 
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/sessions",
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => navigation,
 }));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -85,8 +88,10 @@ const word = {
 const fetchMock = vi.fn();
 
 function readyResponse(url: string): Response {
-  if (url.includes("/profiles/children/")) return Response.json(child);
-  if (url.includes("/profiles/children")) return Response.json([child]);
+  const pathname = new URL(url).pathname;
+  if (pathname === `/profiles/children/${childId}`) return Response.json(child);
+  if (pathname.startsWith("/profiles/children/"))
+    return Response.json({}, { status: 404 });
   if (url.endsWith("/book")) return Response.json(book);
   if (url.includes(`/reading/history/${sessionId}`))
     return Response.json(detail);
@@ -146,21 +151,29 @@ function readyResponse(url: string): Response {
 }
 
 beforeEach(() => {
+  navigation.push.mockReset();
+  navigation.replace.mockReset();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string) => readyResponse(url));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
 
+function renderWithSelectedChild(element: React.ReactNode) {
+  return render(
+    <WithSelectedChild childId={childId}>
+      <AppServicesProvider>{element}</AppServicesProvider>
+    </WithSelectedChild>,
+  );
+}
+
+
+
 describe("Parent report UI through real adapters and HTTP test doubles", () => {
   it.each([0, -1, 100001, Number.NaN, Number.POSITIVE_INFINITY, 2.5])(
     "uses first page for invalid history page %s without forwarding an invalid cursor",
     async (page) => {
-      render(
-        <AppServicesProvider>
-          <SessionHistoryScreen page={page} />
-        </AppServicesProvider>,
-      );
+      renderWithSelectedChild(<SessionHistoryScreen page={page} />);
       await screen.findByRole("heading", { name: book.title });
       expect(
         fetchMock.mock.calls
@@ -180,11 +193,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.includes("/reading/history?") ? pending : readyResponse(url),
     );
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={1} />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<SessionHistoryScreen page={1} />);
     expect(screen.getByLabelText("Đang tải lịch sử đọc")).toBeInTheDocument();
     await waitFor(() =>
       expect(
@@ -210,7 +219,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     expect(screen.getByText("Chưa có dữ liệu thời lượng")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Trang sau" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${childId}&page=2`,
+      "/sessions?page=2",
     );
     expect(
       fetchMock.mock.calls.some(([url]) =>
@@ -219,11 +228,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     ).toBe(false);
   });
   it("passes page cursor and shows previous-page navigation", async () => {
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={2} />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<SessionHistoryScreen page={2} />);
     await screen.findByRole("heading", { name: book.title });
     expect(
       fetchMock.mock.calls.some(([url]) =>
@@ -232,7 +237,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     ).toBe(true);
     expect(screen.getByRole("link", { name: "Trang trước" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${childId}&page=1`,
+      "/sessions?page=1",
     );
   });
   it("keeps optional details unknown instead of displaying sample metrics", async () => {
@@ -253,11 +258,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     expect(screen.queryByText("0 từ/phút")).not.toBeInTheDocument();
   });
   it("shows actual report counts with missing previous period", async () => {
-    render(
-      <AppServicesProvider>
-        <ProgressReportScreen />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<ProgressReportScreen />);
     await screen.findByRole("heading", {
       name: `Cùng nhìn lại hành trình của ${child.alias}`,
     });
@@ -265,11 +266,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     expect(screen.getByText("Chưa đủ kỳ so sánh")).toBeInTheDocument();
   });
   it("shows actual stored words", async () => {
-    render(
-      <AppServicesProvider>
-        <DifficultWordsScreen />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<DifficultWordsScreen />);
     expect(
       await screen.findByRole("heading", { name: word.display_text }),
     ).toBeInTheDocument();
@@ -307,7 +304,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
           ? readyResponse(url)
           : Response.json({ detail: "private sql token" }, { status: 501 }),
       );
-      render(<AppServicesProvider>{element}</AppServicesProvider>);
+      renderWithSelectedChild(element);
       expect(
         await screen.findByRole("heading", {
           name: "Dữ liệu đang chờ bổ sung",
@@ -333,36 +330,38 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
         : readyResponse(url),
     );
     render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={1} requestedChildId={bookId} />
-      </AppServicesProvider>,
+      <WithSelectedChild childId={bookId}>
+        <AppServicesProvider>
+          <SessionHistoryScreen page={1} />
+        </AppServicesProvider>
+      </WithSelectedChild>,
     );
-    expect(
-      await screen.findByText("Không tìm thấy lịch sử"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "/dashboard?focus=child-selection&reason=invalid",
+      ),
+    );
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/reading/history"),
+    )).toBe(false);
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes("/reading/")),
     ).toBe(false);
   });
-  it("no children prompts profile creation without reading reports", async () => {
-    fetchMock.mockImplementation(async () => Response.json([]));
+  it("redirects to Dashboard when no child is selected and does not request reports", async () => {
     render(
-      <AppServicesProvider>
-        <ProgressReportScreen />
-      </AppServicesProvider>,
+      <AppStoreProvider>
+        <AppServicesProvider>
+          <ProgressReportScreen />
+        </AppServicesProvider>
+      </AppStoreProvider>,
     );
-    expect(
-      await screen.findByRole("heading", { name: "Chưa có dữ liệu báo cáo" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Tạo hồ sơ bé" })).toHaveAttribute(
-      "href",
-      "/children/new",
-    );
-    expect(
-      fetchMock.mock.calls.every(([url]) =>
-        String(url).includes("/profiles/children"),
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "/dashboard?focus=child-selection&reason=missing",
       ),
-    ).toBe(true);
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("practice never reports mocked success or sends a write request", async () => {
     const user = userEvent.setup();
