@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   AppStoreContext,
@@ -37,6 +43,10 @@ function SelectedChildStore({
   const clearSelectedChild = useCallback(() => {
     setSelection({ childId: "", child: null });
   }, []);
+
+  useEffect(() => {
+    selectChild(childId);
+  }, [childId, selectChild]);
 
   const setValidatedSelectedChild = useCallback((child: ChildProfileDTO) => {
     setSelection((current) =>
