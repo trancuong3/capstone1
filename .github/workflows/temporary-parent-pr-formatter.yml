@@ -62,7 +62,7 @@ jobs:
             test/real-parent-reports-ui.test.tsx \
             tests/reports/group5-components.test.tsx
 
-          git add frontend
+          git add .
           if git diff --cached --quiet; then
             echo "All PR frontend files already use Prettier formatting."
             exit 0
