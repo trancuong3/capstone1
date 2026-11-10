@@ -155,19 +155,6 @@ export function DifficultWordsScreen() {
         Dữ liệu không tồn tại hoặc không thuộc tài khoản hiện tại.
       </StatusMessage>
     );
-  if (state.status !== "ready") {
-    return (
-      <section
-        aria-busy="true"
-        aria-label="Đang tải từ cần luyện"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
-      >
-        <Skeleton className="h-32 rounded-card" />
-        <Skeleton className="h-44 rounded-card" />
-      </section>
-    );
-  }
-
   if (state.status === "error")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
@@ -184,6 +171,19 @@ export function DifficultWordsScreen() {
         </Button>
       </div>
     );
+
+  if (state.status !== "ready") {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang tải từ cần luyện"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-44 rounded-card" />
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
