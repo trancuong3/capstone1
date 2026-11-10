@@ -4,6 +4,13 @@ import userEvent from "@testing-library/user-event";
 
 import { ReadingManagementScreen } from "@/components/reading-management/reading-management-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { AppStoreProvider } from "@/components/providers/app-store-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
+
+const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
+}));
 
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -31,11 +38,13 @@ const child = {
 };
 const fetchMock = vi.fn();
 beforeEach(() => {
+  replaceMock.mockReset();
   fetchMock.mockReset();
   fetchMock.mockImplementation(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname === "/profiles/children") return Response.json([child]);
+      if (url.pathname === `/profiles/children/${childId}`)
+        return Response.json(child);
       if (url.pathname === "/books/catalog") return Response.json([]);
       if (
         url.pathname === "/reading-management/goals" &&
@@ -53,9 +62,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 function renderScreen() {
   return render(
-    <AppServicesProvider>
-      <ReadingManagementScreen />
-    </AppServicesProvider>,
+    <WithSelectedChild childId={childId}>
+      <AppServicesProvider>
+        <ReadingManagementScreen />
+      </AppServicesProvider>
+    </WithSelectedChild>,
   );
 }
 
@@ -68,6 +79,16 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
     expect(
       await screen.findByRole("heading", { name: "Mục tiêu đọc" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Đang quản lý hồ sơ của/),
+    ).toHaveTextContent("Bé An · Lớp 2");
+    expect(
+      screen.getByRole("link", { name: "Đổi hồ sơ tại Tổng quan" }),
+    ).toHaveAttribute(
+      "href",
+      "/dashboard?focus=child-selection&reason=change",
+    );
+    expect(screen.queryByLabelText("Hồ sơ bé")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Kế hoạch đọc trong tuần" }),
     ).toBeInTheDocument();
@@ -84,6 +105,32 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
       expect(requests).toContain("/reading-management/collections");
       expect(requests).toContain("/reading-management/reminders");
     });
+  });
+
+
+  it("returns to Dashboard instead of selecting the first child when no profile is selected", async () => {
+    render(
+      <AppStoreProvider>
+        <AppServicesProvider>
+          <ReadingManagementScreen />
+        </AppServicesProvider>
+      </AppStoreProvider>,
+    );
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith(
+        "/dashboard?focus=child-selection&reason=missing",
+      );
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Đang xác minh hồ sơ đã chọn…",
+    );
+    expect(screen.queryByLabelText("Hồ sơ bé")).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => new URL(String(url)).pathname.startsWith("/reading-management/"),
+      ),
+    ).toBe(false);
   });
 
   it("does not show success when the backend rejects goal creation", async () => {
