@@ -237,11 +237,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     );
   });
   it("keeps optional details unknown instead of displaying sample metrics", async () => {
-    render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={sessionId} />
-      </AppServicesProvider>,
-    );
+    renderWithSelectedChild(<SessionDetailScreen sessionId={sessionId} />);
     await screen.findByRole("heading", { name: "Buổi đọc đã dừng" });
     expect(screen.getByText("Chưa đánh giá")).toBeInTheDocument();
     expect(screen.getAllByText("Chưa ghi nhận")).toHaveLength(2);
