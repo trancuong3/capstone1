@@ -120,7 +120,7 @@ describe("Report components with typed data and real API adapters", () => {
         "Buổi đọc này chưa có báo cáo đối chiếu được lưu.",
       ),
     ).toBeInTheDocument();
-    expect(requestedApiUrl().pathname).toBe(
+    expect(requestedApiUrl(1).pathname).toBe(
       `/reading/history/${TEST_SESSION_ID}`,
     );
     expect(apiFetchFixture).toHaveBeenCalledTimes(4);
