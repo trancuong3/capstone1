@@ -1,0 +1,29 @@
+{
+  "fixture_id": "vi_curved_01",
+  "condition": "curved",
+  "image": "vi_curved_01.png",
+  "expected_text": "BỮA SÁNG CỦA AN\nHôm nay trời nắng đẹp.\nMẹ chuẩn bị bánh mì và sữa.",
+  "expected_words": [
+    "BỮA",
+    "SÁNG",
+    "CỦA",
+    "AN",
+    "Hôm",
+    "nay",
+    "trời",
+    "nắng",
+    "đẹp.",
+    "Mẹ",
+    "chuẩn",
+    "bị",
+    "bánh",
+    "mì",
+    "và",
+    "sữa."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": null,
+  "width": 526,
+  "height": 301
+}

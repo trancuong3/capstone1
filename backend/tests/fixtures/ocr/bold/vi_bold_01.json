@@ -1,0 +1,278 @@
+{
+  "fixture_id": "vi_bold_01",
+  "condition": "bold",
+  "image": "vi_bold_01.png",
+  "expected_text": "Những bông hoa nở rực rỡ trong vườn.\nBé Lan thích đọc truyện cổ tích mỗi tối.\nĐàn chim hót líu lo trên cành.",
+  "expected_words": [
+    "Những",
+    "bông",
+    "hoa",
+    "nở",
+    "rực",
+    "rỡ",
+    "trong",
+    "vườn.",
+    "Bé",
+    "Lan",
+    "thích",
+    "đọc",
+    "truyện",
+    "cổ",
+    "tích",
+    "mỗi",
+    "tối.",
+    "Đàn",
+    "chim",
+    "hót",
+    "líu",
+    "lo",
+    "trên",
+    "cành."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Những",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        157.0,
+        82
+      ]
+    },
+    {
+      "text": "bông",
+      "line_index": 0,
+      "box": [
+        166.0,
+        49,
+        250.0,
+        82
+      ]
+    },
+    {
+      "text": "hoa",
+      "line_index": 0,
+      "box": [
+        259.0,
+        50,
+        320.0,
+        75
+      ]
+    },
+    {
+      "text": "nở",
+      "line_index": 0,
+      "box": [
+        329.0,
+        47,
+        375.0,
+        75
+      ]
+    },
+    {
+      "text": "rực",
+      "line_index": 0,
+      "box": [
+        383.0,
+        56,
+        440.0,
+        83
+      ]
+    },
+    {
+      "text": "rỡ",
+      "line_index": 0,
+      "box": [
+        449.0,
+        50,
+        487.0,
+        75
+      ]
+    },
+    {
+      "text": "trong",
+      "line_index": 0,
+      "box": [
+        495.0,
+        50,
+        582.0,
+        82
+      ]
+    },
+    {
+      "text": "vườn.",
+      "line_index": 0,
+      "box": [
+        591.0,
+        49,
+        689.0,
+        75
+      ]
+    },
+    {
+      "text": "Bé",
+      "line_index": 1,
+      "box": [
+        44.0,
+        120,
+        88.0,
+        146
+      ]
+    },
+    {
+      "text": "Lan",
+      "line_index": 1,
+      "box": [
+        97.0,
+        121,
+        158.0,
+        146
+      ]
+    },
+    {
+      "text": "thích",
+      "line_index": 1,
+      "box": [
+        167.0,
+        120,
+        248.0,
+        146
+      ]
+    },
+    {
+      "text": "đọc",
+      "line_index": 1,
+      "box": [
+        257.0,
+        121,
+        318.0,
+        154
+      ]
+    },
+    {
+      "text": "truyện",
+      "line_index": 1,
+      "box": [
+        327.0,
+        120,
+        431.0,
+        154
+      ]
+    },
+    {
+      "text": "cổ",
+      "line_index": 1,
+      "box": [
+        440.0,
+        114,
+        480.0,
+        146
+      ]
+    },
+    {
+      "text": "tích",
+      "line_index": 1,
+      "box": [
+        489.0,
+        120,
+        549.0,
+        146
+      ]
+    },
+    {
+      "text": "mỗi",
+      "line_index": 1,
+      "box": [
+        558.0,
+        115,
+        618.0,
+        146
+      ]
+    },
+    {
+      "text": "tối.",
+      "line_index": 1,
+      "box": [
+        627.0,
+        114,
+        677.0,
+        146
+      ]
+    },
+    {
+      "text": "Đàn",
+      "line_index": 2,
+      "box": [
+        43.0,
+        191,
+        109.0,
+        217
+      ]
+    },
+    {
+      "text": "chim",
+      "line_index": 2,
+      "box": [
+        118.0,
+        192,
+        197.0,
+        217
+      ]
+    },
+    {
+      "text": "hót",
+      "line_index": 2,
+      "box": [
+        206.0,
+        191,
+        259.0,
+        217
+      ]
+    },
+    {
+      "text": "líu",
+      "line_index": 2,
+      "box": [
+        268.0,
+        191,
+        307.0,
+        217
+      ]
+    },
+    {
+      "text": "lo",
+      "line_index": 2,
+      "box": [
+        316.0,
+        192,
+        346.0,
+        217
+      ]
+    },
+    {
+      "text": "trên",
+      "line_index": 2,
+      "box": [
+        355.0,
+        191,
+        419.0,
+        217
+      ]
+    },
+    {
+      "text": "cành.",
+      "line_index": 2,
+      "box": [
+        428.0,
+        191,
+        517.0,
+        217
+      ]
+    }
+  ],
+  "width": 733,
+  "height": 301
+}

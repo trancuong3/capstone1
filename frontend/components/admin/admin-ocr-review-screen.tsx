@@ -43,6 +43,7 @@ import {
   syncWordsToPageText,
   tokenizePageText,
 } from "@/lib/ocr/sync-page-text-words";
+import { adjudicateWord } from "@/lib/ocr/word-adjudication";
 import type {
   AdminBookDTO,
   AdminOcrReviewStatus,
@@ -111,6 +112,10 @@ export function getWordReviewStatus(
   word: AdminRevisionWordDTO,
   revisionStatus?: AdminPageRevisionDetailDTO["verification_status"],
 ): AdminOcrReviewStatus {
+  // RED comes only from a trusted one-to-one reference mismatch. Neither the
+  // page status nor a stale word status may relabel it.
+  if (getWordReviewColorGroup("needs_review", word) === "red")
+    return "confirmed_mismatch";
   if (revisionStatus === "VERIFIED") return "verified";
   const status = word.ocr_review_status;
   if (status === "matched") return "engine_agreement";
@@ -221,6 +226,37 @@ export function getWordReviewColorGroup(
       : selectedEngine === "vietocr"
         ? vietocr
         : null;
+  const isTokenIndex = (value: number | null | undefined) =>
+    Number.isInteger(value) && (value ?? -1) >= 0;
+  const paddleRead =
+    typeof paddle === "string" && statuses.paddleocr === "success"
+      ? normalize(paddle)
+      : "";
+  const vietocrRead =
+    typeof vietocr === "string" && statuses.vietocr === "success"
+      ? normalize(vietocr)
+      : "";
+  const lineEnginesAgree =
+    paddleRead.length > 0 &&
+    paddleRead === vietocrRead &&
+    evidence.alignment === "match";
+  if (!lineEnginesAgree) {
+    // PaddleOCR and VietOCR did not both return this token. It can still be
+    // settled when independent engines converge on the displayed text. Split,
+    // merge and unaligned tokens have no one-to-one mapping: never green.
+    if (!["substitute", "unmatched", "insert"].includes(evidence.alignment))
+      return "yellow";
+    if (
+      !isTokenIndex(evidence.paddle_token_index) &&
+      !isTokenIndex(evidence.vietocr_token_index)
+    )
+      return "yellow";
+    const adjudication = adjudicateWord(evidence);
+    return adjudication.status === "resolved" &&
+      adjudication.text === normalize(word.text)
+      ? "green"
+      : "yellow";
+  }
   if (
     typeof paddle !== "string" ||
     !paddle.trim() ||
@@ -264,6 +300,14 @@ export function getWordReviewColorGroup(
         return "yellow";
     }
   }
+  // Agreement between PaddleOCR and VietOCR still loses to a Vietnamese
+  // engine that read the same letters with other marks.
+  const adjudication = adjudicateWord(evidence);
+  if (
+    adjudication.status !== "resolved" ||
+    adjudication.text !== normalize(word.text)
+  )
+    return "yellow";
   return "green";
 }
 
@@ -292,6 +336,8 @@ export function getWordReviewLabel(
     if (status === "verified") return "Admin đã xác minh từ";
     if (word?.ocr_evidence?.verification_source)
       return "Khớp reference của revision đã xác minh";
+    if (hasEngineDisagreementEvidence(word))
+      return "Đã phân xử bằng crop của từ · nhiều lượt đọc độc lập đồng thuận · chưa đối chiếu reference";
     return "Hai OCR đồng thuận · chưa đối chiếu reference";
   }
   if (group === "red") return "Sai so với reference đã xác minh";
@@ -2590,6 +2636,38 @@ export function AdminOcrReviewScreen({
                                       .vietocr_candidate
                                   : "No crop candidate recorded"}
                               </span>
+                              <span>
+                                Crop Tesseract:{" "}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .tesseract_candidate === "string"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .tesseract_candidate
+                                  : "Not run or no candidate"}
+                              </span>
+                              <span>
+                                Phân xử candidate:{" "}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .adjudication_status === "string"
+                                  ? word.ocr_evidence.crop_evidence
+                                      .adjudication_status
+                                  : "Not recorded"}
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .adjudication_support === "string" &&
+                                word.ocr_evidence.crop_evidence
+                                  .adjudication_support
+                                  ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
+                                  : ""}
+                              </span>
+                              {typeof word.ocr_evidence.crop_evidence
+                                .text_before_adjudication === "string" ? (
+                                <span>
+                                  Text trước phân xử:{" "}
+                                  {
+                                    word.ocr_evidence.crop_evidence
+                                      .text_before_adjudication
+                                  }
+                                </span>
+                              ) : null}
                               <span>
                                 Paddle crop raw recognition score:{" "}
                                 {formatRawOcrEvidence(

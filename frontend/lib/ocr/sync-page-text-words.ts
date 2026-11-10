@@ -84,6 +84,10 @@ export function syncPageTextToWords(
       // Keep immutable OCR outputs as provenance; source_text identifies the
       // original token, so they are never mistaken for evidence about the edit.
       ocr_evidence: word.ocr_evidence,
+      // The server color was computed for the previous token. Drop it for an
+      // edited token so the client classifier re-evaluates the current text
+      // against the same evidence instead of showing a stale color.
+      review_color_group: tokenChanged ? undefined : word.review_color_group,
       ocr_review_status: tokenChanged
         ? ("needs_review" as const)
         : (word.ocr_review_status ?? "needs_review"),

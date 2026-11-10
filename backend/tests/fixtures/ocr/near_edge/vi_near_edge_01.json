@@ -1,0 +1,190 @@
+{
+  "fixture_id": "vi_near_edge_01",
+  "condition": "near_edge",
+  "image": "vi_near_edge_01.png",
+  "expected_text": "BỮA SÁNG CỦA AN\nHôm nay trời nắng đẹp.\nMẹ chuẩn bị bánh mì và sữa.",
+  "expected_words": [
+    "BỮA",
+    "SÁNG",
+    "CỦA",
+    "AN",
+    "Hôm",
+    "nay",
+    "trời",
+    "nắng",
+    "đẹp.",
+    "Mẹ",
+    "chuẩn",
+    "bị",
+    "bánh",
+    "mì",
+    "và",
+    "sữa."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "BỮA",
+      "line_index": 0,
+      "box": [
+        5.0,
+        5,
+        80.0,
+        36
+      ]
+    },
+    {
+      "text": "SÁNG",
+      "line_index": 0,
+      "box": [
+        89.0,
+        4,
+        186.0,
+        36
+      ]
+    },
+    {
+      "text": "CỦA",
+      "line_index": 0,
+      "box": [
+        195.0,
+        3,
+        268.0,
+        36
+      ]
+    },
+    {
+      "text": "AN",
+      "line_index": 0,
+      "box": [
+        276.0,
+        11,
+        325.0,
+        36
+      ]
+    },
+    {
+      "text": "Hôm",
+      "line_index": 1,
+      "box": [
+        5.0,
+        82,
+        77.0,
+        107
+      ]
+    },
+    {
+      "text": "nay",
+      "line_index": 1,
+      "box": [
+        86.0,
+        89,
+        141.0,
+        114
+      ]
+    },
+    {
+      "text": "trời",
+      "line_index": 1,
+      "box": [
+        150.0,
+        82,
+        200.0,
+        107
+      ]
+    },
+    {
+      "text": "nắng",
+      "line_index": 1,
+      "box": [
+        209.0,
+        76,
+        285.0,
+        114
+      ]
+    },
+    {
+      "text": "đẹp.",
+      "line_index": 1,
+      "box": [
+        294.0,
+        82,
+        360.0,
+        114
+      ]
+    },
+    {
+      "text": "Mẹ",
+      "line_index": 2,
+      "box": [
+        5.0,
+        153,
+        52.0,
+        183
+      ]
+    },
+    {
+      "text": "chuẩn",
+      "line_index": 2,
+      "box": [
+        61.0,
+        145,
+        154.0,
+        178
+      ]
+    },
+    {
+      "text": "bị",
+      "line_index": 2,
+      "box": [
+        163.0,
+        153,
+        190.0,
+        183
+      ]
+    },
+    {
+      "text": "bánh",
+      "line_index": 2,
+      "box": [
+        199.0,
+        153,
+        275.0,
+        178
+      ]
+    },
+    {
+      "text": "mì",
+      "line_index": 2,
+      "box": [
+        284.0,
+        153,
+        321.0,
+        178
+      ]
+    },
+    {
+      "text": "và",
+      "line_index": 2,
+      "box": [
+        330.0,
+        153,
+        366.0,
+        178
+      ]
+    },
+    {
+      "text": "sữa.",
+      "line_index": 2,
+      "box": [
+        375.0,
+        154,
+        443.0,
+        178
+      ]
+    }
+  ],
+  "width": 448,
+  "height": 223
+}
