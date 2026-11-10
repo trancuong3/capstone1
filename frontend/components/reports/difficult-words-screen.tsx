@@ -42,13 +42,11 @@ export function DifficultWordsScreen() {
   const [state, setState] = useState<WordsState>({ status: "loading" });
 
   useEffect(() => {
-    if (childState.status !== "ready") {
-      return;
-    }
+    if (!selectedChild) return;
+    const child = selectedChild;
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
-      const child = childState.child;
       try {
         const words = await difficultWordService.list(
           child.id,
@@ -76,12 +74,7 @@ export function DifficultWordsScreen() {
     return () => {
       active = false;
     };
-  }, [
-    childState.status,
-    selectedChild?.id,
-    difficultWordService,
-    requestKey,
-  ]);
+  }, [selectedChild, difficultWordService, requestKey]);
 
   if (
     childState.status === "loading" ||

@@ -51,13 +51,11 @@ export function SessionDetailScreen({
   const [state, setState] = useState<DetailState>({ status: "loading" });
 
   useEffect(() => {
-    if (childState.status !== "ready") {
-      return;
-    }
+    if (!selectedChild) return;
+    const child = selectedChild;
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
-      const child = childState.child;
       try {
         const detail = await sessionService.get(sessionId);
         if (detail.child_id !== child.id) {
@@ -86,7 +84,7 @@ export function SessionDetailScreen({
     return () => {
       active = false;
     };
-  }, [childState.status, selectedChild?.id, requestKey, sessionId, sessionService]);
+  }, [selectedChild, requestKey, sessionId, sessionService]);
 
   if (
     childState.status === "loading" ||

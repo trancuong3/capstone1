@@ -12,6 +12,17 @@ import {
   installApiFetchFixture,
   requestedApiUrl,
 } from "@/test/fixtures/api-test-fixture";
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/sessions",
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => navigation,
+}));
+
 import {
   TEST_CHILD_ID,
   TEST_SESSION_ID,

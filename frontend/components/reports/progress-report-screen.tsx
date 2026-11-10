@@ -55,33 +55,39 @@ function ProgressReportContent({
     childState.status === "ready" ? childState.child : null;
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMoreFor, setLoadingMoreFor] = useState<string | null>(null);
   const alive = useRef(true);
   const paging = useRef<string | null>(null);
   const selected = useMemo(
     () => parseProgressPeriod(requestedPeriodStart, requestedPeriodEnd),
     [requestedPeriodStart, requestedPeriodEnd],
   );
+  const currentRequestKey = `${selectedChild?.id ?? ""}:${
+    selected && selected !== "invalid"
+      ? `${selected.period_start}/${selected.period_end}`
+      : ""
+  }:${retry}`;
+  const loadingMore = loadingMoreFor === currentRequestKey;
 
   useEffect(() => {
     alive.current = true;
     let active = true;
-    if (childState.status !== "ready" || selected === "invalid") {
+    if (!selectedChild || selected === "invalid") {
       return () => {
         active = false;
         alive.current = false;
       };
     }
 
+    const child = selectedChild;
+    const selectedPeriod = selected ?? undefined;
     paging.current = null;
-    setLoadingMore(false);
 
     async function load() {
       setState({ status: "loading" });
-      const child = childState.child;
       try {
         const [reportResult, periodsResult] = await Promise.allSettled([
-          reportService.get(child.id, selected ?? undefined),
+          reportService.get(child.id, selectedPeriod),
           reportService.listPeriods(child.id),
         ]);
         if (!active) return;
@@ -117,7 +123,7 @@ function ProgressReportContent({
       active = false;
       alive.current = false;
     };
-  }, [reportService, childState.status, selectedChild?.id, selected, retry]);
+  }, [reportService, selectedChild, selected, retry]);
 
   async function loadMore() {
     if (
@@ -127,8 +133,9 @@ function ProgressReportContent({
     )
       return;
     const { child, periods } = state;
-    paging.current = child.id;
-    setLoadingMore(true);
+    const requestKey = currentRequestKey;
+    paging.current = requestKey;
+    setLoadingMoreFor(requestKey);
     try {
       const page = await reportService.listPeriods(child.id, {
         cursor: periods.next_cursor ?? undefined,
@@ -165,9 +172,12 @@ function ProgressReportContent({
             : current,
         );
     } finally {
-      if (paging.current === child.id) {
+      if (paging.current === requestKey) {
         paging.current = null;
-        if (alive.current) setLoadingMore(false);
+        if (alive.current)
+          setLoadingMoreFor((current) =>
+            current === requestKey ? null : current,
+          );
       }
     }
   }

@@ -166,8 +166,6 @@ export function ReadingManagementScreen() {
     }
     const controller = new AbortController();
     let active = true;
-    setError("");
-    setSuccess("");
     Promise.all([
       service.listGoals(childId, controller.signal),
       service.listPlans(childId, controller.signal),

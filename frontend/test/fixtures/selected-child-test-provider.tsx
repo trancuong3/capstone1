@@ -2,7 +2,6 @@
 
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -44,10 +43,6 @@ function SelectedChildStore({
     setSelection({ childId: "", child: null });
   }, []);
 
-  useEffect(() => {
-    selectChild(childId);
-  }, [childId, selectChild]);
-
   const setValidatedSelectedChild = useCallback((child: ChildProfileDTO) => {
     setSelection((current) =>
       current.childId === child.id ? { ...current, child } : current,
@@ -86,6 +81,8 @@ export function WithSelectedChild({
   children: ReactNode;
 }) {
   return (
-    <SelectedChildStore childId={childId}>{children}</SelectedChildStore>
+    <SelectedChildStore key={childId} childId={childId}>
+      {children}
+    </SelectedChildStore>
   );
 }

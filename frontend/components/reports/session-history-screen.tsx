@@ -48,13 +48,11 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
   const [state, setState] = useState<ScreenState>({ status: "loading" });
 
   useEffect(() => {
-    if (childState.status !== "ready") {
-      return;
-    }
+    if (!selectedChild) return;
+    const child = selectedChild;
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
-      const child = childState.child;
       try {
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
@@ -95,7 +93,7 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
     return () => {
       active = false;
     };
-  }, [childState.status, selectedChild?.id, currentPage, requestKey, sessionService]);
+  }, [selectedChild, currentPage, requestKey, sessionService]);
 
   if (
     childState.status === "loading" ||
