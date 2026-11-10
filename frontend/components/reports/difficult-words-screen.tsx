@@ -7,9 +7,10 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordItem } from "@/components/reports/difficult-word-item";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -17,44 +18,37 @@ import {
   currentDateInReportTimezone,
   DIFFICULT_WORD_DEFAULT_DAYS,
 } from "@/lib/utils/report-state";
-import type { ChildProfileDTO } from "@/types/child";
 import type { DifficultWordDTO } from "@/types/reports";
 
 type WordsState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
-      readonly children: readonly ChildProfileDTO[];
-      readonly child: ChildProfileDTO;
+      readonly child: import("@/types/child").ChildProfileDTO;
       readonly words: readonly DifficultWordDTO[];
     }
-  | { readonly status: "no-children" }
   | { readonly status: "not-found" }
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
-export function DifficultWordsScreen({
-  requestedChildId,
-}: {
-  readonly requestedChildId?: string;
-}) {
-  const { childService, difficultWordService } = useReportServices();
+export function DifficultWordsScreen() {
+  const { difficultWordService } = useReportServices();
+  const { state: childState, retry: retryChild } =
+    useValidatedSelectedChild();
+  const selectedChild =
+    childState.status === "ready" ? childState.child : null;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<WordsState>({ status: "loading" });
 
   useEffect(() => {
+    if (childState.status !== "ready") {
+      return;
+    }
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
       try {
-        const children = await childService.list();
-        if (children.length === 0) {
-          if (active) setState({ status: "no-children" });
-          return;
-        }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
-          : children[0];
+        const child = childState.child;
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(
@@ -62,7 +56,7 @@ export function DifficultWordsScreen({
             DIFFICULT_WORD_DEFAULT_DAYS,
           ),
         );
-        if (active) setState({ status: "ready", children, child, words });
+        if (active) setState({ status: "ready", child, words });
       } catch (error) {
         if (active)
           setState({
@@ -80,9 +74,18 @@ export function DifficultWordsScreen({
     return () => {
       active = false;
     };
-  }, [childService, difficultWordService, requestKey, requestedChildId]);
+  }, [
+    childState.status,
+    selectedChild?.id,
+    difficultWordService,
+    requestKey,
+  ]);
 
-  if (state.status === "loading")
+  if (
+    childState.status === "loading" ||
+    childState.status === "redirecting" ||
+    state.status === "loading"
+  )
     return (
       <section
         aria-busy="true"
@@ -95,15 +98,29 @@ export function DifficultWordsScreen({
         ))}
       </section>
     );
-  if (state.status === "no-children")
+  if (childState.status === "error")
     return (
-      <EmptyState
-        headingLevel={1}
-        action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
-        description="Tạo hồ sơ và bắt đầu đọc để hệ thống có bằng chứng."
-        icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
-        title="Chưa có hồ sơ bé"
-      />
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start"
+          onClick={retryChild}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  if (!selectedChild || (state.status === "ready" && state.child.id !== selectedChild.id))
+    return (
+      <section aria-busy="true" aria-label="Đang cập nhật từ cần luyện" className="mx-auto flex max-w-[1120px] flex-col gap-6">
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-44 rounded-card" />
+      </section>
     );
   if (state.status === "unavailable")
     return (
@@ -160,7 +177,7 @@ export function DifficultWordsScreen({
         action={
           <ButtonLink
             className="sm:w-auto"
-            href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+            href="/reports"
             variant="secondary"
           >
             <ArrowLeft aria-hidden="true" className="size-5" />
@@ -171,12 +188,7 @@ export function DifficultWordsScreen({
         eyebrow="Cùng luyện mỗi ngày"
         title={`Từ cần luyện của ${state.child.alias}`}
       />
-      <div className="max-w-md">
-        <ChildSelector
-          childrenProfiles={state.children}
-          selectedChildId={state.child.id}
-        />
-      </div>
+      <SelectedChildIdentity child={state.child} />
       <StatusMessage title="Nguồn dữ liệu">
         Số đếm và điểm bằng chứng lấy từ báo cáo đã lưu. Trang này không tự sinh
         bằng chứng hoặc thực hiện phát âm thanh.
@@ -185,7 +197,7 @@ export function DifficultWordsScreen({
         <EmptyState
           action={
             <ButtonLink
-              href={`/books?childId=${encodeURIComponent(state.child.id)}`}
+              href="/books"
             >
               Tiếp tục đọc sách
             </ButtonLink>
