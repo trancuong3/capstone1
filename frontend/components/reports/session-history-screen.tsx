@@ -204,6 +204,19 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
     );
   }
 
+  if (state.status !== "ready") {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang tải lịch sử đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-40 rounded-card" />
+      </section>
+    );
+  }
+
   const nextPage =
     state.nextCursor === null ? null : historyPageFromCursor(state.nextCursor);
   return (
