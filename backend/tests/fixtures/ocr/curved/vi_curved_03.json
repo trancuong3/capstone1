@@ -1,0 +1,32 @@
+{
+  "fixture_id": "vi_curved_03",
+  "condition": "curved",
+  "image": "vi_curved_03.png",
+  "expected_text": "Bữa sáng thật là ngon.\nAn nói lời cảm ơn mẹ.\nChú mèo nhỏ nằm ngủ dưới gốc cây.",
+  "expected_words": [
+    "Bữa",
+    "sáng",
+    "thật",
+    "là",
+    "ngon.",
+    "An",
+    "nói",
+    "lời",
+    "cảm",
+    "ơn",
+    "mẹ.",
+    "Chú",
+    "mèo",
+    "nhỏ",
+    "nằm",
+    "ngủ",
+    "dưới",
+    "gốc",
+    "cây."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": null,
+  "width": 648,
+  "height": 301
+}

@@ -11,6 +11,11 @@ import threading
 import unicodedata
 from typing import Any
 
+from app.services.ocr_adjudication import (
+    OCR_ADJUDICATION_RULE,
+    adjudicate_word,
+    replace_token_core,
+)
 from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
     MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
@@ -189,6 +194,12 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     viet_config = Cfg.load_config_from_name("vgg_transformer")
                     target_device = "cuda" if torch.cuda.is_available() else "cpu"
                     viet_config["device"] = target_device
+                    # The released checkpoint already contains every CNN
+                    # weight. Skipping the ImageNet backbone avoids a ~550 MB
+                    # download that would otherwise make VietOCR unavailable
+                    # on machines without access to download.pytorch.org.
+                    if isinstance(viet_config.get("cnn"), dict):
+                        viet_config["cnn"]["pretrained"] = False
                     cached_weight = _find_cached_vietocr_weights()
                     if cached_weight:
                         viet_config["weights"] = cached_weight
@@ -581,9 +592,16 @@ def _extract_curved_lines_from_items(
             flags=cv2.INTER_CUBIC,
         )
 
-        v_curve = np.full(crop_w, crop_h / 2.0, dtype=np.float32)
-        strip_h = int(round(max(24.0, float(crop_h) * 1.30)))
-        dewarped_img = _dewarp_strip_with_safe_border(rect_img, v_curve, strip_h)
+        # VietOCR scales every line to a fixed 32 px height. The quad is
+        # already padded by ~20% of the text height, which keeps Vietnamese
+        # marks inside the crop; stretching it further (the previous 1.3x
+        # strip plus a white frame) only shrank the glyphs and made tone marks
+        # such as hỏi/huyền indistinguishable. Measured on the ground-truth
+        # fixtures: line word accuracy 90.5% -> 97.8%, CER 0.032 -> 0.015
+        # (docs/ocr-color-benchmark.md).
+        dewarped_img = cv2.copyMakeBorder(
+            rect_img, 4, 4, 8, 8, cv2.BORDER_REPLICATE
+        )
 
         tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
 
@@ -832,6 +850,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     configured_binary = _resolve_tesseract_command()
     if configured_binary:
         pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+        _ensure_tesseract_language_data()
 
     array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
@@ -979,7 +998,13 @@ def _recognize_uncertain_word_crops(
         evidence["bbox_quality"] = quality.get("bbox_quality")
         evidence["crop_quality"] = quality.get("crop_quality")
 
-        engine_agrees = evidence.get("alignment") == "match"
+        # A crop is needed only while independent engines have not already
+        # settled on the stored token at line level.
+        line_decision = adjudicate_word(evidence)
+        engine_agrees = (
+            line_decision["status"] == "resolved"
+            and line_decision["text"] == normalize_word(str(word.get("text", "")))
+        )
         if engine_agrees and quality.get("bbox_quality") == "valid" and quality.get("crop_quality") == "usable":
             evidence["crop_evidence"] = {
                 **quality,
@@ -1163,6 +1188,362 @@ def _recognize_uncertain_word_crops(
         "vietocr_failures": vietocr_failures,
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
         "max_crops_per_page": MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
+    }
+
+
+_tesseract_language_data_checked = False
+
+
+def _ensure_tesseract_language_data() -> None:
+    """Point Tesseract at the checkout's Vietnamese model when it cannot see it.
+
+    Tesseract 4/5 read ``TESSDATA_PREFIX`` as the ``tessdata`` directory
+    itself, older builds as its parent. Probe once instead of assuming.
+    """
+    global _tesseract_language_data_checked
+    if _tesseract_language_data_checked:
+        return
+    _tesseract_language_data_checked = True
+    language = os.getenv("TESSERACT_LANG", "vie").split("+")[0]
+    local_data = _backend_root / "tessdata"
+    if not (local_data / f"{language}.traineddata").is_file():
+        return
+
+    def language_available() -> bool:
+        try:
+            return language in pytesseract.get_languages(config="")
+        except Exception:
+            return False
+
+    if language_available():
+        return
+    previous = os.environ.get("TESSDATA_PREFIX")
+    for candidate in (str(local_data), str(_backend_root)):
+        os.environ["TESSDATA_PREFIX"] = candidate
+        if language_available():
+            return
+    if previous is None:
+        os.environ.pop("TESSDATA_PREFIX", None)
+    else:
+        os.environ["TESSDATA_PREFIX"] = previous
+
+
+def _configure_tesseract() -> bool:
+    configured_binary = _resolve_tesseract_command()
+    if not configured_binary:
+        return False
+    pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+    _ensure_tesseract_language_data()
+    return True
+
+
+def _normalize_text_background(gray: np.ndarray) -> np.ndarray:
+    """Dark text on an evenly lit light background, as Tesseract expects.
+
+    Shadows and uneven lighting defeat Tesseract's own binarization. The
+    background is estimated with a wide blur and divided out. Polarity comes
+    from which Otsu class is the minority (the text), not from brightness, so
+    a dim page is not mistaken for light-on-dark text.
+    """
+    threshold, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if float(np.mean(gray < threshold)) > 0.5:
+        gray = cv2.bitwise_not(gray)
+    background = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(8.0, max(gray.shape) / 40.0))
+    return cv2.divide(gray, background, scale=255)
+
+
+def _attach_tesseract_line_readings(
+    image: np.ndarray,
+    words: list[dict[str, object]],
+) -> dict[str, object]:
+    """Read the page once with Tesseract and pair its tokens with our words.
+
+    Tesseract is the second Vietnamese-capable recognizer. Its lines are
+    matched to pipeline lines by box overlap, then tokens are paired by the
+    same order-preserving alignment used between PaddleOCR and VietOCR, so an
+    approximate word box can never attach a token to the wrong word.
+    """
+    import time
+
+    started = time.perf_counter()
+
+    def finish(status: str, paired: int = 0, error: str | None = None) -> dict[str, object]:
+        for word in words:
+            evidence = word.get("ocr_evidence")
+            if isinstance(evidence, dict):
+                statuses = evidence.get("engine_statuses")
+                evidence["engine_statuses"] = {
+                    **(statuses if isinstance(statuses, dict) else {}),
+                    "tesseract": status,
+                }
+                if error:
+                    errors = evidence.get("engine_errors")
+                    evidence["engine_errors"] = {
+                        **(errors if isinstance(errors, dict) else {}),
+                        "tesseract": error,
+                    }
+        return {
+            "status": status,
+            "paired_words": paired,
+            "error": error,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+        }
+
+    if not _configure_tesseract():
+        return finish("not_installed")
+    height, width = image.shape[:2]
+    try:
+        gray = _normalize_text_background(
+            cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        )
+        data = pytesseract.image_to_data(
+            gray,
+            lang=os.getenv("TESSERACT_LANG", "vie"),
+            config="--oem 1 --psm 3",
+            output_type=Output.DICT,
+            timeout=60,
+        )
+    except Exception as exc:
+        logger.warning("Tesseract page reading failed: %s", type(exc).__name__)
+        return finish("error", error=type(exc).__name__)
+
+    tesseract_lines: dict[tuple[int, int, int], dict[str, Any]] = {}
+    for index, raw_text in enumerate(data.get("text", [])):
+        token = unicodedata.normalize("NFC", str(raw_text)).strip()
+        if not token or not normalize_word(token):
+            continue
+        try:
+            left, top = int(data["left"][index]), int(data["top"][index])
+            box_width, box_height = int(data["width"][index]), int(data["height"][index])
+            key = (
+                int(data["block_num"][index]),
+                int(data["par_num"][index]),
+                int(data["line_num"][index]),
+            )
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        line = tesseract_lines.setdefault(
+            key, {"tokens": [], "box": [left, top, left + box_width, top + box_height]}
+        )
+        line["tokens"].append(token)
+        box = line["box"]
+        box[0], box[1] = min(box[0], left), min(box[1], top)
+        box[2], box[3] = max(box[2], left + box_width), max(box[3], top + box_height)
+    if not tesseract_lines:
+        return finish("no_result")
+
+    pipeline_lines: dict[int, dict[str, Any]] = {}
+    for word in words:
+        try:
+            x, y, box_width, box_height = (float(value) for value in word["bbox"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        line = pipeline_lines.setdefault(
+            int(word["line_index"]),
+            {"words": [], "box": [x * width, y * height, (x + box_width) * width, (y + box_height) * height]},
+        )
+        line["words"].append(word)
+        box = line["box"]
+        box[0], box[1] = min(box[0], x * width), min(box[1], y * height)
+        box[2] = max(box[2], (x + box_width) * width)
+        box[3] = max(box[3], (y + box_height) * height)
+
+    def overlap(first: list[float], second: list[float]) -> float:
+        inter_w = min(first[2], second[2]) - max(first[0], second[0])
+        inter_h = min(first[3], second[3]) - max(first[1], second[1])
+        if inter_w <= 0 or inter_h <= 0:
+            return 0.0
+        smaller = min(
+            (first[2] - first[0]) * (first[3] - first[1]),
+            (second[2] - second[0]) * (second[3] - second[1]),
+        )
+        return (inter_w * inter_h) / smaller if smaller > 0 else 0.0
+
+    candidates = sorted(
+        (
+            (overlap(line["box"], tesseract_line["box"]), line_index, key)
+            for line_index, line in pipeline_lines.items()
+            for key, tesseract_line in tesseract_lines.items()
+        ),
+        reverse=True,
+    )
+    used_pipeline: set[int] = set()
+    used_tesseract: set[tuple[int, int, int]] = set()
+    paired = 0
+    for score, line_index, key in candidates:
+        if score < 0.4:
+            break
+        if line_index in used_pipeline or key in used_tesseract:
+            continue
+        used_pipeline.add(line_index)
+        used_tesseract.add(key)
+        line_words = pipeline_lines[line_index]["words"]
+        tesseract_tokens = tesseract_lines[key]["tokens"]
+        for step in align_ocr_tokens(
+            [str(word["text"]) for word in line_words], tesseract_tokens
+        ):
+            if step["operation"] not in {"match", "substitute"}:
+                continue
+            evidence = line_words[int(step["primary_index"])].get("ocr_evidence")
+            if isinstance(evidence, dict) and isinstance(evidence.get("engine_outputs"), dict):
+                evidence["engine_outputs"]["tesseract"] = tesseract_tokens[
+                    int(step["secondary_index"])
+                ]
+                paired += 1
+    return finish("success", paired)
+
+
+def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | None]:
+    """Independent single-word reading of a padded crop; (candidate, error)."""
+    if not _configure_tesseract():
+        return None, "not_installed"
+    try:
+        gray = _normalize_text_background(
+            cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+        )
+        gray = cv2.copyMakeBorder(
+            gray, 10, 10, 10, 10, cv2.BORDER_REPLICATE
+        )
+        text = pytesseract.image_to_string(
+            gray,
+            lang=os.getenv("TESSERACT_LANG", "vie"),
+            config="--oem 1 --psm 8",
+            timeout=8,
+        )
+    except Exception as exc:
+        return None, type(exc).__name__
+    candidate = unicodedata.normalize("NFC", str(text)).strip()
+    return (candidate or None), None
+
+
+def _adjudicate_disputed_words(
+    image: np.ndarray,
+    words: list[dict[str, object]],
+) -> dict[str, object]:
+    """Resolve words the engines did not already agree on at line level.
+
+    Words settled at line level (crop status ``not_needed``) are left alone.
+    For the rest, the padded crop is additionally read by Tesseract when the
+    stored readings still do not identify one candidate. The selected text
+    changes only when ``adjudicate_word`` finds a candidate backed by
+    independent engines; every original engine output stays in the evidence.
+    """
+    import time
+
+    started = time.perf_counter()
+    considered = 0
+    resolved = 0
+    text_changed = 0
+    tesseract_calls = 0
+    for word in words:
+        evidence = word.get("ocr_evidence")
+        if not isinstance(evidence, dict):
+            continue
+        crop_evidence = evidence.get("crop_evidence")
+        if not isinstance(crop_evidence, dict):
+            continue
+        if crop_evidence.get("status") == "not_needed":
+            line_decision = adjudicate_word(evidence)
+            crop_evidence["adjudication_rule"] = OCR_ADJUDICATION_RULE
+            crop_evidence["adjudication_status"] = str(line_decision["status"])
+            crop_evidence["adjudication_support"] = ",".join(line_decision.get("support") or [])
+            if evidence.get("alignment") != "match":
+                evidence["selection_reason"] = "adjudication_" + OCR_ADJUDICATION_RULE
+                evidence["review_reason"] = (
+                    "Không phải mọi engine đọc giống nhau, nhưng ít nhất hai engine độc lập "
+                    "đọc cùng token này và không engine tiếng Việt nào phản bác. "
+                    "Chưa đối chiếu reference."
+                )
+            continue
+        considered += 1
+        decision = adjudicate_word(evidence)
+        if decision["status"] != "resolved" and crop_evidence.get("status") == "completed":
+            crop, quality = crop_word_region(image, word.get("bbox"))
+            if crop is not None and quality.get("crop_quality") == "usable":
+                candidate, error = _recognize_crop_with_tesseract(crop)
+                tesseract_calls += 1
+                crop_evidence["tesseract_candidate"] = candidate
+                if error is not None:
+                    crop_evidence["tesseract_error"] = error
+                decision = adjudicate_word(evidence)
+
+        crop_evidence["adjudication_rule"] = OCR_ADJUDICATION_RULE
+        crop_evidence["adjudication_status"] = str(decision["status"])
+        crop_evidence["adjudication_support"] = ",".join(decision.get("support") or [])
+
+        # 1) Which candidate to display. This is only a better provisional
+        #    choice; it does not confirm the word.
+        preferred = decision.get("preferred_text")
+        current_text = str(word.get("text", ""))
+        switched = False
+        if isinstance(preferred, str) and normalize_word(current_text) != preferred:
+            outputs = evidence.get("engine_outputs")
+            surface = preferred
+            selected_engine = evidence.get("selected_engine")
+            # Prefer the cased surface of a supporting reading over the
+            # lowercase comparison key.
+            for reading, engine_name, field in (
+                ("vietocr_line", "vietocr", None),
+                ("tesseract_line", "tesseract", None),
+                ("paddleocr_line", "paddleocr", None),
+                ("vietocr_crop", "vietocr", "vietocr_candidate"),
+                ("tesseract_crop", "tesseract", "tesseract_candidate"),
+                ("paddleocr_crop", "paddleocr", "paddleocr_candidate"),
+            ):
+                if reading not in (decision.get("preferred_support") or []):
+                    continue
+                raw_value = (
+                    outputs.get(engine_name) if field is None and isinstance(outputs, dict)
+                    else crop_evidence.get(field) if field is not None
+                    else None
+                )
+                if isinstance(raw_value, str) and normalize_word(raw_value) == preferred:
+                    surface = raw_value
+                    if field is None:
+                        selected_engine = engine_name
+                    break
+            new_text = replace_token_core(current_text, surface)
+            # Never store a token that differs from the chosen candidate.
+            if normalize_word(new_text) == preferred:
+                crop_evidence["text_before_adjudication"] = current_text
+                word["text"] = new_text
+                word["normalized_text"] = preferred
+                evidence["selected_engine"] = selected_engine
+                evidence["source_text"] = new_text
+                evidence["selection_reason"] = "preferred_reading_" + OCR_ADJUDICATION_RULE
+                evidence["review_reason"] = (
+                    "Đã chọn candidate được nhiều lượt đọc của engine tiếng Việt ủng hộ hơn để "
+                    "hiển thị. Đây chưa phải xác nhận; cần đối chiếu ảnh."
+                )
+                text_changed += 1
+                switched = True
+
+        # 2) Whether the displayed token is confirmed by independent engines.
+        if (
+            decision["status"] == "resolved"
+            and decision["text"] == normalize_word(str(word.get("text", "")))
+        ):
+            resolved += 1
+            crop_evidence["adjudicated_text"] = str(decision["text"])
+            evidence["source_text"] = str(word["text"])
+            evidence["selection_reason"] = "adjudication_" + OCR_ADJUDICATION_RULE
+            evidence["review_reason"] = (
+                "Không phải mọi engine đọc giống nhau, nhưng hai engine tiếng Việt độc lập "
+                "đọc cùng token này và không lượt đọc nào của chúng khác dấu. "
+                "Chưa đối chiếu reference."
+            )
+        elif not switched:
+            crop_evidence["adjudication_status"] = (
+                "unresolved" if decision["status"] == "resolved" else str(decision["status"])
+            )
+
+    return {
+        "rule": OCR_ADJUDICATION_RULE,
+        "considered": considered,
+        "resolved": resolved,
+        "text_changed": text_changed,
+        "tesseract_calls": tesseract_calls,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
     }
 
 
@@ -1463,9 +1844,17 @@ def _extract_text_and_boxes_dual_engine(
     if not words_output:
         raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
 
+    tesseract_stats = _attach_tesseract_line_readings(image, words_output)
     crop_stats = _recognize_uncertain_word_crops(
         image, words_output, paddle_engine, vietocr_engine
     )
+    adjudication_stats = _adjudicate_disputed_words(image, words_output)
+    if adjudication_stats["text_changed"]:
+        # Keep the page text identical to the ordered word list.
+        rebuilt_lines: dict[int, list[str]] = {}
+        for word in words_output:
+            rebuilt_lines.setdefault(int(word["line_index"]), []).append(str(word["text"]))
+        lines_output = [" ".join(rebuilt_lines[index]) for index in sorted(rebuilt_lines)]
     formatted_text = "\n".join(lines_output)
 
     try:
@@ -1519,9 +1908,11 @@ def _extract_text_and_boxes_dual_engine(
                     else _vietocr_initialization_status if vietocr_engine is None
                     else "no_result"
                 ),
-                "tesseract": "not_run",
+                "tesseract": str(tesseract_stats["status"]),
             },
+            "tesseract_line_stats": tesseract_stats,
             "selective_crop_stats": crop_stats,
+            "adjudication_stats": adjudication_stats,
         },
     }
 

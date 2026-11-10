@@ -22,6 +22,24 @@ from app.services import ocr_engine
 from app.services.admin_ocr_service import AdminOcrService
 
 
+_tesseract_cross_check = patch.object(
+    ocr_engine,
+    "_attach_tesseract_line_readings",
+    return_value={"status": "not_run", "paired_words": 0, "error": None, "elapsed_ms": 0.0},
+)
+
+
+def setUpModule() -> None:
+    # These tests drive PaddleOCR/VietOCR through mocks. The real Tesseract
+    # binary must not read the blank sample images, or results would depend
+    # on what is installed. Its pairing is covered in test_ocr_adjudication.py.
+    _tesseract_cross_check.start()
+
+
+def tearDownModule() -> None:
+    _tesseract_cross_check.stop()
+
+
 def sample_png_bytes(width: int = 400, height: int = 200) -> bytes:
     """Tạo nhanh ảnh giả lập trắng trong bộ nhớ RAM."""
     image = np.full((height, width, 3), 255, dtype=np.uint8)

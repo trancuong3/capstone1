@@ -1,0 +1,289 @@
+{
+  "fixture_id": "vi_shadow_02",
+  "condition": "shadow",
+  "image": "vi_shadow_02.png",
+  "expected_text": "Buổi chiều, hai chị em thả diều ngoài đồng.\nDòng sông quê em nước chảy hiền hòa.\nThầy giáo dạy chúng em viết chữ đẹp.",
+  "expected_words": [
+    "Buổi",
+    "chiều,",
+    "hai",
+    "chị",
+    "em",
+    "thả",
+    "diều",
+    "ngoài",
+    "đồng.",
+    "Dòng",
+    "sông",
+    "quê",
+    "em",
+    "nước",
+    "chảy",
+    "hiền",
+    "hòa.",
+    "Thầy",
+    "giáo",
+    "dạy",
+    "chúng",
+    "em",
+    "viết",
+    "chữ",
+    "đẹp."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Buổi",
+      "line_index": 0,
+      "box": [
+        44.0,
+        42,
+        113.0,
+        75
+      ]
+    },
+    {
+      "text": "chiều,",
+      "line_index": 0,
+      "box": [
+        122.0,
+        44,
+        213.0,
+        80
+      ]
+    },
+    {
+      "text": "hai",
+      "line_index": 0,
+      "box": [
+        222.0,
+        50,
+        268.0,
+        75
+      ]
+    },
+    {
+      "text": "chị",
+      "line_index": 0,
+      "box": [
+        277.0,
+        50,
+        321.0,
+        80
+      ]
+    },
+    {
+      "text": "em",
+      "line_index": 0,
+      "box": [
+        330.0,
+        57,
+        377.0,
+        75
+      ]
+    },
+    {
+      "text": "thả",
+      "line_index": 0,
+      "box": [
+        386.0,
+        48,
+        433.0,
+        75
+      ]
+    },
+    {
+      "text": "diều",
+      "line_index": 0,
+      "box": [
+        442.0,
+        44,
+        507.0,
+        75
+      ]
+    },
+    {
+      "text": "ngoài",
+      "line_index": 0,
+      "box": [
+        516.0,
+        50,
+        600.0,
+        82
+      ]
+    },
+    {
+      "text": "đồng.",
+      "line_index": 0,
+      "box": [
+        609.0,
+        44,
+        694.0,
+        82
+      ]
+    },
+    {
+      "text": "Dòng",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        126.0,
+        153
+      ]
+    },
+    {
+      "text": "sông",
+      "line_index": 1,
+      "box": [
+        135.0,
+        121,
+        209.0,
+        153
+      ]
+    },
+    {
+      "text": "quê",
+      "line_index": 1,
+      "box": [
+        218.0,
+        121,
+        275.0,
+        153
+      ]
+    },
+    {
+      "text": "em",
+      "line_index": 1,
+      "box": [
+        284.0,
+        128,
+        331.0,
+        146
+      ]
+    },
+    {
+      "text": "nước",
+      "line_index": 1,
+      "box": [
+        340.0,
+        121,
+        421.0,
+        146
+      ]
+    },
+    {
+      "text": "chảy",
+      "line_index": 1,
+      "box": [
+        430.0,
+        119,
+        502.0,
+        153
+      ]
+    },
+    {
+      "text": "hiền",
+      "line_index": 1,
+      "box": [
+        511.0,
+        115,
+        576.0,
+        146
+      ]
+    },
+    {
+      "text": "hòa.",
+      "line_index": 1,
+      "box": [
+        585.0,
+        121,
+        651.0,
+        146
+      ]
+    },
+    {
+      "text": "Thầy",
+      "line_index": 2,
+      "box": [
+        44.0,
+        186,
+        120.0,
+        224
+      ]
+    },
+    {
+      "text": "giáo",
+      "line_index": 2,
+      "box": [
+        129.0,
+        192,
+        194.0,
+        224
+      ]
+    },
+    {
+      "text": "dạy",
+      "line_index": 2,
+      "box": [
+        203.0,
+        192,
+        258.0,
+        224
+      ]
+    },
+    {
+      "text": "chúng",
+      "line_index": 2,
+      "box": [
+        267.0,
+        192,
+        360.0,
+        224
+      ]
+    },
+    {
+      "text": "em",
+      "line_index": 2,
+      "box": [
+        369.0,
+        199,
+        416.0,
+        217
+      ]
+    },
+    {
+      "text": "viết",
+      "line_index": 2,
+      "box": [
+        425.0,
+        186,
+        479.0,
+        217
+      ]
+    },
+    {
+      "text": "chữ",
+      "line_index": 2,
+      "box": [
+        487.0,
+        192,
+        546.0,
+        217
+      ]
+    },
+    {
+      "text": "đẹp.",
+      "line_index": 2,
+      "box": [
+        555.0,
+        192,
+        621.0,
+        224
+      ]
+    }
+  ],
+  "width": 738,
+  "height": 301
+}

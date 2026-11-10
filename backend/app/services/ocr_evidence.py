@@ -167,6 +167,9 @@ def crop_word_region(
         gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU
     )
     ink_ratio = float(np.mean(ink > 0))
+    # Text is the minority class whichever its polarity; without this a
+    # light-on-dark word would be rejected as "all ink".
+    ink_ratio = min(ink_ratio, 1.0 - ink_ratio)
     if contrast < 5.0 or ink_ratio < 0.001 or ink_ratio > 0.80:
         return None, {
             "bbox_quality": "valid",

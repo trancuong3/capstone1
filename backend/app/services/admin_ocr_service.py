@@ -30,7 +30,11 @@ from app.schemas.admin_ocr import (
     normalize_ocr_bbox,
 )
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
-from app.services.ocr_evidence import HYBRID_OCR_EVIDENCE_CONTRACT
+from app.services.ocr_adjudication import adjudicate_word
+from app.services.ocr_evidence import (
+    HYBRID_OCR_EVIDENCE_CONTRACT,
+    find_split_merge_candidates,
+)
 from app.services.ocr_engine import (
     OcrEngineUnavailable,
     OcrNoTextDetected,
@@ -166,22 +170,50 @@ def classify_word_evidence(
         return "yellow"
     paddle = outputs.get("paddleocr")
     vietocr = outputs.get("vietocr")
-    if (
-        not isinstance(paddle, str) or not paddle.strip()
-        or not isinstance(vietocr, str) or not vietocr.strip()
-        or statuses.get("paddleocr") != "success"
-        or statuses.get("vietocr") != "success"
-    ):
+    normalized_paddle = (
+        normalize_word(unicodedata.normalize("NFC", paddle))
+        if isinstance(paddle, str) and statuses.get("paddleocr") == "success"
+        else ""
+    )
+    normalized_vietocr = (
+        normalize_word(unicodedata.normalize("NFC", vietocr))
+        if isinstance(vietocr, str) and statuses.get("vietocr") == "success"
+        else ""
+    )
+    alignment = evidence.get("alignment")
+    line_engines_agree = (
+        bool(normalized_paddle)
+        and normalized_paddle == normalized_vietocr
+        and alignment == "match"
+    )
+    if not line_engines_agree:
+        # PaddleOCR and VietOCR did not both return this token. The word can
+        # still be settled when independent engines (VietOCR, Tesseract, crop
+        # readings) converge on the text that is stored and displayed. Split,
+        # merge and unaligned tokens have no one-to-one mapping: never green.
+        if alignment not in {"substitute", "unmatched", "insert"}:
+            return "yellow"
+        # The word must still be anchored to a token position of the engine
+        # that produced the line (PaddleOCR or VietOCR).
+        anchored = False
+        for index_name in ("paddle_token_index", "vietocr_token_index"):
+            token_index = evidence.get(index_name)
+            if (
+                not isinstance(token_index, bool)
+                and isinstance(token_index, int)
+                and token_index >= 0
+            ):
+                anchored = True
+        if not anchored:
+            return "yellow"
+        adjudication = adjudicate_word(evidence)
+        if (
+            adjudication["status"] == "resolved"
+            and adjudication["text"] == normalized_word
+        ):
+            return "green"
         return "yellow"
-
-    normalized_paddle = normalize_word(unicodedata.normalize("NFC", paddle))
-    normalized_vietocr = normalize_word(unicodedata.normalize("NFC", vietocr))
-    if (
-        not normalized_paddle
-        or normalized_paddle != normalized_vietocr
-        or normalized_source != normalized_paddle
-        or evidence.get("alignment") != "match"
-    ):
+    if normalized_source != normalized_paddle:
         return "yellow"
 
     selected_engine = evidence.get("selected_engine")
@@ -225,6 +257,12 @@ def classify_word_evidence(
                 for candidate in candidates if isinstance(candidate, str)
             ):
                 return "yellow"
+    # Agreement between PaddleOCR and VietOCR still loses to a Vietnamese
+    # engine that read the same letters with more marks, or to repeated
+    # contradicting readings.
+    adjudication = adjudicate_word(evidence)
+    if adjudication["status"] != "resolved" or adjudication["text"] != normalized_word:
+        return "yellow"
     return "green"
 
 
@@ -537,6 +575,9 @@ class AdminOcrService:
                 "status", "reason", "preprocessing", "score_semantics",
                 "paddle_error", "vietocr_error", "vietocr_status", "bbox_quality", "crop_quality",
                 "paddleocr_candidate", "vietocr_candidate", "vietocr_decoding_mode",
+                "tesseract_candidate", "tesseract_error",
+                "adjudication_rule", "adjudication_status", "adjudication_support",
+                "adjudicated_text", "text_before_adjudication",
             ):
                 field_value = raw_crop.get(key)
                 if isinstance(field_value, str):
@@ -836,6 +877,46 @@ class AdminOcrService:
         }
 
     @staticmethod
+    def _collapse_isolated_replacements(
+        alignment: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        """Pair one deleted reference token with one inserted OCR token.
+
+        The aligner prefers delete+insert over pairing two very different
+        tokens. When exactly one of each sits between paired neighbours (or a
+        page edge), the position is still an unambiguous one-to-one
+        replacement, so a badly misread word is a mismatch, not "unknown".
+        Longer or unbalanced gap runs are left untouched.
+        """
+        collapsed: list[dict[str, object]] = []
+        position = 0
+        while position < len(alignment):
+            step = alignment[position]
+            following = alignment[position + 1] if position + 1 < len(alignment) else None
+            operations = {step["operation"], following["operation"]} if following else set()
+            if operations == {"delete", "insert"}:
+                before = alignment[position - 1] if position > 0 else None
+                after = alignment[position + 2] if position + 2 < len(alignment) else None
+                isolated = all(
+                    neighbour is None or neighbour["operation"] in {"match", "substitute"}
+                    for neighbour in (before, after)
+                )
+                if isolated:
+                    deleted = step if step["operation"] == "delete" else following
+                    inserted = following if step["operation"] == "delete" else step
+                    collapsed.append({
+                        "operation": "substitute",
+                        "primary_index": deleted["primary_index"],
+                        "secondary_index": inserted["secondary_index"],
+                        "similarity": None,
+                    })
+                    position += 2
+                    continue
+            collapsed.append(step)
+            position += 1
+        return collapsed
+
+    @staticmethod
     def _apply_verified_reference(
         words: list[dict[str, object]], reference_text: str
     ) -> list[dict[str, object]]:
@@ -846,16 +927,31 @@ class AdminOcrService:
             if normalize_word(token)
         ]
         recognized_tokens = [str(word["text"]) for word in words]
-        alignment = align_ocr_tokens(reference_tokens, recognized_tokens)
-        reference_alignment_is_unambiguous = (
-            len(reference_tokens) == len(recognized_tokens)
-            and len(alignment) == len(recognized_tokens)
-            and all(
-                step["primary_index"] == index
-                and step["secondary_index"] == index
-                for index, step in enumerate(alignment)
-            )
+        alignment = AdminOcrService._collapse_isolated_replacements(
+            align_ocr_tokens(reference_tokens, recognized_tokens)
         )
+        # Ambiguity is decided per token, never for the whole page: a missing
+        # or extra word elsewhere must not hide a confirmed mismatch here. A
+        # substitution is one-to-one only when neither neighbouring alignment
+        # step is a gap (a gap next to it means the pairing could shift) and
+        # the token is not part of a possible split/merge group.
+        gap_adjacent_steps: set[int] = set()
+        for position, step in enumerate(alignment):
+            if step["operation"] in {"insert", "delete"}:
+                gap_adjacent_steps.update({position - 1, position + 1})
+        split_merge_recognized: set[int] = set()
+        for candidate in find_split_merge_candidates(reference_tokens, recognized_tokens):
+            split_merge_recognized.update(
+                int(index) for index in candidate["secondary_indices"]
+            )
+        unambiguous_recognized_indices = {
+            int(step["secondary_index"])
+            for position, step in enumerate(alignment)
+            if step["operation"] in {"match", "substitute"}
+            and step["secondary_index"] is not None
+            and position not in gap_adjacent_steps
+            and int(step["secondary_index"]) not in split_merge_recognized
+        }
         by_recognized_index = {
             int(step["secondary_index"]): step
             for step in alignment
@@ -880,10 +976,21 @@ class AdminOcrService:
             )
             confirmed_mismatch = (
                 not exact_match
-                and reference_alignment_is_unambiguous
+                and index in unambiguous_recognized_indices
                 and step is not None
                 and step["operation"] == "substitute"
             )
+            if step is None:
+                reference_alignment = "unmatched"
+            elif exact_match:
+                reference_alignment = "match"
+            elif confirmed_mismatch:
+                reference_alignment = "substitute"
+            elif step["operation"] == "substitute":
+                # Paired, but not safely one-to-one: never a trusted mapping.
+                reference_alignment = "ambiguous"
+            else:
+                reference_alignment = str(step["operation"])
             evidence = AdminOcrService._normalize_word_evidence(
                 word.get("ocr_evidence")
             ) or {
@@ -898,12 +1005,19 @@ class AdminOcrService:
                 "source_text": str(word["text"]),
                 "review_reason": "Bằng chứng từ engine không khả dụng.",
             }
+            recorded_source = evidence.get("source_text")
+            if (
+                not isinstance(recorded_source, str)
+                or normalize_word(recorded_source) != normalize_word(str(word["text"]))
+            ):
+                # The reference is compared with the token stored right now;
+                # a missing or empty engine field must not turn a confirmed
+                # mismatch into "unknown". Engine outputs stay untouched.
+                evidence["source_text"] = str(word["text"])
             evidence.update({
                 "reference_text": reference_token,
                 "verification_source": "verified_revision",
-                "reference_alignment": (
-                    str(step["operation"]) if step is not None else "unmatched"
-                ),
+                "reference_alignment": reference_alignment,
                 "review_reason": (
                     "Token khớp với revision đã xác minh sau khi chuẩn hóa dấu câu và chữ hoa/thường."
                     if exact_match
@@ -1838,15 +1952,20 @@ class AdminOcrService:
                 and not self._has_engine_disagreement_evidence(stored_evidence)
             ):
                 review_status = "needs_review"
+            color_group = self._classify_word_color_group(
+                review_status, stored_evidence, row.Text
+            )
+            if color_group == "red":
+                # RED is reached only through a trusted one-to-one reference
+                # mismatch. No page-level or stale word status may relabel it.
+                review_status = "confirmed_mismatch"
             words.append({
                 "word_index": row.WordIndex, "line_index": row.LineIndex, "text": unicodedata.normalize("NFC", row.Text),
                 "normalized_text": row.NormalizedText,
                 "bbox": tuple(box),
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
-                "review_color_group": self._classify_word_color_group(
-                    review_status, stored_evidence, row.Text
-                ),
+                "review_color_group": color_group,
                 "ocr_score_source": score_source,
                 "ocr_evidence": stored_evidence,
             })

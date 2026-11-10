@@ -1,0 +1,32 @@
+{
+  "fixture_id": "vi_curved_02",
+  "condition": "curved",
+  "image": "vi_curved_02.png",
+  "expected_text": "An ngồi vào bàn ăn.\nÔng bà đang ngồi ở phòng khách.\nAn chào ông bà rồi xuống nhà.",
+  "expected_words": [
+    "An",
+    "ngồi",
+    "vào",
+    "bàn",
+    "ăn.",
+    "Ông",
+    "bà",
+    "đang",
+    "ngồi",
+    "ở",
+    "phòng",
+    "khách.",
+    "An",
+    "chào",
+    "ông",
+    "bà",
+    "rồi",
+    "xuống",
+    "nhà."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": null,
+  "width": 602,
+  "height": 301
+}

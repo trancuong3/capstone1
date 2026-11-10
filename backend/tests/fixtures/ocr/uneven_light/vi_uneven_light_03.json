@@ -1,0 +1,223 @@
+{
+  "fixture_id": "vi_uneven_light_03",
+  "condition": "uneven_light",
+  "image": "vi_uneven_light_03.png",
+  "expected_text": "Bữa sáng thật là ngon.\nAn nói lời cảm ơn mẹ.\nChú mèo nhỏ nằm ngủ dưới gốc cây.",
+  "expected_words": [
+    "Bữa",
+    "sáng",
+    "thật",
+    "là",
+    "ngon.",
+    "An",
+    "nói",
+    "lời",
+    "cảm",
+    "ơn",
+    "mẹ.",
+    "Chú",
+    "mèo",
+    "nhỏ",
+    "nằm",
+    "ngủ",
+    "dưới",
+    "gốc",
+    "cây."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Bữa",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        109.0,
+        75
+      ]
+    },
+    {
+      "text": "sáng",
+      "line_index": 0,
+      "box": [
+        118.0,
+        50,
+        192.0,
+        82
+      ]
+    },
+    {
+      "text": "thật",
+      "line_index": 0,
+      "box": [
+        201.0,
+        50,
+        258.0,
+        80
+      ]
+    },
+    {
+      "text": "là",
+      "line_index": 0,
+      "box": [
+        266.0,
+        50,
+        293.0,
+        75
+      ]
+    },
+    {
+      "text": "ngon.",
+      "line_index": 0,
+      "box": [
+        302.0,
+        57,
+        387.0,
+        82
+      ]
+    },
+    {
+      "text": "An",
+      "line_index": 1,
+      "box": [
+        43.0,
+        121,
+        86.0,
+        146
+      ]
+    },
+    {
+      "text": "nói",
+      "line_index": 1,
+      "box": [
+        95.0,
+        121,
+        141.0,
+        146
+      ]
+    },
+    {
+      "text": "lời",
+      "line_index": 1,
+      "box": [
+        150.0,
+        121,
+        188.0,
+        146
+      ]
+    },
+    {
+      "text": "cảm",
+      "line_index": 1,
+      "box": [
+        197.0,
+        119,
+        261.0,
+        146
+      ]
+    },
+    {
+      "text": "ơn",
+      "line_index": 1,
+      "box": [
+        270.0,
+        128,
+        311.0,
+        146
+      ]
+    },
+    {
+      "text": "mẹ.",
+      "line_index": 1,
+      "box": [
+        320.0,
+        128,
+        376.0,
+        151
+      ]
+    },
+    {
+      "text": "Chú",
+      "line_index": 2,
+      "box": [
+        44.0,
+        192,
+        107.0,
+        217
+      ]
+    },
+    {
+      "text": "mèo",
+      "line_index": 2,
+      "box": [
+        116.0,
+        192,
+        182.0,
+        217
+      ]
+    },
+    {
+      "text": "nhỏ",
+      "line_index": 2,
+      "box": [
+        191.0,
+        190,
+        248.0,
+        217
+      ]
+    },
+    {
+      "text": "nằm",
+      "line_index": 2,
+      "box": [
+        257.0,
+        186,
+        323.0,
+        217
+      ]
+    },
+    {
+      "text": "ngủ",
+      "line_index": 2,
+      "box": [
+        332.0,
+        190,
+        389.0,
+        224
+      ]
+    },
+    {
+      "text": "dưới",
+      "line_index": 2,
+      "box": [
+        398.0,
+        192,
+        470.0,
+        217
+      ]
+    },
+    {
+      "text": "gốc",
+      "line_index": 2,
+      "box": [
+        479.0,
+        186,
+        534.0,
+        224
+      ]
+    },
+    {
+      "text": "cây.",
+      "line_index": 2,
+      "box": [
+        543.0,
+        192,
+        605.0,
+        224
+      ]
+    }
+  ],
+  "width": 648,
+  "height": 301
+}

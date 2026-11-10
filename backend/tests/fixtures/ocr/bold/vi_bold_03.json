@@ -1,0 +1,278 @@
+{
+  "fixture_id": "vi_bold_03",
+  "condition": "bold",
+  "image": "vi_bold_03.png",
+  "expected_text": "Trăng rằm sáng tỏ giữa trời đêm.\nBà kể chuyện ngày xưa cho cháu nghe.\nCả nhà quây quần bên mâm cơm ấm cúng.",
+  "expected_words": [
+    "Trăng",
+    "rằm",
+    "sáng",
+    "tỏ",
+    "giữa",
+    "trời",
+    "đêm.",
+    "Bà",
+    "kể",
+    "chuyện",
+    "ngày",
+    "xưa",
+    "cho",
+    "cháu",
+    "nghe.",
+    "Cả",
+    "nhà",
+    "quây",
+    "quần",
+    "bên",
+    "mâm",
+    "cơm",
+    "ấm",
+    "cúng."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Trăng",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        139.0,
+        82
+      ]
+    },
+    {
+      "text": "rằm",
+      "line_index": 0,
+      "box": [
+        147.96875,
+        43,
+        209.96875,
+        75
+      ]
+    },
+    {
+      "text": "sáng",
+      "line_index": 0,
+      "box": [
+        218.96875,
+        49,
+        298.96875,
+        82
+      ]
+    },
+    {
+      "text": "tỏ",
+      "line_index": 0,
+      "box": [
+        307.96875,
+        47,
+        339.96875,
+        75
+      ]
+    },
+    {
+      "text": "giữa",
+      "line_index": 0,
+      "box": [
+        348.96875,
+        50,
+        422.96875,
+        82
+      ]
+    },
+    {
+      "text": "trời",
+      "line_index": 0,
+      "box": [
+        431.96875,
+        49,
+        488.96875,
+        75
+      ]
+    },
+    {
+      "text": "đêm.",
+      "line_index": 0,
+      "box": [
+        497.96875,
+        49,
+        576.96875,
+        75
+      ]
+    },
+    {
+      "text": "Bà",
+      "line_index": 1,
+      "box": [
+        44.0,
+        120,
+        88.0,
+        146
+      ]
+    },
+    {
+      "text": "kể",
+      "line_index": 1,
+      "box": [
+        97.0,
+        114,
+        135.0,
+        146
+      ]
+    },
+    {
+      "text": "chuyện",
+      "line_index": 1,
+      "box": [
+        144.0,
+        120,
+        264.0,
+        154
+      ]
+    },
+    {
+      "text": "ngày",
+      "line_index": 1,
+      "box": [
+        273.0,
+        120,
+        353.0,
+        153
+      ]
+    },
+    {
+      "text": "xưa",
+      "line_index": 1,
+      "box": [
+        362.0,
+        127,
+        425.0,
+        146
+      ]
+    },
+    {
+      "text": "cho",
+      "line_index": 1,
+      "box": [
+        434.0,
+        121,
+        495.0,
+        146
+      ]
+    },
+    {
+      "text": "cháu",
+      "line_index": 1,
+      "box": [
+        504.0,
+        120,
+        584.0,
+        146
+      ]
+    },
+    {
+      "text": "nghe.",
+      "line_index": 1,
+      "box": [
+        593.0,
+        121,
+        684.0,
+        153
+      ]
+    },
+    {
+      "text": "Cả",
+      "line_index": 2,
+      "box": [
+        44.0,
+        189,
+        88.0,
+        217
+      ]
+    },
+    {
+      "text": "nhà",
+      "line_index": 2,
+      "box": [
+        97.0,
+        191,
+        158.0,
+        217
+      ]
+    },
+    {
+      "text": "quây",
+      "line_index": 2,
+      "box": [
+        167.0,
+        191,
+        247.0,
+        224
+      ]
+    },
+    {
+      "text": "quần",
+      "line_index": 2,
+      "box": [
+        256.0,
+        185,
+        338.0,
+        224
+      ]
+    },
+    {
+      "text": "bên",
+      "line_index": 2,
+      "box": [
+        347.0,
+        191,
+        408.0,
+        217
+      ]
+    },
+    {
+      "text": "mâm",
+      "line_index": 2,
+      "box": [
+        417.0,
+        191,
+        496.0,
+        217
+      ]
+    },
+    {
+      "text": "cơm",
+      "line_index": 2,
+      "box": [
+        505.0,
+        198,
+        578.0,
+        217
+      ]
+    },
+    {
+      "text": "ấm",
+      "line_index": 2,
+      "box": [
+        587.0,
+        185,
+        636.0,
+        217
+      ]
+    },
+    {
+      "text": "cúng.",
+      "line_index": 2,
+      "box": [
+        645.0,
+        191,
+        736.0,
+        224
+      ]
+    }
+  ],
+  "width": 780,
+  "height": 301
+}
