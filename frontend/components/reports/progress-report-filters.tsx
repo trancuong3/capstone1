@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { Button } from "@/components/common/button";
 import { progressHref } from "@/lib/utils/progress-report-state";
 import type { ProgressPeriodOptionDTO } from "@/types/reports";
@@ -28,7 +30,11 @@ export function ProgressReportFilters({
     : "latest";
   const selectedMissing =
     selectedPeriod &&
-    !periods.some((item) => `${item.period_start}/  return (
+    !periods.some(
+      (item) => `${item.period_start}/${item.period_end}` === key,
+    );
+
+  return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
       <div className="min-w-0 flex-1">
         <label
@@ -77,8 +83,6 @@ export function ProgressReportFilters({
           {loadingMore ? "Đang tải kỳ…" : "Tải thêm kỳ"}
         </Button>
       ) : null}
-    </div>
-  );     ) : null}
     </div>
   );
 }
