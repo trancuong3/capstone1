@@ -20,6 +20,7 @@ import {
   historyStateLabel,
 } from "@/lib/utils/report-mappers";
 import type { BookDetailDTO } from "@/types/book";
+import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingSessionDetailDTO } from "@/types/reading";
 
 type DetailState =
@@ -27,7 +28,7 @@ type DetailState =
   | {
       readonly status: "ready";
       readonly detail: ReadingSessionDetailDTO;
-      readonly child: import("@/types/child").ChildProfileDTO;
+      readonly child: ChildProfileDTO;
       readonly book: BookDetailDTO;
     }
   | { readonly status: "not-found"; readonly childId: string }
@@ -197,6 +198,19 @@ export function SessionDetailScreen({
         </Button>
       </div>
     );
+
+  if (state.status !== "ready") {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang tải chi tiết buổi đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-72 rounded-card" />
+      </section>
+    );
+  }
 
   const { detail } = state;
   const metrics = detail.fluency_assessment?.metrics;
