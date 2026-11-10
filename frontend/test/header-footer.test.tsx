@@ -119,13 +119,26 @@ describe("shared header and footer", () => {
       within(footer).getByRole("link", { name: "Hồ sơ phụ huynh" }),
     ).toHaveAttribute("href", "/profile");
     expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
+    const parentNavigation = screen.getByRole("navigation", {
+      name: "Điều hướng dành cho ba mẹ",
+    });
+    const primaryNavigation = within(parentNavigation).getByTestId(
+      "parent-primary-navigation",
+    );
+    expect(primaryNavigation).toHaveClass(
+      "flex-nowrap",
+      "overflow-x-auto",
+      "lg:overflow-visible",
+    );
+    expect(within(primaryNavigation).getAllByRole("link")).toHaveLength(5);
     expect(
-      within(
-        screen.getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
-      ).getByRole("link", {
-        name: label,
-      }),
+      within(parentNavigation).getByRole("link", { name: label }),
     ).toHaveAttribute("aria-current", "page");
+    if (pathname === "/reports/difficult-words") {
+      expect(
+        within(parentNavigation).getByRole("link", { name: "Tiến bộ" }),
+      ).not.toHaveAttribute("aria-current");
+    }
     fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(
