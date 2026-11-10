@@ -18,18 +18,19 @@ import {
   currentDateInReportTimezone,
   DIFFICULT_WORD_DEFAULT_DAYS,
 } from "@/lib/utils/report-state";
+import type { ChildProfileDTO } from "@/types/child";
 import type { DifficultWordDTO } from "@/types/reports";
 
 type WordsState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
-      readonly child: import("@/types/child").ChildProfileDTO;
+      readonly child: ChildProfileDTO;
       readonly words: readonly DifficultWordDTO[];
     }
-  | { readonly status: "not-found" }
-  | { readonly status: "unavailable" }
-  | { readonly status: "error" };
+  | { readonly status: "not-found"; readonly childId: string }
+  | { readonly status: "unavailable"; readonly childId: string }
+  | { readonly status: "error"; readonly childId: string };
 
 export function DifficultWordsScreen() {
   const { difficultWordService } = useReportServices();
@@ -47,8 +48,8 @@ export function DifficultWordsScreen() {
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
+      const child = childState.child;
       try {
-        const child = childState.child;
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(
@@ -67,6 +68,7 @@ export function DifficultWordsScreen() {
                     (error.status === 501 || error.status === 503)
                   ? "unavailable"
                   : "error",
+            childId: child.id,
           });
       }
     }
@@ -84,7 +86,7 @@ export function DifficultWordsScreen() {
   if (
     childState.status === "loading" ||
     childState.status === "redirecting" ||
-    state.status === "loading"
+    (childState.status === "ready" && state.status === "loading")
   )
     return (
       <section
@@ -115,7 +117,13 @@ export function DifficultWordsScreen() {
         </Button>
       </section>
     );
-  if (!selectedChild || (state.status === "ready" && state.child.id !== selectedChild.id))
+  if (
+    !selectedChild ||
+    (state.status === "ready" && state.child.id !== selectedChild.id) ||
+    (state.status !== "ready" &&
+      state.status !== "loading" &&
+      state.childId !== selectedChild.id)
+  )
     return (
       <section aria-busy="true" aria-label="Đang cập nhật từ cần luyện" className="mx-auto flex max-w-[1120px] flex-col gap-6">
         <Skeleton className="h-32 rounded-card" />
@@ -139,13 +147,6 @@ export function DifficultWordsScreen() {
         >
           <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
         </Button>
-        <ButtonLink
-          className="sm:w-auto sm:self-start"
-          href="/children"
-          variant="secondary"
-        >
-          Quản lý hồ sơ bé
-        </ButtonLink>
       </section>
     );
   if (state.status === "not-found")
