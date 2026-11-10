@@ -1,0 +1,245 @@
+{
+  "fixture_id": "vi_punctuation_01",
+  "condition": "punctuation",
+  "image": "vi_punctuation_01.png",
+  "expected_text": "“Mẹ ơi, con đói rồi!” An nói.\nMẹ hỏi: “Con muốn ăn gì?”\nAn đáp: “Bánh mì, sữa và trứng ạ.”",
+  "expected_words": [
+    "“Mẹ",
+    "ơi,",
+    "con",
+    "đói",
+    "rồi!”",
+    "An",
+    "nói.",
+    "Mẹ",
+    "hỏi:",
+    "“Con",
+    "muốn",
+    "ăn",
+    "gì?”",
+    "An",
+    "đáp:",
+    "“Bánh",
+    "mì,",
+    "sữa",
+    "và",
+    "trứng",
+    "ạ.”"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "“Mẹ",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        102.0,
+        80
+      ]
+    },
+    {
+      "text": "ơi,",
+      "line_index": 0,
+      "box": [
+        111.0,
+        50,
+        150.0,
+        80
+      ]
+    },
+    {
+      "text": "con",
+      "line_index": 0,
+      "box": [
+        159.0,
+        57,
+        214.0,
+        75
+      ]
+    },
+    {
+      "text": "đói",
+      "line_index": 0,
+      "box": [
+        223.0,
+        50,
+        269.0,
+        75
+      ]
+    },
+    {
+      "text": "rồi!”",
+      "line_index": 0,
+      "box": [
+        278.0,
+        44,
+        336.0,
+        75
+      ]
+    },
+    {
+      "text": "An",
+      "line_index": 0,
+      "box": [
+        344.0,
+        50,
+        387.0,
+        75
+      ]
+    },
+    {
+      "text": "nói.",
+      "line_index": 0,
+      "box": [
+        396.0,
+        50,
+        451.0,
+        75
+      ]
+    },
+    {
+      "text": "Mẹ",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        91.0,
+        151
+      ]
+    },
+    {
+      "text": "hỏi:",
+      "line_index": 1,
+      "box": [
+        100.0,
+        119,
+        155.0,
+        146
+      ]
+    },
+    {
+      "text": "“Con",
+      "line_index": 1,
+      "box": [
+        164.0,
+        121,
+        238.0,
+        146
+      ]
+    },
+    {
+      "text": "muốn",
+      "line_index": 1,
+      "box": [
+        247.0,
+        115,
+        332.0,
+        146
+      ]
+    },
+    {
+      "text": "ăn",
+      "line_index": 1,
+      "box": [
+        341.0,
+        122,
+        379.0,
+        146
+      ]
+    },
+    {
+      "text": "gì?”",
+      "line_index": 1,
+      "box": [
+        388.0,
+        121,
+        446.0,
+        153
+      ]
+    },
+    {
+      "text": "An",
+      "line_index": 2,
+      "box": [
+        43.0,
+        192,
+        86.0,
+        217
+      ]
+    },
+    {
+      "text": "đáp:",
+      "line_index": 2,
+      "box": [
+        95.0,
+        192,
+        161.0,
+        224
+      ]
+    },
+    {
+      "text": "“Bánh",
+      "line_index": 2,
+      "box": [
+        170.0,
+        192,
+        261.0,
+        217
+      ]
+    },
+    {
+      "text": "mì,",
+      "line_index": 2,
+      "box": [
+        270.0,
+        192,
+        316.0,
+        222
+      ]
+    },
+    {
+      "text": "sữa",
+      "line_index": 2,
+      "box": [
+        325.0,
+        193,
+        384.0,
+        217
+      ]
+    },
+    {
+      "text": "và",
+      "line_index": 2,
+      "box": [
+        393.0,
+        192,
+        429.0,
+        217
+      ]
+    },
+    {
+      "text": "trứng",
+      "line_index": 2,
+      "box": [
+        438.0,
+        192,
+        519.0,
+        224
+      ]
+    },
+    {
+      "text": "ạ.”",
+      "line_index": 2,
+      "box": [
+        528.0,
+        192,
+        567.0,
+        222
+      ]
+    }
+  ],
+  "width": 611,
+  "height": 301
+}

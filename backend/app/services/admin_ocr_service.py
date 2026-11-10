@@ -31,6 +31,7 @@ from app.schemas.admin_ocr import (
 )
 from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.services.ocr_adjudication import adjudicate_word
+from app.services.ocr_punctuation import punctuation_status
 from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
     find_split_merge_candidates,
@@ -100,6 +101,24 @@ class PreparedLocalOcrCorrection:
     image_path: str
     word_boxes: tuple[tuple[float, float, float, float], ...]
     total_chunks: int
+
+
+def geometry_quality(evidence: object) -> str:
+    """How well the stored box covers the word; independent of text color.
+
+    ``good``: valid box with a usable padded crop. ``weak``: valid box whose
+    crop is clipped by the page edge or too faint. ``invalid``: the box
+    itself failed validation and needs repair. ``not_assessed``: no geometry
+    check was recorded (legacy revisions, manual edits).
+    """
+    if not isinstance(evidence, dict):
+        return "not_assessed"
+    bbox_quality = evidence.get("bbox_quality")
+    if bbox_quality == "rejected":
+        return "invalid"
+    if bbox_quality != "valid":
+        return "not_assessed"
+    return "good" if evidence.get("crop_quality") == "usable" else "weak"
 
 
 def classify_word_evidence(
@@ -214,6 +233,14 @@ def classify_word_evidence(
             return "green"
         return "yellow"
     if normalized_source != normalized_paddle:
+        return "yellow"
+    if statuses.get("tesseract") == "success":
+        # Tesseract ran: confirmation comes from the two Vietnamese engines.
+        # Box and crop quality describe geometry, not the text, and are
+        # reported separately (see ``geometry_quality``).
+        adjudication = adjudicate_word(evidence)
+        if adjudication["status"] == "resolved" and adjudication["text"] == normalized_word:
+            return "green"
         return "yellow"
 
     selected_engine = evidence.get("selected_engine")
@@ -576,6 +603,7 @@ class AdminOcrService:
                 "paddle_error", "vietocr_error", "vietocr_status", "bbox_quality", "crop_quality",
                 "paddleocr_candidate", "vietocr_candidate", "vietocr_decoding_mode",
                 "tesseract_candidate", "tesseract_error",
+                "bbox_source", "punctuation_before_reconciliation",
                 "adjudication_rule", "adjudication_status", "adjudication_support",
                 "adjudicated_text", "text_before_adjudication",
             ):
@@ -1966,6 +1994,8 @@ class AdminOcrService:
                 "ocr_confidence": word_score,
                 "ocr_review_status": review_status,
                 "review_color_group": color_group,
+                "geometry_quality": geometry_quality(stored_evidence),
+                "punctuation_status": punctuation_status(row.Text, stored_evidence),
                 "ocr_score_source": score_source,
                 "ocr_evidence": stored_evidence,
             })

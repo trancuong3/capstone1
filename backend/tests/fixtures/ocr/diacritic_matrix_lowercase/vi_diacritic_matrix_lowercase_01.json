@@ -1,0 +1,223 @@
+{
+  "fixture_id": "vi_diacritic_matrix_lowercase_01",
+  "condition": "diacritic_matrix_lowercase",
+  "image": "vi_diacritic_matrix_lowercase_01.png",
+  "expected_text": "bữa bừa bủa sáng sảng sang sãng\nngồi ngời ngài phòng phong phỏng\nkhách khắch khach bàn bản bán",
+  "expected_words": [
+    "bữa",
+    "bừa",
+    "bủa",
+    "sáng",
+    "sảng",
+    "sang",
+    "sãng",
+    "ngồi",
+    "ngời",
+    "ngài",
+    "phòng",
+    "phong",
+    "phỏng",
+    "khách",
+    "khắch",
+    "khach",
+    "bàn",
+    "bản",
+    "bán"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "bữa",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        105.0,
+        75
+      ]
+    },
+    {
+      "text": "bừa",
+      "line_index": 0,
+      "box": [
+        114.0,
+        50,
+        175.0,
+        75
+      ]
+    },
+    {
+      "text": "bủa",
+      "line_index": 0,
+      "box": [
+        184.0,
+        48,
+        241.0,
+        75
+      ]
+    },
+    {
+      "text": "sáng",
+      "line_index": 0,
+      "box": [
+        250.0,
+        50,
+        324.0,
+        82
+      ]
+    },
+    {
+      "text": "sảng",
+      "line_index": 0,
+      "box": [
+        333.0,
+        48,
+        407.0,
+        82
+      ]
+    },
+    {
+      "text": "sang",
+      "line_index": 0,
+      "box": [
+        416.0,
+        57,
+        490.0,
+        82
+      ]
+    },
+    {
+      "text": "sãng",
+      "line_index": 0,
+      "box": [
+        499.0,
+        51,
+        573.0,
+        82
+      ]
+    },
+    {
+      "text": "ngồi",
+      "line_index": 1,
+      "box": [
+        44.0,
+        115,
+        109.0,
+        153
+      ]
+    },
+    {
+      "text": "ngời",
+      "line_index": 1,
+      "box": [
+        118.0,
+        121,
+        186.0,
+        153
+      ]
+    },
+    {
+      "text": "ngài",
+      "line_index": 1,
+      "box": [
+        195.0,
+        121,
+        260.0,
+        153
+      ]
+    },
+    {
+      "text": "phòng",
+      "line_index": 1,
+      "box": [
+        269.0,
+        121,
+        364.0,
+        153
+      ]
+    },
+    {
+      "text": "phong",
+      "line_index": 1,
+      "box": [
+        373.0,
+        121,
+        468.0,
+        153
+      ]
+    },
+    {
+      "text": "phỏng",
+      "line_index": 1,
+      "box": [
+        477.0,
+        119,
+        572.0,
+        153
+      ]
+    },
+    {
+      "text": "khách",
+      "line_index": 2,
+      "box": [
+        44.0,
+        192,
+        135.0,
+        217
+      ]
+    },
+    {
+      "text": "khắch",
+      "line_index": 2,
+      "box": [
+        144.0,
+        186,
+        235.0,
+        217
+      ]
+    },
+    {
+      "text": "khach",
+      "line_index": 2,
+      "box": [
+        244.0,
+        192,
+        335.0,
+        217
+      ]
+    },
+    {
+      "text": "bàn",
+      "line_index": 2,
+      "box": [
+        344.0,
+        192,
+        401.0,
+        217
+      ]
+    },
+    {
+      "text": "bản",
+      "line_index": 2,
+      "box": [
+        410.0,
+        190,
+        467.0,
+        217
+      ]
+    },
+    {
+      "text": "bán",
+      "line_index": 2,
+      "box": [
+        476.0,
+        192,
+        533.0,
+        217
+      ]
+    }
+  ],
+  "width": 617,
+  "height": 301
+}

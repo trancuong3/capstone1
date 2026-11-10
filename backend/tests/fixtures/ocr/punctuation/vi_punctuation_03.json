@@ -1,0 +1,267 @@
+{
+  "fixture_id": "vi_punctuation_03",
+  "condition": "punctuation",
+  "image": "vi_punctuation_03.png",
+  "expected_text": "Chợ có: cam, táo, lê; rau, củ, quả.\n“Tại sao?” – bé hỏi. “Vì trời mưa.”\nHôm nay là thứ hai, ngày 10/11.",
+  "expected_words": [
+    "Chợ",
+    "có:",
+    "cam,",
+    "táo,",
+    "lê;",
+    "rau,",
+    "củ,",
+    "quả.",
+    "“Tại",
+    "sao?”",
+    "–",
+    "bé",
+    "hỏi.",
+    "“Vì",
+    "trời",
+    "mưa.”",
+    "Hôm",
+    "nay",
+    "là",
+    "thứ",
+    "hai,",
+    "ngày",
+    "10/11."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Chợ",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        110.0,
+        80
+      ]
+    },
+    {
+      "text": "có:",
+      "line_index": 0,
+      "box": [
+        119.0,
+        50,
+        164.0,
+        75
+      ]
+    },
+    {
+      "text": "cam,",
+      "line_index": 0,
+      "box": [
+        173.0,
+        57,
+        246.0,
+        80
+      ]
+    },
+    {
+      "text": "táo,",
+      "line_index": 0,
+      "box": [
+        255.0,
+        50,
+        311.0,
+        80
+      ]
+    },
+    {
+      "text": "lê;",
+      "line_index": 0,
+      "box": [
+        320.0,
+        50,
+        356.0,
+        80
+      ]
+    },
+    {
+      "text": "rau,",
+      "line_index": 0,
+      "box": [
+        365.0,
+        57,
+        423.0,
+        80
+      ]
+    },
+    {
+      "text": "củ,",
+      "line_index": 0,
+      "box": [
+        432.0,
+        48,
+        477.0,
+        80
+      ]
+    },
+    {
+      "text": "quả.",
+      "line_index": 0,
+      "box": [
+        486.0,
+        48,
+        552.0,
+        82
+      ]
+    },
+    {
+      "text": "“Tại",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        103.0,
+        151
+      ]
+    },
+    {
+      "text": "sao?”",
+      "line_index": 1,
+      "box": [
+        112.0,
+        121,
+        197.0,
+        146
+      ]
+    },
+    {
+      "text": "–",
+      "line_index": 1,
+      "box": [
+        205.0,
+        136,
+        225.0,
+        146
+      ]
+    },
+    {
+      "text": "bé",
+      "line_index": 1,
+      "box": [
+        234.0,
+        121,
+        272.0,
+        146
+      ]
+    },
+    {
+      "text": "hỏi.",
+      "line_index": 1,
+      "box": [
+        281.0,
+        119,
+        336.0,
+        146
+      ]
+    },
+    {
+      "text": "“Vì",
+      "line_index": 1,
+      "box": [
+        345.0,
+        121,
+        388.0,
+        146
+      ]
+    },
+    {
+      "text": "trời",
+      "line_index": 1,
+      "box": [
+        397.0,
+        121,
+        447.0,
+        146
+      ]
+    },
+    {
+      "text": "mưa.”",
+      "line_index": 1,
+      "box": [
+        456.0,
+        121,
+        546.0,
+        146
+      ]
+    },
+    {
+      "text": "Hôm",
+      "line_index": 2,
+      "box": [
+        44.0,
+        192,
+        116.0,
+        217
+      ]
+    },
+    {
+      "text": "nay",
+      "line_index": 2,
+      "box": [
+        125.0,
+        199,
+        180.0,
+        224
+      ]
+    },
+    {
+      "text": "là",
+      "line_index": 2,
+      "box": [
+        189.0,
+        192,
+        216.0,
+        217
+      ]
+    },
+    {
+      "text": "thứ",
+      "line_index": 2,
+      "box": [
+        225.0,
+        192,
+        276.0,
+        217
+      ]
+    },
+    {
+      "text": "hai,",
+      "line_index": 2,
+      "box": [
+        285.0,
+        192,
+        340.0,
+        222
+      ]
+    },
+    {
+      "text": "ngày",
+      "line_index": 2,
+      "box": [
+        349.0,
+        192,
+        423.0,
+        224
+      ]
+    },
+    {
+      "text": "10/11.",
+      "line_index": 2,
+      "box": [
+        432.0,
+        192,
+        526.0,
+        217
+      ]
+    }
+  ],
+  "width": 596,
+  "height": 301
+}

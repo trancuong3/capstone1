@@ -1,0 +1,267 @@
+{
+  "fixture_id": "vi_punctuation_02",
+  "condition": "punctuation",
+  "image": "vi_punctuation_02.png",
+  "expected_text": "Ôi, trời đẹp quá! Mình đi chơi nhé?\nBà kể: ngày xưa, có một chú thỏ...\nThỏ (rất nhanh) chạy; rùa thì chậm.",
+  "expected_words": [
+    "Ôi,",
+    "trời",
+    "đẹp",
+    "quá!",
+    "Mình",
+    "đi",
+    "chơi",
+    "nhé?",
+    "Bà",
+    "kể:",
+    "ngày",
+    "xưa,",
+    "có",
+    "một",
+    "chú",
+    "thỏ...",
+    "Thỏ",
+    "(rất",
+    "nhanh)",
+    "chạy;",
+    "rùa",
+    "thì",
+    "chậm."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "Ôi,",
+      "line_index": 0,
+      "box": [
+        44.0,
+        43,
+        87.0,
+        80
+      ]
+    },
+    {
+      "text": "trời",
+      "line_index": 0,
+      "box": [
+        96.0,
+        50,
+        146.0,
+        75
+      ]
+    },
+    {
+      "text": "đẹp",
+      "line_index": 0,
+      "box": [
+        155.0,
+        50,
+        212.0,
+        82
+      ]
+    },
+    {
+      "text": "quá!",
+      "line_index": 0,
+      "box": [
+        221.0,
+        50,
+        287.0,
+        82
+      ]
+    },
+    {
+      "text": "Mình",
+      "line_index": 0,
+      "box": [
+        296.0,
+        50,
+        371.0,
+        75
+      ]
+    },
+    {
+      "text": "đi",
+      "line_index": 0,
+      "box": [
+        380.0,
+        50,
+        407.0,
+        75
+      ]
+    },
+    {
+      "text": "chơi",
+      "line_index": 0,
+      "box": [
+        416.0,
+        50,
+        482.0,
+        75
+      ]
+    },
+    {
+      "text": "nhé?",
+      "line_index": 0,
+      "box": [
+        491.0,
+        50,
+        567.0,
+        75
+      ]
+    },
+    {
+      "text": "Bà",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        86.0,
+        146
+      ]
+    },
+    {
+      "text": "kể:",
+      "line_index": 1,
+      "box": [
+        95.0,
+        113,
+        140.0,
+        146
+      ]
+    },
+    {
+      "text": "ngày",
+      "line_index": 1,
+      "box": [
+        149.0,
+        121,
+        223.0,
+        153
+      ]
+    },
+    {
+      "text": "xưa,",
+      "line_index": 1,
+      "box": [
+        232.0,
+        128,
+        300.0,
+        151
+      ]
+    },
+    {
+      "text": "có",
+      "line_index": 1,
+      "box": [
+        309.0,
+        121,
+        345.0,
+        146
+      ]
+    },
+    {
+      "text": "một",
+      "line_index": 1,
+      "box": [
+        354.0,
+        121,
+        411.0,
+        151
+      ]
+    },
+    {
+      "text": "chú",
+      "line_index": 1,
+      "box": [
+        419.0,
+        121,
+        474.0,
+        146
+      ]
+    },
+    {
+      "text": "thỏ...",
+      "line_index": 1,
+      "box": [
+        483.0,
+        119,
+        557.0,
+        146
+      ]
+    },
+    {
+      "text": "Thỏ",
+      "line_index": 2,
+      "box": [
+        44.0,
+        190,
+        103.0,
+        217
+      ]
+    },
+    {
+      "text": "(rất",
+      "line_index": 2,
+      "box": [
+        112.0,
+        186,
+        163.0,
+        224
+      ]
+    },
+    {
+      "text": "nhanh)",
+      "line_index": 2,
+      "box": [
+        171.0,
+        192,
+        277.0,
+        224
+      ]
+    },
+    {
+      "text": "chạy;",
+      "line_index": 2,
+      "box": [
+        286.0,
+        192,
+        367.0,
+        224
+      ]
+    },
+    {
+      "text": "rùa",
+      "line_index": 2,
+      "box": [
+        376.0,
+        192,
+        425.0,
+        217
+      ]
+    },
+    {
+      "text": "thì",
+      "line_index": 2,
+      "box": [
+        434.0,
+        192,
+        471.0,
+        217
+      ]
+    },
+    {
+      "text": "chậm.",
+      "line_index": 2,
+      "box": [
+        480.0,
+        192,
+        572.0,
+        222
+      ]
+    }
+  ],
+  "width": 616,
+  "height": 301
+}

@@ -1,0 +1,201 @@
+{
+  "fixture_id": "vi_dialogue_03",
+  "condition": "dialogue",
+  "image": "vi_dialogue_03.png",
+  "expected_text": "“Thế tổ cò ở đâu ạ?”\n“Ở rặng tre cuối làng.”\nHai ông cháu cùng nhìn theo...",
+  "expected_words": [
+    "“Thế",
+    "tổ",
+    "cò",
+    "ở",
+    "đâu",
+    "ạ?”",
+    "“Ở",
+    "rặng",
+    "tre",
+    "cuối",
+    "làng.”",
+    "Hai",
+    "ông",
+    "cháu",
+    "cùng",
+    "nhìn",
+    "theo..."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "“Thế",
+      "line_index": 0,
+      "box": [
+        44.0,
+        44,
+        114.0,
+        75
+      ]
+    },
+    {
+      "text": "tổ",
+      "line_index": 0,
+      "box": [
+        123.0,
+        42,
+        151.0,
+        75
+      ]
+    },
+    {
+      "text": "cò",
+      "line_index": 0,
+      "box": [
+        160.0,
+        50,
+        196.0,
+        75
+      ]
+    },
+    {
+      "text": "ở",
+      "line_index": 0,
+      "box": [
+        205.0,
+        48,
+        227.0,
+        75
+      ]
+    },
+    {
+      "text": "đâu",
+      "line_index": 0,
+      "box": [
+        236.0,
+        50,
+        293.0,
+        75
+      ]
+    },
+    {
+      "text": "ạ?”",
+      "line_index": 0,
+      "box": [
+        302.0,
+        50,
+        351.0,
+        80
+      ]
+    },
+    {
+      "text": "“Ở",
+      "line_index": 1,
+      "box": [
+        44.0,
+        113,
+        84.0,
+        146
+      ]
+    },
+    {
+      "text": "rặng",
+      "line_index": 1,
+      "box": [
+        93.0,
+        122,
+        161.0,
+        153
+      ]
+    },
+    {
+      "text": "tre",
+      "line_index": 1,
+      "box": [
+        170.0,
+        122,
+        209.0,
+        146
+      ]
+    },
+    {
+      "text": "cuối",
+      "line_index": 1,
+      "box": [
+        218.0,
+        115,
+        281.0,
+        146
+      ]
+    },
+    {
+      "text": "làng.”",
+      "line_index": 1,
+      "box": [
+        290.0,
+        121,
+        375.0,
+        153
+      ]
+    },
+    {
+      "text": "Hai",
+      "line_index": 2,
+      "box": [
+        44.0,
+        192,
+        96.0,
+        217
+      ]
+    },
+    {
+      "text": "ông",
+      "line_index": 2,
+      "box": [
+        105.0,
+        192,
+        162.0,
+        224
+      ]
+    },
+    {
+      "text": "cháu",
+      "line_index": 2,
+      "box": [
+        171.0,
+        192,
+        245.0,
+        217
+      ]
+    },
+    {
+      "text": "cùng",
+      "line_index": 2,
+      "box": [
+        254.0,
+        192,
+        328.0,
+        224
+      ]
+    },
+    {
+      "text": "nhìn",
+      "line_index": 2,
+      "box": [
+        337.0,
+        192,
+        403.0,
+        217
+      ]
+    },
+    {
+      "text": "theo...",
+      "line_index": 2,
+      "box": [
+        412.0,
+        192,
+        505.0,
+        217
+      ]
+    }
+  ],
+  "width": 549,
+  "height": 301
+}

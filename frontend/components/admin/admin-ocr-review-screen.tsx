@@ -257,6 +257,16 @@ export function getWordReviewColorGroup(
       ? "green"
       : "yellow";
   }
+  if (paddleRead !== normalize(word.text)) return "yellow";
+  if (statuses.tesseract === "success") {
+    // Tesseract ran: the two Vietnamese engines confirm the text. Box and
+    // crop quality are geometry and are reported separately.
+    const adjudication = adjudicateWord(evidence);
+    return adjudication.status === "resolved" &&
+      adjudication.text === normalize(word.text)
+      ? "green"
+      : "yellow";
+  }
   if (
     typeof paddle !== "string" ||
     !paddle.trim() ||
@@ -353,6 +363,43 @@ export function getWordReviewLabel(
     word?.ocr_evidence?.review_reason?.trim() ||
     "Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh"
   );
+}
+
+type WordGeometryQuality = "good" | "weak" | "invalid" | "not_assessed";
+
+/**
+ * Box quality is reported next to the text color and never changes it: a
+ * correct word stays green while its box may still need repair.
+ */
+export function getWordGeometryQuality(
+  word?: AdminRevisionWordDTO,
+): WordGeometryQuality {
+  if (word?.geometry_quality) return word.geometry_quality;
+  const evidence = word?.ocr_evidence;
+  if (!evidence) return "not_assessed";
+  if (evidence.bbox_quality === "rejected") return "invalid";
+  if (evidence.bbox_quality !== "valid") return "not_assessed";
+  return evidence.crop_quality === "usable" ? "good" : "weak";
+}
+
+export function getWordGeometryLabel(word?: AdminRevisionWordDTO): string {
+  return {
+    good: "Box ôm đúng vùng chữ",
+    weak: "Box chạm biên hoặc crop yếu · nên căn chỉnh lại",
+    invalid: "Box không hợp lệ · cần căn chỉnh lại",
+    not_assessed: "Chưa đánh giá hình học của box",
+  }[getWordGeometryQuality(word)];
+}
+
+export function getWordPunctuationLabel(word?: AdminRevisionWordDTO): string {
+  return {
+    correct: "Dấu câu khớp reference đã xác minh",
+    incorrect: "Dấu câu khác reference đã xác minh",
+    uncertain: "Các engine đọc dấu câu khác nhau · cần đối chiếu ảnh",
+    consistent:
+      "Các engine tiếng Việt đọc cùng dấu câu · chưa đối chiếu reference",
+    not_assessed: "Chưa có căn cứ để đánh giá dấu câu",
+  }[word?.punctuation_status ?? "not_assessed"];
 }
 
 export function getWordReviewColor(
@@ -672,14 +719,21 @@ function OcrImageViewer({
               word.word_index === selectedWord
                 ? "z-10 border-2 ring-2 ring-white"
                 : "border";
-            const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${reviewLabel}. ${scoreLabel}.`;
+            const geometryQuality = getWordGeometryQuality(word);
+            const geometryNeedsRepair =
+              geometryQuality === "weak" || geometryQuality === "invalid";
+            const geometryNote = geometryNeedsRepair
+              ? ` ${getWordGeometryLabel(word)}.`
+              : "";
+            const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${reviewLabel}. ${scoreLabel}.${geometryNote}`;
             const boxTitle = `Từ ${word.word_index + 1}: ${word.text} · ${reviewLabel} · ${scoreLabel} · bản nháp: ${currentDraftToken ?? "chưa có"}`;
 
             return (
               <button
                 aria-label={boxLabel}
                 aria-pressed={word.word_index === selectedWord}
-                className={`absolute box-border cursor-pointer rounded-[2px] p-0 ${getWordReviewColor(reviewStatus, word, paddleLineScore)} ${selectedClass}`}
+                className={`absolute box-border cursor-pointer rounded-[2px] p-0 ${getWordReviewColor(reviewStatus, word, paddleLineScore)} ${selectedClass}${geometryNeedsRepair ? " border-dashed" : ""}`}
+                data-geometry-quality={geometryQuality}
                 key={`${word.line_index}-${word.word_index}`}
                 onClick={() => {
                   onSelectWord(word.word_index);
@@ -2610,6 +2664,10 @@ export function AdminOcrReviewScreen({
                             {word.ocr_evidence?.selection_reason ??
                               "Not recorded"}
                           </span>
+                          <span>
+                            Hình học của box: {getWordGeometryLabel(word)}
+                          </span>
+                          <span>Dấu câu: {getWordPunctuationLabel(word)}</span>
                           <span>
                             Bounding box quality:{" "}
                             {word.ocr_evidence?.bbox_quality ?? "Not assessed"}

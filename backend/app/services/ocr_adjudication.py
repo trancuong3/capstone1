@@ -61,6 +61,7 @@ def adjudication_token(value: object) -> str | None:
         and token[-1] not in {"'", "-"}
     ):
         token = token[:-1]
+    token = token.strip("'-") or token
     token = re.sub(r"\s+", " ", token).strip()
     if not token or " " in token:
         return None
@@ -144,7 +145,16 @@ def adjudicate_word(evidence: object) -> dict[str, Any]:
     }
     if not isinstance(evidence, dict):
         return {**unresolved, "status": "not_applicable", "reason": "no_evidence"}
-    if evidence.get("bbox_quality") != "valid" or evidence.get("crop_quality") != "usable":
+    statuses = evidence.get("engine_statuses")
+    tesseract_ran = isinstance(statuses, dict) and statuses.get("tesseract") == "success"
+    region_usable = (
+        evidence.get("bbox_quality") == "valid" and evidence.get("crop_quality") == "usable"
+    )
+    # Line readings are attached to a word by token order, not by its box, so
+    # a clipped crop or a badly fitting box says nothing about the text. Only
+    # evidence recorded before Tesseract was an engine keeps the old gate,
+    # because PaddleOCR + VietOCR agreement alone was validated with it.
+    if not region_usable and not tesseract_ran:
         return {**unresolved, "status": "not_applicable", "reason": "word_region_not_usable"}
 
     readings = collect_word_readings(evidence)
@@ -153,9 +163,6 @@ def adjudicate_word(evidence: object) -> dict[str, Any]:
         token = readings.get(key)
         if token is not None:
             by_token.setdefault(token, []).append(key)
-    statuses = evidence.get("engine_statuses")
-    tesseract_ran = isinstance(statuses, dict) and statuses.get("tesseract") == "success"
-
     confirmed: list[tuple[str, list[str], list[str]]] = []
     preferred: list[tuple[str, list[str]]] = []
     for token, supporters in by_token.items():
@@ -232,17 +239,13 @@ def replace_token_core(raw_token: str, candidate: str) -> str:
 
     def core_bounds(value: str) -> tuple[int, int]:
         start = 0
-        while start < len(value) and (
-            unicodedata.category(value[start]).startswith(("P", "S"))
-            and value[start] not in {"'", "-"}
-        ):
+        while start < len(value) and unicodedata.category(value[start]).startswith(("P", "S")):
             start += 1
         end = len(value)
-        while end > start and (
-            unicodedata.category(value[end - 1]).startswith(("P", "S"))
-            and value[end - 1] not in {"'", "-"}
-        ):
+        while end > start and unicodedata.category(value[end - 1]).startswith(("P", "S")):
             end -= 1
+        if start == end:  # punctuation only: nothing to swap
+            return 0, len(value)
         return start, end
 
     raw = unicodedata.normalize("NFC", raw_token)

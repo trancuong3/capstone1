@@ -238,6 +238,12 @@ class AdminRevisionWordRead(BaseModel):
     bbox: tuple[float, float, float, float]
     ocr_confidence: float | None = Field(ge=0, le=1, allow_inf_nan=False)
     review_color_group: Literal["green", "yellow", "red"] = "yellow"
+    # Reported next to the text color and never folded into it: a correct word
+    # stays green while its box may still need repair, and vice versa.
+    geometry_quality: Literal["good", "weak", "invalid", "not_assessed"] = "not_assessed"
+    punctuation_status: Literal[
+        "correct", "incorrect", "uncertain", "consistent", "not_assessed"
+    ] = "not_assessed"
     ocr_review_status: Literal[
         "matched",
         "suspect",
