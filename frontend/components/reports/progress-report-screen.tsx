@@ -1,7 +1,7 @@
 "use client";
 
 import { History, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
@@ -55,9 +55,9 @@ function ProgressReportContent({
   const [loadingMore, setLoadingMore] = useState(false);
   const alive = useRef(true);
   const paging = useRef(false);
-  const selected = parseProgressPeriod(
-    requestedPeriodStart,
-    requestedPeriodEnd,
+  const selected = useMemo(
+    () => parseProgressPeriod(requestedPeriodStart, requestedPeriodEnd),
+    [requestedPeriodStart, requestedPeriodEnd],
   );
 
   useEffect(() => {
@@ -118,13 +118,7 @@ function ProgressReportContent({
           periodsError: periodsResult.status === "rejected",
         });
       } catch (error) {
-        if (active)
-          setState({
-            status:
-              isServiceError(error) && error.status === 404
-                ? "not-found"
-                : "error",
-          });
+        if (active) setState({ status: "error" });
       }
     }
     void load();
