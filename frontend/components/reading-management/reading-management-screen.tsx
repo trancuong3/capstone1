@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
   BellRing,
@@ -20,10 +20,9 @@ import {
 
 import { Button } from "@/components/common/button";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
-import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookService } from "@/hooks/use-book-service";
-import { useChildService } from "@/hooks/use-child-service";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { conflictMessage } from "@/lib/api/reading-management-messages";
 import {
@@ -34,7 +33,6 @@ import {
   isRunningPlan,
 } from "@/components/reading-management/reading-management-insights";
 import type { BookListItemDTO } from "@/types/book";
-import type { ChildProfileDTO } from "@/types/child";
 import type {
   BookCollectionType,
   ChildBookCollectionDTO,
@@ -107,23 +105,20 @@ function clock(value: string): string {
   return value.slice(0, 5);
 }
 
-interface Props {
-  requestedChildId?: string;
-}
-
-export function ReadingManagementScreen({ requestedChildId }: Props) {
-  const childService = useChildService();
+export function ReadingManagementScreen() {
   const bookService = useBookService();
   const service = useReadingManagementService();
-  const [children, setChildren] = useState<ChildProfileDTO[]>([]);
-  const [childId, setChildId] = useState(requestedChildId ?? "");
+  const { state: childState, retry: retryChild } =
+    useValidatedSelectedChild();
+  const childId = childState.status === "ready" ? childState.childId : "";
+  const selectedChild =
+    childState.status === "ready" ? childState.child : null;
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
   const [plans, setPlans] = useState<ReadingPlanDTO[]>([]);
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
   const [reminders, setReminders] = useState<ReadingReminderDTO[]>([]);
   const [due, setDue] = useState<ReadingReminderOccurrenceDTO[]>([]);
   const [books, setBooks] = useState<BookListItemDTO[]>([]);
-  const [loadingChildren, setLoadingChildren] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -156,10 +151,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const currentRequestKey = `${childId}:${reloadKey}`;
   const isReadingDataLoading =
     Boolean(childId) && settledRequestKey !== currentRequestKey;
-  const selectedChild = useMemo(
-    () => children.find((child) => child.id === childId) ?? null,
-    [children, childId],
-  );
   const favorites = collections.filter(
     (entry) => entry.collection_type === "FAVORITE",
   );
@@ -167,35 +158,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     (entry) => entry.collection_type === "WANT_TO_READ",
   );
 
-  useEffect(() => {
-    let active = true;
-    childService
-      .list()
-      .then((items) => {
-        if (!active) return;
-        setChildren(items);
-        const requested = requestedChildId
-          ? items.find((child) => child.id === requestedChildId)
-          : undefined;
-        setChildId((current) =>
-          current && items.some((child) => child.id === current)
-            ? current
-            : (requested?.id ?? items[0]?.id ?? ""),
-        );
-      })
-      .catch(() => {
-        if (active) setError("Không tải được hồ sơ bé. Vui lòng thử lại.");
-      })
-      .finally(() => {
-        if (active) setLoadingChildren(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [childService, requestedChildId]);
+
 
   useEffect(() => {
-    if (!childId) {
+    if (childState.status !== "ready") {
       return;
     }
     const controller = new AbortController();
@@ -243,6 +209,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     reloadKey,
     selectedChild?.grade,
     service,
+    childState.status,
   ]);
 
   async function runAction(
@@ -441,12 +408,42 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       if (saved) setReminderEmailEnabled(false);
     }
   }
-  if (loadingChildren)
+  if (
+    childState.status === "loading" ||
+    childState.status === "redirecting"
+  ) {
     return (
-      <section className="mx-auto max-w-5xl p-6" aria-busy="true">
-        Đang tải hồ sơ bé…
+      <section
+        aria-busy="true"
+        className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8"
+      >
+        <span className="sr-only" role="status">
+          Đang xác minh hồ sơ đã chọn…
+        </span>
+        <div className="h-12 w-full max-w-sm animate-pulse rounded-card bg-sky" />
+        <div className="h-28 w-full animate-pulse rounded-card bg-white" />
       </section>
     );
+  }
+
+  if (childState.status === "error") {
+    return (
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start"
+          onClick={retryChild}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8">
@@ -472,34 +469,28 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </Button>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-white p-4">
-        <label className="font-bold text-ink" htmlFor="management-child">
-          Hồ sơ bé
-        </label>
-        <select
-          id="management-child"
-          className={inputClass + " min-w-56"}
-          value={childId}
-          onChange={(event) => setChildId(event.target.value)}
-        >
-          {children.map((child) => (
-            <option key={child.id} value={child.id}>
-              {child.alias} · Lớp {child.grade}
-            </option>
-          ))}
-        </select>
-        {selectedChild ? (
-          <div className="flex items-center gap-2 text-label text-muted">
-            <ProfileAvatar
-              ariaLabel={`Ảnh đại diện của ${selectedChild.alias}`}
-              displayName={selectedChild.alias}
-              imageUrl={selectedChild.avatar_url}
-              size="sm"
-            />
-            <span>Đang xem: {selectedChild.alias}</span>
-          </div>
-        ) : null}
-      </div>
+      {selectedChild ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-white p-4">
+          <ProfileAvatar
+            ariaLabel={`Ảnh đại diện của ${selectedChild.alias}`}
+            displayName={selectedChild.alias}
+            imageUrl={selectedChild.avatar_url}
+            size="sm"
+          />
+          <p className="min-w-0 flex-1 text-label text-muted">
+            Đang quản lý hồ sơ của{" "}
+            <strong className="font-extrabold text-ink">
+              {selectedChild.alias} · Lớp {selectedChild.grade}
+            </strong>
+          </p>
+          <Link
+            className="inline-flex min-h-11 items-center rounded-control px-3 text-label font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+            href="/dashboard?focus=child-selection&reason=change"
+          >
+            Đổi hồ sơ tại Tổng quan
+          </Link>
+        </div>
+      ) : null}
       {error ? (
         <StatusMessage title="Có vấn đề xảy ra" tone="error">
           {error}
@@ -509,13 +500,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <StatusMessage title="Đã lưu" tone="success">
           {success}
         </StatusMessage>
-      ) : null}
-      {!childId && !isReadingDataLoading ? (
-        <EmptyState
-          icon={<Target className="size-9" />}
-          title="Chưa có hồ sơ bé"
-          description="Hãy tạo hồ sơ bé trước khi thiết lập mục tiêu hoặc lịch nhắc."
-        />
       ) : null}
       {isReadingDataLoading && childId ? (
         <p role="status" aria-live="polite">
