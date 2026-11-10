@@ -166,6 +166,8 @@ export function ReadingManagementScreen() {
     }
     const controller = new AbortController();
     let active = true;
+    setError("");
+    setSuccess("");
     Promise.all([
       service.listGoals(childId, controller.signal),
       service.listPlans(childId, controller.signal),
@@ -503,9 +505,22 @@ export function ReadingManagementScreen() {
         </StatusMessage>
       ) : null}
       {isReadingDataLoading && childId ? (
-        <p role="status" aria-live="polite">
-          Đang tải dữ liệu của bé…
-        </p>
+        <section
+          aria-busy="true"
+          aria-label="Đang tải dữ liệu quản lý đọc"
+          className="flex flex-col gap-4"
+        >
+          <span className="sr-only" role="status" aria-live="polite">
+            Đang tải dữ liệu của bé…
+          </span>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((item) => (
+              <Skeleton className="h-28 rounded-card" key={item} />
+            ))}
+          </div>
+          <Skeleton className="h-48 rounded-card" />
+          <Skeleton className="h-48 rounded-card" />
+        </section>
       ) : null}
 
       {childId &&
