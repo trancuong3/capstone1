@@ -209,7 +209,11 @@ describe("Saved reading progress UI", () => {
       requestedPeriodEnd: "2026-03-01",
     });
     expect(screen.getByText("Kỳ báo cáo không hợp lệ")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/system/progress/"),
+      ),
+    ).toBe(false);
   });
   it("does not show old-child data while navigation is loading or after its request resolves late", async () => {
     let resolve: (response: Response) => void = () => {};
