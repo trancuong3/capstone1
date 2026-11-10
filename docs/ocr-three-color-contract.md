@@ -104,8 +104,8 @@ Cột "Trước" được đo bằng cùng script trên mã nguồn trước tha
 - Hai engine tiếng Việt vẫn có thể cùng đọc sai một dấu trên ảnh nhiễu. Trong
   lần đo cuối không có trường hợp nào, nhưng ở một lần đo trung gian có 1 trường
   hợp (`bàn` → `bản`). Chỉ reference đã xác minh mới loại trừ được.
-- Chữ sát mép ảnh (crop chạm biên) luôn vàng khi chưa có reference vì dấu có thể
-  bị cắt.
+- (Đã thay đổi ở vòng 2, xem mục 8) Chữ sát mép ảnh không còn bị vàng chỉ vì crop
+  chạm biên; chất lượng box được báo riêng.
 - Chưa kiểm thử E2E trên giao diện thật với tài khoản Admin và Supabase; phần
   này cần được chạy thủ công.
 
@@ -140,3 +140,154 @@ PaddleOCR, VietOCR và Tesseract; các test còn lại không cần engine.
 | GREEN bắt buộc | 180 từ × 10 biến thể | `GreenHardAssertions` |
 | RED bắt buộc | 200 cặp × 9 biến thể × 2 trạng thái trang | `RedHardAssertions` |
 | Trang trộn màu | 10 kịch bản + ma trận 120 trang | `MixedPageScenarios` |
+
+## 8. Vòng 2: giảm vàng sai, dấu câu và hình học (2026-11-10)
+
+Vòng này đo trên bộ fixture mở rộng: 63 trang, 21 điều kiện, 1.314 từ ground
+truth (thêm font serif, font sách thiếu nhi, trang dày dấu câu, hội thoại và ma
+trận 60 từ chỉ khác dấu). Cột "Trước" là mã nguồn ở commit `9e3e121` chạy trên
+cùng bộ fixture.
+
+### A. Vì sao từ đúng vẫn bị vàng (63 từ ở baseline)
+
+| Nguyên nhân | Số từ | Tỷ lệ | Xử lý |
+|---|---:|---:|---|
+| Crop gate: crop chạm biên hoặc yếu dù hai engine tiếng Việt đã đồng thuận | 23 | 36,5% | Đã sửa: bỏ cổng crop/bbox khỏi kết luận văn bản |
+| Hai engine tiếng Việt đọc khác dấu | 17 | 27,0% | Giữ vàng: chưa có căn cứ để chọn |
+| Hai engine tiếng Việt đọc khác chữ | 10 | 15,9% | Giữ vàng |
+| Tesseract không có token cho từ | 8 | 12,7% | Một phần được crop xác nhận; còn lại giữ vàng |
+| Token mapping (split/merge) | 4 | 6,3% | Giữ vàng: không có ánh xạ một-một |
+| Bbox gate: box không hợp lệ | 1 | 1,6% | Đã sửa như crop gate |
+
+Sau khi sửa còn 42 từ, toàn bộ thuộc bốn nhóm "giữ vàng" ở trên; danh sách từng
+từ kèm bằng chứng ở [ocr-false-yellow-report.md](ocr-false-yellow-report.md).
+12 trong số đó nằm ở font sách thiếu nhi, nơi Tesseract đọc sai phần lớn.
+
+### B. Thay đổi về nhận dạng
+
+- **Giữ nguyên model.** VietOCR `vgg_transformer` và Tesseract `vie` là hai
+  engine đọc tiếng Việt; PaddleOCR chỉ làm detector và bỏ phiếu dấu câu. Chưa
+  tích hợp model PaddleOCR khác: các model nhận dạng tiếng Việt mới hơn cần
+  PaddleOCR 3.x, không tương thích với bộ đã pin (PaddleOCR 2.7.3 +
+  PaddlePaddle 2.6.2); việc nâng cả stack nằm ngoài phạm vi an toàn của vòng này.
+- **Box đo thay cho box ước lượng.** Khi Tesseract và pipeline đọc cùng chữ
+  cái, box của từ lấy từ box Tesseract đo được thay cho box chia tỷ lệ trong
+  dòng. IoU trung bình 0,573 → 0,893.
+- **Crop theo box mới** giúp lượt đọc lại của VietOCR trên từ tranh chấp đúng
+  hơn (34/79 → 44/79), nhờ đó candidate hiển thị được đổi đúng thêm 4 từ.
+- **Lượt đọc Tesseract trên crop từng từ kém** (8/79 đúng với box cũ, 26/79 với
+  box mới): chỉ được dùng như một lượt đọc bổ sung, không tự xác nhận được từ.
+
+### C. Tiếng Việt
+
+| Chỉ số | Trước | Sau |
+|---|---|---|
+| Dấu thanh | 903/931 = 97,0% | 907/931 = 97,4% |
+| Dấu mũ/trăng/râu | 554/568 = 97,5% | 554/568 = 97,5% |
+| Chữ đ | 68/69 = 98,6% | 68/69 = 98,6% |
+
+Lỗi còn lại tập trung ở: mất dấu huyền (7), mất dấu râu của ơ (8, chủ yếu
+`rỡ` → `rõ` do VietOCR), và font sách thiếu nhi (14/54 từ sai). Ma trận nhầm lẫn
+đầy đủ ở [ocr-color-benchmark.md](ocr-color-benchmark.md).
+
+### D. Dấu câu
+
+| Chỉ số | Trước | Sau | Mục tiêu |
+|---|---|---|---|
+| Precision | 181/191 = 94,8% | 207/216 = 95,8% | ≥ 98% |
+| Recall | 181/224 = 80,8% | 207/224 = 92,4% | ≥ 98% |
+| F1 | 0,872 | 0,941 | |
+| Ranh giới câu (. ! ?) | 129/166 = 77,7% | 152/166 = 91,6% | |
+
+- Baseline mất 33 dấu chấm cuối câu vì VietOCR hay bỏ dấu chấm và bước chuyển
+  dấu câu từ PaddleOCR không gồm dấu chấm.
+- Dấu câu đầu/cuối mỗi từ nay được quyết định bằng đa số giữa các engine đã đọc
+  đúng chữ cái của từ đó (cần ít nhất hai engine, hòa thì giữ nguyên). Phần chữ
+  không bị đụng tới; bề mặt trước khi đổi được lưu lại.
+- Dấu câu đứng riêng (`–` đầu câu thoại, `...`) được giữ trong văn bản trang
+  nhưng không thành token từ.
+- Dấu nháy đơn và gạch nối ở mép từ (`'An'`) nay là dấu câu; trước đây chúng
+  làm từ bị coi là từ khác và tô đỏ.
+- Mỗi từ có thêm `punctuation_status` (`correct`, `incorrect`, `uncertain`,
+  `consistent`, `not_assessed`), độc lập với màu của từ.
+
+### E. Vàng sai
+
+| Chỉ số | Trước | Sau | Mục tiêu | Đạt |
+|---|---|---|---|---|
+| GREEN precision | 1207/1207 = 100% | 1232/1232 = 100% (CI 95%: 99,7–100%) | ≥ 99% | Có |
+| GREEN recall trên từ đúng | 1207/1270 = 95,0% | 1232/1274 = 96,7% (CI 95%: 95,6–97,6%) | ≥ 98% | Chưa |
+| Từ đúng bị vàng | 63/1270 = 5,0% | 42/1274 = 3,3% (CI 95%: 2,4–4,4%) | ≤ 2% | Chưa |
+| False green | 0 | 0 | 0 | Có |
+
+### F. Nhận dạng
+
+| Chỉ số | Trước | Sau | Mục tiêu | Đạt |
+|---|---|---|---|---|
+| Exact word accuracy | 1270/1314 = 96,7% | 1274/1314 = 97,0% | ≥ 99% | Chưa |
+| Diacritic word accuracy | 1069/1112 = 96,1% | 1073/1112 = 96,5% | ≥ 99% | Chưa |
+| CER trung bình | 0,0169 | 0,0160 | ≤ 0,01 | Chưa |
+| WER trung bình | 0,0420 | 0,0383 | | |
+| Punctuation F1 | 0,872 | 0,941 | | |
+| IoU của box | 0,573 | 0,893 | | |
+| Thời gian mỗi trang (CPU) | 2,68 s | 2,39 s | | |
+
+Từng engine trên cùng ground truth (sau thay đổi): PaddleOCR 19,0% từ đúng,
+VietOCR 96,5%, Tesseract 96,7%, hybrid 97,0%. Không tính font sách thiếu nhi,
+hybrid đạt 1234/1260 = 97,9%.
+
+### G. Release gates
+
+| Gate | Kết quả |
+|---|---|
+| A. Phân loại theo reference | Đạt: 1274/1274 từ đúng → xanh, 38/38 từ sai → đỏ, không false green/red |
+| B. Nhận dạng tiếng Việt | **Chưa đạt** (97,0% so với 99%; CER 0,016 so với 0,01) |
+| C. Vàng sai | Precision đạt; recall 96,7% và vàng sai 3,3% **chưa đạt** |
+| D. Dấu câu | **Chưa đạt** (precision 95,8%, recall 92,4%); không còn mất dấu câu khi lưu/tải và không làm lệch ánh xạ từ |
+| E. Ảnh sách thật | **Chưa đạt**: repository không có ảnh chụp/scan sách đã được xác minh độc lập |
+
+### H. Lịch sử tự sửa
+
+| Vòng | Phát hiện | Nguyên nhân | Sửa | Kết quả |
+|---|---|---|---|---|
+| 1 | 24 từ đúng vàng dù hai engine tiếng Việt đồng thuận | Cổng crop/bbox nằm trước phân xử | Bỏ cổng hình học khỏi kết luận văn bản khi Tesseract đã chạy; thêm `geometry_quality` | Vàng sai 5,0% → 3,4% |
+| 2 | Lượt đọc crop gần như vô dụng (Tesseract 8/79) | Box từ chỉ là ước lượng (IoU 0,57) | Dùng box Tesseract đo được | IoU 0,89; thêm 4 từ đúng |
+| 3 | Mất 33 dấu chấm, recall dấu câu 80,8% | VietOCR bỏ dấu chấm; không có bước đối chiếu dấu câu | Bỏ phiếu dấu câu theo từng từ | Recall 92,4% |
+| 4 | Dấu `–` đầu câu thoại biến mất khỏi văn bản | Token chỉ có dấu câu bị loại khi dựng văn bản | Giữ bố cục dòng gồm cả token dấu câu | Văn bản trang giữ đủ |
+| 5 | `'An'` bị tô đỏ so với reference `An` | Dấu nháy/gạch ở mép từ được coi là chữ | Chuẩn hóa mép từ ở backend và frontend | Từ đúng, dấu câu báo riêng |
+| 6 | Hai ca test cũ còn đòi vàng khi crop yếu | Hợp đồng đã đổi theo yêu cầu mới | Cập nhật kỳ vọng D29, D30 và test vùng crop | Khớp hợp đồng mới |
+
+### I. Giới hạn còn lại
+
+- Font sách thiếu nhi (Comic Sans): VietOCR 74%, Tesseract 52%. Đây là giới hạn
+  của model; các từ sai ở đây không bao giờ được tô xanh, nhưng nhiều từ đúng
+  phải ở lại màu vàng.
+- Khi VietOCR và Tesseract khác nhau một dấu (`rỡ`/`rõ`), không có căn cứ ảnh
+  độc lập thứ ba để phân xử. Cần thêm một recognizer tiếng Việt độc lập hoặc
+  calibration trên dữ liệu thật.
+- Dấu câu đứng riêng chỉ được giữ khi VietOCR đọc được nó; chưa bỏ phiếu cho
+  loại này.
+- Chưa có ảnh sách thật và chưa chạy E2E trên giao diện Admin.
+
+### J. Bộ kiểm thử mới của vòng 2
+
+| Nhóm | Số kịch bản | Nơi đặt |
+|---|---:|---|
+| A. 60 từ chỉ khác dấu, vẽ thành ảnh, chạy engine thật | 60 từ × 2 kiểu chữ | `test_ocr_false_yellow_suite.py::RealOcrIntegration` |
+| B. Dấu thanh và Unicode | 30 | `ToneMarkAndUnicodeRules` |
+| C. Dấu câu | 55, cộng 23 test pipeline | `test_ocr_punctuation.py` |
+| D. Từ đúng không được vàng | 35, cộng 11 test riêng | `FalseYellowRegressionSuite` |
+| E. Độ chính xác của đỏ | 25 | `RedPrecision` |
+| F. Trang trộn | 25 | `MixedPages` |
+| G. Tích hợp engine thật theo 21 điều kiện ảnh | 20 điều kiện có ngưỡng sàn + 8 test | `RealOcrIntegration` |
+| Frontend: hình học, dấu câu, chuẩn hóa mép từ | 18 | `ocr-word-color-matrix.test.ts` |
+
+Nhóm G dùng ảnh dựng bằng máy; test `test_g_real_book_photographs_are_not_available`
+tự bỏ qua kèm thông báo Gate E chưa đạt cho tới khi có thư mục
+`backend/tests/fixtures/ocr_real_books/`.
+
+### K. Kết luận
+
+Phần phân loại màu (Gate A, GREEN precision) đủ cơ sở để dùng. Chất lượng nhận
+dạng, tỷ lệ vàng sai và dấu câu đã cải thiện có đo đếm nhưng **chưa đạt các
+ngưỡng nghiệm thu B, C, D, E**, nên chưa thể tuyên bố nghiệm thu toàn bộ.

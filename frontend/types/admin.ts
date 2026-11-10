@@ -158,6 +158,11 @@ export interface AdminRevisionWordDTO {
   readonly bbox: readonly [number, number, number, number];
   readonly ocr_confidence: number | null;
   readonly review_color_group?: "green" | "yellow" | "red";
+  /** Box quality, independent of the text color. */
+  readonly geometry_quality?: "good" | "weak" | "invalid" | "not_assessed";
+  /** Punctuation verdict, independent of the text color. */
+  readonly punctuation_status?:
+    "correct" | "incorrect" | "uncertain" | "consistent" | "not_assessed";
   readonly ocr_review_status?: AdminOcrReviewStatus;
   readonly ocr_score_source?: AdminOcrScoreSource | null;
   readonly ocr_evidence?: AdminOcrWordEvidenceDTO | null;

@@ -29,7 +29,7 @@ from ocr_color_testkit import (
 )
 
 from app.services import ocr_engine
-from app.services.admin_ocr_service import AdminOcrService
+from app.services.admin_ocr_service import AdminOcrService, geometry_quality
 from app.services.ocr_adjudication import (
     adjudicate_word,
     adjudication_token,
@@ -206,10 +206,11 @@ def _engine_cases():
     yield "D28 crop reading stored together with an engine error is ignored", three_engines(
         w, paddle="SANG", vietocr=w, tesseract=None,
         crop=completed_crop("SANG", w, w, tesseract_error="TesseractError")), "yellow"
-    yield "D29 bounding box rejected", three_engines(
-        w, paddle=w, vietocr=w, tesseract=w, bbox_quality="rejected"), "yellow"
-    yield "D30 crop clipped by the page edge", three_engines(
-        w, paddle=w, vietocr=w, tesseract=w, crop_quality="weak"), "yellow"
+    # Geometry is reported separately: a bad box does not make the text unknown.
+    yield "D29 bounding box rejected, Vietnamese engines agree on the text", three_engines(
+        w, paddle=w, vietocr=w, tesseract=w, bbox_quality="rejected"), "green"
+    yield "D30 crop clipped by the page edge, Vietnamese engines agree on the text", three_engines(
+        w, paddle=w, vietocr=w, tesseract=w, crop_quality="weak"), "green"
     yield "D31 displayed text differs from what the engines confirmed", three_engines(
         "SẢNG", paddle="SANG", vietocr="SÁNG", tesseract="SÁNG", selected="vietocr"), "yellow"
     yield "D32 mark-free word confirmed by both Vietnamese engines", three_engines(
@@ -507,15 +508,25 @@ class BoundingBoxAndCrop(unittest.TestCase):
         _crop, quality = crop_word_region(_page(200, 170), WORD_BOX)
         self.assertIn("clahe", quality["preprocessing"])
 
-    def test_an_unusable_region_can_never_be_confirmed_by_engines(self):
-        for bbox_quality, crop_quality in (("rejected", "unavailable"), ("valid", "weak"),
-                                           ("not_checked", None)):
-            word = three_engines("SÁNG", paddle="SÁNG", vietocr="SÁNG", tesseract="SÁNG",
-                                 bbox_quality=bbox_quality, crop_quality=crop_quality)
+    def test_region_quality_is_geometry_not_text_evidence(self):
+        for bbox_quality, crop_quality, geometry in (
+            ("rejected", "unavailable", "invalid"), ("valid", "weak", "weak"),
+            ("not_checked", None, "not_assessed"), ("valid", "usable", "good"),
+        ):
             with self.subTest(bbox=bbox_quality, crop=crop_quality):
-                self.assertEqual(classify_word(word), "yellow")
-                # A verified reference still decides it.
-                self.assertEqual(classify_page([word], "SÁNG"), ["green"])
+                confirmed = three_engines("SÁNG", paddle="SANG", vietocr="SÁNG", tesseract="SÁNG",
+                                          bbox_quality=bbox_quality, crop_quality=crop_quality)
+                # Two Vietnamese engines read the text: confirmed whatever the box.
+                self.assertEqual(classify_word(confirmed), "green")
+                self.assertEqual(geometry_quality(confirmed["ocr_evidence"]), geometry)
+                # Evidence recorded before Tesseract was an engine keeps the
+                # earlier, stricter standard for PaddleOCR + VietOCR agreement.
+                legacy = engine_word("SÁNG", bbox_quality=bbox_quality, crop_quality=crop_quality)
+                self.assertEqual(classify_word(legacy), "green" if geometry == "good" else "yellow")
+                # A verified reference decides the text in every case.
+                self.assertEqual(classify_page([legacy], "SÁNG"), ["green"])
+                self.assertEqual(classify_page([engine_word(
+                    "SANG", bbox_quality=bbox_quality, crop_quality=crop_quality)], "SÁNG"), ["red"])
 
     def test_line_crop_for_vietocr_is_not_stretched(self):
         image = _page(text="Hom nay troi nang dep", origin=(20, 230), scale=1.3)
@@ -650,9 +661,10 @@ class GroundTruthFixtures(unittest.TestCase):
     def test_fixture_set_is_complete_and_ground_truth_is_authored(self):
         benchmark = _load_benchmark()
         fixtures = benchmark.load_fixtures()
-        self.assertEqual(len(fixtures), 45)
+        self.assertEqual(len(fixtures), len(benchmark.CONDITIONS) * benchmark.PAGES_PER_CONDITION)
+        self.assertGreaterEqual(len(benchmark.CONDITIONS), 21)
         self.assertEqual({fixture["condition"] for fixture in fixtures}, set(benchmark.CONDITIONS))
-        authored = {token for sentence in benchmark.SENTENCES for token in sentence.split()}
+        authored = benchmark.authored_tokens()
         for fixture in fixtures:
             with self.subTest(fixture=fixture["fixture_id"]):
                 self.assertTrue(fixture["verified"])
@@ -667,7 +679,7 @@ class GroundTruthFixtures(unittest.TestCase):
     "PaddleOCR and VietOCR are not installed; the real-OCR gate needs both engines",
 )
 class RealOcrFixtureGate(unittest.TestCase):
-    """Runs the production pipeline on all 45 image-quality fixtures."""
+    """Runs the production pipeline on every ground-truth fixture."""
 
     @classmethod
     def setUpClass(cls):
@@ -686,7 +698,8 @@ class RealOcrFixtureGate(unittest.TestCase):
                     for result in cls.results for row in result["words"]]
 
     def test_b_every_fixture_ran_on_the_dual_engine_pipeline(self):
-        self.assertEqual(len(self.results), 45)
+        self.assertEqual(
+            len(self.results), len(self.benchmark.CONDITIONS) * self.benchmark.PAGES_PER_CONDITION)
         for result in self.results:
             with self.subTest(fixture=result["fixture_id"]):
                 self.assertEqual(result["engine"], "paddleocr_vietocr_dual")

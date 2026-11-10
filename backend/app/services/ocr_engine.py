@@ -16,6 +16,7 @@ from app.services.ocr_adjudication import (
     adjudicate_word,
     replace_token_core,
 )
+from app.services.ocr_punctuation import canonical_punctuation, split_surface_token
 from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
     MAX_SELECTIVE_WORD_CROPS_PER_PAGE,
@@ -102,6 +103,13 @@ def normalize_word(value: str) -> str:
         and value[-1] not in {"'", "-"}
     ):
         value = value[:-1]
+    # An apostrophe or hyphen belongs to the word only between letters
+    # ("d'accord", "xì-gà"). At the edge it is a quote or a dash: 'An' is the
+    # word "an". A token made only of them is left as it was, so no token
+    # changes between being a word and not being one.
+    edge_trimmed = value.strip("'-")
+    if edge_trimmed:
+        value = edge_trimmed
     return re.sub(r"\s+", " ", value).strip()
 
 
@@ -1252,6 +1260,36 @@ def _normalize_text_background(gray: np.ndarray) -> np.ndarray:
     return cv2.divide(gray, background, scale=255)
 
 
+def _same_base_letters(first: str, second: str) -> bool:
+    """Same letters once marks and outer punctuation are ignored (geometry only)."""
+
+    def base(value: str) -> str:
+        decomposed = unicodedata.normalize("NFD", normalize_word(value))
+        return "".join(
+            character for character in decomposed
+            if unicodedata.category(character) != "Mn"
+        ).replace("đ", "d")
+
+    first_base = base(first)
+    return bool(first_base) and first_base == base(second)
+
+
+def _normalized_box(
+    pixel_box: tuple[int, int, int, int], width: int, height: int
+) -> list[float] | None:
+    """Pixel (left, top, width, height) -> normalized xywh inside the page."""
+    left, top, box_width, box_height = pixel_box
+    if box_width < 2 or box_height < 2 or width <= 0 or height <= 0:
+        return None
+    x0 = min(max(left / width, 0.0), 1.0)
+    y0 = min(max(top / height, 0.0), 1.0)
+    x1 = min(max((left + box_width) / width, 0.0), 1.0)
+    y1 = min(max((top + box_height) / height, 0.0), 1.0)
+    if x1 - x0 <= 0 or y1 - y0 <= 0:
+        return None
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
 def _attach_tesseract_line_readings(
     image: np.ndarray,
     words: list[dict[str, object]],
@@ -1326,6 +1364,7 @@ def _attach_tesseract_line_readings(
             key, {"tokens": [], "box": [left, top, left + box_width, top + box_height]}
         )
         line["tokens"].append(token)
+        line.setdefault("token_boxes", []).append((left, top, box_width, box_height))
         box = line["box"]
         box[0], box[1] = min(box[0], left), min(box[1], top)
         box[2], box[3] = max(box[2], left + box_width), max(box[3], top + box_height)
@@ -1370,6 +1409,7 @@ def _attach_tesseract_line_readings(
     used_pipeline: set[int] = set()
     used_tesseract: set[tuple[int, int, int]] = set()
     paired = 0
+    measured_boxes = 0
     for score, line_index, key in candidates:
         if score < 0.4:
             break
@@ -1384,13 +1424,34 @@ def _attach_tesseract_line_readings(
         ):
             if step["operation"] not in {"match", "substitute"}:
                 continue
-            evidence = line_words[int(step["primary_index"])].get("ocr_evidence")
+            word = line_words[int(step["primary_index"])]
+            evidence = word.get("ocr_evidence")
             if isinstance(evidence, dict) and isinstance(evidence.get("engine_outputs"), dict):
-                evidence["engine_outputs"]["tesseract"] = tesseract_tokens[
-                    int(step["secondary_index"])
-                ]
+                tesseract_token = tesseract_tokens[int(step["secondary_index"])]
+                evidence["engine_outputs"]["tesseract"] = tesseract_token
                 paired += 1
-    return finish("success", paired)
+                # The pipeline box is a proportional estimate inside the line
+                # quad. Tesseract measured this word's glyphs directly, so
+                # when both read the same letters its box replaces the
+                # estimate (marks may differ; the letters locate the word).
+                if _same_base_letters(str(word["text"]), tesseract_token):
+                    measured = _normalized_box(
+                        tesseract_lines[key]["token_boxes"][int(step["secondary_index"])],
+                        width, height,
+                    )
+                    if measured is not None:
+                        word["bbox_estimated"] = list(word["bbox"])
+                        word["bbox"] = measured
+                        word["bbox_source"] = "tesseract_word_box"
+                        measured_boxes += 1
+    stats = finish("success", paired)
+    stats["measured_boxes"] = measured_boxes
+    # Tesseract's own page reading, kept so each engine can be measured
+    # against ground truth on its own (never used to color a word).
+    stats["page_lines"] = [
+        " ".join(tesseract_lines[key]["tokens"]) for key in sorted(tesseract_lines)
+    ]
+    return stats
 
 
 def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | None]:
@@ -1547,6 +1608,65 @@ def _adjudicate_disputed_words(
     }
 
 
+def _reconcile_punctuation(words: list[dict[str, object]]) -> dict[str, object]:
+    """Settle each word's leading/trailing punctuation by engine majority.
+
+    An engine votes only for a word whose letters it read (marks ignored), so
+    punctuation is never moved to a neighbouring word. A side changes only
+    when at least two engines agree on it and no other reading ties; the
+    lexical core is never touched and the previous surface is recorded.
+    """
+    from collections import Counter
+
+    changed = 0
+    disputed = 0
+    for word in words:
+        evidence = word.get("ocr_evidence")
+        if not isinstance(evidence, dict):
+            continue
+        outputs = evidence.get("engine_outputs")
+        statuses = evidence.get("engine_statuses")
+        if not isinstance(outputs, dict) or not isinstance(statuses, dict):
+            continue
+        current = split_surface_token(str(word.get("text", "")))
+        if not current.core:
+            continue
+        votes = []
+        for engine in ("vietocr", "tesseract", "paddleocr"):
+            value = outputs.get(engine)
+            if statuses.get(engine) != "success" or not isinstance(value, str):
+                continue
+            parts = split_surface_token(value)
+            if parts.core and _same_base_letters(parts.core, current.core):
+                votes.append(parts)
+        if len(votes) < 2:
+            continue
+        sides = {"leading": current.leading, "trailing": current.trailing}
+        for side in ("leading", "trailing"):
+            counts = Counter(canonical_punctuation(getattr(parts, side)) for parts in votes)
+            if len(counts) > 1:
+                disputed += 1
+            (best, support), *rest = counts.most_common()
+            if support < 2 or (rest and rest[0][1] == support):
+                continue
+            if best == canonical_punctuation(sides[side]):
+                continue
+            sides[side] = next(
+                getattr(parts, side) for parts in votes
+                if canonical_punctuation(getattr(parts, side)) == best
+            )
+        new_text = sides["leading"] + current.core + sides["trailing"]
+        if new_text != current.surface:
+            crop_evidence = evidence.get("crop_evidence")
+            if isinstance(crop_evidence, dict):
+                crop_evidence["punctuation_before_reconciliation"] = current.surface
+            word["text"] = new_text
+            if isinstance(evidence.get("source_text"), str):
+                evidence["source_text"] = new_text
+            changed += 1
+    return {"changed_words": changed, "disputed_sides": disputed}
+
+
 def _extract_text_and_boxes_dual_engine(
     image_bytes: bytes,
     paddle_engine: Any,
@@ -1593,6 +1713,9 @@ def _extract_text_and_boxes_dual_engine(
 
     words_output: list[dict[str, object]] = []
     lines_output: list[str] = []
+    # Per line: ("word", index into words_output) or ("mark", literal) so the
+    # page text keeps punctuation-only tokens ("–", "...") that are not words.
+    line_layouts: list[list[tuple[str, object]]] = []
     line_evidence: list[dict[str, object]] = []
 
     for line_idx, item in enumerate(ordered_items):
@@ -1840,6 +1963,16 @@ def _extract_text_and_boxes_dual_engine(
             })
 
         lines_output.append(" ".join(valid_words))
+        layout: list[tuple[str, object]] = []
+        first_word_index = len(words_output) - len(valid_words)
+        word_position = 0
+        for surface_token in unicodedata.normalize("NFC", chosen_text).split():
+            if normalize_word(surface_token):
+                layout.append(("word", first_word_index + word_position))
+                word_position += 1
+            else:
+                layout.append(("mark", surface_token))
+        line_layouts.append(layout)
 
     if not words_output:
         raise OcrNoTextDetected("Dual-Engine không trích xuất được từ ngữ hợp lệ")
@@ -1849,12 +1982,26 @@ def _extract_text_and_boxes_dual_engine(
         image, words_output, paddle_engine, vietocr_engine
     )
     adjudication_stats = _adjudicate_disputed_words(image, words_output)
-    if adjudication_stats["text_changed"]:
-        # Keep the page text identical to the ordered word list.
-        rebuilt_lines: dict[int, list[str]] = {}
-        for word in words_output:
-            rebuilt_lines.setdefault(int(word["line_index"]), []).append(str(word["text"]))
-        lines_output = [" ".join(rebuilt_lines[index]) for index in sorted(rebuilt_lines)]
+    punctuation_stats = _reconcile_punctuation(words_output)
+    for word in words_output:
+        bbox_source = word.pop("bbox_source", None)
+        word.pop("bbox_estimated", None)
+        evidence = word.get("ocr_evidence")
+        if (
+            isinstance(bbox_source, str)
+            and isinstance(evidence, dict)
+            and isinstance(evidence.get("crop_evidence"), dict)
+        ):
+            evidence["crop_evidence"]["bbox_source"] = bbox_source
+    # The page text is rebuilt from the final word surfaces, in order, with
+    # every punctuation-only token kept where the recognizer read it.
+    lines_output = [
+        " ".join(
+            str(words_output[int(item)]["text"]) if kind == "word" else str(item)
+            for kind, item in layout
+        )
+        for layout in line_layouts
+    ]
     formatted_text = "\n".join(lines_output)
 
     try:
@@ -1913,6 +2060,7 @@ def _extract_text_and_boxes_dual_engine(
             "tesseract_line_stats": tesseract_stats,
             "selective_crop_stats": crop_stats,
             "adjudication_stats": adjudication_stats,
+            "punctuation_stats": punctuation_stats,
         },
     }
 

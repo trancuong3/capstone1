@@ -1,0 +1,223 @@
+{
+  "fixture_id": "vi_childrens_font_02",
+  "condition": "childrens_font",
+  "image": "vi_childrens_font_02.png",
+  "expected_text": "An ngồi vào bàn ăn.\nÔng bà đang ngồi ở phòng khách.\nAn chào ông bà rồi xuống nhà.",
+  "expected_words": [
+    "An",
+    "ngồi",
+    "vào",
+    "bàn",
+    "ăn.",
+    "Ông",
+    "bà",
+    "đang",
+    "ngồi",
+    "ở",
+    "phòng",
+    "khách.",
+    "An",
+    "chào",
+    "ông",
+    "bà",
+    "rồi",
+    "xuống",
+    "nhà."
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "An",
+      "line_index": 0,
+      "box": [
+        44.0,
+        56,
+        87.0,
+        82
+      ]
+    },
+    {
+      "text": "ngồi",
+      "line_index": 0,
+      "box": [
+        97.0,
+        55,
+        160.0,
+        91
+      ]
+    },
+    {
+      "text": "vào",
+      "line_index": 0,
+      "box": [
+        170.0,
+        55,
+        222.0,
+        83
+      ]
+    },
+    {
+      "text": "bàn",
+      "line_index": 0,
+      "box": [
+        232.0,
+        55,
+        287.0,
+        82
+      ]
+    },
+    {
+      "text": "ăn.",
+      "line_index": 0,
+      "box": [
+        297.0,
+        55,
+        340.0,
+        84
+      ]
+    },
+    {
+      "text": "Ông",
+      "line_index": 1,
+      "box": [
+        44.0,
+        118,
+        107.0,
+        162
+      ]
+    },
+    {
+      "text": "bà",
+      "line_index": 1,
+      "box": [
+        117.0,
+        126,
+        155.0,
+        153
+      ]
+    },
+    {
+      "text": "đang",
+      "line_index": 1,
+      "box": [
+        164.0,
+        126,
+        237.0,
+        162
+      ]
+    },
+    {
+      "text": "ngồi",
+      "line_index": 1,
+      "box": [
+        247.0,
+        126,
+        310.0,
+        162
+      ]
+    },
+    {
+      "text": "ở",
+      "line_index": 1,
+      "box": [
+        320.0,
+        126,
+        337.0,
+        153
+      ]
+    },
+    {
+      "text": "phòng",
+      "line_index": 1,
+      "box": [
+        347.0,
+        126,
+        439.0,
+        163
+      ]
+    },
+    {
+      "text": "khách.",
+      "line_index": 1,
+      "box": [
+        449.0,
+        126,
+        549.0,
+        155
+      ]
+    },
+    {
+      "text": "An",
+      "line_index": 2,
+      "box": [
+        44.0,
+        198,
+        87.0,
+        224
+      ]
+    },
+    {
+      "text": "chào",
+      "line_index": 2,
+      "box": [
+        97.0,
+        197,
+        169.0,
+        224
+      ]
+    },
+    {
+      "text": "ông",
+      "line_index": 2,
+      "box": [
+        179.0,
+        196,
+        233.0,
+        233
+      ]
+    },
+    {
+      "text": "bà",
+      "line_index": 2,
+      "box": [
+        243.0,
+        197,
+        281.0,
+        224
+      ]
+    },
+    {
+      "text": "rồi",
+      "line_index": 2,
+      "box": [
+        290.0,
+        197,
+        333.0,
+        224
+      ]
+    },
+    {
+      "text": "xuống",
+      "line_index": 2,
+      "box": [
+        343.0,
+        197,
+        434.0,
+        233
+      ]
+    },
+    {
+      "text": "nhà.",
+      "line_index": 2,
+      "box": [
+        444.0,
+        197,
+        507.0,
+        226
+      ]
+    }
+  ],
+  "width": 593,
+  "height": 301
+}

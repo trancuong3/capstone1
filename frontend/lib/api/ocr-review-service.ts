@@ -101,6 +101,20 @@ export const adminRevisionDetailSchema = z.object({
         .enum(["green", "yellow", "red"])
         .optional()
         .catch(undefined),
+      geometry_quality: z
+        .enum(["good", "weak", "invalid", "not_assessed"])
+        .optional()
+        .catch(undefined),
+      punctuation_status: z
+        .enum([
+          "correct",
+          "incorrect",
+          "uncertain",
+          "consistent",
+          "not_assessed",
+        ])
+        .optional()
+        .catch(undefined),
       ocr_review_status: z
         .enum([
           "matched",

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  getWordGeometryLabel,
+  getWordGeometryQuality,
+  getWordPunctuationLabel,
   getWordReviewBadgeColor,
   getWordReviewColor,
   getWordReviewColorGroup,
@@ -7,7 +10,11 @@ import {
   getWordReviewStatus,
 } from "@/components/admin/admin-ocr-review-screen";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
-import { syncPageTextToWords } from "@/lib/ocr/sync-page-text-words";
+import {
+  normalizeVietnameseWord,
+  syncPageTextToWords,
+  tokenizePageText,
+} from "@/lib/ocr/sync-page-text-words";
 import { adjudicateWord } from "@/lib/ocr/word-adjudication";
 import type {
   AdminOcrReviewStatus,
@@ -501,5 +508,170 @@ describe("API payload parsing keeps the color contract", () => {
     };
     expect(item.ocr_evidence).toBeNull();
     expect(getWordReviewColorGroup("needs_review", item)).toBe("yellow");
+  });
+});
+
+describe("geometry and punctuation are reported next to the text color", () => {
+  const confirmed = (overrides: Partial<AdminOcrWordEvidenceDTO>) =>
+    evidence({
+      engine_outputs: { paddleocr: "SANG", vietocr: "SÁNG", tesseract: "SÁNG" },
+      engine_statuses: {
+        paddleocr: "success",
+        vietocr: "success",
+        tesseract: "success",
+      },
+      ...overrides,
+    });
+
+  it.each([
+    ["weak", { crop_quality: "weak" }],
+    ["invalid", { bbox_quality: "rejected", crop_quality: "unavailable" }],
+    ["good", {}],
+    ["not_assessed", { bbox_quality: "not_checked", crop_quality: null }],
+  ] as const)(
+    "keeps a confirmed word green when its box is %s",
+    (quality, overrides) => {
+      const item = word("SÁNG", { ocr_evidence: confirmed(overrides) });
+      expect(getWordReviewColorGroup("engine_disagreement", item)).toBe(
+        "green",
+      );
+      expect(getWordGeometryQuality(item)).toBe(quality);
+    },
+  );
+
+  it("keeps the earlier, stricter standard for evidence without Tesseract", () => {
+    const legacy = evidence({
+      engine_outputs: { paddleocr: "SÁNG", vietocr: "SÁNG" },
+      alignment: "match",
+      crop_evidence: { status: "not_needed" },
+      crop_quality: "weak",
+    });
+    expect(
+      getWordReviewColorGroup(
+        "engine_agreement",
+        word("SÁNG", { ocr_evidence: legacy }),
+      ),
+    ).toBe("yellow");
+  });
+
+  it("prefers the server geometry field and labels every state", () => {
+    const labels = (["good", "weak", "invalid", "not_assessed"] as const).map(
+      (quality) =>
+        getWordGeometryLabel(word("x", { geometry_quality: quality })),
+    );
+    expect(new Set(labels).size).toBe(4);
+    expect(
+      getWordGeometryQuality(
+        word("x", {
+          geometry_quality: "invalid",
+          ocr_evidence: confirmed({}),
+        }),
+      ),
+    ).toBe("invalid");
+    expect(getWordGeometryQuality(word("x"))).toBe("not_assessed");
+  });
+
+  it("labels every punctuation verdict distinctly", () => {
+    const labels = (
+      [
+        "correct",
+        "incorrect",
+        "uncertain",
+        "consistent",
+        "not_assessed",
+      ] as const
+    ).map((status) =>
+      getWordPunctuationLabel(word("x", { punctuation_status: status })),
+    );
+    expect(new Set(labels).size).toBe(5);
+    expect(getWordPunctuationLabel(word("x"))).toBe(labels[4]);
+  });
+
+  it("a wrong punctuation mark does not change the word color", () => {
+    const item = word("ngon.", {
+      review_color_group: "green",
+      punctuation_status: "incorrect",
+      ocr_evidence: withReference("ngon!", "match", "ngon."),
+    });
+    expect(
+      getWordReviewColorGroup(getWordReviewStatus(item, "NEEDS_REVIEW"), item),
+    ).toBe("green");
+    const legacy = { ...item, review_color_group: undefined };
+    expect(getWordReviewColorGroup("needs_review", legacy)).toBe("green");
+  });
+
+  it("drops the stale punctuation verdict of an edited token only", () => {
+    const page = [
+      word("An", { punctuation_status: "correct" }, 0),
+      word("ngon.", { punctuation_status: "incorrect" }, 1),
+    ];
+    const result = syncPageTextToWords("An ngon!", page);
+    expect(result.words[0].punctuation_status).toBe("correct");
+    expect(result.words[1].punctuation_status).toBeUndefined();
+    expect(result.words[1].text).toBe("ngon!");
+  });
+
+  it("parses the new API fields and tolerates their absence", () => {
+    const base = {
+      page_id: "33333333-3333-4333-8333-333333333333",
+      page_revision_id: "44444444-4444-4444-8444-444444444441",
+      revision_no: 1,
+      verification_status: "NEEDS_REVIEW",
+      lifecycle_status: "ACTIVE",
+      draft_text: "– An ngon.",
+      ocr_metadata: {},
+      created_at: "2026-11-10T00:00:00Z",
+      verified_at: null,
+      verified_by: null,
+    };
+    const served = {
+      word_index: 0,
+      line_index: 0,
+      text: "An",
+      normalized_text: "an",
+      bbox: [0.1, 0.2, 0.15, 0.08],
+      ocr_confidence: null,
+      ocr_review_status: "needs_review",
+      review_color_group: "green",
+      ocr_evidence: null,
+    };
+    const parsed = adminRevisionDetailSchema.parse({
+      ...base,
+      words: [
+        {
+          ...served,
+          geometry_quality: "weak",
+          punctuation_status: "uncertain",
+        },
+        { ...served, word_index: 1, text: "ngon.", normalized_text: "ngon" },
+        {
+          ...served,
+          word_index: 2,
+          geometry_quality: "sideways",
+          punctuation_status: 7,
+        },
+      ],
+    });
+    expect(parsed.words[0].geometry_quality).toBe("weak");
+    expect(parsed.words[0].punctuation_status).toBe("uncertain");
+    expect(parsed.words[1].geometry_quality).toBeUndefined();
+    expect(parsed.words[2].geometry_quality).toBeUndefined();
+    expect(parsed.words[2].punctuation_status).toBeUndefined();
+    // The standalone dash stays in the page text although it is not a word.
+    expect(parsed.draft_text).toBe("– An ngon.");
+    expect(tokenizePageText(parsed.draft_text ?? "")).toEqual(["An", "ngon."]);
+  });
+
+  it.each([
+    ["'An'", "an"],
+    ["vườn'", "vườn"],
+    ["-An", "an"],
+    ["An-", "an"],
+    ["d'accord", "d'accord"],
+    ["xì-gà", "xì-gà"],
+    ["“Sáng!”", "sáng"],
+    ["-", "-"],
+  ])("normalizes %s to the lexical core %s", (surface, core) => {
+    expect(normalizeVietnameseWord(surface)).toBe(core);
   });
 });

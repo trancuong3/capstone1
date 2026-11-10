@@ -25,8 +25,9 @@ import unicodedata
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+for _path in (str(BACKEND_ROOT), str(Path(__file__).resolve().parent)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -36,7 +37,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+import ocr_benchmark_metrics as metrics
+
 FIXTURE_ROOT = BACKEND_ROOT / "tests" / "fixtures" / "ocr"
+NEWLINE = "\n"
 
 # Authored ground truth. Do not replace with OCR output.
 SENTENCES = [
@@ -59,6 +63,43 @@ SENTENCES = [
     "Bà kể chuyện ngày xưa cho cháu nghe.",
     "Cả nhà quây quần bên mâm cơm ấm cúng.",
 ]
+# Dense punctuation: quotes, colons, semicolons, brackets, ellipsis, dashes.
+PUNCTUATION_SENTENCES = [
+    "“Mẹ ơi, con đói rồi!” An nói.",
+    "Mẹ hỏi: “Con muốn ăn gì?”",
+    "An đáp: “Bánh mì, sữa và trứng ạ.”",
+    "Ôi, trời đẹp quá! Mình đi chơi nhé?",
+    "Bà kể: ngày xưa, có một chú thỏ...",
+    "Thỏ (rất nhanh) chạy; rùa thì chậm.",
+    "Chợ có: cam, táo, lê; rau, củ, quả.",
+    "“Tại sao?” – bé hỏi. “Vì trời mưa.”",
+    "Hôm nay là thứ hai, ngày 10/11.",
+]
+# Dialogue: lines opening with a dash, questions and exclamations.
+DIALOGUE_SENTENCES = [
+    "– Con chào ông ạ!",
+    "– Ừ, cháu ngoan lắm.",
+    "– Ông ơi, kia là con gì?",
+    "– Đó là con cò, cháu ạ.",
+    "Bé reo lên: “A, cò bay rồi!”",
+    "Ông cười: “Cò về tổ đấy.”",
+    "“Thế tổ cò ở đâu ạ?”",
+    "“Ở rặng tre cuối làng.”",
+    "Hai ông cháu cùng nhìn theo...",
+]
+# Words that differ only by a tone mark, a vowel mark or đ. Nonsense forms
+# are intentional: the ground truth is what is drawn, not a dictionary.
+DIACRITIC_MATRIX_LINES = [
+    "BỮA BỪA BỦA SÁNG SẢNG SANG SÃNG",
+    "NGỒI NGỜI NGÀI PHÒNG PHONG PHỎNG",
+    "KHÁCH KHẮCH KHACH BÀN BẢN BÁN",
+    "ĂN AN ÂN SỮA SỦA SUA MẸ MẺ ME",
+    "BỐ BỎ BO CẢM CÁM CAM ƠN ON",
+    "ĐI DI ĐẸP DEP NHÀ NHA XUỐNG XUÔNG",
+    "TRỜI TRƠI NẮNG NANG NẰNG CHÀO CHAO",
+    "GIƯỜNG GIUONG CHUẨN CHUÂN BỊ BI",
+    "RỬA RUA BUA NGOI KHẮC MÉ BÒ",
+]
 LINES_PER_PAGE = 3
 PAGES_PER_CONDITION = 3
 
@@ -66,12 +107,29 @@ CONDITIONS = [
     "clean", "blur", "low_light", "over_exposed", "uneven_light", "shadow",
     "mixed_background", "bold", "italic", "small_text", "near_edge",
     "compressed", "noise", "rotated", "curved",
+    "serif", "childrens_font", "punctuation", "dialogue",
+    "diacritic_matrix", "diacritic_matrix_lowercase",
 ]
+# Conditions drawn from their own authored text instead of SENTENCES.
+_CONDITION_TEXT = {
+    "punctuation": PUNCTUATION_SENTENCES,
+    "dialogue": DIALOGUE_SENTENCES,
+    "diacritic_matrix": DIACRITIC_MATRIX_LINES,
+    "diacritic_matrix_lowercase": [line.lower() for line in DIACRITIC_MATRIX_LINES],
+}
+
+
+def authored_tokens() -> set[str]:
+    """Every ground-truth token any fixture may contain."""
+    lines = SENTENCES + [line for group in _CONDITION_TEXT.values() for line in group]
+    return {token for line in lines for token in line.split()}
 
 _FONT_CANDIDATES = {
     "regular": ["arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"],
     "bold": ["arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"],
     "italic": ["ariali.ttf", "DejaVuSans-Oblique.ttf", "LiberationSans-Italic.ttf"],
+    "serif": ["times.ttf", "DejaVuSerif.ttf", "LiberationSerif-Regular.ttf"],
+    "child": ["comic.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"],
 }
 _FONT_DIRS = [
     Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
@@ -90,7 +148,11 @@ def find_font(style: str) -> Path | None:
     return None
 
 
-def page_lines(condition_index: int, page: int) -> list[str]:
+def page_lines(condition_index: int, page: int, condition: str | None = None) -> list[str]:
+    own_text = _CONDITION_TEXT.get(condition or "")
+    if own_text is not None:
+        start = page * LINES_PER_PAGE
+        return own_text[start:start + LINES_PER_PAGE]
     start = ((condition_index * PAGES_PER_CONDITION + page) * LINES_PER_PAGE) % len(SENTENCES)
     return [SENTENCES[(start + offset) % len(SENTENCES)] for offset in range(LINES_PER_PAGE)]
 
@@ -142,6 +204,12 @@ def apply_condition(condition: str, lines: list[str], seed: int):
         return render_page(lines, margin=5)
     if condition == "mixed_background":
         return render_page(lines, foreground=(20, 30, 110), background=(244, 226, 172))
+    if condition == "serif":
+        return render_page(lines, style="serif")
+    if condition == "childrens_font":
+        return render_page(lines, style="child")
+    if condition in _CONDITION_TEXT:
+        return render_page(lines)
 
     image, boxes = render_page(lines)
     height, width = image.shape[:2]
@@ -191,7 +259,7 @@ def build_fixtures() -> list[dict[str, object]]:
     fixtures = []
     for condition_index, condition in enumerate(CONDITIONS):
         for page in range(PAGES_PER_CONDITION):
-            lines = page_lines(condition_index, page)
+            lines = page_lines(condition_index, page, condition)
             seed = 1000 + condition_index * 10 + page
             image, boxes = apply_condition(condition, lines, seed)
             ok, encoded = cv2.imencode(".png", image)
@@ -261,14 +329,38 @@ def evaluate_fixture(fixture: dict[str, object]) -> dict[str, object]:
     """Run the production pipeline on one fixture and score every word."""
     import jiwer
 
-    from app.services.admin_ocr_service import AdminOcrService, classify_word_evidence
+    from app.services.admin_ocr_service import (
+        AdminOcrService,
+        classify_word_evidence,
+        geometry_quality,
+    )
     from app.services.ocr_engine import align_ocr_tokens, extract_text_and_boxes, normalize_word
 
     started = time.perf_counter()
     result = extract_text_and_boxes(fixture["_png"])
     latency = time.perf_counter() - started
     words = AdminOcrService._word_data(copy.deepcopy(result["words"]))
-    truth_tokens = [unicodedata.normalize("NFC", token) for token in fixture["expected_words"]]
+    # Lexical ground-truth tokens; punctuation-only tokens ("–") are not words.
+    truth_tokens = [
+        unicodedata.normalize("NFC", token)
+        for token in fixture["expected_words"] if normalize_word(token)
+    ]
+    metadata = result["metadata"]
+    line_evidence = metadata.get("line_evidence") or []
+    engine_tokens = {
+        "paddleocr": [token for line in line_evidence
+                      for token in str(line.get("paddle_output") or "").split()],
+        "vietocr": [token for line in line_evidence
+                    for token in str(line.get("vietocr_output") or "").split()],
+        "tesseract": [token for line in (metadata.get("tesseract_line_stats") or {}).get("page_lines", [])
+                      for token in str(line).split()],
+        "hybrid": str(result["text"]).split(),
+    }
+    truth_surface = str(fixture["expected_text"]).split()
+    engine_metrics = {
+        name: metrics.text_metrics(truth_surface, tokens)
+        for name, tokens in engine_tokens.items()
+    }
     truth_keys = [normalize_word(token) for token in truth_tokens]
     ocr_keys = [str(word["normalized_text"]) for word in words]
 
@@ -329,7 +421,20 @@ def evaluate_fixture(fixture: dict[str, object]) -> dict[str, object]:
                          (x + w) * fixture["width"], (y + h) * fixture["height"]]
             iou = _iou(predicted, [float(v) for v in true_boxes[truth_index]["box"]])
         evidence = word["ocr_evidence"] or {}
+        outputs = evidence.get("engine_outputs") or {}
+        crop = evidence.get("crop_evidence") or {}
         rows.append({
+            "word_index": index,
+            "paddleocr": outputs.get("paddleocr"),
+            "vietocr": outputs.get("vietocr"),
+            "tesseract": outputs.get("tesseract"),
+            "paddleocr_crop": crop.get("paddleocr_candidate"),
+            "vietocr_crop": crop.get("vietocr_candidate"),
+            "tesseract_crop": crop.get("tesseract_candidate"),
+            "crop_status": crop.get("status"),
+            "adjudication_support": crop.get("adjudication_support"),
+            "review_reason": evidence.get("review_reason"),
+            "geometry_quality": geometry_quality(evidence),
             "text": word["text"],
             "truth": truth_tokens[truth_index] if truth_index is not None else None,
             "truth_state": "correct" if is_correct else "incorrect" if truth_index is not None else "ambiguous",
@@ -358,6 +463,7 @@ def evaluate_fixture(fixture: dict[str, object]) -> dict[str, object]:
         "baseline_cer": float(jiwer.cer(truth_text, " ".join(baseline_keys))) if baseline_keys else 1.0,
         "missed_truth_words": sum(1 for step in alignment if step["operation"] == "delete"),
         "adjudication_stats": result["metadata"].get("adjudication_stats"),
+        "engine_metrics": engine_metrics,
         "words": rows,
     }
 
@@ -423,6 +529,22 @@ def summarize(results: list[dict[str, object]]) -> dict[str, object]:
     }
     for key in ("no_reference", "baseline", "with_reference"):
         summary[f"rates_{key}"] = rates(summary[f"matrix_{key}"])
+    summary["engines"] = {
+        name: metrics.merge_text_metrics([result["engine_metrics"][name] for result in results])
+        for name in ("paddleocr", "vietocr", "tesseract", "hybrid")
+    }
+    false_yellow = [
+        dict(row, fixture_id=result["fixture_id"], condition=result["condition"],
+             cause=metrics.false_yellow_cause(row))
+        for result in results for row in result["words"]
+        if row["truth_state"] == "correct" and row["no_reference_color"] == "yellow"
+    ]
+    summary["false_yellow"] = false_yellow
+    summary["false_yellow_causes"] = dict(
+        sorted(((cause, sum(1 for row in false_yellow if row["cause"] == cause))
+                for cause in metrics.FALSE_YELLOW_CAUSES), key=lambda item: -item[1]))
+    geometry = [row["geometry_quality"] for row in rows]
+    summary["geometry"] = {state: geometry.count(state) for state in sorted(set(geometry))}
     return summary
 
 
@@ -485,7 +607,7 @@ Generated by `backend/scripts/ocr_color_benchmark.py`. Every number below was
 measured on this run; none is a target or an estimate.
 
 - Fixtures: {summary['fixtures']} synthetic pages in `backend/tests/fixtures/ocr/`,
-  {len(by_condition)} image-quality conditions × {PAGES_PER_CONDITION} pages, {summary['truth_words']} ground-truth words.
+  {len(by_condition)} conditions × {PAGES_PER_CONDITION} pages, {summary['truth_words']} ground-truth words.
 - Ground truth: the authored text that was rendered into each image. It is
   never derived from OCR output.
 - Engines: {", ".join(f"{name} {version}" for name, version in versions.items())}.
@@ -551,8 +673,148 @@ YELLOW by rule, not GREEN.
 """
 
 
+ENGINE_LABELS = {
+    "paddleocr": "PaddleOCR (line recognition)",
+    "vietocr": "VietOCR (line recognition)",
+    "tesseract": "Tesseract vie (page)",
+    "hybrid": "Hybrid (final text)",
+}
+
+
+def _plain(pair) -> str:
+    successes, total = pair
+    return "n/a" if total == 0 else f"{successes}/{total} = {successes / total:.1%}"
+
+
+def _confusion_table(counter, header, *, limit: int = 15) -> str:
+    items = [(key, count) for key, count in counter.most_common() if key[0] != key[1]][:limit]
+    if not items:
+        return "No confusions recorded."
+    lines = [f"| {header[0]} | {header[1]} | Count |", "|---|---|---:|"]
+    lines += [f"| {a} | {b} | {count} |" for (a, b), count in items]
+    return NEWLINE.join(lines)
+
+
+def render_engine_sections(summary) -> str:
+    engines = summary["engines"]
+    rows = []
+    for name, label in ENGINE_LABELS.items():
+        data = engines[name]
+        f1 = data["punct_f1"]
+        f1_text = "n/a" if f1 is None else f"{f1:.3f}"
+        rows.append(
+            f"| {label} | {_plain(data['exact_word'])} | {_plain(data['diacritic_word'])} | "
+            f"{data['mean_cer']:.4f} | {data['mean_wer']:.4f} | {_plain(data['punct_precision'])} | "
+            f"{_plain(data['punct_recall'])} | {f1_text} |")
+    hybrid = engines["hybrid"]
+    causes = summary["false_yellow_causes"]
+    total_false_yellow = len(summary["false_yellow"])
+    cause_rows = [
+        f"| {metrics.FALSE_YELLOW_CAUSES[cause]} | {count} | {count / total_false_yellow:.1%} |"
+        for cause, count in causes.items() if count
+    ] or ["| (none) | 0 | 0.0% |"]
+    geometry = ", ".join(f"{state}: {count}" for state, count in summary["geometry"].items())
+    sections = [
+        "",
+        "## Engines against the same ground truth",
+        "",
+        "Each engine's own output is scored separately. The exact-word columns compare",
+        "the lexical core (NFC, case-insensitive, marks preserved); punctuation is",
+        "scored on the leading/trailing marks of each word.",
+        "",
+        "| Engine | Exact word | Diacritic word | Mean CER | Mean WER | Punct. precision | Punct. recall | Punct. F1 |",
+        "|---|---|---|---:|---:|---|---|---:|",
+        *rows,
+        "",
+        "## Vietnamese marks (final text)",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Tone mark accuracy (words carrying a tone) | {_fraction(hybrid['tone'])} |",
+        f"| Vowel mark accuracy (â ă ê ô ơ ư) | {_fraction(hybrid['vowel_quality'])} |",
+        f"| đ accuracy | {_fraction(hybrid['d_stroke'])} |",
+        f"| Sentence boundary accuracy (. ! ?) | {_fraction(hybrid['sentence_boundary'])} |",
+        f"| Words paired with ground truth (punctuation-aware alignment) | {_fraction(hybrid['alignment'])} |",
+        "",
+        "### Tone confusions (ground truth → OCR)",
+        "",
+        _confusion_table(hybrid["tone_confusion"], ("Truth tone", "OCR tone")),
+        "",
+        "### Vowel mark confusions",
+        "",
+        _confusion_table(hybrid["vowel_confusion"], ("Truth marks", "OCR marks")),
+        "",
+        "### Consonant confusions",
+        "",
+        _confusion_table(hybrid["consonant_confusion"], ("Truth", "OCR")),
+        "",
+        "### Punctuation confusions",
+        "",
+        _confusion_table(hybrid["punctuation_confusion"], ("Truth mark", "OCR mark")),
+        "",
+        "## Correct words still shown YELLOW (no reference)",
+        "",
+        f"{total_false_yellow} correct words were not confirmed. Each one is listed with its",
+        "evidence in `docs/ocr-false-yellow-report.md`.",
+        "",
+        "| Cause | Words | Share |",
+        "|---|---:|---:|",
+        *cause_rows,
+        "",
+        f"Geometry quality of all OCR words (reported separately from text color): {geometry}.",
+        "",
+    ]
+    return NEWLINE.join(sections)
+
+
+def render_false_yellow_report(summary) -> str:
+    rows = summary["false_yellow"]
+    lines = [
+        "# Correct words shown YELLOW without a reference",
+        "",
+        "Generated by `backend/scripts/ocr_color_benchmark.py`. Each row is a word whose",
+        "OCR text equals the ground truth but that independent engines did not confirm.",
+        "",
+        f"Total: {len(rows)} words.",
+        "",
+        "| Cause | Words |",
+        "|---|---:|",
+    ]
+    lines += [f"| {metrics.FALSE_YELLOW_CAUSES[cause]} | {count} |"
+              for cause, count in summary["false_yellow_causes"].items() if count]
+    lines += [
+        "",
+        "| Fixture | Word # | Reference | OCR text | PaddleOCR | VietOCR | Tesseract | Crop (P / V / T) | Bbox | Crop | Alignment | Support | Cause | Review reason |",
+        "|---|---:|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+
+    def cell(value) -> str:
+        return "—" if value in (None, "") else str(value).replace("|", "/")
+
+    for row in rows:
+        crops = " / ".join(cell(row.get(key)) for key in ("paddleocr_crop", "vietocr_crop", "tesseract_crop"))
+        lines.append(
+            f"| {row['fixture_id']} | {row['word_index']} | {cell(row['truth'])} | {cell(row['text'])} | "
+            f"{cell(row['paddleocr'])} | {cell(row['vietocr'])} | {cell(row['tesseract'])} | {crops} | "
+            f"{cell(row['bbox_quality'])} | {cell(row['crop_quality'])} | {cell(row['engine_alignment'])} | "
+            f"{cell(row['adjudication_support'])} | {metrics.FALSE_YELLOW_CAUSES[row['cause']]} | "
+            f"{cell(row['review_reason'])} |")
+    return NEWLINE.join(lines) + NEWLINE
+
+
+def _jsonable(value):
+    if isinstance(value, dict):
+        return {(" -> ".join(key) if isinstance(key, tuple) else str(key)): _jsonable(item)
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--false-yellow-report", type=Path,
+                        help="write the per-word false-yellow report here")
     parser.add_argument("--write-fixtures", action="store_true",
                         help="(re)generate the fixture images and JSON files")
     parser.add_argument("--report", type=Path, help="write the Markdown report here")
@@ -573,12 +835,15 @@ def main() -> None:
         "vietocr": ocr_engine._package_version("vietocr") or "missing",
         "pytesseract": ocr_engine._package_version("pytesseract") or "missing",
     }
-    report = render_report(results, summary, versions)
+    report = render_report(results, summary, versions) + render_engine_sections(summary)
     if args.report:
         args.report.write_text(report, encoding="utf-8")
+    if args.false_yellow_report:
+        args.false_yellow_report.write_text(render_false_yellow_report(summary), encoding="utf-8")
     if args.json:
         args.json.write_text(json.dumps(
-            {"summary": summary, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+            _jsonable({"summary": summary, "results": results}), ensure_ascii=False, indent=2),
+            encoding="utf-8")
     print(report)
 
 

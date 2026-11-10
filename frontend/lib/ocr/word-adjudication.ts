@@ -103,8 +103,13 @@ export function adjudicateWord(
     support: [],
   };
   if (!evidence) return notApplicable;
-  if (evidence.bbox_quality !== "valid" || evidence.crop_quality !== "usable")
-    return notApplicable;
+  const tesseractRan = evidence.engine_statuses?.tesseract === "success";
+  const regionUsable =
+    evidence.bbox_quality === "valid" && evidence.crop_quality === "usable";
+  // Line readings are attached by token order, not by the box, so a clipped
+  // crop says nothing about the text. Only evidence recorded before
+  // Tesseract was an engine keeps the old region gate.
+  if (!regionUsable && !tesseractRan) return notApplicable;
 
   const readings = collectWordReadings(evidence);
   const byToken = new Map<string, ReadingKey[]>();
@@ -113,8 +118,6 @@ export function adjudicateWord(
     if (token === undefined) continue;
     byToken.set(token, [...(byToken.get(token) ?? []), key]);
   }
-  const tesseractRan = evidence.engine_statuses?.tesseract === "success";
-
   const confirmed: Array<[string, ReadingKey[]]> = [];
   for (const [token, supporters] of byToken) {
     const engines = new Set(supporters.map((key) => READING_ENGINE[key]));

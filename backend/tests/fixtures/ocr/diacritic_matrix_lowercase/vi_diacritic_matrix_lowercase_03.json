@@ -1,0 +1,234 @@
+{
+  "fixture_id": "vi_diacritic_matrix_lowercase_03",
+  "condition": "diacritic_matrix_lowercase",
+  "image": "vi_diacritic_matrix_lowercase_03.png",
+  "expected_text": "trời trơi nắng nang nằng chào chao\ngiường giuong chuẩn chuân bị bi\nrửa rua bua ngoi khắc mé bò",
+  "expected_words": [
+    "trời",
+    "trơi",
+    "nắng",
+    "nang",
+    "nằng",
+    "chào",
+    "chao",
+    "giường",
+    "giuong",
+    "chuẩn",
+    "chuân",
+    "bị",
+    "bi",
+    "rửa",
+    "rua",
+    "bua",
+    "ngoi",
+    "khắc",
+    "mé",
+    "bò"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "trời",
+      "line_index": 0,
+      "box": [
+        44.0,
+        50,
+        94.0,
+        75
+      ]
+    },
+    {
+      "text": "trơi",
+      "line_index": 0,
+      "box": [
+        103.0,
+        50,
+        153.0,
+        75
+      ]
+    },
+    {
+      "text": "nắng",
+      "line_index": 0,
+      "box": [
+        162.0,
+        44,
+        238.0,
+        82
+      ]
+    },
+    {
+      "text": "nang",
+      "line_index": 0,
+      "box": [
+        247.0,
+        57,
+        323.0,
+        82
+      ]
+    },
+    {
+      "text": "nằng",
+      "line_index": 0,
+      "box": [
+        332.0,
+        44,
+        408.0,
+        82
+      ]
+    },
+    {
+      "text": "chào",
+      "line_index": 0,
+      "box": [
+        417.0,
+        50,
+        491.0,
+        75
+      ]
+    },
+    {
+      "text": "chao",
+      "line_index": 0,
+      "box": [
+        500.0,
+        50,
+        574.0,
+        75
+      ]
+    },
+    {
+      "text": "giường",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        154.0,
+        153
+      ]
+    },
+    {
+      "text": "giuong",
+      "line_index": 1,
+      "box": [
+        163.0,
+        121,
+        266.0,
+        153
+      ]
+    },
+    {
+      "text": "chuẩn",
+      "line_index": 1,
+      "box": [
+        275.0,
+        113,
+        368.0,
+        146
+      ]
+    },
+    {
+      "text": "chuân",
+      "line_index": 1,
+      "box": [
+        377.0,
+        121,
+        470.0,
+        146
+      ]
+    },
+    {
+      "text": "bị",
+      "line_index": 1,
+      "box": [
+        479.0,
+        121,
+        506.0,
+        151
+      ]
+    },
+    {
+      "text": "bi",
+      "line_index": 1,
+      "box": [
+        515.0,
+        121,
+        542.0,
+        146
+      ]
+    },
+    {
+      "text": "rửa",
+      "line_index": 2,
+      "box": [
+        44.0,
+        190,
+        97.0,
+        217
+      ]
+    },
+    {
+      "text": "rua",
+      "line_index": 2,
+      "box": [
+        106.0,
+        199,
+        155.0,
+        217
+      ]
+    },
+    {
+      "text": "bua",
+      "line_index": 2,
+      "box": [
+        164.0,
+        192,
+        221.0,
+        217
+      ]
+    },
+    {
+      "text": "ngoi",
+      "line_index": 2,
+      "box": [
+        230.0,
+        192,
+        295.0,
+        224
+      ]
+    },
+    {
+      "text": "khắc",
+      "line_index": 2,
+      "box": [
+        304.0,
+        186,
+        376.0,
+        217
+      ]
+    },
+    {
+      "text": "mé",
+      "line_index": 2,
+      "box": [
+        385.0,
+        192,
+        432.0,
+        217
+      ]
+    },
+    {
+      "text": "bò",
+      "line_index": 2,
+      "box": [
+        441.0,
+        192,
+        479.0,
+        217
+      ]
+    }
+  ],
+  "width": 618,
+  "height": 301
+}

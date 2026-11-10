@@ -35,7 +35,12 @@ export function normalizeVietnameseWord(value: string): string {
     characters.pop();
   }
 
-  return characters.join("").replace(/\s+/gu, " ").trim().normalize("NFC");
+  // An apostrophe or hyphen is part of the word only between letters; at the
+  // edge it is a quote or a dash. A token made only of them is left as is.
+  // Mirrors backend `normalize_word`.
+  const joined = characters.join("");
+  const edgeTrimmed = joined.replace(/^['-]+|['-]+$/gu, "");
+  return (edgeTrimmed || joined).replace(/\s+/gu, " ").trim().normalize("NFC");
 }
 
 /**
@@ -88,6 +93,8 @@ export function syncPageTextToWords(
       // edited token so the client classifier re-evaluates the current text
       // against the same evidence instead of showing a stale color.
       review_color_group: tokenChanged ? undefined : word.review_color_group,
+      // The punctuation verdict described the previous surface as well.
+      punctuation_status: tokenChanged ? undefined : word.punctuation_status,
       ocr_review_status: tokenChanged
         ? ("needs_review" as const)
         : (word.ocr_review_status ?? "needs_review"),

@@ -1,0 +1,201 @@
+{
+  "fixture_id": "vi_dialogue_01",
+  "condition": "dialogue",
+  "image": "vi_dialogue_01.png",
+  "expected_text": "– Con chào ông ạ!\n– Ừ, cháu ngoan lắm.\n– Ông ơi, kia là con gì?",
+  "expected_words": [
+    "–",
+    "Con",
+    "chào",
+    "ông",
+    "ạ!",
+    "–",
+    "Ừ,",
+    "cháu",
+    "ngoan",
+    "lắm.",
+    "–",
+    "Ông",
+    "ơi,",
+    "kia",
+    "là",
+    "con",
+    "gì?"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "–",
+      "line_index": 0,
+      "box": [
+        43.0,
+        65,
+        63.0,
+        75
+      ]
+    },
+    {
+      "text": "Con",
+      "line_index": 0,
+      "box": [
+        72.0,
+        50,
+        135.0,
+        75
+      ]
+    },
+    {
+      "text": "chào",
+      "line_index": 0,
+      "box": [
+        144.0,
+        50,
+        218.0,
+        75
+      ]
+    },
+    {
+      "text": "ông",
+      "line_index": 0,
+      "box": [
+        227.0,
+        50,
+        284.0,
+        82
+      ]
+    },
+    {
+      "text": "ạ!",
+      "line_index": 0,
+      "box": [
+        293.0,
+        50,
+        321.0,
+        80
+      ]
+    },
+    {
+      "text": "–",
+      "line_index": 1,
+      "box": [
+        43.0,
+        136,
+        63.0,
+        146
+      ]
+    },
+    {
+      "text": "Ừ,",
+      "line_index": 1,
+      "box": [
+        72.0,
+        114,
+        110.0,
+        151
+      ]
+    },
+    {
+      "text": "cháu",
+      "line_index": 1,
+      "box": [
+        119.0,
+        121,
+        193.0,
+        146
+      ]
+    },
+    {
+      "text": "ngoan",
+      "line_index": 1,
+      "box": [
+        202.0,
+        128,
+        297.0,
+        153
+      ]
+    },
+    {
+      "text": "lắm.",
+      "line_index": 1,
+      "box": [
+        306.0,
+        115,
+        370.0,
+        146
+      ]
+    },
+    {
+      "text": "–",
+      "line_index": 2,
+      "box": [
+        43.0,
+        207,
+        63.0,
+        217
+      ]
+    },
+    {
+      "text": "Ông",
+      "line_index": 2,
+      "box": [
+        72.0,
+        185,
+        136.0,
+        224
+      ]
+    },
+    {
+      "text": "ơi,",
+      "line_index": 2,
+      "box": [
+        145.0,
+        192,
+        184.0,
+        222
+      ]
+    },
+    {
+      "text": "kia",
+      "line_index": 2,
+      "box": [
+        193.0,
+        192,
+        237.0,
+        217
+      ]
+    },
+    {
+      "text": "là",
+      "line_index": 2,
+      "box": [
+        246.0,
+        192,
+        273.0,
+        217
+      ]
+    },
+    {
+      "text": "con",
+      "line_index": 2,
+      "box": [
+        282.0,
+        199,
+        337.0,
+        217
+      ]
+    },
+    {
+      "text": "gì?",
+      "line_index": 2,
+      "box": [
+        346.0,
+        192,
+        393.0,
+        224
+      ]
+    }
+  ],
+  "width": 437,
+  "height": 301
+}

@@ -1,0 +1,289 @@
+{
+  "fixture_id": "vi_diacritic_matrix_02",
+  "condition": "diacritic_matrix",
+  "image": "vi_diacritic_matrix_02.png",
+  "expected_text": "ĂN AN ÂN SỮA SỦA SUA MẸ MẺ ME\nBỐ BỎ BO CẢM CÁM CAM ƠN ON\nĐI DI ĐẸP DEP NHÀ NHA XUỐNG XUÔNG",
+  "expected_words": [
+    "ĂN",
+    "AN",
+    "ÂN",
+    "SỮA",
+    "SỦA",
+    "SUA",
+    "MẸ",
+    "MẺ",
+    "ME",
+    "BỐ",
+    "BỎ",
+    "BO",
+    "CẢM",
+    "CÁM",
+    "CAM",
+    "ƠN",
+    "ON",
+    "ĐI",
+    "DI",
+    "ĐẸP",
+    "DEP",
+    "NHÀ",
+    "NHA",
+    "XUỐNG",
+    "XUÔNG"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "ĂN",
+      "line_index": 0,
+      "box": [
+        43.0,
+        44,
+        92.0,
+        75
+      ]
+    },
+    {
+      "text": "AN",
+      "line_index": 0,
+      "box": [
+        100.0,
+        50,
+        149.0,
+        75
+      ]
+    },
+    {
+      "text": "ÂN",
+      "line_index": 0,
+      "box": [
+        157.0,
+        43,
+        206.0,
+        75
+      ]
+    },
+    {
+      "text": "SỮA",
+      "line_index": 0,
+      "box": [
+        215.0,
+        44,
+        290.0,
+        75
+      ]
+    },
+    {
+      "text": "SỦA",
+      "line_index": 0,
+      "box": [
+        299.0,
+        42,
+        370.0,
+        75
+      ]
+    },
+    {
+      "text": "SUA",
+      "line_index": 0,
+      "box": [
+        379.0,
+        50,
+        450.0,
+        75
+      ]
+    },
+    {
+      "text": "MẸ",
+      "line_index": 0,
+      "box": [
+        459.0,
+        50,
+        510.0,
+        80
+      ]
+    },
+    {
+      "text": "MẺ",
+      "line_index": 0,
+      "box": [
+        519.0,
+        42,
+        570.0,
+        75
+      ]
+    },
+    {
+      "text": "ME",
+      "line_index": 0,
+      "box": [
+        579.0,
+        50,
+        630.0,
+        75
+      ]
+    },
+    {
+      "text": "BỐ",
+      "line_index": 1,
+      "box": [
+        44.0,
+        114,
+        93.0,
+        146
+      ]
+    },
+    {
+      "text": "BỎ",
+      "line_index": 1,
+      "box": [
+        102.0,
+        113,
+        151.0,
+        146
+      ]
+    },
+    {
+      "text": "BO",
+      "line_index": 1,
+      "box": [
+        160.0,
+        121,
+        209.0,
+        146
+      ]
+    },
+    {
+      "text": "CẢM",
+      "line_index": 1,
+      "box": [
+        218.0,
+        113,
+        294.0,
+        146
+      ]
+    },
+    {
+      "text": "CÁM",
+      "line_index": 1,
+      "box": [
+        303.0,
+        114,
+        379.0,
+        146
+      ]
+    },
+    {
+      "text": "CAM",
+      "line_index": 1,
+      "box": [
+        388.0,
+        121,
+        464.0,
+        146
+      ]
+    },
+    {
+      "text": "ƠN",
+      "line_index": 1,
+      "box": [
+        473.0,
+        121,
+        527.0,
+        146
+      ]
+    },
+    {
+      "text": "ON",
+      "line_index": 1,
+      "box": [
+        536.0,
+        121,
+        587.0,
+        146
+      ]
+    },
+    {
+      "text": "ĐI",
+      "line_index": 2,
+      "box": [
+        43.0,
+        192,
+        78.0,
+        217
+      ]
+    },
+    {
+      "text": "DI",
+      "line_index": 2,
+      "box": [
+        87.0,
+        192,
+        121.0,
+        217
+      ]
+    },
+    {
+      "text": "ĐẸP",
+      "line_index": 2,
+      "box": [
+        129.0,
+        192,
+        201.0,
+        222
+      ]
+    },
+    {
+      "text": "DEP",
+      "line_index": 2,
+      "box": [
+        210.0,
+        192,
+        281.0,
+        217
+      ]
+    },
+    {
+      "text": "NHÀ",
+      "line_index": 2,
+      "box": [
+        290.0,
+        185,
+        363.0,
+        217
+      ]
+    },
+    {
+      "text": "NHA",
+      "line_index": 2,
+      "box": [
+        372.0,
+        192,
+        445.0,
+        217
+      ]
+    },
+    {
+      "text": "XUỐNG",
+      "line_index": 2,
+      "box": [
+        454.0,
+        185,
+        579.0,
+        217
+      ]
+    },
+    {
+      "text": "XUÔNG",
+      "line_index": 2,
+      "box": [
+        588.0,
+        185,
+        713.0,
+        217
+      ]
+    }
+  ],
+  "width": 756,
+  "height": 301
+}

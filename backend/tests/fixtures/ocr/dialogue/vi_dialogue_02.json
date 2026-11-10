@@ -1,0 +1,234 @@
+{
+  "fixture_id": "vi_dialogue_02",
+  "condition": "dialogue",
+  "image": "vi_dialogue_02.png",
+  "expected_text": "– Đó là con cò, cháu ạ.\nBé reo lên: “A, cò bay rồi!”\nÔng cười: “Cò về tổ đấy.”",
+  "expected_words": [
+    "–",
+    "Đó",
+    "là",
+    "con",
+    "cò,",
+    "cháu",
+    "ạ.",
+    "Bé",
+    "reo",
+    "lên:",
+    "“A,",
+    "cò",
+    "bay",
+    "rồi!”",
+    "Ông",
+    "cười:",
+    "“Cò",
+    "về",
+    "tổ",
+    "đấy.”"
+  ],
+  "verified": true,
+  "ground_truth_source": "authored_text_rendered_by_benchmark_script",
+  "word_boxes_px": [
+    {
+      "text": "–",
+      "line_index": 0,
+      "box": [
+        43.0,
+        65,
+        63.0,
+        75
+      ]
+    },
+    {
+      "text": "Đó",
+      "line_index": 0,
+      "box": [
+        71.0,
+        50,
+        116.0,
+        75
+      ]
+    },
+    {
+      "text": "là",
+      "line_index": 0,
+      "box": [
+        125.0,
+        50,
+        152.0,
+        75
+      ]
+    },
+    {
+      "text": "con",
+      "line_index": 0,
+      "box": [
+        161.0,
+        57,
+        216.0,
+        75
+      ]
+    },
+    {
+      "text": "cò,",
+      "line_index": 0,
+      "box": [
+        225.0,
+        50,
+        270.0,
+        80
+      ]
+    },
+    {
+      "text": "cháu",
+      "line_index": 0,
+      "box": [
+        279.0,
+        50,
+        353.0,
+        75
+      ]
+    },
+    {
+      "text": "ạ.",
+      "line_index": 0,
+      "box": [
+        362.0,
+        57,
+        390.0,
+        80
+      ]
+    },
+    {
+      "text": "Bé",
+      "line_index": 1,
+      "box": [
+        44.0,
+        121,
+        86.0,
+        146
+      ]
+    },
+    {
+      "text": "reo",
+      "line_index": 1,
+      "box": [
+        95.0,
+        128,
+        144.0,
+        146
+      ]
+    },
+    {
+      "text": "lên:",
+      "line_index": 1,
+      "box": [
+        153.0,
+        121,
+        208.0,
+        146
+      ]
+    },
+    {
+      "text": "“A,",
+      "line_index": 1,
+      "box": [
+        217.0,
+        121,
+        260.0,
+        151
+      ]
+    },
+    {
+      "text": "cò",
+      "line_index": 1,
+      "box": [
+        269.0,
+        121,
+        305.0,
+        146
+      ]
+    },
+    {
+      "text": "bay",
+      "line_index": 1,
+      "box": [
+        314.0,
+        121,
+        369.0,
+        153
+      ]
+    },
+    {
+      "text": "rồi!”",
+      "line_index": 1,
+      "box": [
+        378.0,
+        115,
+        436.0,
+        146
+      ]
+    },
+    {
+      "text": "Ông",
+      "line_index": 2,
+      "box": [
+        44.0,
+        185,
+        108.0,
+        224
+      ]
+    },
+    {
+      "text": "cười:",
+      "line_index": 2,
+      "box": [
+        117.0,
+        192,
+        196.0,
+        217
+      ]
+    },
+    {
+      "text": "“Cò",
+      "line_index": 2,
+      "box": [
+        205.0,
+        192,
+        260.0,
+        217
+      ]
+    },
+    {
+      "text": "về",
+      "line_index": 2,
+      "box": [
+        269.0,
+        186,
+        305.0,
+        217
+      ]
+    },
+    {
+      "text": "tổ",
+      "line_index": 2,
+      "box": [
+        314.0,
+        184,
+        342.0,
+        217
+      ]
+    },
+    {
+      "text": "đấy.”",
+      "line_index": 2,
+      "box": [
+        351.0,
+        186,
+        426.0,
+        224
+      ]
+    }
+  ],
+  "width": 480,
+  "height": 301
+}
