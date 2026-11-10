@@ -98,6 +98,136 @@ class PreparedLocalOcrCorrection:
     total_chunks: int
 
 
+def classify_word_evidence(
+    review_status: str,
+    evidence: dict[str, object] | None,
+    word_text: str | None = None,
+) -> str:
+    """Classify one OCR word as green, yellow or red using auditable evidence."""
+    if not isinstance(evidence, dict) or not isinstance(word_text, str):
+        return "green" if review_status == "verified" else "yellow"
+
+    normalized_word = normalize_word(unicodedata.normalize("NFC", word_text))
+    if not normalized_word:
+        return "green" if review_status == "verified" else "yellow"
+
+    reference_text = evidence.get("reference_text")
+    verification_source = evidence.get("verification_source")
+    reference_alignment = evidence.get("reference_alignment")
+    has_verified_reference_provenance = (
+        isinstance(verification_source, str)
+        and verification_source in {"admin", "verified_revision"}
+    )
+    trusted_reference = (
+        isinstance(verification_source, str)
+        and verification_source in {"admin", "verified_revision"}
+        and isinstance(reference_text, str)
+        and bool(reference_text.strip())
+        and isinstance(reference_alignment, str)
+        and reference_alignment in {"match", "substitute"}
+    )
+    if has_verified_reference_provenance and not trusted_reference:
+        # A verified page reference exists, but this token has no safe one-to-one
+        # reference mapping. Do not bypass that uncertainty with OCR consensus.
+        return "yellow"
+    if trusted_reference and isinstance(reference_text, str):
+        normalized_reference = normalize_word(unicodedata.normalize("NFC", reference_text))
+        if normalized_word == normalized_reference:
+            return "green"
+        source_text = evidence.get("source_text")
+        normalized_source = (
+            normalize_word(unicodedata.normalize("NFC", source_text))
+            if isinstance(source_text, str) else None
+        )
+        if (
+            reference_alignment == "substitute"
+            and normalized_source == normalized_word
+        ):
+            # Trusted reference provenance plus a one-to-one substitution is
+            # decisive even when a persisted review status is stale.
+            return "red"
+        return "yellow"
+
+    # Explicit word-level Admin verification remains green unless a trusted
+    # verified reference above directly contradicts the current OCR token.
+    if review_status == "verified":
+        return "green"
+
+    source_text = evidence.get("source_text")
+    if not isinstance(source_text, str):
+        return "yellow"
+    normalized_source = normalize_word(unicodedata.normalize("NFC", source_text))
+    if normalized_source != normalized_word:
+        return "yellow"
+
+    outputs = evidence.get("engine_outputs")
+    statuses = evidence.get("engine_statuses")
+    if not isinstance(outputs, dict) or not isinstance(statuses, dict):
+        return "yellow"
+    paddle = outputs.get("paddleocr")
+    vietocr = outputs.get("vietocr")
+    if (
+        not isinstance(paddle, str) or not paddle.strip()
+        or not isinstance(vietocr, str) or not vietocr.strip()
+        or statuses.get("paddleocr") != "success"
+        or statuses.get("vietocr") != "success"
+    ):
+        return "yellow"
+
+    normalized_paddle = normalize_word(unicodedata.normalize("NFC", paddle))
+    normalized_vietocr = normalize_word(unicodedata.normalize("NFC", vietocr))
+    if (
+        not normalized_paddle
+        or normalized_paddle != normalized_vietocr
+        or normalized_source != normalized_paddle
+        or evidence.get("alignment") != "match"
+    ):
+        return "yellow"
+
+    selected_engine = evidence.get("selected_engine")
+    selected_candidate = (
+        outputs.get(selected_engine)
+        if isinstance(selected_engine, str) and selected_engine in {"paddleocr", "vietocr"}
+        else None
+    )
+    if (
+        not isinstance(selected_candidate, str)
+        or normalize_word(unicodedata.normalize("NFC", selected_candidate)) != normalized_paddle
+    ):
+        return "yellow"
+
+    for index_name in ("paddle_token_index", "vietocr_token_index"):
+        token_index = evidence.get(index_name)
+        if isinstance(token_index, bool) or not isinstance(token_index, int) or token_index < 0:
+            return "yellow"
+    if evidence.get("bbox_quality") != "valid" or evidence.get("crop_quality") != "usable":
+        return "yellow"
+
+    crop_evidence = evidence.get("crop_evidence")
+    if isinstance(crop_evidence, dict):
+        crop_status = crop_evidence.get("status")
+        if (
+            not isinstance(crop_status, str)
+            or crop_status not in {"not_needed", "completed"}
+            or isinstance(crop_evidence.get("paddle_error"), str)
+            or isinstance(crop_evidence.get("vietocr_error"), str)
+        ):
+            return "yellow"
+        if crop_status == "completed":
+            candidates = (
+                crop_evidence.get("paddleocr_candidate"),
+                crop_evidence.get("vietocr_candidate"),
+            )
+            if not all(isinstance(candidate, str) and candidate.strip() for candidate in candidates):
+                return "yellow"
+            if any(
+                normalize_word(unicodedata.normalize("NFC", candidate)) != normalized_paddle
+                for candidate in candidates if isinstance(candidate, str)
+            ):
+                return "yellow"
+    return "green"
+
+
 class AdminOcrService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -1606,69 +1736,8 @@ class AdminOcrService:
         evidence: dict[str, object] | None,
         word_text: str | None = None,
     ) -> str:
-        """One server-authoritative word color contract; missing metadata is not a risk."""
-        if review_status in {"verified", "reference_match"}:
-            return "green"
-        if review_status == "confirmed_mismatch":
-            return "red"
-        if not isinstance(evidence, dict):
-            return "neutral"
-
-        source_text = evidence.get("source_text")
-        if (
-            isinstance(word_text, str)
-            and isinstance(source_text, str)
-            and normalize_word(word_text) != normalize_word(source_text)
-        ):
-            return "yellow"
-
-        outputs = evidence.get("engine_outputs")
-        if isinstance(outputs, dict):
-            paddle = outputs.get("paddleocr")
-            vietocr = outputs.get("vietocr")
-            if (
-                isinstance(paddle, str) and paddle.strip()
-                and isinstance(vietocr, str) and vietocr.strip()
-                and normalize_word(paddle) != normalize_word(vietocr)
-            ):
-                return "yellow"
-
-        alignment = evidence.get("alignment")
-        engine_statuses = evidence.get("engine_statuses")
-        statuses = engine_statuses if isinstance(engine_statuses, dict) else {}
-        if alignment in {
-            "substitute", "split", "merge", "unresolved",
-        }:
-            return "yellow"
-        if alignment in {"unmatched", "delete", "insert"}:
-            selected_engine = evidence.get("selected_engine")
-            other_engine = (
-                "vietocr" if selected_engine == "paddleocr"
-                else "paddleocr" if selected_engine == "vietocr"
-                else None
-            )
-            other_status = statuses.get(other_engine) if other_engine else None
-            # A missing token is a word-level disagreement only when the
-            # other engine completed this line. no_result/error/not_run mean
-            # there is no second candidate to compare, not proof of a bad word.
-            if other_status == "success":
-                return "yellow"
-
-        if evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}:
-            return "yellow"
-        if evidence.get("crop_quality") in {"weak", "low", "poor", "rejected"}:
-            return "yellow"
-        crop_evidence = evidence.get("crop_evidence")
-        if isinstance(crop_evidence, dict) and (
-            crop_evidence.get("crop_quality") in {"weak", "low", "poor", "rejected"}
-            or crop_evidence.get("bbox_quality") in {"rejected", "invalid", "poor"}
-            or crop_evidence.get("status") == "partial"
-            or isinstance(crop_evidence.get("paddle_error"), str)
-            or isinstance(crop_evidence.get("vietocr_error"), str)
-        ):
-            return "yellow"
-
-        return "neutral"
+        """Compatibility wrapper around the pure word-evidence classifier."""
+        return classify_word_evidence(review_status, evidence, word_text)
 
     async def revision_detail(
         self,

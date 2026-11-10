@@ -53,9 +53,8 @@ import type {
 } from "@/types/admin";
 
 type LoadError = "not-found" | "unavailable" | "safe";
-type WordFilter =
-  "all" | "review" | "risk" | "disagreement" | "verified" | "neutral";
-type WordReviewColorGroup = "green" | "red" | "yellow" | "neutral";
+type WordFilter = "all" | "review" | "risk" | "disagreement" | "red" | "green";
+type WordReviewColorGroup = "green" | "yellow" | "red";
 type AiTokenChange = {
   readonly index: number;
   readonly original: string;
@@ -159,19 +158,9 @@ function hasDiacriticOnlyEngineDisagreement(
   );
 }
 
-function sourceTokenWasEdited(word: AdminRevisionWordDTO | undefined): boolean {
-  const source = word?.ocr_evidence?.source_text;
-  return (
-    typeof source === "string" &&
-    normalizeVietnameseWord(source) !==
-      normalizeVietnameseWord(word?.text ?? "")
-  );
-}
-
 /**
- * Backend review_color_group is authoritative. Legacy fallback is conservative:
- * missing calibration/reference/metadata is neutral; only direct word-level
- * risk evidence is yellow.
+ * Backend colors are authoritative. This fallback handles legacy payloads
+ * that omit the three-color group and applies strict word-level evidence gates.
  */
 export function getWordReviewColorGroup(
   status: AdminOcrReviewStatus,
@@ -181,62 +170,101 @@ export function getWordReviewColorGroup(
   const contractGroup = word?.review_color_group;
   if (
     contractGroup === "green" ||
-    contractGroup === "red" ||
     contractGroup === "yellow" ||
-    contractGroup === "neutral"
-  ) {
+    contractGroup === "red"
+  )
     return contractGroup;
-  }
-  if (status === "verified" || status === "reference_match") return "green";
-  if (status === "confirmed_mismatch") return "red";
-  if (sourceTokenWasEdited(word)) return "yellow";
-  const evidence = word?.ocr_evidence;
-  if (evidence) {
-    const statuses = evidence.engine_statuses ?? {};
-    const selectedEngine = evidence.selected_engine;
-    const otherEngine =
-      selectedEngine === "paddleocr"
-        ? "vietocr"
-        : selectedEngine === "vietocr"
-          ? "paddleocr"
-          : null;
-    const otherStatus = otherEngine ? statuses[otherEngine] : undefined;
-    const riskyAlignments = new Set([
-      "substitute",
-      "split",
-      "merge",
-      "unresolved",
-    ]);
-    if (riskyAlignments.has(evidence.alignment)) return "yellow";
-    if (
-      ["unmatched", "insert", "delete"].includes(evidence.alignment) &&
-      otherStatus === "success"
-    )
-      return "yellow";
-    if (
-      ["rejected", "invalid", "poor"].includes(evidence.bbox_quality ?? "") ||
-      ["weak", "low", "poor", "rejected"].includes(
-        evidence.crop_quality ?? "",
-      ) ||
-      evidence.crop_evidence?.status === "partial" ||
-      typeof evidence.crop_evidence?.paddle_error === "string" ||
-      typeof evidence.crop_evidence?.vietocr_error === "string"
-    )
-      return "yellow";
+  if (!word?.ocr_evidence) return status === "verified" ? "green" : "yellow";
 
-    const paddle = evidence.engine_outputs.paddleocr;
-    const vietocr = evidence.engine_outputs.vietocr;
+  const evidence = word.ocr_evidence;
+  const normalize = (value: string) =>
+    normalizeVietnameseWord(value.normalize("NFC"));
+  const source = evidence.source_text;
+  const reference = evidence.reference_text;
+  const hasVerifiedReferenceProvenance =
+    evidence.verification_source === "admin" ||
+    evidence.verification_source === "verified_revision";
+  const trustedReference =
+    hasVerifiedReferenceProvenance &&
+    typeof reference === "string" &&
+    reference.trim().length > 0 &&
+    ["match", "substitute"].includes(evidence.reference_alignment ?? "");
+
+  if (hasVerifiedReferenceProvenance && !trustedReference) return "yellow";
+  if (trustedReference && typeof reference === "string") {
+    if (normalize(word.text) === normalize(reference)) return "green";
     if (
-      typeof paddle === "string" &&
-      paddle.trim() &&
-      typeof vietocr === "string" &&
-      vietocr.trim() &&
-      normalizeVietnameseWord(paddle) !== normalizeVietnameseWord(vietocr)
+      evidence.reference_alignment === "substitute" &&
+      typeof source === "string" &&
+      normalize(source) === normalize(word.text)
     )
-      return "yellow";
+      return "red";
+    return "yellow";
+  }
+  // Word-level Admin verification is valid unless a trusted verified reference
+  // above directly contradicts the OCR source token.
+  if (status === "verified") return "green";
+  if (
+    typeof source !== "string" ||
+    normalize(source) !== normalize(word.text)
+  ) {
+    return "yellow";
   }
 
-  return "neutral";
+  const paddle = evidence.engine_outputs.paddleocr;
+  const vietocr = evidence.engine_outputs.vietocr;
+  const statuses = evidence.engine_statuses ?? {};
+  const selectedEngine = evidence.selected_engine;
+  const selectedCandidate =
+    selectedEngine === "paddleocr"
+      ? paddle
+      : selectedEngine === "vietocr"
+        ? vietocr
+        : null;
+  if (
+    typeof paddle !== "string" ||
+    !paddle.trim() ||
+    typeof vietocr !== "string" ||
+    !vietocr.trim() ||
+    normalize(paddle) !== normalize(vietocr) ||
+    statuses.paddleocr !== "success" ||
+    statuses.vietocr !== "success" ||
+    evidence.alignment !== "match" ||
+    typeof selectedCandidate !== "string" ||
+    normalize(selectedCandidate) !== normalize(word.text) ||
+    !Number.isInteger(evidence.paddle_token_index) ||
+    (evidence.paddle_token_index ?? -1) < 0 ||
+    !Number.isInteger(evidence.vietocr_token_index) ||
+    (evidence.vietocr_token_index ?? -1) < 0 ||
+    evidence.bbox_quality !== "valid" ||
+    evidence.crop_quality !== "usable"
+  )
+    return "yellow";
+
+  const crop = evidence.crop_evidence;
+  if (crop) {
+    if (
+      !["not_needed", "completed"].includes(String(crop.status)) ||
+      typeof crop.paddle_error === "string" ||
+      typeof crop.vietocr_error === "string"
+    )
+      return "yellow";
+    if (crop.status === "completed") {
+      const candidates = [crop.paddleocr_candidate, crop.vietocr_candidate];
+      if (
+        !candidates.every(
+          (candidate) => typeof candidate === "string" && candidate.trim(),
+        ) ||
+        candidates.some(
+          (candidate) =>
+            typeof candidate === "string" &&
+            normalize(candidate) !== normalize(paddle),
+        )
+      )
+        return "yellow";
+    }
+  }
+  return "green";
 }
 
 function matchesWordFilter(
@@ -249,11 +277,9 @@ function matchesWordFilter(
   const group = getWordReviewColorGroup(status, word, paddleLineScore);
   if (filter === "review") return group === "red" || group === "yellow";
   if (filter === "risk") return group === "yellow";
-  if (filter === "disagreement") {
-    return hasEngineDisagreementEvidence(word);
-  }
-  if (filter === "verified") return group === "green";
-  return group === "neutral";
+  if (filter === "red") return group === "red";
+  if (filter === "green") return group === "green";
+  return hasEngineDisagreementEvidence(word);
 }
 
 export function getWordReviewLabel(
@@ -261,29 +287,25 @@ export function getWordReviewLabel(
   word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
 ): string {
-  if (status === "verified") return "Admin đã xác minh từ";
-  if (status === "reference_match")
-    return "Khớp reference của trang đã xác minh";
-  if (status === "confirmed_mismatch")
-    return "Sai so với reference đã xác minh";
-  if (status === "engine_agreement")
-    return "Hai engine đồng thuận · chưa xác minh độc lập";
+  const group = getWordReviewColorGroup(status, word);
+  if (group === "green") {
+    if (status === "verified") return "Admin đã xác minh từ";
+    if (word?.ocr_evidence?.verification_source)
+      return "Khớp reference của revision đã xác minh";
+    return "Hai OCR đồng thuận · chưa đối chiếu reference";
+  }
+  if (group === "red") return "Sai so với reference đã xác minh";
   if (
-    status === "engine_disagreement" &&
     hasEngineDisagreementEvidence(word) &&
     hasDiacriticOnlyEngineDisagreement(word)
-  ) {
-    return "Hai engine chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
-  }
-  if (status === "engine_disagreement" && hasEngineDisagreementEvidence(word)) {
-    return "Hai engine bất đồng · cần đối chiếu ảnh";
-  }
-  if (getWordReviewColorGroup(status, word) === "neutral") {
-    return "Chưa xác minh độc lập · chưa phát hiện rủi ro OCR";
+  )
+    return "Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
+  if (hasEngineDisagreementEvidence(word)) {
+    return "Hai OCR bất đồng · chưa thể xác định candidate đúng";
   }
   return (
     word?.ocr_evidence?.review_reason?.trim() ||
-    "Có rủi ro OCR cần Admin đối chiếu ảnh"
+    "Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh"
   );
 }
 
@@ -295,9 +317,8 @@ export function getWordReviewColor(
   const group = getWordReviewColorGroup(status, word, paddleLineScore);
   return {
     green: "border-green-600 bg-green-400/35 text-green-900",
-    red: "border-red-600 bg-red-400/35 text-red-900",
     yellow: "border-amber-600 bg-amber-300/40 text-amber-950",
-    neutral: "border-slate-300 bg-slate-100/80 text-slate-800",
+    red: "border-red-600 bg-red-400/35 text-red-900",
   }[group];
 }
 
@@ -309,9 +330,8 @@ export function getWordReviewBadgeColor(
   const group = getWordReviewColorGroup(status, word, paddleLineScore);
   return {
     green: "bg-green-100 text-green-800 border-green-300",
-    red: "bg-red-100 text-red-800 border-red-300",
     yellow: "bg-amber-100 text-amber-900 border-amber-400",
-    neutral: "bg-slate-100 text-slate-700 border-slate-300",
+    red: "bg-red-100 text-red-900 border-red-300",
   }[group];
 }
 
@@ -1514,9 +1534,8 @@ export function AdminOcrReviewScreen({
   const colorCounts = useMemo(() => {
     const counts: Record<WordReviewColorGroup, number> = {
       green: 0,
-      red: 0,
       yellow: 0,
-      neutral: 0,
+      red: 0,
     };
     for (const word of words) {
       const status = getWordReviewStatus(word, detail?.verification_status);
@@ -1669,45 +1688,38 @@ export function AdminOcrReviewScreen({
             words={words}
           />
           <p className="mt-3 text-sm leading-6 text-muted">
-            Chỉ từ được Admin xác minh hoặc khớp một-một với reference của
-            revision đã xác minh mới được tô xanh. Chỉ mismatch rõ ràng với
-            reference mới được tô đỏ. Đồng thuận engine, bất đồng dấu, Paddle
-            line score và raw crop score không tự quyết định màu. Engine đồng
-            thuận an toàn hoặc chỉ có một engine chạy mà không có dấu hiệu rủi
-            ro sẽ ở nhóm trung tính; vàng chỉ dành cho bất
-            đồng/alignment/inference hoặc chất lượng crop có vấn đề. Chưa bật
-            auto-green từ confidence.
+            Xanh biểu thị Admin/reference đã xác minh hoặc hai OCR đồng thuận
+            chính xác ở cấp từ với alignment, token mapping và bbox/crop hợp lệ;
+            đồng thuận là evidence tốt, không đồng nghĩa Admin verified. Vàng
+            dành cho từ thiếu evidence, bất đồng hoặc mapping/chất lượng chưa an
+            toàn. Đỏ chỉ xuất hiện khi candidate không khớp reference đã xác
+            minh trong alignment một-một rõ ràng. Raw OCR score và similarity
+            heuristic không được sử dụng như xác suất đúng.
           </p>
           <div
             aria-label="Thống kê trạng thái từ OCR"
-            className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"
+            className="mt-4 grid grid-cols-3 gap-2"
             role="group"
           >
             {(
               [
                 {
                   id: "green",
-                  label: "Xanh · Admin/reference đã xác minh",
+                  label: "Xanh · evidence tốt",
                   count: colorCounts.green,
                   cardClass: "border-green-600/50 bg-green-50 text-green-900",
+                },
+                {
+                  id: "yellow",
+                  label: "Vàng · cần kiểm tra",
+                  count: colorCounts.yellow,
+                  cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
                 },
                 {
                   id: "red",
                   label: "Đỏ · reference xác nhận sai",
                   count: colorCounts.red,
                   cardClass: "border-red-600/50 bg-red-50 text-red-900",
-                },
-                {
-                  id: "yellow",
-                  label: "Vàng · có rủi ro OCR",
-                  count: colorCounts.yellow,
-                  cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
-                },
-                {
-                  id: "neutral",
-                  label: "Trung tính · chưa xác minh",
-                  count: colorCounts.neutral,
-                  cardClass: "border-slate-400/60 bg-slate-50 text-slate-800",
                 },
               ] as const
             ).map((state) => (
@@ -2127,9 +2139,9 @@ export function AdminOcrReviewScreen({
               <div>
                 <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
                 <p className="mt-1 text-sm text-muted">
-                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ đã có
-                  mismatch hoặc rủi ro; {colorCounts.neutral} từ đang trung tính
-                  và chưa có xác minh độc lập.
+                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần kiểm
+                  tra; {colorCounts.green} từ đã có evidence tốt, nhưng nhóm
+                  xanh chưa đồng nghĩa với Admin verified.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2202,14 +2214,14 @@ export function AdminOcrReviewScreen({
                     }).length,
                   },
                   {
-                    id: "verified",
-                    label: "Đã xác minh",
-                    count: colorCounts.green,
+                    id: "red",
+                    label: "Đỏ · reference xác nhận sai",
+                    count: colorCounts.red,
                   },
                   {
-                    id: "neutral",
-                    label: "Trung tính",
-                    count: colorCounts.neutral,
+                    id: "green",
+                    label: "Xanh · evidence tốt",
+                    count: colorCounts.green,
                   },
                 ] as const satisfies readonly {
                   id: WordFilter;
@@ -2223,10 +2235,10 @@ export function AdminOcrReviewScreen({
                     wordFilter === filter.id
                       ? filter.id === "risk" || filter.id === "disagreement"
                         ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
-                        : filter.id === "verified"
+                        : filter.id === "green"
                           ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
-                          : filter.id === "neutral"
-                            ? "border-slate-500 bg-slate-100 text-slate-900 ring-2 ring-slate-500/15"
+                          : filter.id === "red"
+                            ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
                             : "border-primary bg-sky text-primary-hover"
                       : "border-border bg-white text-muted hover:bg-canvas"
                   }`}
@@ -2250,8 +2262,8 @@ export function AdminOcrReviewScreen({
               {filteredWords.length === 0 ? (
                 <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
                   {wordFilter === "review"
-                    ? "Không có từ nào có mismatch hoặc rủi ro cần ưu tiên. Nhóm trung tính vẫn chưa được xác minh độc lập."
-                    : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "rủi ro" : wordFilter === "disagreement" ? "engine bất đồng" : wordFilter === "verified" ? "đã xác minh" : wordFilter === "neutral" ? "trung tính" : "này"}.`}
+                    ? "Không có từ nào có mismatch hoặc thiếu bằng chứng cần ưu tiên."
+                    : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "vàng" : wordFilter === "red" ? "đỏ" : wordFilter === "green" ? "xanh" : wordFilter === "disagreement" ? "engine bất đồng" : "này"}.`}
                 </p>
               ) : (
                 filteredWords.map((word) => {
@@ -2636,9 +2648,9 @@ export function AdminOcrReviewScreen({
                           <span>
                             Lý do trạng thái:{" "}
                             {word.ocr_evidence?.review_reason ??
-                              (colorGroup === "neutral"
-                                ? "No review risk detected"
-                                : "No explicit review reason recorded")}
+                              (colorGroup === "green"
+                                ? "Evidence supports a likely-correct OCR token; not Admin verified"
+                                : "Insufficient OCR evidence; Admin review required")}
                           </span>
                           <span>
                             {getPaddleLineScoreLabel(

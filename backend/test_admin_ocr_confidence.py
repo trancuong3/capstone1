@@ -70,7 +70,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ocr_confidence, 0.97)
         self.assertEqual(result.ocr_score_source, OCR_SCORE_CONTRACT)
         self.assertEqual(result.ocr_review_status, "needs_review")
-        self.assertEqual(result.review_color_group, "neutral")
+        self.assertEqual(result.review_color_group, "yellow")
         self.assertNotIn("word_review_statuses", detail.ocr_metadata)
         self.assertNotIn("word_score_sources", detail.ocr_metadata)
         self.assertNotIn("ocr_score_contract", detail.ocr_metadata)
@@ -133,7 +133,7 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(detail.words[0].ocr_review_status, "needs_review")
-        self.assertEqual(detail.words[0].review_color_group, "neutral")
+        self.assertEqual(detail.words[0].review_color_group, "yellow")
         self.assertEqual(detail.words[0].ocr_confidence, 0.96)
         self.assertEqual(detail.words[0].ocr_score_source, OCR_SCORE_CONTRACT)
 
@@ -527,29 +527,64 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             "ba",
         )
 
-    def test_word_color_group_does_not_turn_missing_metadata_into_risk(self):
+    def test_word_color_classification_uses_consensus_and_trusted_reference_evidence(self):
         classify = AdminOcrService._classify_word_color_group
         safe_agreement = {
-            "alignment": "match",
+            "contract": "hybrid_ocr_evidence_v4",
+            "engine_outputs": {
+                "paddleocr": "Chuyện",
+                "vietocr": "Chuyện",
+                "tesseract": None,
+            },
             "engine_statuses": {
                 "paddleocr": "success",
                 "vietocr": "success",
                 "tesseract": "not_run",
             },
+            "paddle_token_index": 3,
+            "vietocr_token_index": 2,
+            "source_text": "Chuyện",
+            "alignment": "match",
+            "selected_engine": "vietocr",
+            "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+            "bbox_quality": "valid",
+            "crop_quality": "usable",
+            "crop_evidence": {
+                "status": "not_needed",
+                "score_semantics": "raw_recognition_output_not_probability",
+            },
+            "engine_agreement_score": 0.83,
             "calibrated_word_accuracy": None,
             "reference_text": None,
+            "verification_source": None,
         }
-        self.assertEqual(classify("engine_agreement", safe_agreement), "neutral")
-        self.assertEqual(classify("needs_review", None), "neutral")
-        self.assertEqual(classify("engine_disagreement", None), "neutral")
-        self.assertEqual(classify("engine_disagreement", safe_agreement), "neutral")
+
+        self.assertEqual(classify("engine_agreement", safe_agreement, "Chuyện"), "green")
+        self.assertEqual(classify("engine_disagreement", safe_agreement, "Chuyện"), "green")
+        self.assertEqual(
+            classify("needs_review", safe_agreement, "Chuye\u0323\u0302n"), "green"
+        )
+        self.assertEqual(classify("needs_review", None, "Chuyện"), "yellow")
+        self.assertEqual(classify("engine_disagreement", None, "Chuyện"), "yellow")
+        self.assertEqual(classify("needs_review", safe_agreement, "Chuyén"), "yellow")
         self.assertEqual(
             classify(
-                "engine_disagreement",
+                "needs_review",
                 {
-                    "engine_outputs": {"paddleocr": "vé", "vietocr": "về"},
+                    **safe_agreement,
+                    "engine_outputs": {
+                        "paddleocr": "Chuyén",
+                        "vietocr": "Chuyện",
+                        "tesseract": None,
+                    },
                     "alignment": "substitute",
+                    "crop_evidence": {
+                        "status": "completed",
+                        "paddleocr_candidate": "Chuyen",
+                        "vietocr_candidate": "Chuyện",
+                    },
                 },
+                "Chuyện",
             ),
             "yellow",
         )
@@ -557,79 +592,114 @@ class AdminOcrConfidenceTests(unittest.IsolatedAsyncioTestCase):
             classify(
                 "needs_review",
                 {
-                    "engine_outputs": {"paddleocr": "mèo", "vietocr": None},
-                    "alignment": "unmatched",
-                    "selected_engine": "paddleocr",
+                    **safe_agreement,
+                    "engine_outputs": {
+                        "paddleocr": "lui",
+                        "vietocr": "hui",
+                        "tesseract": None,
+                    },
+                    "source_text": "hui",
+                    "alignment": "substitute",
+                    "paddle_crop_recognition_score": 0.99,
+                    "vietocr_crop_recognition_score": 0.99,
+                },
+                "hui",
+            ),
+            "yellow",
+        )
+        self.assertEqual(
+            classify(
+                "needs_review",
+                {
+                    **safe_agreement,
                     "engine_statuses": {
                         "paddleocr": "success",
                         "vietocr": "error",
                         "tesseract": "not_run",
                     },
                 },
+                "Chuyện",
             ),
-            "neutral",
+            "yellow",
         )
         self.assertEqual(
-            classify(
-                "needs_review",
-                {
-                    "alignment": "not_computed",
-                    "engine_statuses": {
-                        "paddleocr": "success",
-                        "vietocr": "no_result",
-                    },
-                },
-            ),
-            "neutral",
+            classify("needs_review", {**safe_agreement, "bbox_quality": "rejected"}, "Chuyện"),
+            "yellow",
         )
         self.assertEqual(
-            classify(
-                "needs_review",
-                {
-                    "source_text": "bé",
-                    "alignment": "match",
-                },
-                "em",
-            ),
+            classify("needs_review", {**safe_agreement, "crop_quality": "weak"}, "Chuyện"),
             "yellow",
         )
         self.assertEqual(
             classify(
                 "needs_review",
                 {
-                    "alignment": "unmatched",
-                    "selected_engine": "paddleocr",
-                    "engine_statuses": {
-                        "paddleocr": "success",
-                        "vietocr": "not_initialized",
-                        "tesseract": "not_run",
+                    **safe_agreement,
+                    "crop_evidence": {
+                        "status": "completed",
+                        "paddleocr_candidate": "Chuyen",
+                        "vietocr_candidate": "Chuyện",
                     },
                 },
-            ),
-            "neutral",
-        )
-        self.assertEqual(
-            classify(
-                "needs_review",
-                {
-                    "alignment": "substitute",
-                    "selected_engine": "paddleocr",
-                    "engine_statuses": {
-                        "paddleocr": "success",
-                        "vietocr": "success",
-                        "tesseract": "not_run",
-                    },
-                },
+                "Chuyện",
             ),
             "yellow",
         )
-        self.assertEqual(classify("confirmed_mismatch", safe_agreement), "red")
-        self.assertEqual(classify("needs_review", {"alignment": "split"}), "yellow")
-        self.assertEqual(classify("needs_review", {"alignment": "merge"}), "yellow")
-        self.assertEqual(classify("reference_match", safe_agreement), "green")
-        self.assertEqual(classify("verified", safe_agreement), "green")
+        self.assertEqual(classify("needs_review", safe_agreement, "Chuyện đã sửa"), "yellow")
+
+        verified_mismatch = {
+            **safe_agreement,
+            "source_text": "hui",
+            "reference_text": "lui",
+            "verification_source": "verified_revision",
+            "reference_alignment": "substitute",
+        }
+        verified_match = {
+            **safe_agreement,
+            "source_text": "lui",
+            "reference_text": "lui",
+            "verification_source": "verified_revision",
+            "reference_alignment": "match",
+        }
+        self.assertEqual(classify("confirmed_mismatch", verified_mismatch, "hui"), "red")
+        # Trusted reference mismatch outranks any stale word-review status.
+        self.assertEqual(classify("needs_review", verified_mismatch, "hui"), "red")
+        self.assertEqual(classify("engine_disagreement", verified_mismatch, "hui"), "red")
+        self.assertEqual(classify("verified", verified_mismatch, "hui"), "red")
+        self.assertEqual(classify("verified", verified_match, "lui"), "green")
+        unmatched_verified_reference = {
+            **safe_agreement,
+            "verification_source": "verified_revision",
+            "reference_text": None,
+            "reference_alignment": "unmatched",
+        }
         self.assertEqual(
-            classify("needs_review", {"alignment": "match", "crop_quality": "low"}),
+            classify("verified", unmatched_verified_reference, "Chuyện"), "yellow"
+        )
+        self.assertEqual(classify("reference_match", verified_match, "lui"), "green")
+        self.assertEqual(
+            classify(
+                "engine_agreement",
+                {
+                    **safe_agreement,
+                    "verification_source": "verified_revision",
+                    "reference_text": None,
+                    "reference_alignment": "unmatched",
+                },
+                "Chuyện",
+            ),
+            "yellow",
+        )
+        self.assertEqual(
+            classify("confirmed_mismatch", safe_agreement, "Chuyện"), "green"
+        )
+        self.assertEqual(classify("verified", None, "Chuyện"), "green")
+        self.assertEqual(
+            classify(
+                "confirmed_mismatch",
+                {**verified_mismatch, "reference_alignment": "unresolved"},
+                "hui",
+            ),
             "yellow",
         )
 
