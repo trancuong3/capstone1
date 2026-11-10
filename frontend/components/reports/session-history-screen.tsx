@@ -3,8 +3,9 @@
 import { History, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { ChildSelector } from "@/components/reports/child-selector";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { SessionHistoryItem } from "@/components/reports/session-history-item";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -16,51 +17,44 @@ import {
   historyPageFromCursor,
   mapSessionHistoryItem,
 } from "@/lib/utils/report-mappers";
-import type { ChildProfileDTO } from "@/types/child";
 import type { SessionHistoryItemViewModelUI } from "@/types/reports";
 
 type ScreenState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
-      readonly children: readonly ChildProfileDTO[];
-      readonly child: ChildProfileDTO;
+      readonly child: import("@/types/child").ChildProfileDTO;
       readonly items: readonly SessionHistoryItemViewModelUI[];
       readonly nextCursor: string | null;
     }
-  | { readonly status: "no-children" }
   | { readonly status: "not-found" }
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
 interface SessionHistoryScreenProps {
   readonly page: number;
-  readonly requestedChildId?: string;
 }
 
-export function SessionHistoryScreen({
-  page,
-  requestedChildId,
-}: SessionHistoryScreenProps) {
-  const { childService, sessionService } = useReportServices();
+export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
+  const { sessionService } = useReportServices();
+  const { state: childState, retry: retryChild } =
+    useValidatedSelectedChild();
+  const selectedChild =
+    childState.status === "ready" ? childState.child : null;
   const currentPage =
     Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ScreenState>({ status: "loading" });
 
   useEffect(() => {
+    if (childState.status !== "ready") {
+      return;
+    }
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
       try {
-        const children = await childService.list();
-        if (children.length === 0) {
-          if (active) setState({ status: "no-children" });
-          return;
-        }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
-          : children[0];
+        const child = childState.child;
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
           limit: 2,
@@ -76,7 +70,6 @@ export function SessionHistoryScreen({
         if (active) {
           setState({
             status: "ready",
-            children,
             child,
             items,
             nextCursor: history.next_cursor,
@@ -100,9 +93,13 @@ export function SessionHistoryScreen({
     return () => {
       active = false;
     };
-  }, [childService, currentPage, requestKey, requestedChildId, sessionService]);
+  }, [childState.status, selectedChild?.id, currentPage, requestKey, sessionService]);
 
-  if (state.status === "loading") {
+  if (
+    childState.status === "loading" ||
+    childState.status === "redirecting" ||
+    state.status === "loading"
+  ) {
     return (
       <section
         aria-busy="true"
@@ -116,15 +113,34 @@ export function SessionHistoryScreen({
     );
   }
 
-  if (state.status === "no-children") {
+  if (childState.status === "error") {
     return (
-      <EmptyState
-        headingLevel={1}
-        action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
-        description="Tạo hồ sơ để bắt đầu lưu các buổi đọc."
-        icon={<History aria-hidden="true" className="size-10 text-primary" />}
-        title="Chưa có hồ sơ bé"
-      />
+      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start sm:px-8"
+          onClick={retryChild}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  }
+  if (!selectedChild || (state.status === "ready" && state.child.id !== selectedChild.id)) {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật lịch sử đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-40 rounded-card" />
+      </section>
     );
   }
 
@@ -180,7 +196,6 @@ export function SessionHistoryScreen({
     );
   }
 
-  const childQuery = `childId=${encodeURIComponent(state.child.id)}`;
   const nextPage =
     state.nextCursor === null ? null : historyPageFromCursor(state.nextCursor);
   return (
@@ -190,16 +205,11 @@ export function SessionHistoryScreen({
         eyebrow="Hành trình đọc"
         title="Lịch sử buổi đọc"
       />
-      <div className="max-w-md">
-        <ChildSelector
-          childrenProfiles={state.children}
-          selectedChildId={state.child.id}
-        />
-      </div>
+      <SelectedChildIdentity child={state.child} />
       {state.items.length === 0 ? (
         <EmptyState
           action={
-            <ButtonLink href={`/books?${childQuery}`}>
+            <ButtonLink href="/books">
               Chọn sách để đọc
             </ButtonLink>
           }
@@ -229,7 +239,7 @@ export function SessionHistoryScreen({
         {currentPage > 1 ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${currentPage - 1}`}
+            href={`/sessions?page=${currentPage - 1}`}
             variant="secondary"
           >
             Trang trước
@@ -240,7 +250,7 @@ export function SessionHistoryScreen({
         {nextPage !== null ? (
           <ButtonLink
             className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${nextPage}`}
+            href={`/sessions?page=${nextPage}`}
           >
             Trang sau
           </ButtonLink>
