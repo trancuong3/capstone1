@@ -17,19 +17,20 @@ import {
   historyPageFromCursor,
   mapSessionHistoryItem,
 } from "@/lib/utils/report-mappers";
+import type { ChildProfileDTO } from "@/types/child";
 import type { SessionHistoryItemViewModelUI } from "@/types/reports";
 
 type ScreenState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
-      readonly child: import("@/types/child").ChildProfileDTO;
+      readonly child: ChildProfileDTO;
       readonly items: readonly SessionHistoryItemViewModelUI[];
       readonly nextCursor: string | null;
     }
-  | { readonly status: "not-found" }
-  | { readonly status: "unavailable" }
-  | { readonly status: "error" };
+  | { readonly status: "not-found"; readonly childId: string }
+  | { readonly status: "unavailable"; readonly childId: string }
+  | { readonly status: "error"; readonly childId: string };
 
 interface SessionHistoryScreenProps {
   readonly page: number;
@@ -53,8 +54,8 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
+      const child = childState.child;
       try {
-        const child = childState.child;
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
           limit: 2,
@@ -85,6 +86,7 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
                     (error.status === 501 || error.status === 503)
                   ? "unavailable"
                   : "error",
+            childId: child.id,
           });
         }
       }
@@ -98,7 +100,7 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
   if (
     childState.status === "loading" ||
     childState.status === "redirecting" ||
-    state.status === "loading"
+    (childState.status === "ready" && state.status === "loading")
   ) {
     return (
       <section
@@ -131,7 +133,13 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
       </section>
     );
   }
-  if (!selectedChild || (state.status === "ready" && state.child.id !== selectedChild.id)) {
+  if (
+    !selectedChild ||
+    (state.status === "ready" && state.child.id !== selectedChild.id) ||
+    (state.status !== "ready" &&
+      state.status !== "loading" &&
+      state.childId !== selectedChild.id)
+  ) {
     return (
       <section
         aria-busy="true"
