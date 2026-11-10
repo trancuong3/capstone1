@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import { DifficultWordItem } from "@/components/reports/difficult-word-item";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
@@ -92,9 +93,11 @@ describe("Report components with typed data and real API adapters", () => {
       throw new Error("Unexpected isolated report route");
     });
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      <WithSelectedChild childId={TEST_CHILD_ID}>
+        <AppServicesProvider>
+          <SessionDetailScreen sessionId={TEST_SESSION_ID} />
+        </AppServicesProvider>
+      </WithSelectedChild>,
     );
     expect(await screen.findByText("Chưa đánh giá")).toBeInTheDocument();
     expect(screen.getAllByText(TEST_REVISION_ID).length).toBeGreaterThan(0);
