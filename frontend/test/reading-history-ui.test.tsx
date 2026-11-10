@@ -2,6 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { AppStoreProvider } from "@/components/providers/app-store-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import { SessionHistoryScreen } from "@/components/reports/session-history-screen";
 import { SessionDetailScreen } from "@/components/reports/session-detail-screen";
 import {
@@ -14,11 +16,18 @@ import {
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
 
-const navigation = vi.hoisted(() => ({ push: vi.fn(), query: "" }));
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  query: "",
+}));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/sessions",
   useSearchParams: () => new URLSearchParams(navigation.query),
-  useRouter: () => ({ push: navigation.push }),
+  useRouter: () => ({
+    push: navigation.push,
+    replace: navigation.replace,
+  }),
 }));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -63,6 +72,7 @@ function respond(url: string) {
 beforeEach(() => {
   currentDetail = sessionDetailFixture;
   navigation.push.mockReset();
+  navigation.replace.mockReset();
   navigation.query = "";
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string) => respond(url));
@@ -70,8 +80,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+function withSelectedChild(childId: string, content: React.ReactNode) {
+  return (
+    <WithSelectedChild childId={childId}>
+      <AppServicesProvider>{content}</AppServicesProvider>
+    </WithSelectedChild>
+  );
+}
+
+
 describe("Reading history list", () => {
-  it("uses the server next cursor and preserves child/page on detail links", async () => {
+  it("uses the server next cursor and preserves page context on detail links", async () => {
     fetchMock.mockImplementation(async (url: string) =>
       new URL(url).pathname === "/reading/history"
         ? Response.json({
@@ -80,38 +99,30 @@ describe("Reading history list", () => {
           })
         : respond(url),
     );
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={3} requestedChildId={TEST_CHILD_ID} />
-      </AppServicesProvider>,
-    );
+    render(withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={3} />));
     await screen.findByRole("heading", { name: bookFixture.title });
     expect(screen.getByRole("link", { name: "Trang sau" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}&page=5`,
+      "/sessions?page=5",
     );
     expect(screen.getByRole("link", { name: "Trang trước" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}&page=2`,
+      "/sessions?page=2",
     );
     expect(screen.getByRole("link", { name: "Xem chi tiết" })).toHaveAttribute(
       "href",
       `/sessions/${TEST_SESSION_ID}?childId=${TEST_CHILD_ID}&page=3`,
     );
   });
-  it("reset page when selecting another child", async () => {
-    navigation.query = `childId=${TEST_CHILD_ID}&page=3`;
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={3} />
-      </AppServicesProvider>,
-    );
+  it("does not offer a duplicate child selector and links to Dashboard to change child", async () => {
+    render(withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={1} />));
     await screen.findByRole("heading", { name: bookFixture.title });
-    await userEvent
-      .setup()
-      .selectOptions(screen.getByRole("combobox"), TEST_FOREIGN_CHILD_ID);
-    expect(navigation.push).toHaveBeenCalledWith(
-      `/sessions?childId=${TEST_FOREIGN_CHILD_ID}`,
+    expect(
+      screen.queryByRole("combobox", { name: "Chọn hồ sơ bé để xem dữ liệu" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Đổi hồ sơ" })).toHaveAttribute(
+      "href",
+      "/dashboard?focus=child-selection",
     );
   });
   it("ignores late data from the previously selected child", async () => {
@@ -125,11 +136,9 @@ describe("Reading history list", () => {
         ? first
         : Response.json({ sessions: [], next_cursor: null });
     });
-    const view = render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={1} requestedChildId={TEST_CHILD_ID} />
-      </AppServicesProvider>,
-    );
+    const historyTree = (selectedChildId: string) =>
+      withSelectedChild(selectedChildId, <SessionHistoryScreen page={1} />);
+    const view = render(historyTree(TEST_CHILD_ID));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
@@ -138,38 +147,39 @@ describe("Reading history list", () => {
         ),
       ).toBe(true),
     );
-    view.rerender(
-      <AppServicesProvider>
-        <SessionHistoryScreen
-          page={1}
-          requestedChildId={TEST_FOREIGN_CHILD_ID}
-        />
-      </AppServicesProvider>,
-    );
+    view.rerender(historyTree(TEST_FOREIGN_CHILD_ID));
     await screen.findByRole("heading", { name: "Chưa có buổi đọc" });
     await act(async () => {
       resolveFirst(
         Response.json({ sessions: [sessionSummaryFixture], next_cursor: null }),
       );
     });
-    expect(screen.getByRole("combobox")).toHaveValue(TEST_FOREIGN_CHILD_ID);
+    expect(screen.getByText("Bé thứ hai")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Chọn hồ sơ bé để xem dữ liệu" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: bookFixture.title }),
     ).not.toBeInTheDocument();
   });
-  it("no children means no history request", async () => {
-    fetchMock.mockResolvedValue(Response.json([]));
+  it("redirects to Dashboard when no child is selected before requesting history", async () => {
     render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={1} />
-      </AppServicesProvider>,
+      <AppStoreProvider>
+        <AppServicesProvider>
+          <SessionHistoryScreen page={1} />
+        </AppServicesProvider>
+      </AppStoreProvider>,
     );
-    await screen.findByRole("heading", { name: "Chưa có hồ sơ bé" });
-    expect(
-      fetchMock.mock.calls.every(
-        ([url]) => new URL(String(url)).pathname === "/profiles/children",
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith(
+        "/dashboard?focus=child-selection&reason=missing",
       ),
-    ).toBe(true);
+    );
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        new URL(String(url)).pathname === "/reading/history",
+      ),
+    ).toBe(false);
   });
   it("empty later page still allows returning to the previous page", async () => {
     fetchMock.mockImplementation(async (url: string) =>
@@ -177,17 +187,13 @@ describe("Reading history list", () => {
         ? Response.json({ sessions: [], next_cursor: null })
         : respond(url),
     );
-    render(
-      <AppServicesProvider>
-        <SessionHistoryScreen page={2} />
-      </AppServicesProvider>,
-    );
+    render(withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={2} />));
     await screen.findByRole("heading", {
       name: "Không còn buổi đọc ở trang này",
     });
     expect(screen.getByRole("link", { name: "Trang trước" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}&page=1`,
+      "/sessions?page=1",
     );
     expect(
       screen.queryByRole("link", { name: "Trang sau" }),
@@ -201,11 +207,7 @@ describe("Reading history list", () => {
           ? Response.json({ detail: "private sql token" }, { status })
           : respond(url),
       );
-      render(
-        <AppServicesProvider>
-          <SessionHistoryScreen page={1} />
-        </AppServicesProvider>,
-      );
+      render(withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={1} />));
       await screen.findByText("Chưa tải được lịch sử");
       expect(screen.queryByText("Chưa có buổi đọc")).not.toBeInTheDocument();
       expect(screen.queryByText("private sql token")).not.toBeInTheDocument();
