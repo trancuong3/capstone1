@@ -160,13 +160,15 @@ function ProgressReportContent({
     } catch {
       if (alive.current)
         setState((current) =>
-          current.status === "loaded"
+          current.status === "loaded" && current.child.id === child.id
             ? { ...current, periodsError: true }
             : current,
         );
     } finally {
-      if (paging.current === child.id) paging.current = null;
-      if (alive.current) setLoadingMore(false);
+      if (paging.current === child.id) {
+        paging.current = null;
+        if (alive.current) setLoadingMore(false);
+      }
     }
   }
 
