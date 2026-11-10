@@ -125,7 +125,11 @@ export function DifficultWordsScreen() {
       state.childId !== selectedChild.id)
   )
     return (
-      <section aria-busy="true" aria-label="Đang cập nhật từ cần luyện" className="mx-auto flex max-w-[1120px] flex-col gap-6">
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật từ cần luyện"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-44 rounded-card" />
       </section>
