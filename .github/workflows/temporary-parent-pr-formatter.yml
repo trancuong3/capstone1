@@ -1,0 +1,64 @@
+name: Temporary Parent PR formatter
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/temporary-parent-pr-formatter.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/parent-ux-polish-20261110'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format every changed frontend file
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_SHA"
+          changed_files="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA"...HEAD -- frontend/ |
+            sed 's#^frontend/##' |
+            grep -E '\\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)$' || true)"
+
+          if [ -z "$changed_files" ]; then
+            echo "No changed frontend files need formatting."
+            exit 0
+          fi
+
+          printf '%s\\n' "$changed_files" | xargs -r npx prettier --write --
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "Changed frontend files already use Prettier formatting."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "style(parent): apply Prettier to PR files"
+          git push origin "HEAD:$HEAD_REF"
