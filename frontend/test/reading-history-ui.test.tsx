@@ -236,9 +236,10 @@ describe("Reading history detail", () => {
       },
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByRole("heading", { name: "Buổi đọc đã hoàn thành" });
     expect(screen.getByText("80", { exact: true })).toBeInTheDocument();
@@ -252,13 +253,10 @@ describe("Reading history detail", () => {
       duration_ms: null,
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen
-          sessionId={TEST_SESSION_ID}
-          requestedChildId={TEST_CHILD_ID}
-          page={3}
-        />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} page={3} />,
+      ),
     );
     await screen.findByRole("heading", { name: "Buổi đọc đã hoàn thành" });
     expect(screen.getByText("Chưa có dữ liệu thời lượng")).toBeInTheDocument();
@@ -269,20 +267,19 @@ describe("Reading history detail", () => {
       `/sessions?childId=${TEST_CHILD_ID}&page=3`,
     );
   });
-  it("direct links or foreign navigation context do not choose another child's history", async () => {
+  it("does not expose a detail belonging to another child selected from Dashboard", async () => {
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen
-          sessionId={TEST_SESSION_ID}
-          requestedChildId={TEST_FOREIGN_CHILD_ID}
-          page={3}
-        />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_FOREIGN_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} page={3} />,
+      ),
     );
-    await screen.findByRole("heading", { name: "Buổi đọc đã hoàn thành" });
-    expect(screen.getByRole("link", { name: "Lịch sử" })).toHaveAttribute(
+    await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
+    expect(screen.queryByRole("heading", { name: "Buổi đọc đã hoàn thành" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Về lịch sử" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}`,
+      "/sessions",
     );
   });
   it("shows actual detected events without calling them confirmed errors", async () => {
@@ -297,9 +294,10 @@ describe("Reading history detail", () => {
       ],
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByText("Ghi nhận phát âm");
     expect(screen.getByText("Đã phát hiện, chưa xác nhận")).toBeInTheDocument();
@@ -319,9 +317,10 @@ describe("Reading history detail", () => {
       },
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByRole("heading", { name: "Buổi đọc đã hoàn thành" });
     expect(screen.getByText(/Có sự kiện đã lưu/)).toBeInTheDocument();
@@ -365,9 +364,10 @@ describe("Reading history detail", () => {
       },
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByText("Câu hỏi đã lưu");
     expect(screen.getByText("Độ khó đã lưu: EASY")).toBeInTheDocument();
@@ -398,9 +398,10 @@ describe("Reading history detail", () => {
       },
     };
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByText(
       "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ.",
@@ -412,9 +413,10 @@ describe("Reading history detail", () => {
       Response.json({ detail: "private" }, { status: 404 }),
     );
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      withSelectedChild(
+        TEST_CHILD_ID,
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />,
+      ),
     );
     await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
     expect(screen.queryByText(bookFixture.title)).not.toBeInTheDocument();
