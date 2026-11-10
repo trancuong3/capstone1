@@ -27,7 +27,8 @@ export function progressHref(
     query.set("period_start", period.period_start);
     query.set("period_end", period.period_end);
   }
-  return `/reports?${query.toString()}`;
+  const suffix = query.toString();
+  return suffix ? `/reports?${suffix}` : "/reports";
 }
 
 export function formatProgressDuration(value: number | null): string {
