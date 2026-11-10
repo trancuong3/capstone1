@@ -264,178 +264,178 @@ export function AppShell({ children }: AppShellProps) {
             />
             {!isChildOnboarding ? (
               <div className="relative z-50 shrink-0 lg:order-3" ref={accountMenuRef}>
-              <button
-              aria-controls="parent-account-menu"
-              aria-expanded={isAccountMenuVisible}
-              aria-haspopup="menu"
-              aria-label={
-              isAccountMenuVisible
-              ? "Đóng menu tài khoản"
-              : "Mở menu tài khoản"
-              }
-              className="flex size-11 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-              onClick={() => {
-              if (isAccountMenuVisible) {
-              setAccountMenu((current) => ({
-              ...current,
-              isOpen: false,
-              }));
-              } else {
-              setAccountMenu({ isOpen: true, pathname });
-              }
-              }}
-              onKeyDown={(event) => {
-              if (event.key === "ArrowDown" && !isAccountMenuVisible) {
-              event.preventDefault();
-              setAccountMenu({ isOpen: true, pathname });
-              }
-              }}
-              ref={avatarButtonRef}
-              type="button"
-              >
-              <ProfileAvatar
-              ariaLabel="Ảnh đại diện tài khoản"
-              displayName={displayName}
-              imageUrl={profile?.avatar_url}
-              size="sm"
-              />
-              </button>
+                <button
+                  aria-controls="parent-account-menu"
+                  aria-expanded={isAccountMenuVisible}
+                  aria-haspopup="menu"
+                  aria-label={
+                    isAccountMenuVisible
+                      ? "Đóng menu tài khoản"
+                      : "Mở menu tài khoản"
+                  }
+                  className="flex size-11 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                  onClick={() => {
+                    if (isAccountMenuVisible) {
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }));
+                    } else {
+                      setAccountMenu({ isOpen: true, pathname });
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown" && !isAccountMenuVisible) {
+                      event.preventDefault();
+                      setAccountMenu({ isOpen: true, pathname });
+                    }
+                  }}
+                  ref={avatarButtonRef}
+                  type="button"
+                >
+                  <ProfileAvatar
+                    ariaLabel="Ảnh đại diện tài khoản"
+                    displayName={displayName}
+                    imageUrl={profile?.avatar_url}
+                    size="sm"
+                  />
+                </button>
               
-              <div
-              aria-label="Menu tài khoản"
-              className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
-              hidden={!isAccountMenuVisible}
-              id="parent-account-menu"
-              onKeyDown={handleMenuKeyDown}
-              role="menu"
-              >
-              <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
-              <ProfileAvatar
-              ariaLabel="Ảnh đại diện tài khoản"
-              displayName={displayName}
-              imageUrl={profile?.avatar_url}
-              size="lg"
-              />
-              <p className="max-w-full break-words text-label font-extrabold text-ink">
-              {displayName ?? "Tài khoản ViRead"}
-              </p>
-              {roleLabel(profile?.role) ? (
-              <p className="text-sm font-semibold text-primary">
-              {roleLabel(profile?.role)}
-              </p>
-              ) : null}
-              {email ? (
-              <p className="max-w-full break-all text-sm text-muted">
-              {email}
-              </p>
-              ) : null}
-              </div>
+                <div
+                  aria-label="Menu tài khoản"
+                  className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
+                  hidden={!isAccountMenuVisible}
+                  id="parent-account-menu"
+                  onKeyDown={handleMenuKeyDown}
+                  role="menu"
+                >
+                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
+                    <ProfileAvatar
+                      ariaLabel="Ảnh đại diện tài khoản"
+                      displayName={displayName}
+                      imageUrl={profile?.avatar_url}
+                      size="lg"
+                    />
+                    <p className="max-w-full break-words text-label font-extrabold text-ink">
+                      {displayName ?? "Tài khoản ViRead"}
+                    </p>
+                    {roleLabel(profile?.role) ? (
+                      <p className="text-sm font-semibold text-primary">
+                        {roleLabel(profile?.role)}
+                      </p>
+                    ) : null}
+                    {email ? (
+                      <p className="max-w-full break-all text-sm text-muted">
+                        {email}
+                      </p>
+                    ) : null}
+                  </div>
               
-              <div className="my-2 border-t border-border" />
-              <Link
-              aria-current={
-              routeMatchesPath(pathname, "/profile") ? "page" : undefined
-              }
-              className={cn(
-              "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-              routeMatchesPath(pathname, "/profile")
-              ? "bg-sky text-primary-hover"
-              : "hover:bg-sky",
-              )}
-              href="/profile"
-              onClick={() =>
-              setAccountMenu((current) => ({
-              ...current,
-              isOpen: false,
-              }))
-              }
-              role="menuitem"
-              tabIndex={isAccountMenuVisible ? 0 : -1}
-              >
-              <UserRound aria-hidden="true" className="size-5" />
-              Hồ sơ ba mẹ
-              </Link>
-              <Link
-              aria-current={
-              routeMatchesPath(pathname, "/children") ? "page" : undefined
-              }
-              className={cn(
-              "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-              routeMatchesPath(pathname, "/children")
-              ? "bg-sky text-primary-hover"
-              : "hover:bg-sky",
-              )}
-              href="/children"
-              onClick={() =>
-              setAccountMenu((current) => ({
-              ...current,
-              isOpen: false,
-              }))
-              }
-              role="menuitem"
-              tabIndex={isAccountMenuVisible ? 0 : -1}
-              >
-              <UsersRound aria-hidden="true" className="size-5" />
-              Hồ sơ bé
-              </Link>
+                  <div className="my-2 border-t border-border" />
+                  <Link
+                    aria-current={
+                      routeMatchesPath(pathname, "/profile") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeMatchesPath(pathname, "/profile")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/profile"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <UserRound aria-hidden="true" className="size-5" />
+                    Hồ sơ ba mẹ
+                  </Link>
+                  <Link
+                    aria-current={
+                      routeMatchesPath(pathname, "/children") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeMatchesPath(pathname, "/children")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/children"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <UsersRound aria-hidden="true" className="size-5" />
+                    Hồ sơ bé
+                  </Link>
               
-              <div className="my-2 border-t border-border" />
-              <Link
-              aria-current={
-              routeMatchesPath(pathname, "/settings") ? "page" : undefined
-              }
-              className={cn(
-              "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-              routeMatchesPath(pathname, "/settings")
-              ? "bg-sky text-primary-hover"
-              : "hover:bg-sky",
-              )}
-              href="/settings"
-              onClick={() =>
-              setAccountMenu((current) => ({ ...current, isOpen: false }))
-              }
-              role="menuitem"
-              tabIndex={isAccountMenuVisible ? 0 : -1}
-              >
-              <Settings aria-hidden="true" className="size-5" />
-              Cài đặt
-              </Link>
-              <Link
-              aria-current={
-              routeMatchesPath(pathname, "/help-support")
-              ? "page"
-              : undefined
-              }
-              className={cn(
-              "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-              routeMatchesPath(pathname, "/help-support")
-              ? "bg-sky text-primary-hover"
-              : "hover:bg-sky",
-              )}
-              href="/help-support"
-              onClick={() =>
-              setAccountMenu((current) => ({ ...current, isOpen: false }))
-              }
-              role="menuitem"
-              tabIndex={isAccountMenuVisible ? 0 : -1}
-              >
-              <CircleHelp aria-hidden="true" className="size-5" />
-              Trợ giúp &amp; hỗ trợ
-              </Link>
+                  <div className="my-2 border-t border-border" />
+                  <Link
+                    aria-current={
+                      routeMatchesPath(pathname, "/settings") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeMatchesPath(pathname, "/settings")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/settings"
+                    onClick={() =>
+                      setAccountMenu((current) => ({ ...current, isOpen: false }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <Settings aria-hidden="true" className="size-5" />
+                    Cài đặt
+                  </Link>
+                  <Link
+                    aria-current={
+                      routeMatchesPath(pathname, "/help-support")
+                        ? "page"
+                        : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeMatchesPath(pathname, "/help-support")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/help-support"
+                    onClick={() =>
+                      setAccountMenu((current) => ({ ...current, isOpen: false }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <CircleHelp aria-hidden="true" className="size-5" />
+                    Trợ giúp &amp; hỗ trợ
+                  </Link>
               
-              <div className="my-2 border-t border-border" />
-              <button
-              className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-bold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
-              disabled={isSigningOut}
-              onClick={() => void handleSignOut()}
-              role="menuitem"
-              tabIndex={isAccountMenuVisible ? 0 : -1}
-              type="button"
-              >
-              <LogOut aria-hidden="true" className="size-5" />
-              {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
-              </button>
-              </div>
+                  <div className="my-2 border-t border-border" />
+                  <button
+                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-bold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                    disabled={isSigningOut}
+                    onClick={() => void handleSignOut()}
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                    type="button"
+                  >
+                    <LogOut aria-hidden="true" className="size-5" />
+                    {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
