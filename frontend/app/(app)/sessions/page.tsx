@@ -9,7 +9,6 @@ export const metadata: Metadata = { title: "Lịch sử đọc" };
 
 interface SessionsPageProps {
   readonly searchParams: Promise<{
-    childId?: string | string[];
     page?: string | string[];
   }>;
 }
@@ -25,7 +24,6 @@ export default async function SessionsPage({
           historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ??
           1
         }
-        requestedChildId={firstQueryValue(query.childId)}
       />
     </AppServicesProvider>
   );
