@@ -133,8 +133,12 @@ describe("Progress URL state", () => {
     expect(parseProgressPeriod("2024-02-29", "2024-03-01")).toMatchObject({
       days: 2,
     });
-    expect(progressHref(TEST_CHILD_ID)).toBe(
-      `/reports?childId=${TEST_CHILD_ID}`,
-    );
+    expect(progressHref()).toBe("/reports");
+    expect(
+      progressHref({
+        period_start: "2026-09-02",
+        period_end: "2026-10-01",
+      }),
+    ).toBe("/reports?period_start=2026-09-02&period_end=2026-10-01");
   });
 });
