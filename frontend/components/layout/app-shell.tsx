@@ -300,7 +300,7 @@ export function AppShell({ children }: AppShellProps) {
                     size="sm"
                   />
                 </button>
-              
+
                 <div
                   aria-label="Menu tài khoản"
                   className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
@@ -330,7 +330,7 @@ export function AppShell({ children }: AppShellProps) {
                       </p>
                     ) : null}
                   </div>
-              
+
                   <div className="my-2 border-t border-border" />
                   <Link
                     aria-current={
@@ -378,7 +378,7 @@ export function AppShell({ children }: AppShellProps) {
                     <UsersRound aria-hidden="true" className="size-5" />
                     Hồ sơ bé
                   </Link>
-              
+
                   <div className="my-2 border-t border-border" />
                   <Link
                     aria-current={
@@ -422,7 +422,7 @@ export function AppShell({ children }: AppShellProps) {
                     <CircleHelp aria-hidden="true" className="size-5" />
                     Trợ giúp &amp; hỗ trợ
                   </Link>
-              
+
                   <div className="my-2 border-t border-border" />
                   <button
                     className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-bold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
