@@ -111,7 +111,7 @@ describe("Reading history list", () => {
     );
     expect(screen.getByRole("link", { name: "Xem chi tiết" })).toHaveAttribute(
       "href",
-      `/sessions/${TEST_SESSION_ID}?childId=${TEST_CHILD_ID}&page=3`,
+      `/sessions/${TEST_SESSION_ID}?page=3`,
     );
   });
   it("does not offer a duplicate child selector and links to Dashboard to change child", async () => {
