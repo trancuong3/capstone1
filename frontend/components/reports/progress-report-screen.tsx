@@ -36,7 +36,8 @@ type Loaded = {
   periodsError: boolean;
 };
 type State =
-  | { status: "loading" | "error" }
+  | { status: "loading" }
+  | { status: "error"; childId: string }
   | ({ status: "loaded" } & Loaded);
 
 export function ProgressReportScreen(props: Props) {
@@ -56,7 +57,7 @@ function ProgressReportContent({
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const alive = useRef(true);
-  const paging = useRef(false);
+  const paging = useRef<string | null>(null);
   const selected = useMemo(
     () => parseProgressPeriod(requestedPeriodStart, requestedPeriodEnd),
     [requestedPeriodStart, requestedPeriodEnd],
@@ -71,6 +72,9 @@ function ProgressReportContent({
         alive.current = false;
       };
     }
+
+    paging.current = null;
+    setLoadingMore(false);
 
     async function load() {
       setState({ status: "loading" });
@@ -105,7 +109,7 @@ function ProgressReportContent({
           periodsError: periodsResult.status === "rejected",
         });
       } catch {
-        if (active) setState({ status: "error" });
+        if (active) setState({ status: "error", childId: child.id });
       }
     }
     void load();
@@ -119,11 +123,11 @@ function ProgressReportContent({
     if (
       state.status !== "loaded" ||
       !state.periods.next_cursor ||
-      paging.current
+      paging.current !== null
     )
       return;
     const { child, periods } = state;
-    paging.current = true;
+    paging.current = child.id;
     setLoadingMore(true);
     try {
       const page = await reportService.listPeriods(child.id, {
@@ -131,7 +135,8 @@ function ProgressReportContent({
       });
       if (alive.current)
         setState((current) => {
-          if (current.status !== "loaded") return current;
+          if (current.status !== "loaded" || current.child.id !== child.id)
+            return current;
           const keys = new Set(
             current.periods.items.map(
               (item) => `${item.period_start}/${item.period_end}`,
@@ -160,7 +165,7 @@ function ProgressReportContent({
             : current,
         );
     } finally {
-      paging.current = false;
+      if (paging.current === child.id) paging.current = null;
       if (alive.current) setLoadingMore(false);
     }
   }
@@ -190,7 +195,7 @@ function ProgressReportContent({
   if (
     childState.status === "loading" ||
     childState.status === "redirecting" ||
-    state.status === "loading"
+    (childState.status === "ready" && state.status === "loading")
   )
     return (
       <section
@@ -219,7 +224,21 @@ function ProgressReportContent({
         </Button>
       </section>
     );
-  if (state.status !== "loaded" || !selectedChild)
+  if (
+    !selectedChild ||
+    (state.status === "error" && state.childId !== selectedChild.id)
+  )
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật hồ sơ báo cáo"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-80 rounded-card" />
+      </section>
+    );
+  if (state.status !== "loaded")
     return (
       <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
         <StatusMessage title="Chưa tải được báo cáo" tone="error">
