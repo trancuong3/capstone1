@@ -124,9 +124,10 @@ describe("Saved reading progress UI", () => {
     expect(
       screen.queryByLabelText("Chọn hồ sơ bé để xem dữ liệu"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Đổi hồ sơ" }),
-    ).toHaveAttribute("href", "/dashboard?focus=child-selection");
+    expect(screen.getByRole("link", { name: "Đổi hồ sơ" })).toHaveAttribute(
+      "href",
+      "/dashboard?focus=child-selection",
+    );
   });
   it("paginates saved periods without repeating an existing option", async () => {
     const user = userEvent.setup();

@@ -167,8 +167,6 @@ function renderWithSelectedChild(element: React.ReactNode) {
   );
 }
 
-
-
 describe("Parent report UI through real adapters and HTTP test doubles", () => {
   it.each([0, -1, 100001, Number.NaN, Number.POSITIVE_INFINITY, 2.5])(
     "uses first page for invalid history page %s without forwarding an invalid cursor",
@@ -329,9 +327,11 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
         "/dashboard?focus=child-selection&reason=invalid",
       ),
     );
-    expect(fetchMock.mock.calls.some(([url]) =>
-      String(url).includes("/reading/history"),
-    )).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/reading/history"),
+      ),
+    ).toBe(false);
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes("/reading/")),
     ).toBe(false);

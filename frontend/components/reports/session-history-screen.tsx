@@ -38,10 +38,8 @@ interface SessionHistoryScreenProps {
 
 export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
   const { sessionService } = useReportServices();
-  const { state: childState, retry: retryChild } =
-    useValidatedSelectedChild();
-  const selectedChild =
-    childState.status === "ready" ? childState.child : null;
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const currentPage =
     Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
   const [requestKey, setRequestKey] = useState(0);
@@ -227,11 +225,7 @@ export function SessionHistoryScreen({ page }: SessionHistoryScreenProps) {
       <SelectedChildIdentity child={state.child} />
       {state.items.length === 0 ? (
         <EmptyState
-          action={
-            <ButtonLink href="/books">
-              Chọn sách để đọc
-            </ButtonLink>
-          }
+          action={<ButtonLink href="/books">Chọn sách để đọc</ButtonLink>}
           description="Các buổi đọc được lưu của bé sẽ xuất hiện ở đây, kể cả buổi đang thực hiện."
           icon={<History aria-hidden="true" className="size-10 text-primary" />}
           title={

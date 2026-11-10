@@ -30,9 +30,7 @@ export function ProgressReportFilters({
     : "latest";
   const selectedMissing =
     selectedPeriod &&
-    !periods.some(
-      (item) => `${item.period_start}/${item.period_end}` === key,
-    );
+    !periods.some((item) => `${item.period_start}/${item.period_end}` === key);
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -50,7 +48,8 @@ export function ProgressReportFilters({
           onChange={(event) => {
             const value = event.target.value;
             const item = periods.find(
-              (period) => `${period.period_start}/${period.period_end}` === value,
+              (period) =>
+                `${period.period_start}/${period.period_end}` === value,
             );
             if (value === "latest") router.push(progressHref());
             else if (item) router.push(progressHref(item));

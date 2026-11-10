@@ -312,9 +312,7 @@ export function AppShell({ children }: AppShellProps) {
                   onKeyDown={handleMenuKeyDown}
                   role="menu"
                 >
-                  <div
-                    className="flex flex-col items-center gap-2 px-3 py-3 text-center"
-                  >
+                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
                     <ProfileAvatar
                       ariaLabel="Ảnh đại diện tài khoản"
                       displayName={displayName}
@@ -403,7 +401,10 @@ export function AppShell({ children }: AppShellProps) {
                     )}
                     href="/settings"
                     onClick={() =>
-                      setAccountMenu((current) => ({ ...current, isOpen: false }))
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
                     }
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
@@ -425,7 +426,10 @@ export function AppShell({ children }: AppShellProps) {
                     )}
                     href="/help-support"
                     onClick={() =>
-                      setAccountMenu((current) => ({ ...current, isOpen: false }))
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
                     }
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}

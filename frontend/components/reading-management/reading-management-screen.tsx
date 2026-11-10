@@ -109,11 +109,9 @@ function clock(value: string): string {
 export function ReadingManagementScreen() {
   const bookService = useBookService();
   const service = useReadingManagementService();
-  const { state: childState, retry: retryChild } =
-    useValidatedSelectedChild();
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const childId = childState.status === "ready" ? childState.childId : "";
-  const selectedChild =
-    childState.status === "ready" ? childState.child : null;
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
   const [plans, setPlans] = useState<ReadingPlanDTO[]>([]);
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
@@ -158,7 +156,6 @@ export function ReadingManagementScreen() {
   const readingList = collections.filter(
     (entry) => entry.collection_type === "WANT_TO_READ",
   );
-
 
   useEffect(() => {
     if (childState.status !== "ready") {
@@ -408,10 +405,7 @@ export function ReadingManagementScreen() {
       if (saved) setReminderEmailEnabled(false);
     }
   }
-  if (
-    childState.status === "loading" ||
-    childState.status === "redirecting"
-  ) {
+  if (childState.status === "loading" || childState.status === "redirecting") {
     return (
       <section
         aria-busy="true"

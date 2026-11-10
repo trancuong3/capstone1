@@ -79,15 +79,12 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
     expect(
       await screen.findByRole("heading", { name: "Mục tiêu đọc" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Đang quản lý hồ sơ của/),
-    ).toHaveTextContent("Bé An · Lớp 2");
+    expect(screen.getByText(/Đang quản lý hồ sơ của/)).toHaveTextContent(
+      "Bé An · Lớp 2",
+    );
     expect(
       screen.getByRole("link", { name: "Đổi hồ sơ tại Tổng quan" }),
-    ).toHaveAttribute(
-      "href",
-      "/dashboard?focus=child-selection&reason=change",
-    );
+    ).toHaveAttribute("href", "/dashboard?focus=child-selection&reason=change");
     expect(screen.queryByLabelText("Hồ sơ bé")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Kế hoạch đọc trong tuần" }),
@@ -106,7 +103,6 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
       expect(requests).toContain("/reading-management/reminders");
     });
   });
-
 
   it("returns to Dashboard instead of selecting the first child when no profile is selected", async () => {
     render(
@@ -127,8 +123,8 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
     );
     expect(screen.queryByLabelText("Hồ sơ bé")).not.toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.some(
-        ([url]) => new URL(String(url)).pathname.startsWith("/reading-management/"),
+      fetchMock.mock.calls.some(([url]) =>
+        new URL(String(url)).pathname.startsWith("/reading-management/"),
       ),
     ).toBe(false);
   });

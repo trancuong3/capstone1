@@ -49,10 +49,8 @@ function ProgressReportContent({
   requestedPeriodEnd,
 }: Props) {
   const { reportService } = useReportServices();
-  const { state: childState, retry: retryChild } =
-    useValidatedSelectedChild();
-  const selectedChild =
-    childState.status === "ready" ? childState.child : null;
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
   const [loadingMoreFor, setLoadingMoreFor] = useState<string | null>(null);
@@ -199,9 +197,7 @@ function ProgressReportContent({
           Cần đủ ngày bắt đầu và kết thúc hợp lệ, ngày kết thúc không trước ngày
           bắt đầu.
         </StatusMessage>
-        <ButtonLink href={progressHref()}>
-          Xem báo cáo mới nhất
-        </ButtonLink>
+        <ButtonLink href={progressHref()}>Xem báo cáo mới nhất</ButtonLink>
       </section>
     );
   if (

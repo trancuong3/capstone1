@@ -34,10 +34,8 @@ type WordsState =
 
 export function DifficultWordsScreen() {
   const { difficultWordService } = useReportServices();
-  const { state: childState, retry: retryChild } =
-    useValidatedSelectedChild();
-  const selectedChild =
-    childState.status === "ready" ? childState.child : null;
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<WordsState>({ status: "loading" });
 
@@ -186,11 +184,7 @@ export function DifficultWordsScreen() {
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
       <ReportPageHeader
         action={
-          <ButtonLink
-            className="sm:w-auto"
-            href="/reports"
-            variant="secondary"
-          >
+          <ButtonLink className="sm:w-auto" href="/reports" variant="secondary">
             <ArrowLeft aria-hidden="true" className="size-5" />
             Báo cáo
           </ButtonLink>
@@ -206,13 +200,7 @@ export function DifficultWordsScreen() {
       </StatusMessage>
       {state.words.length === 0 ? (
         <EmptyState
-          action={
-            <ButtonLink
-              href="/books"
-            >
-              Tiếp tục đọc sách
-            </ButtonLink>
-          }
+          action={<ButtonLink href="/books">Tiếp tục đọc sách</ButtonLink>}
           description="Báo cáo đã lưu chưa ghi nhận từ cần luyện trong kỳ đang chọn."
           icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
           title="Chưa có từ cần luyện"

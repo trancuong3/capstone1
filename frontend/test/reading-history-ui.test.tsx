@@ -88,7 +88,6 @@ function withSelectedChild(childId: string, content: React.ReactNode) {
   );
 }
 
-
 describe("Reading history list", () => {
   it("uses the server next cursor and preserves page context on detail links", async () => {
     fetchMock.mockImplementation(async (url: string) =>
@@ -176,8 +175,8 @@ describe("Reading history list", () => {
       ),
     );
     expect(
-      fetchMock.mock.calls.some(([url]) =>
-        new URL(String(url)).pathname === "/reading/history",
+      fetchMock.mock.calls.some(
+        ([url]) => new URL(String(url)).pathname === "/reading/history",
       ),
     ).toBe(false);
   });
@@ -207,7 +206,9 @@ describe("Reading history list", () => {
           ? Response.json({ detail: "private sql token" }, { status })
           : respond(url),
       );
-      render(withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={1} />));
+      render(
+        withSelectedChild(TEST_CHILD_ID, <SessionHistoryScreen page={1} />),
+      );
       await screen.findByText("Chưa tải được lịch sử");
       expect(screen.queryByText("Chưa có buổi đọc")).not.toBeInTheDocument();
       expect(screen.queryByText("private sql token")).not.toBeInTheDocument();
@@ -275,8 +276,9 @@ describe("Reading history detail", () => {
       ),
     );
     await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
-    expect(screen.queryByRole("heading", { name: "Buổi đọc đã hoàn thành" }))
-      .not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Buổi đọc đã hoàn thành" }),
+    ).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).endsWith("/book")),
     ).toBe(false);

@@ -43,10 +43,8 @@ export function SessionDetailScreen({
   readonly page?: number;
 }) {
   const { sessionService } = useReportServices();
-  const { state: childState, retry: retryChild } =
-    useValidatedSelectedChild();
-  const selectedChild =
-    childState.status === "ready" ? childState.child : null;
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
 
