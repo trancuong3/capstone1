@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ChildProgressAssessmentCard } from "@/components/reports/child-progress-assessment";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
@@ -264,6 +265,7 @@ function ProgressReportContent({
           </ButtonLink>
         }
       />
+      <SelectedChildIdentity child={child} />
       <ChildProgressAssessmentCard childId={child.id} childName={child.alias} />
       <ProgressReportFilters
         childrenProfiles={children}
