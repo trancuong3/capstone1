@@ -20,10 +20,9 @@ export function parseProgressPeriod(
 }
 
 export function progressHref(
-  childId: string,
   period?: Pick<ReportDateWindow, "period_start" | "period_end">,
 ): string {
-  const query = new URLSearchParams({ childId });
+  const query = new URLSearchParams();
   if (period) {
     query.set("period_start", period.period_start);
     query.set("period_end", period.period_end);
