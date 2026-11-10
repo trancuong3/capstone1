@@ -1,17 +1,19 @@
 "use client";
 
 import { History, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ChildProgressAssessmentCard } from "@/components/reports/child-progress-assessment";
+import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { useReportServices } from "@/hooks/use-report-services";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import { mapReportMetrics } from "@/lib/utils/report-mappers";
 import {
@@ -23,12 +25,10 @@ import type { ChildProfileDTO } from "@/types/child";
 import type { ProgressPeriodsDTO, ProgressReportDTO } from "@/types/reports";
 
 interface Props {
-  readonly requestedChildId?: string;
   readonly requestedPeriodStart?: string | string[];
   readonly requestedPeriodEnd?: string | string[];
 }
 type Loaded = {
-  children: readonly ChildProfileDTO[];
   child: ChildProfileDTO;
   report: ProgressReportDTO | null;
   reportStatus: "ready" | "empty" | "unavailable" | "error";
@@ -36,60 +36,56 @@ type Loaded = {
   periodsError: boolean;
 };
 type State =
-  | { status: "loading" | "no-children" | "not-found" | "error" }
+  | { status: "loading" }
+  | { status: "error"; childId: string }
   | ({ status: "loaded" } & Loaded);
 
-// Reset immediately on URL changes; an old child's report must not flash under new filters.
 export function ProgressReportScreen(props: Props) {
-  return <ProgressReportContent key={JSON.stringify(props)} {...props} />;
+  return <ProgressReportContent {...props} />;
 }
 
 function ProgressReportContent({
-  requestedChildId,
   requestedPeriodStart,
   requestedPeriodEnd,
 }: Props) {
-  const { childService, reportService } = useReportServices();
+  const { reportService } = useReportServices();
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingMoreFor, setLoadingMoreFor] = useState<string | null>(null);
   const alive = useRef(true);
-  const paging = useRef(false);
-  const selected = parseProgressPeriod(
-    requestedPeriodStart,
-    requestedPeriodEnd,
+  const paging = useRef<string | null>(null);
+  const selected = useMemo(
+    () => parseProgressPeriod(requestedPeriodStart, requestedPeriodEnd),
+    [requestedPeriodStart, requestedPeriodEnd],
   );
+  const currentRequestKey = `${selectedChild?.id ?? ""}:${
+    selected && selected !== "invalid"
+      ? `${selected.period_start}/${selected.period_end}`
+      : ""
+  }:${retry}`;
+  const loadingMore = loadingMoreFor === currentRequestKey;
 
   useEffect(() => {
     alive.current = true;
     let active = true;
-    if (
-      parseProgressPeriod(requestedPeriodStart, requestedPeriodEnd) ===
-      "invalid"
-    )
-      return;
+    if (!selectedChild || selected === "invalid") {
+      return () => {
+        active = false;
+        alive.current = false;
+      };
+    }
+
+    const child = selectedChild;
+    const selectedPeriod = selected ?? undefined;
+    paging.current = null;
+
     async function load() {
       setState({ status: "loading" });
       try {
-        const children = await childService.list();
-        if (!children.length) {
-          if (active) setState({ status: "no-children" });
-          return;
-        }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
-          : children[0];
-        if (!children.some((item) => item.id === child.id)) {
-          if (active) setState({ status: "not-found" });
-          return;
-        }
-        const window = parseProgressPeriod(
-          requestedPeriodStart,
-          requestedPeriodEnd,
-        );
-        if (window === "invalid") return;
         const [reportResult, periodsResult] = await Promise.allSettled([
-          reportService.get(child.id, window ?? undefined),
+          reportService.get(child.id, selectedPeriod),
           reportService.listPeriods(child.id),
         ]);
         if (!active) return;
@@ -106,7 +102,6 @@ function ProgressReportContent({
                 : "error";
         setState({
           status: "loaded",
-          children,
           child,
           report:
             reportResult.status === "fulfilled" ? reportResult.value : null,
@@ -117,14 +112,8 @@ function ProgressReportContent({
               : { items: [], next_cursor: null },
           periodsError: periodsResult.status === "rejected",
         });
-      } catch (error) {
-        if (active)
-          setState({
-            status:
-              isServiceError(error) && error.status === 404
-                ? "not-found"
-                : "error",
-          });
+      } catch {
+        if (active) setState({ status: "error", childId: child.id });
       }
     }
     void load();
@@ -132,32 +121,27 @@ function ProgressReportContent({
       active = false;
       alive.current = false;
     };
-  }, [
-    childService,
-    reportService,
-    requestedChildId,
-    requestedPeriodStart,
-    requestedPeriodEnd,
-    retry,
-  ]);
+  }, [reportService, selectedChild, selected, retry]);
 
   async function loadMore() {
     if (
       state.status !== "loaded" ||
       !state.periods.next_cursor ||
-      paging.current
+      paging.current !== null
     )
       return;
     const { child, periods } = state;
-    paging.current = true;
-    setLoadingMore(true);
+    const requestKey = currentRequestKey;
+    paging.current = requestKey;
+    setLoadingMoreFor(requestKey);
     try {
       const page = await reportService.listPeriods(child.id, {
         cursor: periods.next_cursor ?? undefined,
       });
       if (alive.current)
         setState((current) => {
-          if (current.status !== "loaded") return current;
+          if (current.status !== "loaded" || current.child.id !== child.id)
+            return current;
           const keys = new Set(
             current.periods.items.map(
               (item) => `${item.period_start}/${item.period_end}`,
@@ -181,13 +165,18 @@ function ProgressReportContent({
     } catch {
       if (alive.current)
         setState((current) =>
-          current.status === "loaded"
+          current.status === "loaded" && current.child.id === child.id
             ? { ...current, periodsError: true }
             : current,
         );
     } finally {
-      paging.current = false;
-      if (alive.current) setLoadingMore(false);
+      if (paging.current === requestKey) {
+        paging.current = null;
+        if (alive.current)
+          setLoadingMoreFor((current) =>
+            current === requestKey ? null : current,
+          );
+      }
     }
   }
 
@@ -208,14 +197,14 @@ function ProgressReportContent({
           Cần đủ ngày bắt đầu và kết thúc hợp lệ, ngày kết thúc không trước ngày
           bắt đầu.
         </StatusMessage>
-        <ButtonLink
-          href={requestedChildId ? progressHref(requestedChildId) : "/reports"}
-        >
-          Xem báo cáo mới nhất
-        </ButtonLink>
+        <ButtonLink href={progressHref()}>Xem báo cáo mới nhất</ButtonLink>
       </section>
     );
-  if (state.status === "loading")
+  if (
+    childState.status === "loading" ||
+    childState.status === "redirecting" ||
+    (childState.status === "ready" && state.status === "loading")
+  )
     return (
       <section
         aria-busy="true"
@@ -226,33 +215,60 @@ function ProgressReportContent({
         <Skeleton className="h-80 rounded-card" />
       </section>
     );
-  if (state.status === "no-children")
+  if (childState.status === "error")
     return (
-      <EmptyState
-        headingLevel={1}
-        title="Chưa có dữ liệu báo cáo"
-        description="Tạo hồ sơ bé để xem các báo cáo đã lưu."
-        action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
-      />
+      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start"
+          onClick={retryChild}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  if (
+    !selectedChild ||
+    (state.status === "error" && state.childId !== selectedChild.id)
+  )
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật hồ sơ báo cáo"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-80 rounded-card" />
+      </section>
     );
   if (state.status !== "loaded")
     return (
       <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
-        <StatusMessage
-          title={
-            state.status === "not-found"
-              ? "Không tìm thấy báo cáo"
-              : "Chưa tải được báo cáo"
-          }
-          tone="error"
-        >
-          Dữ liệu không tồn tại, không thuộc tài khoản hiện tại hoặc chưa tải
-          được.
+        <StatusMessage title="Chưa tải được báo cáo" tone="error">
+          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         {retryButton}
       </section>
     );
-  const { child, children, report, periods } = state;
+  const { report, periods } = state;
+  const child = selectedChild;
+  if (state.child.id !== child.id) {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật hồ sơ báo cáo"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-80 rounded-card" />
+      </section>
+    );
+  }
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
       <ReportPageHeader
@@ -262,7 +278,7 @@ function ProgressReportContent({
         action={
           <ButtonLink
             className="sm:w-auto"
-            href={`/sessions?childId=${encodeURIComponent(child.id)}`}
+            href="/sessions"
             variant="secondary"
           >
             <History aria-hidden="true" className="size-5" />
@@ -270,10 +286,9 @@ function ProgressReportContent({
           </ButtonLink>
         }
       />
+      <SelectedChildIdentity child={child} />
       <ChildProgressAssessmentCard childId={child.id} childName={child.alias} />
       <ProgressReportFilters
-        childrenProfiles={children}
-        childId={child.id}
         periods={periods.items}
         selectedPeriod={selected}
         hasMore={periods.next_cursor !== null}
@@ -293,7 +308,7 @@ function ProgressReportContent({
               ? "Chưa có báo cáo cho kỳ đã chọn"
               : "Chưa có báo cáo đã lưu"
           }
-          description="Không có báo cáo cho lựa chọn này. Có thể chọn bé khác hoặc kỳ khác; không có dữ liệu mẫu thay thế."
+          description="Không có báo cáo cho kỳ này. Ba mẹ có thể chọn kỳ khác; không có dữ liệu mẫu thay thế."
         />
       ) : null}
       {state.reportStatus === "unavailable" ? (
@@ -455,7 +470,7 @@ function ProgressReportContent({
             ) : null}
             <ButtonLink
               className="mt-5 sm:w-auto"
-              href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+              href="/reports/difficult-words"
               variant="secondary"
             >
               Mở mục Từ cần luyện

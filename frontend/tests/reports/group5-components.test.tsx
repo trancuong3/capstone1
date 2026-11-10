@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import { DifficultWordItem } from "@/components/reports/difficult-word-item";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
@@ -11,6 +12,17 @@ import {
   installApiFetchFixture,
   requestedApiUrl,
 } from "@/test/fixtures/api-test-fixture";
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/sessions",
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => navigation,
+}));
+
 import {
   TEST_CHILD_ID,
   TEST_SESSION_ID,
@@ -92,9 +104,11 @@ describe("Report components with typed data and real API adapters", () => {
       throw new Error("Unexpected isolated report route");
     });
     render(
-      <AppServicesProvider>
-        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
-      </AppServicesProvider>,
+      <WithSelectedChild childId={TEST_CHILD_ID}>
+        <AppServicesProvider>
+          <SessionDetailScreen sessionId={TEST_SESSION_ID} />
+        </AppServicesProvider>
+      </WithSelectedChild>,
     );
     expect(await screen.findByText("Chưa đánh giá")).toBeInTheDocument();
     expect(screen.getAllByText(TEST_REVISION_ID).length).toBeGreaterThan(0);
@@ -106,7 +120,7 @@ describe("Report components with typed data and real API adapters", () => {
         "Buổi đọc này chưa có báo cáo đối chiếu được lưu.",
       ),
     ).toBeInTheDocument();
-    expect(requestedApiUrl().pathname).toBe(
+    expect(requestedApiUrl(1).pathname).toBe(
       `/reading/history/${TEST_SESSION_ID}`,
     );
     expect(apiFetchFixture).toHaveBeenCalledTimes(4);

@@ -11,6 +11,7 @@ import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionEventList } from "@/components/reports/session-event-list";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { useReportServices } from "@/hooks/use-report-services";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   formatHistoryDateTime,
@@ -30,34 +31,37 @@ type DetailState =
       readonly child: ChildProfileDTO;
       readonly book: BookDetailDTO;
     }
-  | { readonly status: "not-found" }
-  | { readonly status: "unavailable" }
-  | { readonly status: "error" };
+  | { readonly status: "not-found"; readonly childId: string }
+  | { readonly status: "unavailable"; readonly childId: string }
+  | { readonly status: "error"; readonly childId: string };
 
 export function SessionDetailScreen({
   sessionId,
-  requestedChildId,
   page = 1,
 }: {
   readonly sessionId: string;
-  readonly requestedChildId?: string;
   readonly page?: number;
 }) {
-  const { childService, sessionService } = useReportServices();
+  const { sessionService } = useReportServices();
+  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const selectedChild = childState.status === "ready" ? childState.child : null;
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
 
   useEffect(() => {
+    if (!selectedChild) return;
+    const child = selectedChild;
     let active = true;
     async function load(): Promise<void> {
       setState({ status: "loading" });
       try {
         const detail = await sessionService.get(sessionId);
-        const [child, book] = await Promise.all([
-          childService.get(detail.child_id),
-          sessionService.getBook(sessionId),
-        ]);
-        if (book.id !== detail.book_id || child.id !== detail.child_id)
+        if (detail.child_id !== child.id) {
+          if (active) setState({ status: "not-found", childId: child.id });
+          return;
+        }
+        const book = await sessionService.getBook(sessionId);
+        if (book.id !== detail.book_id)
           throw new Error("Invalid historical book response");
         if (active) setState({ status: "ready", detail, child, book });
       } catch (error) {
@@ -70,6 +74,7 @@ export function SessionDetailScreen({
                     (error.status === 501 || error.status === 503)
                   ? "unavailable"
                   : "error",
+            childId: child.id,
           });
       }
     }
@@ -77,13 +82,51 @@ export function SessionDetailScreen({
     return () => {
       active = false;
     };
-  }, [childService, requestKey, sessionId, sessionService]);
+  }, [selectedChild, requestKey, sessionId, sessionService]);
 
-  if (state.status === "loading")
+  if (
+    childState.status === "loading" ||
+    childState.status === "redirecting" ||
+    (childState.status === "ready" && state.status === "loading")
+  )
     return (
       <section
         aria-busy="true"
         aria-label="Đang tải chi tiết buổi đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-72 rounded-card" />
+      </section>
+    );
+  if (childState.status === "error")
+    return (
+      <section className="mx-auto flex max-w-[960px] flex-col gap-4">
+        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
+          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
+          lại.
+        </StatusMessage>
+        <Button
+          className="sm:w-auto sm:self-start"
+          onClick={retryChild}
+          variant="secondary"
+        >
+          <RefreshCw aria-hidden="true" className="size-5" />
+          Thử lại
+        </Button>
+      </section>
+    );
+  if (
+    !selectedChild ||
+    (state.status !== "ready" &&
+      state.status !== "loading" &&
+      state.childId !== selectedChild.id) ||
+    (state.status === "ready" && state.child.id !== selectedChild.id)
+  )
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang cập nhật chi tiết buổi đọc"
         className="mx-auto flex max-w-[1120px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
@@ -152,6 +195,19 @@ export function SessionDetailScreen({
       </div>
     );
 
+  if (state.status !== "ready") {
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Đang tải chi tiết buổi đọc"
+        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+      >
+        <Skeleton className="h-32 rounded-card" />
+        <Skeleton className="h-72 rounded-card" />
+      </section>
+    );
+  }
+
   const { detail } = state;
   const metrics = detail.fluency_assessment?.metrics;
   const rangeIsPartial =
@@ -159,13 +215,8 @@ export function SessionDetailScreen({
     (detail.pages_completed == null ||
       detail.pages_completed < detail.selected_range_pages);
   const returnPage =
-    requestedChildId === detail.child_id &&
-    Number.isSafeInteger(page) &&
-    page >= 1 &&
-    page <= 100000
-      ? page
-      : null;
-  const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
+    Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : null;
+  const returnHref = `/sessions${returnPage === null ? "" : `?page=${returnPage}`}`;
   const availability = detail.availability;
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">

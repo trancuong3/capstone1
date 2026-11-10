@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import {
   GoalInsights,
   PlanInsights,
@@ -23,6 +24,11 @@ import type {
   ReadingGoalDTO,
   ReadingPlanDTO,
 } from "@/types/reading-management";
+
+const { replaceMock } = vi.hoisted(() => ({ replaceMock: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
+}));
 
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -333,12 +339,13 @@ describe("ReadingManagementScreen with derived data", () => {
   beforeEach(() => {
     goalRows = [];
     planRows = [];
+    replaceMock.mockReset();
     fetchMock.mockReset();
     fetchMock.mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = new URL(String(input));
-        if (url.pathname === "/profiles/children")
-          return Response.json([child]);
+        if (url.pathname === `/profiles/children/${CHILD}`)
+          return Response.json(child);
         if (url.pathname === "/books/catalog") return Response.json([]);
         if (
           url.pathname === "/reading-management/goals" &&
@@ -367,9 +374,11 @@ describe("ReadingManagementScreen with derived data", () => {
 
   function renderScreen() {
     return render(
-      <AppServicesProvider>
-        <ReadingManagementScreen />
-      </AppServicesProvider>,
+      <WithSelectedChild childId={CHILD}>
+        <AppServicesProvider>
+          <ReadingManagementScreen />
+        </AppServicesProvider>
+      </WithSelectedChild>,
     );
   }
 

@@ -43,7 +43,7 @@ export function SessionHistoryItem({
         </div>
         <Link
           className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-5 text-label font-bold text-primary-hover hover:bg-border focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-          href={`/sessions/${item.session.id}?childId=${encodeURIComponent(item.child.id)}&page=${page}`}
+          href={`/sessions/${item.session.id}?page=${page}`}
         >
           Xem chi tiết
         </Link>

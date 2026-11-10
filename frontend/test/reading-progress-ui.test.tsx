@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 import { ProgressReportScreen } from "@/components/reports/progress-report-screen";
 import {
   childFixture as child,
@@ -11,9 +12,12 @@ import {
 } from "@/test/fixtures/report-data-fixture";
 import type { ProgressReportDTO } from "@/types/reports";
 
-const navigation = vi.hoisted(() => ({ push: vi.fn() }));
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: navigation.push }),
+  useRouter: () => ({
+    push: navigation.push,
+    replace: navigation.replace,
+  }),
 }));
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -62,19 +66,30 @@ function respond(input: string) {
 beforeEach(() => {
   current = report;
   navigation.push.mockReset();
+  navigation.replace.mockReset();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string) => respond(url));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
-function renderReport(
+function reportTree(
+  childId: string = TEST_CHILD_ID,
   props: React.ComponentProps<typeof ProgressReportScreen> = {},
 ) {
-  return render(
-    <AppServicesProvider>
-      <ProgressReportScreen {...props} />
-    </AppServicesProvider>,
+  return (
+    <WithSelectedChild childId={childId}>
+      <AppServicesProvider>
+        <ProgressReportScreen {...props} />
+      </AppServicesProvider>
+    </WithSelectedChild>
   );
+}
+
+function renderReport(
+  props: React.ComponentProps<typeof ProgressReportScreen> = {},
+  childId: string = TEST_CHILD_ID,
+) {
+  return render(reportTree(childId, props));
 }
 
 describe("Saved reading progress UI", () => {
@@ -91,10 +106,10 @@ describe("Saved reading progress UI", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Lịch sử đọc" })).toHaveAttribute(
       "href",
-      `/sessions?childId=${TEST_CHILD_ID}`,
+      "/sessions",
     );
   });
-  it("selects an exact period and resets it when switching child", async () => {
+  it("selects an exact saved period without duplicating child selection", async () => {
     const user = userEvent.setup();
     renderReport({
       requestedPeriodStart: report.period_start,
@@ -105,15 +120,13 @@ describe("Saved reading progress UI", () => {
       screen.getByLabelText("Kỳ báo cáo đã lưu"),
       "latest",
     );
-    expect(navigation.push).toHaveBeenLastCalledWith(
-      `/reports?childId=${TEST_CHILD_ID}`,
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Chọn hồ sơ bé để xem dữ liệu"),
-      TEST_FOREIGN_CHILD_ID,
-    );
-    expect(navigation.push).toHaveBeenLastCalledWith(
-      `/reports?childId=${TEST_FOREIGN_CHILD_ID}`,
+    expect(navigation.push).toHaveBeenLastCalledWith("/reports");
+    expect(
+      screen.queryByLabelText("Chọn hồ sơ bé để xem dữ liệu"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Đổi hồ sơ" })).toHaveAttribute(
+      "href",
+      "/dashboard?focus=child-selection",
     );
   });
   it("paginates saved periods without repeating an existing option", async () => {
@@ -132,7 +145,7 @@ describe("Saved reading progress UI", () => {
       "2026-08-01/2026-08-31",
     );
     expect(navigation.push).toHaveBeenLastCalledWith(
-      `/reports?childId=${TEST_CHILD_ID}&period_start=2026-08-01&period_end=2026-08-31`,
+      "/reports?period_start=2026-08-01&period_end=2026-08-31",
     );
   });
   it("preserves missing metrics, real zeros and explicit legacy values", async () => {
@@ -197,7 +210,11 @@ describe("Saved reading progress UI", () => {
       requestedPeriodEnd: "2026-03-01",
     });
     expect(screen.getByText("Kỳ báo cáo không hợp lệ")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/system/progress/"),
+      ),
+    ).toBe(false);
   });
   it("does not show old-child data while navigation is loading or after its request resolves late", async () => {
     let resolve: (response: Response) => void = () => {};
@@ -209,7 +226,7 @@ describe("Saved reading progress UI", () => {
         ? pending
         : respond(url),
     );
-    const view = renderReport({ requestedChildId: TEST_CHILD_ID });
+    const view = renderReport({}, TEST_CHILD_ID);
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([url]) =>
@@ -217,11 +234,7 @@ describe("Saved reading progress UI", () => {
         ),
       ).toBe(true),
     );
-    view.rerender(
-      <AppServicesProvider>
-        <ProgressReportScreen requestedChildId={TEST_FOREIGN_CHILD_ID} />
-      </AppServicesProvider>,
-    );
+    view.rerender(reportTree(TEST_FOREIGN_CHILD_ID));
     expect(screen.queryByText("4 buổi")).not.toBeInTheDocument();
     await screen.findByRole("heading", {
       name: `Cùng nhìn lại hành trình của ${second.alias}`,

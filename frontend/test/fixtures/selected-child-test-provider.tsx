@@ -1,18 +1,71 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import {
-  AppStoreProvider,
-  useAppStore,
+  AppStoreContext,
+  type AppStore,
 } from "@/components/providers/app-store-provider";
+import type { ChildProfileDTO } from "@/types/child";
 
-function StoreSeeder({ childId }: { childId: string }) {
-  const { selectChild } = useAppStore();
-  useEffect(() => {
-    selectChild(childId);
-  }, [childId, selectChild]);
-  return null;
+interface Selection {
+  childId: string;
+  child: ChildProfileDTO | null;
+}
+
+function SelectedChildStore({
+  childId,
+  children,
+}: {
+  childId: string;
+  children: ReactNode;
+}) {
+  const [selection, setSelection] = useState<Selection>(() => ({
+    childId,
+    child: null,
+  }));
+
+  const selectChild = useCallback((nextChildId: string) => {
+    if (!nextChildId) return;
+    setSelection((current) =>
+      current.childId === nextChildId
+        ? current
+        : { childId: nextChildId, child: null },
+    );
+  }, []);
+
+  const clearSelectedChild = useCallback(() => {
+    setSelection({ childId: "", child: null });
+  }, []);
+
+  const setValidatedSelectedChild = useCallback((child: ChildProfileDTO) => {
+    setSelection((current) =>
+      current.childId === child.id ? { ...current, child } : current,
+    );
+  }, []);
+
+  const value = useMemo<AppStore>(
+    () => ({
+      selectedChildId: selection.childId || null,
+      validatedSelectedChild: selection.child,
+      selectChild,
+      clearSelectedChild,
+      setValidatedSelectedChild,
+    }),
+    [
+      clearSelectedChild,
+      selectChild,
+      selection.child,
+      selection.childId,
+      setValidatedSelectedChild,
+    ],
+  );
+
+  return (
+    <AppStoreContext.Provider value={value}>
+      {children}
+    </AppStoreContext.Provider>
+  );
 }
 
 export function WithSelectedChild({
@@ -23,9 +76,8 @@ export function WithSelectedChild({
   children: ReactNode;
 }) {
   return (
-    <AppStoreProvider>
-      <StoreSeeder childId={childId} />
+    <SelectedChildStore key={childId} childId={childId}>
       {children}
-    </AppStoreProvider>
+    </SelectedChildStore>
   );
 }
