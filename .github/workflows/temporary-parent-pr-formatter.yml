@@ -35,30 +35,40 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Format every changed frontend file
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      - name: Format the exact PR frontend files
         run: |
-          git fetch --no-tags origin "$BASE_SHA"
-          changed_files="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA"...HEAD -- frontend/ |
-            sed 's#^frontend/##' |
-            grep -E '\\.(cjs|mjs|js|jsx|ts|tsx|json|css|scss|md|mdx|yaml|yml|html)$' || true)"
+          npx prettier --write \
+            'app/(app)/reading-management/page.tsx' \
+            'app/(app)/reports/difficult-words/page.tsx' \
+            'app/(app)/reports/page.tsx' \
+            'app/(app)/sessions/[sessionId]/page.tsx' \
+            'app/(app)/sessions/page.tsx' \
+            components/layout/app-shell.tsx \
+            components/reading-management/reading-management-screen.tsx \
+            components/reports/difficult-words-screen.tsx \
+            components/reports/progress-report-filters.tsx \
+            components/reports/progress-report-screen.tsx \
+            components/reports/session-detail-screen.tsx \
+            components/reports/session-history-item.tsx \
+            components/reports/session-history-screen.tsx \
+            lib/utils/progress-report-state.ts \
+            test/fixtures/selected-child-test-provider.tsx \
+            test/header-footer.test.tsx \
+            test/reading-history-ui.test.tsx \
+            test/reading-management-insights.test.tsx \
+            test/reading-management-ui.test.tsx \
+            test/reading-progress-services.test.ts \
+            test/reading-progress-ui.test.tsx \
+            test/real-parent-reports-ui.test.tsx \
+            tests/reports/group5-components.test.tsx
 
-          if [ -z "$changed_files" ]; then
-            echo "No changed frontend files need formatting."
-            exit 0
-          fi
-
-          printf '%s\\n' "$changed_files" | xargs -r npx prettier --write --
-
-          git add .
+          git add frontend
           if git diff --cached --quiet; then
-            echo "Changed frontend files already use Prettier formatting."
+            echo "All PR frontend files already use Prettier formatting."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "style(parent): apply Prettier to PR files"
-          git push origin "HEAD:$HEAD_REF"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
