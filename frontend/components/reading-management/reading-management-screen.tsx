@@ -20,6 +20,7 @@ import {
 
 import { Button } from "@/components/common/button";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookService } from "@/hooks/use-book-service";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
@@ -157,7 +158,6 @@ export function ReadingManagementScreen() {
   const readingList = collections.filter(
     (entry) => entry.collection_type === "WANT_TO_READ",
   );
-
 
 
   useEffect(() => {
@@ -420,8 +420,8 @@ export function ReadingManagementScreen() {
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ đã chọn…
         </span>
-        <div className="h-12 w-full max-w-sm animate-pulse rounded-card bg-sky" />
-        <div className="h-28 w-full animate-pulse rounded-card bg-white" />
+        <Skeleton className="h-12 w-full max-w-sm rounded-card" />
+        <Skeleton className="h-28 w-full rounded-card" />
       </section>
     );
   }
@@ -491,6 +491,7 @@ export function ReadingManagementScreen() {
           </Link>
         </div>
       ) : null}
+
       {error ? (
         <StatusMessage title="Có vấn đề xảy ra" tone="error">
           {error}
