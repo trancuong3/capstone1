@@ -37,6 +37,19 @@ describe("admin components", () => {
     navigationMock.replace.mockClear();
   });
 
+  it("uses compact consistent button sizing and exposes a destructive variant", async () => {
+    const services = createAdminServiceFixture();
+    render(withAdminFixture(
+      <div>
+        <AdminLayout><p>Content</p></AdminLayout>
+      </div>,
+      services,
+    ));
+    const logout = screen.getByRole("button", { name: "Đăng xuất" });
+    expect(logout.className).toContain("min-h-11");
+    expect(logout.className).not.toContain("h-16");
+  });
+
   it("uses a safe message when the admin auth service rejects credentials", async () => {
     const services = createAdminServiceFixture();
     services.auth.signIn.mockRejectedValue(

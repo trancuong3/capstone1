@@ -133,6 +133,77 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
   });
 
+
+  it("opens the selected parent's edit form, loads that ID, and saves changed fields once", async () => {
+    const parent = {
+      id: "22222222-2222-4222-8222-222222222222",
+      display_name: "Nguyen Van A",
+      created_at: "2026-10-01T00:00:00Z",
+      children_count: 1,
+    };
+    list.mockResolvedValue({ items: [parent], total: 1, limit: 10, offset: 0 });
+    getById.mockResolvedValue({
+      id: parent.id,
+      display_name: "Nguyen Van A",
+      email: "parent@example.com",
+      phone: "0900000000",
+      created_at: parent.created_at,
+      children: [],
+      contact_info_status: "available",
+    });
+    update.mockResolvedValue({});
+
+    renderScreen();
+    await screen.findByRole("heading", { name: "Nguyen Van A" });
+    fireEvent.click(screen.getByRole("button", { name: /Sửa/i }));
+
+    expect(await screen.findByText("Đang tải thông tin tài khoản…")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("parent@example.com")).toBeInTheDocument();
+    expect(getById).toHaveBeenCalledWith(parent.id);
+
+    fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
+      target: { value: "Nguyen Van Updated" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith(parent.id, {
+        display_name: "Nguyen Van Updated",
+      });
+    });
+    expect(await screen.findByText("Đã cập nhật hồ sơ Parent.")).toBeInTheDocument();
+  });
+
+  it("does not send an update when a contact field is cleared", async () => {
+    const parent = {
+      id: "22222222-2222-4222-8222-222222222222",
+      display_name: "Nguyen Van A",
+      created_at: "2026-10-01T00:00:00Z",
+      children_count: 0,
+    };
+    list.mockResolvedValue({ items: [parent], total: 1, limit: 10, offset: 0 });
+    getById.mockResolvedValue({
+      id: parent.id,
+      display_name: parent.display_name,
+      email: "parent@example.com",
+      phone: "0900000000",
+      created_at: parent.created_at,
+      children: [],
+      contact_info_status: "available",
+    });
+
+    renderScreen();
+    await screen.findByRole("heading", { name: "Nguyen Van A" });
+    fireEvent.click(screen.getByRole("button", { name: /Sửa/i }));
+    const email = await screen.findByDisplayValue("parent@example.com");
+    fireEvent.change(email, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+    expect(await screen.findByText(/Backend hiện không hỗ trợ xóa email/i)).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("soft-deletes a Parent through the API and removes it from the refreshed list", async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",

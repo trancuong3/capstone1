@@ -135,7 +135,7 @@ export function AdminParentFormModal({
         input: { display_name: displayName, email, ...(phone ? { phone } : {}) },
       };
     } else {
-      const input: AdminParentUpdateInput = {};
+      const input: { display_name?: string; email?: string; phone?: string } = {};
       if (displayName !== originalName) input.display_name = displayName;
       if (contactInfoEditable && email !== originalEmail) input.email = email;
       if (contactInfoEditable && phone !== originalPhone) input.phone = phone;

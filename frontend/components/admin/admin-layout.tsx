@@ -80,7 +80,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             {links.map(({ href, label, icon: Icon }) => {
               const isActive = pathname === href || pathname.startsWith(`${href}/`);
               return (
-              <Link
+                <Link
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "flex min-h-11 shrink-0 items-center gap-2 rounded-control px-3 text-sm font-bold focus-visible:outline-3 focus-visible:outline-primary",
@@ -89,10 +89,10 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                     : "text-muted hover:bg-canvas",
                 )}
                 href={href}
-                key={href}
-              >
-                <Icon aria-hidden className="size-5" /> {label}
-              </Link>
+                  key={href}
+                >
+                  <Icon aria-hidden className="size-5" /> {label}
+                </Link>
               );
             })}
           </nav>
