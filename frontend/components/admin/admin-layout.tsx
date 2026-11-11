@@ -12,6 +12,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { ViReadLogo } from "@/components/common/viread-logo";
+import { Button } from "@/components/common/button";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { cn } from "@/lib/utils/cn";
@@ -61,7 +62,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         Bỏ qua điều hướng, đến nội dung quản trị
       </a>
       <header className="shrink-0 border-b border-border bg-white">
-        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-4 py-4 sm:px-8">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-3 px-4 py-3 sm:px-8">
           <div className="mr-auto flex min-w-0 items-center gap-3">
             <ViReadLogo
               ariaLabel="ViRead - khu vực quản trị"
@@ -76,12 +77,14 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             aria-label="Điều hướng quản trị"
             className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto"
           >
-            {links.map(({ href, label, icon: Icon }) => (
+            {links.map(({ href, label, icon: Icon }) => {
+              const isActive = pathname === href || pathname.startsWith(`${href}/`);
+              return (
               <Link
-                aria-current={pathname.startsWith(href) ? "page" : undefined}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex min-h-12 shrink-0 items-center gap-2 rounded-control px-3 font-bold focus-visible:outline-3 focus-visible:outline-primary",
-                  pathname.startsWith(href)
+                  "flex min-h-11 shrink-0 items-center gap-2 rounded-control px-3 text-sm font-bold focus-visible:outline-3 focus-visible:outline-primary",
+                  isActive
                     ? "bg-sky text-primary-hover"
                     : "text-muted hover:bg-canvas",
                 )}
@@ -90,17 +93,20 @@ export function AdminLayout({ children }: { children: ReactNode }) {
               >
                 <Icon aria-hidden className="size-5" /> {label}
               </Link>
-            ))}
+              );
+            })}
           </nav>
-          <button
-            className="order-2 flex min-h-12 items-center gap-2 rounded-control px-3 font-bold text-muted hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary sm:order-3"
+          <Button
+            className="order-2 sm:order-3 sm:w-auto"
             disabled={isSigningOut}
+            isLoading={isSigningOut}
             onClick={() => void handleSignOut()}
             type="button"
+            variant="quiet"
           >
-            <LogOut aria-hidden className="size-5" />{" "}
+            {!isSigningOut ? <LogOut aria-hidden className="size-5" /> : null}
             {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
-          </button>
+          </Button>
         </div>
       </header>
       {hasSignOutError ? (

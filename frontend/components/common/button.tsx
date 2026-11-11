@@ -8,15 +8,16 @@ import type {
 
 import { cn } from "@/lib/utils/cn";
 
-export type ButtonVariant = "primary" | "secondary" | "quiet";
+export type ButtonVariant = "primary" | "secondary" | "quiet" | "destructive";
 
 const baseClassName =
-  "inline-flex h-16 w-full items-center justify-center gap-2 rounded-control px-4 py-3 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control px-4 py-2.5 text-center text-sm font-bold leading-5 transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
 
 const variantClassNames: Record<ButtonVariant, string> = {
   primary: "bg-primary text-white hover:bg-primary-hover",
   secondary: "bg-sky text-primary-hover hover:bg-border",
   quiet: "bg-white text-ink hover:bg-sky",
+  destructive: "bg-danger text-white hover:opacity-90",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
