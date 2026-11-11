@@ -103,7 +103,7 @@ export function Modal({
           {showCloseButton ? (
             <Button
               aria-label="Đóng hộp thoại"
-              className="size-12 shrink-0 p-0"
+              className="size-12! shrink-0 p-0!"
               onClick={onClose}
               variant="quiet"
             >

@@ -66,11 +66,14 @@ def saved_report():
 def service_with_mocks():
     service = ReadingComparisonService.__new__(ReadingComparisonService)
     service.content = SimpleNamespace(
+        repository=SimpleNamespace(events_for_session=AsyncMock(return_value=[])),
         get_page=AsyncMock(return_value=page_dto()),
         get_session_page=AsyncMock(return_value=page_dto()),
         get_session_summary=AsyncMock(return_value=SimpleNamespace(id=SESSION_ID)),
     )
     service.repository = SimpleNamespace(
+        lock_session=AsyncMock(return_value=SimpleNamespace(State="IN_PROGRESS")),
+        finalized_for_page=AsyncMock(return_value=None),
         find_exact=AsyncMock(return_value=None),
         create=AsyncMock(),
         list_for_session=AsyncMock(return_value=[]),

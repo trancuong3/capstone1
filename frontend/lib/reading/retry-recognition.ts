@@ -1,16 +1,11 @@
-const retryPunctuation = /[^\p{L}\p{N}\s]/gu;
+import { normalizeVietnameseText } from "@/lib/reading/vietnamese-text";
 
 /**
  * Normalizes browser speech text without stripping Vietnamese diacritics.
  * Tone marks are semantically meaningful and must remain part of recognition.
  */
 export function normalizeRetryText(value: string): string {
-  return value
-    .normalize("NFC")
-    .toLocaleLowerCase("vi-VN")
-    .replace(retryPunctuation, " ")
-    .trim()
-    .replace(/\s+/g, " ");
+  return normalizeVietnameseText(value);
 }
 
 /**

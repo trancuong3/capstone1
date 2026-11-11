@@ -71,6 +71,7 @@ def _make_service(*, lifecycle="ACTIVE", current=R1_ID, words=None):
     service = AdminOcrService(db)
     page = SimpleNamespace(
         Id=PAGE_ID,
+        ImagePath="books/test/pages/page/original.png", Width=800, Height=1000,
         LifecycleStatus=lifecycle,
         CurrentVerifiedRevisionId=current,
     )
@@ -157,6 +158,8 @@ class AdminOcrDraftLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revision.DraftText, source.VerifiedText)
         self.assertIsNone(revision.VerifiedText)
         self.assertEqual(revision.ProcessingMeta["source_revision_id"], str(R1_ID))
+        self.assertEqual(revision.ProcessingMeta["source_image_path"], page.ImagePath)
+        self.assertEqual((revision.ProcessingMeta["source_image_width"], revision.ProcessingMeta["source_image_height"]), (800, 1000))
         self.assertEqual(
             [word["word_index"] for word in copied_words],
             [word.WordIndex for word in source_words],

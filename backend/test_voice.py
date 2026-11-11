@@ -92,8 +92,23 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "audio/mpeg")
         self.assertEqual(response.headers["cache-control"], "no-store")
         provider.synthesize.assert_awaited_once_with(
-            text="Bé đọc cùng mình nhé.", requested_voice_id="voice_123"
+            text="Bé đọc cùng mình nhé.", requested_voice_id="voice_123", speed=1.0
         )
+
+    def test_short_tts_speed_reaches_provider_and_invalid_values_never_do(self):
+        provider = MagicMock()
+        provider.synthesize = AsyncMock(return_value=SynthesizedAudio(content=b"mp3", content_type="audio/mpeg"))
+        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+            with make_client() as client:
+                for speed in (0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.2):
+                    with self.subTest(speed=speed):
+                        response = client.post("/voice/text-to-speech", json={"text": "Bé đọc.", "speed": speed})
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(provider.synthesize.await_args.kwargs["speed"], speed)
+                provider.synthesize.reset_mock()
+                for speed in (0.69, 1.21):
+                    self.assertEqual(client.post("/voice/text-to-speech", json={"text": "Bé đọc.", "speed": speed}).status_code, 422)
+                provider.synthesize.assert_not_awaited()
 
     def test_text_to_speech_requires_authenticated_request(self):
         with make_client(authenticated=False) as client:

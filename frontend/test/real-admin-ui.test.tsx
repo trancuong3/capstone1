@@ -66,9 +66,12 @@ let pageRetired = false;
 let manualDraftCreated = false;
 
 function readyResponse(url: string): Response {
-  if (url.endsWith("/image"))
+  if (new URL(url, "http://localhost").pathname.endsWith("/image"))
     return Response.json({
       page_id: pageId,
+      page_revision_id:
+        new URL(url, "http://localhost").searchParams.get("revision_id") ??
+        revisionId,
       page_number: 2,
       preview_url: "https://example.test/image.png",
       width: 800,
@@ -439,7 +442,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     await screen.findByRole("heading", { name: "Không tìm thấy trang" });
     expect(
-      fetchMock.mock.calls.some(([url]) => String(url).endsWith("/image")),
+      fetchMock.mock.calls.some(([url]) =>
+        new URL(String(url), "http://localhost").pathname.endsWith("/image"),
+      ),
     ).toBe(false);
   });
   it("renders verified revision as read-only and allows a new OCR revision", async () => {

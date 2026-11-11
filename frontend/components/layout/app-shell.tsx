@@ -223,6 +223,14 @@ export function AppShell({ children }: AppShellProps) {
     items[nextIndex]?.focus();
   }
 
+  if (isReadingRoute) {
+    return (
+      <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
+        {children}
+      </main>
+    );
+  }
+
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
       <a

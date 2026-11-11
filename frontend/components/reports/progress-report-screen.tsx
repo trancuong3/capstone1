@@ -21,6 +21,7 @@ import {
 } from "@/lib/utils/progress-report-state";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ProgressPeriodsDTO, ProgressReportDTO } from "@/types/reports";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 
 interface Props {
   readonly requestedChildId?: string;
@@ -333,6 +334,17 @@ function ProgressReportContent({
             >
               Chỉ hiển thị giá trị hợp lệ đã lưu. Phần thiếu hoặc chưa hỗ trợ
               không được coi là số 0.
+            </StatusMessage>
+          ) : null}
+          <ReadingAssessmentSummary assessment={report.assessment} />
+          {report.assessment_coverage &&
+          report.assessment_coverage.assessed_sessions <
+            report.assessment_coverage.total_sessions ? (
+            <StatusMessage tone="info">
+              Kết quả lượt đầu và luyện lại có bằng chứng ở{" "}
+              {report.assessment_coverage.assessed_sessions}/
+              {report.assessment_coverage.total_sessions} buổi. Các buổi còn
+              thiếu không được tính thành đúng hoặc sai.
             </StatusMessage>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

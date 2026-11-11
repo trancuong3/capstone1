@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
+import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 import type { WordTimestamp } from "@/lib/api/speech-service";
 
 const alignmentSchema = z.object({
@@ -12,6 +13,22 @@ const alignmentSchema = z.object({
 });
 
 const summarySchema = z.object({
+  assessment_version: z.literal(1).optional(),
+  initial_assessment: z
+    .array(
+      z.object({
+        word_id: z.uuid(),
+        word_index: z.number().int().nonnegative(),
+        text: z.string(),
+        status: z.enum([
+          "CORRECT",
+          "MISPRONUNCIATION",
+          "OMISSION",
+          "UNCERTAIN",
+        ]),
+      }),
+    )
+    .optional(),
   missing_words: z.array(z.string()),
   extra_words: z.array(z.string()),
 
@@ -93,6 +110,10 @@ export type ComparisonResult = z.infer<typeof comparisonSchema>;
 export interface ComparisonPageReference {
   readonly page_id: string;
   readonly page_revision_id: string;
+  readonly initial_assessment?: readonly {
+    readonly word_id: string;
+    readonly status: "CORRECT" | "MISPRONUNCIATION" | "OMISSION" | "UNCERTAIN";
+  }[];
 }
 
 export async function compareTranscript(
@@ -114,6 +135,12 @@ export async function compareTranscript(
           ? {
               page_id: page.page_id,
               page_revision_id: page.page_revision_id,
+              ...(page.initial_assessment
+                ? {
+                    finalize: true,
+                    initial_assessment: page.initial_assessment,
+                  }
+                : {}),
             }
           : {}),
       },
@@ -129,6 +156,7 @@ const savedReportSchema = comparisonSchema.omit({ session_id: true }).extend({
 });
 
 const sessionReportsSchema = z.object({
+  assessment: readingAssessmentSchema.nullable().optional(),
   session_id: z.string(),
   total: z.number(),
   reports: z.array(savedReportSchema),

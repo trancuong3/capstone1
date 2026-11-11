@@ -21,7 +21,7 @@ export function ReadingProgress({
       </span>
       <span className="inline-flex items-center gap-2 text-success-ink">
         <ScanLine aria-hidden="true" className="size-4" />
-        Đã thấy trang {pageNumber}
+        Đang mở trang {pageNumber}
       </span>
     </div>
   );

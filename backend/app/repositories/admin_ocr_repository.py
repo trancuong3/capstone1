@@ -14,6 +14,12 @@ class AdminOcrRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def page_for_upload(self, book_id: UUID, upload_id: UUID) -> BookPage | None:
+        return await self.db.scalar(
+            select(BookPage).where(BookPage.BookId == book_id,
+                BookPage.ProcessingMeta["upload_id"].astext == str(upload_id))
+        )
+
     async def role(self, profile_id: UUID) -> str | None:
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
 

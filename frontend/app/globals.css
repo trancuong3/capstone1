@@ -79,6 +79,11 @@ html {
   background: var(--ra-color-canvas);
 }
 
+/* Reading controls reflow below 320 CSS pixels when the page is magnified. */
+html:has([data-reading-controls]) {
+  min-width: 0;
+}
+
 body {
   min-height: 100vh;
   margin: 0;

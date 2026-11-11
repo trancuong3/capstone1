@@ -101,6 +101,8 @@ class HistoryCompatibilityTests(unittest.IsolatedAsyncioTestCase):
                 WordId=QUESTION,
                 Metadata={
                     "retry_attempt": 2,
+                    "incorrect_retry_count": 1,
+                    "resolution_status": "SELF_CORRECTED",
                     "original_status": "MISPRONUNCIATION",
                     "target_word": "khỏe",
                     "recognized_text": "Bé đọc khỏe rồi",
@@ -126,6 +128,8 @@ class HistoryCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             detail.events[0].metadata,
             {
                 "retry_attempt": 2,
+                "incorrect_retry_count": 1,
+                "resolution_status": "SELF_CORRECTED",
                 "original_status": "MISPRONUNCIATION",
                 "target_word": "khỏe",
                 "recognized_text": "Bé đọc khỏe rồi",

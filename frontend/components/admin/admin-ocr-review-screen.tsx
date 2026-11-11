@@ -917,10 +917,7 @@ export function AdminOcrReviewScreen({
         if (requestId === requestIdRef.current) setError("not-found");
         return;
       }
-      const [nextImage, nextHistory] = await Promise.all([
-        pages.getImage(pageId),
-        revisions.list(pageId),
-      ]);
+      const nextHistory = await revisions.list(pageId);
       const active = nextHistory[0];
       if (!active) {
         if (requestId === requestIdRef.current) setError("unavailable");
@@ -932,10 +929,10 @@ export function AdminOcrReviewScreen({
           )
         : undefined;
       const selectedRevision = preferredRevision ?? active;
-      const nextDetail = await ocr.getRevision(
-        pageId,
-        selectedRevision.page_revision_id,
-      );
+      const [nextDetail, nextImage] = await Promise.all([
+        ocr.getRevision(pageId, selectedRevision.page_revision_id),
+        pages.getImage(pageId, selectedRevision.page_revision_id),
+      ]);
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);
@@ -1001,13 +998,17 @@ export function AdminOcrReviewScreen({
   async function chooseRevision(revisionId: string) {
     const requestId = ++revisionChoiceRequestIdRef.current;
     try {
-      const selected = await ocr.getRevision(pageId, revisionId);
+      const [selected, selectedImage] = await Promise.all([
+        ocr.getRevision(pageId, revisionId),
+        pages.getImage(pageId, revisionId),
+      ]);
       if (
         !mountedRef.current ||
         requestId !== revisionChoiceRequestIdRef.current
       )
         return;
       applyDetail(selected);
+      setImage(selectedImage);
       setNotice(null);
     } catch {
       if (
@@ -1525,14 +1526,25 @@ export function AdminOcrReviewScreen({
 
   async function reprocess() {
     if (!detail) return;
+    const generation = ++revisionChoiceRequestIdRef.current;
     setBusy("reprocess");
     setNotice(null);
     try {
       const result = await revisions.reprocess(pageId, (status) => {
         if (status.page_id !== pageId) return;
       });
+      const [nextImage, nextHistory] = await Promise.all([
+        pages.getImage(pageId, result.page_revision_id),
+        revisions.list(pageId),
+      ]);
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
+      setImage(nextImage);
       applyDetail(result);
-      setHistory(await revisions.list(pageId));
+      setHistory(nextHistory);
       setNotice(
         "Đã tạo revision mới từ ảnh trong Supabase Storage. Revision cũ vẫn được giữ nguyên.",
       );
@@ -1564,6 +1576,7 @@ export function AdminOcrReviewScreen({
       return;
     }
     setBusy("reupload");
+    const generation = ++revisionChoiceRequestIdRef.current;
     setNotice(null);
     try {
       const result = await pages.replaceImageAndReprocess(
@@ -1573,9 +1586,18 @@ export function AdminOcrReviewScreen({
       if (result.page_id !== pageId || result.lifecycle_status !== "ACTIVE") {
         throw new Error("Unexpected page OCR response");
       }
+      const [nextImage, nextHistory] = await Promise.all([
+        pages.getImage(pageId, result.page_revision_id),
+        revisions.list(pageId),
+      ]);
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
+      setImage(nextImage);
       applyDetail(result);
-      setHistory(await revisions.list(pageId));
-      setImage(await pages.getImage(pageId));
+      setHistory(nextHistory);
       setReplacementFile(null);
       const input = document.getElementById(
         "replacement-page-image",

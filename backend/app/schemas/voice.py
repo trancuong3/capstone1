@@ -9,6 +9,7 @@ class TextToSpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2_500)
     # A voice id is not secret, but constraining it prevents malformed provider paths.
     voice_id: str | None = Field(default=None, min_length=1, max_length=100)
+    speed: float = Field(default=1.0, ge=0.7, le=1.2, allow_inf_nan=False)
 
     @field_validator("text")
     @classmethod

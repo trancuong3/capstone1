@@ -192,6 +192,7 @@ export interface AdminRevisionSummaryUI {
 
 export interface AdminPageImageUI {
   readonly page_id: UUID;
+  readonly page_revision_id?: UUID | null;
   readonly page_number: number;
   readonly preview_url: string;
   readonly width: number;

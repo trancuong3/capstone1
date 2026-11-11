@@ -3,6 +3,7 @@ import type {
   SessionHistoryResponseDTO,
 } from "@/types/reading";
 import { z } from "zod";
+import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { bookDtoSchema } from "@/lib/api/book-service";
 import { historyPageFromCursor } from "@/lib/utils/report-mappers";
@@ -42,6 +43,7 @@ const summarySchema = z.object({
   duration_ms: z.number().int().nonnegative().nullable(),
 });
 const detailSchema = summarySchema.extend({
+  assessment: readingAssessmentSchema.nullable().optional(),
   selected_range_pages: z.number().int().nonnegative().nullable().optional(),
   pages_completed: z.number().int().nonnegative().nullable().optional(),
   selected_page_revision_ids: z.array(z.uuid()),

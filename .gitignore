@@ -50,6 +50,20 @@ __pycache__/
 
 # Test files
 tests/
+# Keep Phase 2 regression sources visible without including generated tests.
+!frontend/tests/
+frontend/tests/*
+!frontend/tests/reading/
+frontend/tests/reading/*
+!frontend/tests/reading/audio-quality.test.ts
+!frontend/tests/reading/recognition-evidence.test.ts
+!frontend/tests/reading/sequential-alignment.test.ts
+# Keep Phase 3 TTS regression sources visible.
+!frontend/tests/reading/tts-text.test.ts
+!frontend/tests/reading/tts-playback-lifecycle.test.tsx
+# Keep multimodal reading geometry regression sources visible.
+!frontend/tests/reading/page-presentation.test.ts
+!frontend/tests/reading/reading-scale.test.ts
 
 # Python virtual environments
 venv/

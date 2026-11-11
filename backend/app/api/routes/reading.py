@@ -19,6 +19,7 @@ from app.schemas.reading import (
     CompareReadingRequest,
     ReadingComparisonReportRead,
     ReadingSessionReportsRead,
+    ReadingPracticeStateRead,
 )
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
@@ -161,6 +162,15 @@ async def create_reading_event(
         actor_id, event_in
     )
 
+
+@router.get("/sessions/{session_id}/practice-state", response_model=ReadingPracticeStateRead)
+async def get_reading_practice_state(
+    session_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ReadingContentService(ReadingContentRepository(db)).get_practice_state(session_id, actor_id)
+
 @router.post("/fluency", response_model=FluencyAssessmentResponse)
 async def create_fluency_assessment(
     assessment_in: FluencyAssessmentCreate,
@@ -187,6 +197,10 @@ from app.schemas.reading import (
 class HistoryRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def comparison_reports(self, session_id: UUID):
+        from app.repositories.reading_comparison_repository import ReadingComparisonRepository
+        return await ReadingComparisonRepository(self.db).list_for_session(session_id)
 
     async def role(self, actor_id: UUID):
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
@@ -280,6 +294,16 @@ class HistoryService:
         if type(attempt) is int and 1 <= attempt <= 10000:
             result["retry_attempt"] = attempt
 
+        incorrect_count = source.get("incorrect_retry_count")
+        if type(incorrect_count) is int and 0 <= incorrect_count <= 3:
+            result["incorrect_retry_count"] = incorrect_count
+
+        resolution_status = source.get("resolution_status")
+        if isinstance(resolution_status, str) and resolution_status in (
+            "RETRYING", "SELF_CORRECTED", "UNRESOLVED",
+        ):
+            result["resolution_status"] = resolution_status
+
         original_status = source.get("original_status")
         if isinstance(original_status, str) and original_status in (
             "OMISSION",
@@ -294,6 +318,8 @@ class HistoryService:
         recognized_text = source.get("recognized_text")
         if isinstance(recognized_text, str) and recognized_text.strip():
             result["recognized_text"] = recognized_text.strip()[:200]
+        if source.get("skip_reason") == "TECHNICAL_OR_MANUAL":
+            result["skip_reason"] = "TECHNICAL_OR_MANUAL"
 
         return result
 
@@ -398,8 +424,13 @@ class HistoryService:
                 return "unsupported"
             return "partial" if readable < total or partial else "available"
 
+        from app.services.reading_assessment import aggregate_assessment
+        assessment_metrics = aggregate_assessment(
+            session_id, await self.repository.comparison_reports(session_id), events,
+        )["assessment"]
         return SessionDetailRead(
             **summary.model_dump(),
+            assessment=assessment_metrics,
             selected_range_pages=len(page_rows) if page_rows else None,
             pages_completed=(
                 sum(1 for page_row in page_rows if page_row.Status == "COMPLETED")

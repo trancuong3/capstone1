@@ -16,6 +16,7 @@ import {
   SPEED_MAX,
   SPEED_MIN,
   SPEED_STEP,
+  getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import { cn } from "@/lib/utils/cn";
 
@@ -37,7 +38,7 @@ interface ReadingVoiceSettingsProps {
   disabled?: boolean;
   isPreviewing?: boolean;
   /** Speaks a short sample with the currently chosen voice and speed. */
-  onPreview: (sample: string) => void;
+  onPreview: (sample: string) => void | Promise<void>;
   onStopPreview: () => void;
 }
 
@@ -46,10 +47,20 @@ function voiceTitle(voice: VoiceOption): string {
 }
 
 function voiceDetails(voice: VoiceOption): string {
+  const ages: Record<string, string> = {
+    young: "Trẻ trung",
+    young_adult: "Trẻ trung",
+    youthful: "Trẻ trung",
+    child: "Giọng trẻ em",
+    middle_aged: "Trung niên",
+    old: "Lớn tuổi",
+  };
   return [
     voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : null,
     voice.accent,
-    voice.age ? voice.age.replace("_", " ") : null,
+    voice.age
+      ? (ages[voice.age.toLowerCase()] ?? voice.age.replaceAll("_", " "))
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -69,26 +80,49 @@ export function ReadingVoiceSettings({
   const { preferences, update } = useSpeechPreferences();
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
+  const [filter, setFilter] = useState("all");
+  const [previewError, setPreviewError] = useState(false);
   const mountedRef = useRef(true);
+  const previewGenerationRef = useRef(0);
+  const loadControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      loadControllerRef.current?.abort();
     };
   }, []);
 
   const loadVoices = useCallback(() => {
+    loadControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
     setLoadState({ status: "loading" });
     voiceStudio
-      .listVoices()
+      .listVoices(controller.signal)
       .then((data) => {
-        if (mountedRef.current) setLoadState({ status: "ready", data });
+        if (!mountedRef.current || controller.signal.aborted) return;
+        const storedVoice = getSpeechPreferences().voiceId;
+        if (
+          storedVoice &&
+          !data.voices.some((voice) => voice.voice_id === storedVoice)
+        )
+          update({ voiceId: null });
+        setLoadState({ status: "ready", data });
       })
       .catch(() => {
-        if (mountedRef.current) setLoadState({ status: "error" });
+        if (mountedRef.current && !controller.signal.aborted)
+          setLoadState({ status: "error" });
       });
-  }, [voiceStudio]);
+  }, [voiceStudio, update]);
+
+  function change(value: Parameters<typeof update>[0]) {
+    previewGenerationRef.current += 1;
+    onStopPreview();
+    setPreviewError(false);
+    update(value);
+  }
 
   function open() {
     setIsOpen(true);
@@ -98,25 +132,40 @@ export function ReadingVoiceSettings({
   }
 
   function close() {
+    previewGenerationRef.current += 1;
+    setPreviewError(false);
     onStopPreview();
+    loadControllerRef.current?.abort();
+    if (loadState.status === "loading") setLoadState({ status: "idle" });
     setIsOpen(false);
   }
 
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
   const selectedVoiceId = preferences.voiceId ?? defaultVoiceId;
+  const isYouthful = (voice: VoiceOption) =>
+    ["young", "young_adult", "youthful"].includes(
+      voice.age?.toLowerCase() ?? "",
+    );
+  const matchesFilter = (voice: VoiceOption) =>
+    filter === "all" ||
+    (filter === "young"
+      ? isYouthful(voice)
+      : voice.gender?.toLowerCase() === filter);
 
   return (
     <>
       <Button
         aria-haspopup="dialog"
-        className="h-[68px] min-w-0 flex-col gap-0 px-1 text-label sm:h-16 sm:flex-row sm:gap-2 sm:px-3 sm:text-button"
+        className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
         disabled={disabled}
         onClick={open}
         variant="quiet"
       >
         <SlidersHorizontal aria-hidden="true" className="size-6 shrink-0" />
-        <span className="truncate">Giọng đọc</span>
+        <span className="max-w-full text-center whitespace-normal break-words">
+          Giọng đọc
+        </span>
       </Button>
 
       <Modal isOpen={isOpen} onClose={close} title="Giọng đọc mẫu">
@@ -143,7 +192,7 @@ export function ReadingVoiceSettings({
               max={SPEED_MAX}
               min={SPEED_MIN}
               onChange={(event) =>
-                update({ speed: clampSpeed(Number(event.target.value)) })
+                change({ speed: clampSpeed(Number(event.target.value)) })
               }
               step={SPEED_STEP}
               type="range"
@@ -163,7 +212,7 @@ export function ReadingVoiceSettings({
                         : "border-border bg-white text-ink hover:border-primary hover:bg-cream",
                     )}
                     key={preset.label}
-                    onClick={() => update({ speed: preset.value })}
+                    onClick={() => change({ speed: preset.value })}
                     type="button"
                   >
                     {preset.label}
@@ -180,6 +229,30 @@ export function ReadingVoiceSettings({
             >
               Chọn giọng đọc
             </h3>
+            {loadState.status === "ready" &&
+            loadState.data.voices.length > 0 ? (
+              <select
+                aria-label="Lọc giọng đọc"
+                className="min-h-11 w-full rounded-control border border-border bg-white px-3 text-body"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              >
+                <option value="all">Tất cả giọng đọc</option>
+                {loadState.data.voices.some(
+                  (voice) => voice.gender?.toLowerCase() === "male",
+                ) ? (
+                  <option value="male">Giọng nam</option>
+                ) : null}
+                {loadState.data.voices.some(
+                  (voice) => voice.gender?.toLowerCase() === "female",
+                ) ? (
+                  <option value="female">Giọng nữ</option>
+                ) : null}
+                {loadState.data.voices.some(isYouthful) ? (
+                  <option value="young">Giọng trẻ trung</option>
+                ) : null}
+              </select>
+            ) : null}
 
             {loadState.status === "loading" || loadState.status === "idle" ? (
               <p className="text-body text-muted">Đang tải danh sách giọng…</p>
@@ -193,13 +266,18 @@ export function ReadingVoiceSettings({
                   Thử lại
                 </Button>
               </div>
+            ) : loadState.data.voices.length === 0 ? (
+              <p className="text-body text-muted">
+                Chưa có giọng đọc trong danh sách. Bé có thể dùng giọng mặc định
+                hoặc giọng tiếng Việt trên thiết bị nếu có.
+              </p>
             ) : (
               <div
                 aria-labelledby="voice-choice-heading"
                 className="max-h-64 space-y-2 overflow-y-auto pr-1"
                 role="radiogroup"
               >
-                {loadState.data.voices.map((voice) => {
+                {loadState.data.voices.filter(matchesFilter).map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
                   return (
                     <button
@@ -212,7 +290,7 @@ export function ReadingVoiceSettings({
                       )}
                       key={voice.voice_id}
                       onClick={() =>
-                        update({
+                        change({
                           voiceId:
                             voice.voice_id === defaultVoiceId
                               ? null
@@ -243,18 +321,48 @@ export function ReadingVoiceSettings({
                 })}
               </div>
             )}
+            {loadState.status === "ready" &&
+            !loadState.data.voices.some(isYouthful) ? (
+              <p className="text-label text-muted">
+                Chưa có giọng được xác nhận là trẻ trung trong danh sách hiện
+                tại.
+              </p>
+            ) : null}
+            <Button onClick={() => change({ voiceId: null })} variant="quiet">
+              Dùng giọng mặc định
+            </Button>
           </section>
 
           <Button
             className="w-full"
-            onClick={() =>
-              isPreviewing ? onStopPreview() : onPreview(PREVIEW_TEXT)
-            }
+            onClick={() => {
+              const generation = ++previewGenerationRef.current;
+              if (isPreviewing) {
+                onStopPreview();
+                return;
+              }
+              setPreviewError(false);
+              void Promise.resolve()
+                .then(() => onPreview(PREVIEW_TEXT))
+                .catch((error: unknown) => {
+                  if (
+                    mountedRef.current &&
+                    generation === previewGenerationRef.current &&
+                    !(error instanceof Error && error.name === "AbortError")
+                  )
+                    setPreviewError(true);
+                });
+            }}
             variant="secondary"
           >
             <Volume2 aria-hidden="true" className="size-5" />
             {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
           </Button>
+          {previewError ? (
+            <p role="alert" className="text-body text-muted">
+              Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.
+            </p>
+          ) : null}
         </div>
       </Modal>
     </>

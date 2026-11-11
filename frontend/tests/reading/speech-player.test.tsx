@@ -226,12 +226,12 @@ describe("useSpeechPlayer", () => {
     expect(utterance.voice?.lang).toBe("vi-VN");
     expect(result.current.isPlaying).toBe(true);
 
-    act(() => {
+    await act(async () => {
       utterance.onstart?.({} as SpeechSynthesisEvent);
       utterance.onboundary?.({ charIndex: 4 } as SpeechSynthesisEvent);
       utterance.onend?.({} as SpeechSynthesisEvent);
+      await playback;
     });
-    await playback;
 
     expect(onPlay).toHaveBeenCalledOnce();
     expect(onTimeUpdate).toHaveBeenCalled();

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
+import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 import type {
   ReadingCompletionSummaryUI,
   ReadingPageDTO,
@@ -8,6 +9,7 @@ import type {
   ReadingSessionCreateResponseDTO,
   ReadingSessionSummaryDTO,
   ReadingSessionPageProgressDTO,
+  ReadingPracticeStateDTO,
 } from "@/types/reading";
 
 export interface CreateRetryEventInput {
@@ -15,18 +17,22 @@ export interface CreateRetryEventInput {
   pageId: string;
   pageRevisionId: string;
   wordId: string;
-  status: "CONFIRMED" | "FAILED";
+  status: "CONFIRMED" | "FAILED" | "UNCERTAIN";
   startMs: number;
   endMs: number | null;
   metadata?: {
     retry_attempt?: number;
+    incorrect_retry_count?: number;
+    resolution_status?: "RETRYING" | "SELF_CORRECTED" | "UNRESOLVED";
     original_status?: "OMISSION" | "MISPRONUNCIATION";
     recognized_text?: string;
     target_word?: string;
+    skip_reason?: "TECHNICAL_OR_MANUAL";
   };
 }
 
 export interface ReadingService {
+  getPracticeState?(sessionId: string): Promise<ReadingPracticeStateDTO>;
   create(
     input: ReadingSessionCreateDTO,
   ): Promise<ReadingSessionCreateResponseDTO>;
@@ -121,6 +127,7 @@ export const readingPageDtoSchema = z.object({
   width: z.number(),
   height: z.number(),
   image_url: z.string().nullable().optional(),
+  image_overlay_safe: z.boolean().optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
   paragraph_start_line_indices: z
@@ -130,6 +137,7 @@ export const readingPageDtoSchema = z.object({
 });
 
 const completionSummarySchema = z.object({
+  assessment: readingAssessmentSchema.nullable().optional(),
   duration_minutes: z.number().int().nonnegative().nullable(),
   pages_explored: z.number().int().nonnegative().nullable(),
   selected_range_pages: z.number().int().nonnegative().nullable().optional(),
@@ -142,8 +150,83 @@ const completionSummarySchema = z.object({
   score: z.number().min(0).max(100).nullable().optional(),
 });
 
+const practiceStateSchema = z
+  .object({
+    session_id: z.uuid(),
+    legacy_evidence_present: z.boolean(),
+    pages: z.array(
+      z.object({
+        page_id: z.uuid(),
+        page_revision_id: z.uuid(),
+        page_number: z.number().int().positive(),
+        transcript: z.string(),
+        initial_assessment: z
+          .array(
+            z.object({
+              word_id: z.uuid(),
+              word_index: z.number().int().nonnegative(),
+              text: z.string().min(1),
+              status: z.enum([
+                "CORRECT",
+                "MISPRONUNCIATION",
+                "OMISSION",
+                "UNCERTAIN",
+              ]),
+            }),
+          )
+          .min(1),
+      }),
+    ),
+    words: z.array(
+      z.object({
+        page_id: z.uuid(),
+        page_revision_id: z.uuid(),
+        word_id: z.uuid(),
+        retry_attempt_count: z.number().int().nonnegative(),
+        incorrect_retry_count: z.number().int().min(0).max(3),
+        resolution_status: z.enum(["RETRYING", "SELF_CORRECTED", "UNRESOLVED"]),
+      }),
+    ),
+  })
+  .refine((value) => {
+    const expected = new Set(
+      value.pages.flatMap((page) =>
+        page.initial_assessment
+          .filter((word) =>
+            ["MISPRONUNCIATION", "OMISSION"].includes(word.status),
+          )
+          .map(
+            (word) =>
+              `${page.page_id}:${page.page_revision_id}:${word.word_id}`,
+          ),
+      ),
+    );
+    const actual = new Set(
+      value.words.map(
+        (word) => `${word.page_id}:${word.page_revision_id}:${word.word_id}`,
+      ),
+    );
+    return (
+      actual.size === value.words.length &&
+      actual.size === expected.size &&
+      [...actual].every((key) => expected.has(key)) &&
+      value.words.every(
+        (word) =>
+          word.retry_attempt_count >= word.incorrect_retry_count &&
+          (word.resolution_status !== "SELF_CORRECTED" ||
+            word.retry_attempt_count > 0),
+      )
+    );
+  });
+
 export function createReadingService(): ReadingService {
   return {
+    async getPracticeState(sessionId): Promise<ReadingPracticeStateDTO> {
+      return requestApi(
+        `/reading/sessions/${encodeURIComponent(sessionId)}/practice-state`,
+        practiceStateSchema.refine((value) => value.session_id === sessionId),
+      );
+    },
     async create(
       input: ReadingSessionCreateDTO,
     ): Promise<ReadingSessionCreateResponseDTO> {

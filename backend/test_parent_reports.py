@@ -43,6 +43,7 @@ def history_repo():
         Id=BOOK, Title="Historical retired book", Author=None,
         MinGrade=1, MaxGrade=3, LifecycleStatus="RETIRED"))
     repo.events = AsyncMock(return_value=[])
+    repo.comparison_reports = AsyncMock(return_value=[])
     repo.fluency = AsyncMock(return_value=None)
     repo.questions = AsyncMock(return_value=[])
     repo.answer = AsyncMock(return_value=None)
@@ -202,6 +203,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             Id=SESSION, GeneratedAt=datetime(2026, 10, 8, tzinfo=timezone.utc),
             PeriodStart=date(2026, 9, 9), PeriodEnd=date(2026, 10, 8)))
         self.repo.latest = AsyncMock(return_value=self.repo.report.return_value)
+        self.repo.period_assessment = AsyncMock(return_value={"assessment": None, "assessment_coverage": None})
         return ProgressService(self.repo, self.access)
 
     async def test_complete_stored_report_preserves_actual_values(self):
