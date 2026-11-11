@@ -191,7 +191,7 @@ describe("shared header and footer", () => {
   });
 
   it.each(["/books", "/books/book-1", "/reading/session-1"])(
-    "keeps shared Parent navigation visible without duplicate navigation on %s",
+    "uses parent navigation outside child reading and one reading landmark on %s",
     (pathname) => {
       navigationMock.pathname = pathname;
       const { container } = render(
@@ -202,18 +202,30 @@ describe("shared header and footer", () => {
           createAuthServiceFixture(),
         ),
       );
-      expect(container.querySelector("header")).not.toHaveClass("hidden");
-      expect(
-        screen.getAllByRole("navigation", {
-          name: "Điều hướng dành cho ba mẹ",
-        }),
-      ).toHaveLength(1);
+      if (pathname.startsWith("/reading/")) {
+        expect(container.querySelector("header")).toBeNull();
+        expect(
+          screen.queryByRole("navigation", {
+            name: "Điều hướng dành cho ba mẹ",
+          }),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+        expect(screen.getAllByRole("main")).toHaveLength(1);
+        expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+      } else {
+        expect(container.querySelector("header")).not.toHaveClass("hidden");
+        expect(
+          screen.getAllByRole("navigation", {
+            name: "Điều hướng dành cho ba mẹ",
+          }),
+        ).toHaveLength(1);
+        expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+        expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
+        expect(container.querySelector("main")?.nextElementSibling).toBe(
+          screen.getByRole("contentinfo"),
+        );
+      }
       expect(screen.getByRole("main")).toHaveTextContent("Không gian đọc");
-      expect(screen.getByRole("contentinfo")).toBeInTheDocument();
-      expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
-      expect(container.querySelector("main")?.nextElementSibling).toBe(
-        screen.getByRole("contentinfo"),
-      );
     },
   );
 

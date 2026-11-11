@@ -190,12 +190,13 @@ async def get_admin_pages(
 @router.get("/admin/pages/{page_id}/image", response_model=AdminPageImageRead)
 async def get_admin_image(
     page_id: UUID,
+    revision_id: UUID | None = None,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
-    return await service.image(page_id)
+    return await service.image(page_id, revision_id)
 
 
 @router.get("/admin/pages/{page_id}/processing", response_model=AdminPageProcessingRead)

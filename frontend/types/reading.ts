@@ -99,6 +99,8 @@ export interface ReadingPageDTO {
   readonly width: number;
   readonly height: number;
   readonly image_url?: string | null;
+  /** Missing/false means use OCR text; coordinates alone do not prove alignment. */
+  readonly image_overlay_safe?: boolean;
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
   /** Zero-based line indices that begin a new paragraph. */
@@ -234,7 +236,18 @@ export interface ReadingRealtimeSnapshotUI {
   readonly child_error_events: readonly [];
 }
 
+export interface ReadingAssessmentMetricsDTO {
+  readonly first_pass_correct: number;
+  readonly first_pass_incorrect: number;
+  readonly self_corrected_words: number;
+  readonly unresolved_words: number;
+  readonly retry_attempts: number;
+  readonly skipped_after_retry_limit: number;
+  readonly recognition_uncertain: number;
+}
+
 export interface ReadingCompletionSummaryUI {
+  readonly assessment?: ReadingAssessmentMetricsDTO | null;
   readonly duration_minutes: number | null;
   readonly pages_explored: number | null;
   readonly selected_range_pages?: number | null;
@@ -245,6 +258,32 @@ export interface ReadingCompletionSummaryUI {
   readonly mispronounced_words?: readonly string[] | null;
   readonly skipped_words?: readonly string[] | null;
   readonly score?: number | null;
+}
+
+export interface ReadingPracticeStateDTO {
+  readonly session_id: string;
+  readonly legacy_evidence_present: boolean;
+  readonly pages: readonly {
+    readonly page_id: string;
+    readonly page_revision_id: string;
+    readonly page_number: number;
+    readonly transcript: string;
+    readonly initial_assessment: readonly {
+      readonly word_id: string;
+      readonly word_index: number;
+      readonly text: string;
+      readonly status:
+        "CORRECT" | "MISPRONUNCIATION" | "OMISSION" | "UNCERTAIN";
+    }[];
+  }[];
+  readonly words: readonly {
+    readonly page_id: string;
+    readonly page_revision_id: string;
+    readonly word_id: string;
+    readonly retry_attempt_count: number;
+    readonly incorrect_retry_count: number;
+    readonly resolution_status: "RETRYING" | "SELF_CORRECTED" | "UNRESOLVED";
+  }[];
 }
 
 export type ReadingEventType =
@@ -328,6 +367,7 @@ export interface HistoryFluencyAssessmentDTO extends Omit<
 }
 
 export interface ReadingSessionDetailDTO extends HistorySessionSummaryDTO {
+  readonly assessment?: ReadingAssessmentMetricsDTO | null;
   readonly selected_range_pages?: number | null;
   readonly pages_completed?: number | null;
   readonly selected_page_revision_ids: readonly UUID[];

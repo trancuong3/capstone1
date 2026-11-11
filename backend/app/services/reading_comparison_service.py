@@ -70,6 +70,43 @@ class ReadingComparisonService:
         if not reference_text.strip():
             raise HTTPException(status_code=422, detail="Book text is empty.")
 
+        session = await self.repository.lock_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        initial_assessment = None
+        if payload.finalize:
+            if not page.words:
+                raise HTTPException(status_code=422, detail="A final assessment requires page words")
+            if payload.initial_assessment is None:
+                raise HTTPException(status_code=422, detail="A final assessment requires word evidence")
+            supplied = {str(item.word_id): item.status for item in payload.initial_assessment}
+            word_ids = {str(word.word_id) for word in page.words}
+            if len(supplied) != len(payload.initial_assessment) or set(supplied) != word_ids:
+                raise HTTPException(status_code=422, detail="Assessment words must match the page revision exactly")
+            initial_assessment = [
+                {"word_id": str(word.word_id), "word_index": word.word_index,
+                 "text": word.text, "status": supplied[str(word.word_id)]}
+                for word in page.words
+            ]
+        elif payload.initial_assessment is not None:
+            raise HTTPException(status_code=422, detail="Word evidence requires a final assessment")
+
+        finalized = await self.repository.finalized_for_page(
+            session_id, page.page_id, page.page_revision_id,
+        )
+        if finalized is not None:
+            if (finalized.Transcript != transcript or (payload.finalize
+                    and finalized.Summary.get("initial_assessment") != initial_assessment)):
+                raise HTTPException(status_code=409, detail="The initial assessment is immutable")
+            return self._to_read(finalized)
+        if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
+            raise HTTPException(status_code=409, detail="Cannot assess a finished session")
+        if payload.finalize and any(
+            row.PageId == page.page_id and row.PageRevisionId == page.page_revision_id
+            for row in await self.repository.list_for_session(session_id)
+        ):
+            raise HTTPException(status_code=409, detail="A legacy comparison cannot be replaced with a new initial assessment")
+
         result = align_text(reference_text, transcript)
         words = (
             [word.model_dump() for word in payload.words]
@@ -81,6 +118,9 @@ class ReadingComparisonService:
             words=words,
             threshold=1.0,
         )
+        if payload.finalize:
+            summary = {**summary, "assessment_version": 1,
+                       "initial_assessment": initial_assessment}
 
         # Safe retry after a lost HTTP response: return an already-persisted
         # identical comparison instead of creating a duplicate report.
@@ -90,7 +130,7 @@ class ReadingComparisonService:
             page.page_revision_id,
             transcript,
         )
-        if existing is not None:
+        if existing is not None and not payload.finalize:
             return self._to_read(existing)
 
         report = ReadingComparisonReport(
@@ -110,7 +150,12 @@ class ReadingComparisonService:
     ) -> ReadingSessionReportsRead:
         await self.content.get_session_summary(session_id, actor_id)
         reports = await self.repository.list_for_session(session_id)
+        from app.services.reading_assessment import aggregate_assessment
+        assessment = aggregate_assessment(
+            session_id, reports, await self.content.repository.events_for_session(session_id),
+        )["assessment"]
         return ReadingSessionReportsRead(
+            assessment=assessment,
             session_id=session_id,
             total=len(reports),
             reports=[self._to_read(report) for report in reports],
@@ -123,6 +168,8 @@ class ReadingComparisonService:
         if report is None:
             raise HTTPException(status_code=404, detail="Không tìm thấy báo cáo.")
         await self.content.get_session_summary(report.SessionId, actor_id)
+        if isinstance(report.Summary, dict) and report.Summary.get("assessment_version") == 1:
+            raise HTTPException(status_code=409, detail="The initial assessment is immutable")
         await self.repository.delete(report)
         return {
             "message": "Report deleted successfully",

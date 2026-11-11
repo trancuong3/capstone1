@@ -560,6 +560,9 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (path === `/books/admin/pages/${ids.page}/image`)
       return respond(route, {
         page_id: ids.page,
+        page_revision_id:
+          new URL(route.request().url()).searchParams.get("revision_id") ??
+          ids.revision,
         page_number: 2,
         preview_url: "http://127.0.0.1:8000/test-page.svg",
         width: 800,

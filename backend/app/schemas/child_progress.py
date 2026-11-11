@@ -43,7 +43,11 @@ class ComprehensionTypeRead(BaseModel):
     first_try_correct: int = Field(ge=0)
 
 
+from app.schemas.reading import ReadingAssessmentMetrics
+
+
 class ProgressMetricsRead(BaseModel):
+    reading_assessment: ReadingAssessmentMetrics | None = None
     sessions: int = Field(ge=0)
     active_days: int = Field(ge=0)
     reading_minutes: int = Field(ge=0)

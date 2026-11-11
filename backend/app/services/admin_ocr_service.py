@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import PurePath
 from typing import Any, Callable
 from uuid import UUID, uuid4
 
@@ -381,6 +382,8 @@ class AdminOcrService:
             raise HTTPException(status_code=415, detail="Only JPEG, PNG, and WebP images are supported")
         try:
             with Image.open(BytesIO(data)) as image:
+                if max(image.size) > MAX_IMAGE_DIMENSION:
+                    raise HTTPException(status_code=413, detail="Image dimensions must not exceed 6000 by 6000 pixels")
                 image.verify()
             with Image.open(BytesIO(data)) as image:
                 image_format = image.format or ""
@@ -406,6 +409,10 @@ class AdminOcrService:
         actual = ALLOWED_FORMATS.get(image_format)
         if actual is None or actual[0] != declared_type:
             raise HTTPException(status_code=415, detail="File content does not match the declared image type")
+        suffix = PurePath(file.filename).suffix.lower()
+        allowed_extensions = {"JPEG": {".jpg", ".jpeg"}, "PNG": {".png"}, "WEBP": {".webp"}}
+        if suffix not in allowed_extensions.get(image_format, set()):
+            raise HTTPException(status_code=415, detail="File extension does not match the image content")
         if width <= 0 or height <= 0 or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
             raise HTTPException(status_code=413, detail="Image dimensions must not exceed 6000 by 6000 pixels")
         if not data or len(data) > MAX_IMAGE_BYTES:
@@ -1278,7 +1285,7 @@ class AdminOcrService:
         return changed
 
     async def upload_page(
-        self, actor_id: UUID, book_id: UUID, file: UploadFile
+        self, actor_id: UUID, book_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,
     ) -> AdminRevisionDetailRead:
         started_at = time.perf_counter()
         log_diagnostic(
@@ -1292,6 +1299,7 @@ class AdminOcrService:
         await self.db.rollback()
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
+        image_digest = hashlib.sha256(data).hexdigest()
         page_id = uuid4()
         revision_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
@@ -1303,6 +1311,20 @@ class AdminOcrService:
                 raise HTTPException(status_code=404, detail="Book not found")
             if book.LifecycleStatus != "ACTIVE":
                 raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
+
+            if upload_id is not None:
+                existing = await self.repo.page_for_upload(book_id, upload_id)
+                if existing is not None:
+                    saved_meta = dict(existing.ProcessingMeta or {})
+                    if saved_meta.get("image_sha256") != image_digest:
+                        raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
+                    if existing.LifecycleStatus != "ACTIVE":
+                        raise HTTPException(status_code=409, detail="This upload is pending or retired; reload before retrying")
+                    saved_revision_id = saved_meta.get("upload_revision_id")
+                    saved_revision = await self.repo.revision(existing.Id, UUID(saved_revision_id)) if saved_revision_id else None
+                    if saved_revision is None:
+                        raise HTTPException(status_code=409, detail="Upload outcome requires review; reload before retrying")
+                    return await self.revision_detail(existing, saved_revision)
 
             await self._renumber_active_pages(book_id, lock=True)
             page_number = await self.repo.next_active_page_number(book_id)
@@ -1325,6 +1347,8 @@ class AdminOcrService:
                     "storage": "supabase",
                     "ocr_state": "PROCESSING",
                     "processing_started_at": datetime.now(timezone.utc).isoformat(),
+                    **({"upload_id": str(upload_id), "image_sha256": image_digest,
+                        "upload_revision_id": str(revision_id)} if upload_id else {}),
                 },
             )
             self.repo.stage_page_reservation(page)
@@ -1374,6 +1398,8 @@ class AdminOcrService:
                 if not text_value:
                     raise HTTPException(status_code=422, detail="OCR produced empty text")
                 metadata = dict(ocr["metadata"])
+                metadata.update({"source_image_path": object_path, "source_image_width": width,
+                                 "source_image_height": height, "source_image_sha256": image_digest})
                 metadata["word_review_statuses"] = [
                     str(word.get("ocr_review_status", "needs_review"))
                     for word in words
@@ -1461,7 +1487,10 @@ class AdminOcrService:
                     raise HTTPException(status_code=409, detail="Page reservation is no longer pending")
 
                 self.repo.set_page_lifecycle_status(page, "ACTIVE")
-                page.ProcessingMeta = {"storage": "supabase"}
+                page.ProcessingMeta = {"storage": "supabase", **({
+                    "upload_id": str(upload_id), "image_sha256": image_digest,
+                    "upload_revision_id": str(revision_id),
+                } if upload_id else {})}
                 revision = PageRevision(
                     Id=revision_id,
                     PageId=page_id,
@@ -1538,7 +1567,7 @@ class AdminOcrService:
             await self.db.rollback()
 
     async def replace_page_image(
-        self, actor_id: UUID, page_id: UUID, file: UploadFile
+        self, actor_id: UUID, page_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,
     ) -> AdminRevisionDetailRead:
         started_at = time.perf_counter()
         await self.require_admin(actor_id)
@@ -1570,9 +1599,22 @@ class AdminOcrService:
         previous_height = page.Height
         existing_revisions = await self.repo.revisions(page_id)
         expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
+        previous_uploads = [(row.Id, dict(row.ProcessingMeta or {})) for row in existing_revisions] if upload_id else []
         await self.db.rollback()
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
+        image_digest = hashlib.sha256(data).hexdigest()
+        if upload_id:
+            for saved_id, saved_meta in previous_uploads:
+                if saved_meta.get("upload_id") != str(upload_id):
+                    continue
+                if saved_meta.get("source_image_sha256") != image_digest:
+                    raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
+                saved_page = await self.repo.page(page_id)
+                saved_revision = await self.repo.revision(page_id, saved_id)
+                if saved_page is None or saved_revision is None:
+                    raise HTTPException(status_code=409, detail="Upload outcome requires review; reload before retrying")
+                return await self.revision_detail(saved_page, saved_revision)
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
         storage_uploaded = False
 
@@ -1660,6 +1702,8 @@ class AdminOcrService:
         ]
         processing_meta["word_evidence_v2_authoritative"] = True
         processing_meta.update({
+            **({"upload_id": str(upload_id)} if upload_id else {}),
+            "source_image_sha256": image_digest,
             "source_image_path": object_path,
             "source_image_width": width,
             "source_image_height": height,
@@ -1973,6 +2017,8 @@ class AdminOcrService:
         if not raw_revision.isascii() or not raw_revision.isdecimal() or int(raw_revision) < 1:
             raise HTTPException(status_code=409, detail="Stored revision number is not a positive numeric string")
         for internal_key in (
+            "upload_id",
+            "source_image_sha256",
             "source_image_path",
             "source_image_width",
             "source_image_height",
@@ -2154,6 +2200,10 @@ class AdminOcrService:
                 json.dumps({"text": text_value, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
             ).hexdigest(),
             ProcessingMeta={
+                "source_image_path": source_metadata.get("source_image_path", page.ImagePath),
+                "source_image_width": source_metadata.get("source_image_width", page.Width),
+                "source_image_height": source_metadata.get("source_image_height", page.Height),
+                **({"source_image_sha256": source_metadata["source_image_sha256"]} if "source_image_sha256" in source_metadata else {}),
                 "source_revision_id": str(source.Id),
                 "creation_reason": "manual_edit",
                 "word_review_statuses": ["reference_match"] * len(words),
@@ -2344,6 +2394,8 @@ class AdminOcrService:
             if isinstance(candidate_path, str) and candidate_path
             else page.ImagePath
         )
+        source_width = latest_metadata.get("source_image_width") if candidate_path else page.Width
+        source_height = latest_metadata.get("source_image_height") if candidate_path else page.Height
         await self.db.rollback()
 
         try:
@@ -2405,6 +2457,9 @@ class AdminOcrService:
             ):
                 if key in latest_metadata:
                     processing_meta[key] = latest_metadata[key]
+        processing_meta.update({"source_image_path": source_image_path,
+                                "source_image_width": source_width, "source_image_height": source_height,
+                                "source_image_sha256": hashlib.sha256(image_bytes).hexdigest()})
 
         revision_id = uuid4()
         content_hash = hashlib.sha256(

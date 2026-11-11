@@ -83,13 +83,20 @@ export function ReadingReport({ result, sessionId }: Props) {
   }, [result.page_id, result.page_revision_id, sessionId]);
 
   // Thống kê kết quả đọc
-  const correctCount = result.alignment.filter(
-    (item) => item.status === "MATCH",
-  ).length;
+  const snapshot = result.summary.initial_assessment;
+  const correctCount = snapshot
+    ? snapshot.filter((word) => word.status === "CORRECT").length
+    : result.alignment.filter((item) => item.status === "MATCH").length;
 
-  const missingCount = result.summary.missing_words.length;
+  const missingCount = snapshot
+    ? snapshot.filter((word) => word.status === "OMISSION").length
+    : result.summary.missing_words.length;
   const extraCount = result.summary.extra_words.length;
-  const wrongCount = result.summary.substitutions.length;
+  const wrongCount = snapshot
+    ? snapshot.filter((word) => word.status === "MISPRONUNCIATION").length
+    : result.summary.substitutions.length;
+  const uncertainCount =
+    snapshot?.filter((word) => word.status === "UNCERTAIN").length ?? 0;
 
   const repeatedWordCounts = result.summary.repeated_words.reduce<
     Record<string, number>
@@ -247,9 +254,11 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       <p>
-        {missingCount === 0 && wrongCount === 0
-          ? "Bé đã đọc đúng nội dung bài."
-          : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
+        {uncertainCount > 0
+          ? "Có phần chưa nghe rõ nên chưa thể đánh giá toàn bộ trang."
+          : missingCount === 0 && wrongCount === 0
+            ? "Bé đã đọc đúng nội dung bài."
+            : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
       </p>
     </div>
   );

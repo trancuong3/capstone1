@@ -4,7 +4,8 @@ import logging
 import os
 import tempfile
 import unittest
-from io import BytesIO
+from io import BytesIO, StringIO
+from dotenv.main import DotEnv
 from pathlib import Path
 from unittest.mock import patch
 
@@ -169,19 +170,21 @@ class OcrCorrectionConfigTests(unittest.TestCase):
             backend_root.mkdir()
             repository_root.mkdir()
             workspace_root.mkdir()
-            (backend_root / ".env").write_text(
-                'OCR_CLOUD_CORRECTION_ENABLED="true"\n', encoding="utf-8"
-            )
-            (repository_root / ".env").write_text(
-                'GEMINI_API_KEY="dotenv-gemini"\n', encoding="utf-8"
-            )
-            (workspace_root / ".env").write_text(
-                'GROQ_API_KEY="dotenv-groq"\n', encoding="utf-8"
-            )
+            # Exercise the real dotenv parser over explicit synthetic streams.
+            # No .env file is created or read, including in isolated CI runs.
+            fixtures = {
+                backend_root / ".env": 'OCR_CLOUD_CORRECTION_ENABLED="true"\n',
+                repository_root / ".env": 'GEMINI_API_KEY="dotenv-gemini"\nOCR_CLOUD_CORRECTION_ENABLED="false"\n',
+                workspace_root / ".env": 'GROQ_API_KEY="dotenv-groq"\n',
+            }
+            def fixture_values(path):
+                return DotEnv(dotenv_path=None, stream=StringIO(fixtures[path])).dict()
             with (
                 patch.object(database_config, "BACKEND_ROOT", backend_root),
                 patch.object(database_config, "REPOSITORY_ROOT", repository_root),
                 patch.object(database_config, "WORKSPACE_ROOT", workspace_root),
+                patch.object(Path, "is_file", lambda path: path in fixtures),
+                patch.object(database_config, "dotenv_values", side_effect=fixture_values),
                 patch.dict(os.environ, {}, clear=True),
             ):
                 database_config._load_missing_dotenv_values()
@@ -200,13 +203,13 @@ class OcrCorrectionConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as temporary_directory:
             backend_root = Path(temporary_directory) / "backend"
             backend_root.mkdir()
-            (backend_root / ".env").write_text(
-                'OCR_CLOUD_CORRECTION_ENABLED="true"\n', encoding="utf-8"
-            )
+            fixtures = {backend_root / ".env": 'OCR_CLOUD_CORRECTION_ENABLED="true"\n'}
             with (
                 patch.object(database_config, "BACKEND_ROOT", backend_root),
                 patch.object(database_config, "REPOSITORY_ROOT", backend_root.parent / "none"),
                 patch.object(database_config, "WORKSPACE_ROOT", backend_root.parent / "missing"),
+                patch.object(Path, "is_file", lambda path: path in fixtures),
+                patch.object(database_config, "dotenv_values", side_effect=fixture_values),
                 patch.dict(
                     os.environ, {"OCR_CLOUD_CORRECTION_ENABLED": "false"}, clear=True
                 ),

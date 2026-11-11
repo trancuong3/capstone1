@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 import os
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -10,6 +11,7 @@ import tempfile
 import threading
 import unicodedata
 from typing import Any
+from app.services.word_box_geometry import build_geometry_evidence
 
 from app.services.ocr_adjudication import (
     OCR_ADJUDICATION_RULE,
@@ -44,7 +46,12 @@ import jiwer
 import numpy as np
 import pytesseract
 from pytesseract import Output
-import torch
+try:
+    import torch
+except ImportError:
+    # VietOCR is optional; its missing runtime must not prevent image
+    # validation, revision management, or a working PaddleOCR detector.
+    torch = None
 from PIL import Image
 
 _paddle_import_status = "success"
@@ -192,6 +199,8 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             else:
                 try:
                     viet_config = Cfg.load_config_from_name("vgg_transformer")
+                    if torch is None:
+                        raise OcrEngineUnavailable("The VietOCR torch runtime is not installed")
                     target_device = "cuda" if torch.cuda.is_available() else "cpu"
                     viet_config["device"] = target_device
                     # The released checkpoint already contains every CNN
@@ -632,14 +641,18 @@ def sort_reading_order_adaptive(
 
 
 def _segment_words_by_ink(
-    rect_img: np.ndarray, words: list[str]
+    rect_img: np.ndarray, words: list[str], *, geometry: dict[str, Any] | None = None
 ) -> list[tuple[float, float, float, float]]:
+    if geometry is not None:
+        geometry["reliable"] = False
     num_words = len(words)
     c_h, c_w = rect_img.shape[:2]
     if num_words == 0 or c_w < 8 or c_h < 6:
         return []
 
-    gray = cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY)
+    # Segment glyphs, not the dark background surrounding light text.
+    # Keep original coordinates: normalization changes intensity only.
+    gray = _normalize_text_background(cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY))
     block_sz = max(11, (c_h | 1))
     binary = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_sz, 10
@@ -673,6 +686,8 @@ def _segment_words_by_ink(
     last_ink = int(ink_cols[-1])
 
     if num_words == 1:
+        if geometry is not None:
+            geometry["reliable"] = True
         return [(max(0.0, (first_ink - 3) / c_w), norm_y0, min(1.0, (last_ink + 4) / c_w), norm_y1)]
 
     best_segments = None
@@ -724,6 +739,11 @@ def _segment_words_by_ink(
 
     if best_segments is None:
         best_segments = []
+
+    # Equal-count connected glyph groups are evidence; forced splits/merges
+    # and blank crops may retain positions for review, but never enable overlay.
+    if geometry is not None:
+        geometry["reliable"] = len(best_segments) == num_words
 
     while len(best_segments) > num_words:
         min_gap = 1e9
@@ -794,6 +814,7 @@ def _map_curved_word_boxes(
     item: dict[str, Any],
     orig_width: int,
     orig_height: int,
+    *, geometry: dict[str, Any] | None = None,
 ) -> list[list[float]]:
     if not words:
         return []
@@ -802,7 +823,7 @@ def _map_curved_word_boxes(
     pts = item["quad"]
     tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
 
-    word_spans = _segment_words_by_ink(rect_img, words)
+    word_spans = _segment_words_by_ink(rect_img, words, geometry=geometry)
     boxes: list[list[float]] = []
 
     for rx0, ry0, rx1, ry1 in word_spans:
@@ -859,7 +880,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     orig_height, orig_width = image.shape[:2]
 
     target_lang = os.getenv("TESSERACT_LANG", "vie")
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = _normalize_text_background(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     try:
@@ -928,6 +949,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
         "words": words,
         "metadata": {
             "engine": "tesseract",
+            "word_box_geometry": build_geometry_evidence(words, orig_width, orig_height, reliable=True),
             "ocr_score_contract": "tesseract_raw_word_score_v1",
             "ocr_evidence_contract": "tesseract_raw_word_score_v1",
             "language": target_lang,
@@ -948,7 +970,7 @@ def _raw_recognition_score(value: Any) -> object:
     """Keep model output scores raw; never reinterpret them as accuracy."""
     if value is None:
         return None
-    if torch.is_tensor(value):
+    if torch is not None and torch.is_tensor(value):
         value = value.detach().cpu().tolist()
     elif isinstance(value, np.ndarray):
         value = value.tolist()
@@ -1113,7 +1135,7 @@ def _recognize_uncertain_word_crops(
                 crop_evidence_decoding_mode = (
                     "beam_search" if beam_search_enabled else "standard_batch_or_predict"
                 )
-                with torch.inference_mode(), _vietocr_inference_lock:
+                with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
                     can_batch = (
                         not beam_search_enabled
                         and callable(getattr(vietocr_engine, "predict_batch", None))
@@ -1246,7 +1268,9 @@ def _normalize_text_background(gray: np.ndarray) -> np.ndarray:
     a dim page is not mistaken for light-on-dark text.
     """
     threshold, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if float(np.mean(gray < threshold)) > 0.5:
+    # Otsu puts pixels equal to the threshold in its dark class as well.
+    # Excluding equality misses the background of clean two-tone screenshots.
+    if float(np.mean(gray <= threshold)) > 0.5:
         gray = cv2.bitwise_not(gray)
     background = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(8.0, max(gray.shape) / 40.0))
     return cv2.divide(gray, background, scale=255)
@@ -1594,6 +1618,7 @@ def _extract_text_and_boxes_dual_engine(
     words_output: list[dict[str, object]] = []
     lines_output: list[str] = []
     line_evidence: list[dict[str, object]] = []
+    geometry_reliable = True
 
     for line_idx, item in enumerate(ordered_items):
         paddle_text = item["paddle_text"]
@@ -1620,7 +1645,7 @@ def _extract_text_and_boxes_dual_engine(
 
         if vietocr_engine is not None:
             try:
-                with torch.inference_mode(), _vietocr_inference_lock:
+                with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
                     viet_text = vietocr_engine.predict(line_img_pil)
                 if isinstance(viet_text, str) and viet_text.strip():
                     viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
@@ -1650,7 +1675,9 @@ def _extract_text_and_boxes_dual_engine(
         if not valid_words:
             continue
 
-        line_boxes = _map_curved_word_boxes(valid_words, item, orig_width, orig_height)
+        line_geometry: dict[str, Any] = {}
+        line_boxes = _map_curved_word_boxes(valid_words, item, orig_width, orig_height, geometry=line_geometry)
+        geometry_reliable = geometry_reliable and line_geometry.get("reliable") is True
         paddle_entries = _tokens_with_source_indices(paddle_text)
         vietocr_entries = _tokens_with_source_indices(viet_text_candidate or "")
         paddle_tokens = [token for _source_index, token in paddle_entries]
@@ -1877,6 +1904,7 @@ def _extract_text_and_boxes_dual_engine(
         "words": words_output,
         "metadata": {
             "engine": "paddleocr_vietocr_dual",
+            "word_box_geometry": build_geometry_evidence(words_output, orig_width, orig_height, reliable=geometry_reliable),
             "engine_version": "PP-OCRv4 + VietOCR-vgg_transformer",
             "engine_versions": {
                 "paddleocr": _package_version("paddleocr"),

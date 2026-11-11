@@ -1,4 +1,11 @@
-import { Fragment } from "react";
+"use client";
+
+import { Fragment, useEffect, useRef } from "react";
+import {
+  wordPresentationClasses,
+  wordPresentationLabels,
+  type WordPresentationState,
+} from "@/lib/reading/word-presentation";
 
 import { cn } from "@/lib/utils/cn";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
@@ -6,6 +13,9 @@ import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface BookPageContentProps {
+  selfCorrectedWordIds?: ReadonlySet<string>;
+  unresolvedWordIds?: ReadonlySet<string>;
+  uncertainWordIds?: ReadonlySet<string>;
   page: ReadingPageDTO;
   comparisonResult?: Pick<ComparisonResult, "alignment" | "summary"> | null;
   currentWordId?: string | null;
@@ -21,6 +31,9 @@ interface BookPageContentProps {
 }
 
 export function BookPageContent({
+  selfCorrectedWordIds,
+  unresolvedWordIds,
+  uncertainWordIds,
   page,
   comparisonResult,
   currentWordId = null,
@@ -35,17 +48,64 @@ export function BookPageContent({
   previewSnapshot,
 }: BookPageContentProps) {
   const hasWords = page.words.length > 0;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const activeWordId = previewSnapshot
+    ? previewSnapshot.currentWordId
+    : currentWordId;
+  useEffect(() => {
+    const active = [
+      ...(contentRef.current?.querySelectorAll<HTMLElement>("[data-word-id]") ??
+        []),
+    ].find((element) => element.dataset.wordId === activeWordId);
+    active?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
+  }, [activeWordId, page.page_revision_id]);
+  const alignmentByIndex = new Map(
+    comparisonResult?.alignment.map((item) => [item.book_index, item]),
+  );
+  const savedById = new Map(
+    comparisonResult?.summary.initial_assessment?.map((item) => [
+      item.word_id,
+      item,
+    ]),
+  );
+  const textTokens = [...(page.text ?? "").matchAll(/\S+/gu)];
+  const textMatchesWords =
+    textTokens.length === page.words.length &&
+    textTokens.every(
+      (match, index) =>
+        match[0].normalize("NFC") === page.words[index].text.normalize("NFC"),
+    );
 
   return (
-    <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-5 shadow-inner sm:mt-6 sm:p-8">
+    <div
+      ref={contentRef}
+      data-reading-panel="text"
+      className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-3 shadow-inner sm:mt-6 sm:p-6"
+    >
       {hasWords ? (
         <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
           {page.words.map((word, index) => {
             const wordIndex = word.word_index ?? index;
 
-            const alignment = comparisonResult?.alignment.find(
-              (item) => item.book_index === wordIndex,
-            );
+            const initial = savedById.get(word.word_id);
+            const alignment = initial
+              ? {
+                  status:
+                    initial.status === "CORRECT"
+                      ? "MATCH"
+                      : initial.status === "MISPRONUNCIATION"
+                        ? "SUBSTITUTE"
+                        : initial.status === "OMISSION"
+                          ? "DELETE"
+                          : "UNCERTAIN",
+                }
+              : alignmentByIndex.get(wordIndex);
 
             const isPreviewActive =
               previewSnapshot !== null && previewSnapshot !== undefined;
@@ -132,17 +192,40 @@ export function BookPageContent({
               (index === 0 || startsLine) &&
               (page.indented_line_indices ?? []).includes(lineIndex);
 
-            const statusClass = isSkipped
-              ? "bg-red-200 text-red-900 ring-1 ring-red-500"
-              : isMispronounced
-                ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
-                : isRepeated
-                  ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
-                  : isHesitation
-                    ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                    : isCorrect
-                      ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                      : "";
+            const presentationState: WordPresentationState =
+              selfCorrectedWordIds?.has(word.word_id)
+                ? "self-corrected"
+                : unresolvedWordIds?.has(word.word_id)
+                  ? "unresolved"
+                  : uncertainWordIds?.has(word.word_id) ||
+                      initial?.status === "UNCERTAIN"
+                    ? "uncertain"
+                    : isSkipped
+                      ? "omission"
+                      : isMispronounced
+                        ? "incorrect"
+                        : isCorrect
+                          ? "correct"
+                          : isCurrent
+                            ? "current"
+                            : "unread";
+            const statusClass = [
+              "self-corrected",
+              "unresolved",
+              "uncertain",
+            ].includes(presentationState)
+              ? wordPresentationClasses[presentationState]
+              : isSkipped
+                ? "bg-red-200 text-red-900 ring-1 ring-red-500"
+                : isMispronounced
+                  ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
+                  : isRepeated
+                    ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
+                    : isHesitation
+                      ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
+                      : isCorrect
+                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
+                        : "";
 
             const hasConfirmedStatus =
               isSkipped ||
@@ -162,8 +245,32 @@ export function BookPageContent({
 
             return (
               <Fragment key={word.word_id}>
-                {startsLine ? <br /> : null}
-                {startsParagraph ? <br /> : null}
+                {textMatchesWords ? (
+                  Array.from(
+                    {
+                      length: Math.min(
+                        2,
+                        (
+                          page
+                            .text!.slice(
+                              index === 0
+                                ? 0
+                                : textTokens[index - 1].index! +
+                                    textTokens[index - 1][0].length,
+                              textTokens[index].index,
+                            )
+                            .match(/\n/gu) ?? []
+                        ).length,
+                      ),
+                    },
+                    (_, breakIndex) => <br key={breakIndex} />,
+                  )
+                ) : (
+                  <>
+                    {startsLine ? <br /> : null}
+                    {startsParagraph ? <br /> : null}
+                  </>
+                )}
 
                 {isIndented ? (
                   <span
@@ -174,7 +281,9 @@ export function BookPageContent({
 
                 <span
                   className={cn(
-                    "mr-2 inline-block rounded-[10px] px-2 py-0.5 transition-all duration-150",
+                    "mr-2 inline-block scroll-mt-24 scroll-mb-40 rounded-[10px] px-2 py-0.5 transition-all duration-150",
+                    !readOnly &&
+                      "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                     !readOnly && "cursor-pointer select-none active:scale-95",
                     statusClass,
                     currentClass,
@@ -193,6 +302,14 @@ export function BookPageContent({
                   data-line-index={lineIndex}
                   data-page-revision-id={page.page_revision_id}
                   data-word-id={word.word_id}
+                  data-reading-state={presentationState}
+                  aria-current={isCurrent ? "true" : undefined}
+                  aria-label={readOnly ? undefined : word.text}
+                  aria-describedby={
+                    readOnly
+                      ? undefined
+                      : `text-word-state-${page.page_revision_id}-${word.word_id}`
+                  }
                   onClick={readOnly ? undefined : () => onWordClick?.(word)}
                   role={readOnly ? undefined : "button"}
                   tabIndex={readOnly ? undefined : 0}
@@ -215,6 +332,29 @@ export function BookPageContent({
                   }
                 >
                   {word.text}
+                  {!readOnly ? (
+                    <span
+                      hidden
+                      id={`text-word-state-${page.page_revision_id}-${word.word_id}`}
+                    >
+                      {wordPresentationLabels[presentationState]}
+                    </span>
+                  ) : null}
+                  {presentationState === "self-corrected" ? (
+                    <span aria-hidden="true" className="ml-1 text-sm">
+                      ↺
+                    </span>
+                  ) : null}
+                  {presentationState === "unresolved" ? (
+                    <span aria-hidden="true" className="ml-1 text-sm">
+                      ◇
+                    </span>
+                  ) : null}
+                  {presentationState === "uncertain" ? (
+                    <span aria-hidden="true" className="ml-1 text-sm">
+                      ?
+                    </span>
+                  ) : null}
                 </span>
               </Fragment>
             );

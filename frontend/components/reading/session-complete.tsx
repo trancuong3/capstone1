@@ -21,6 +21,7 @@ import Image from "next/image";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
@@ -53,15 +54,15 @@ export function SessionComplete({
       summary.pages_explored < summary.selected_range_pages);
   const spokenWords = summary.spoken_words ?? [];
   const transcripts = summary.transcripts ?? [];
-  const correctWords = summary.correct_words ?? spokenWords;
+  const correctWords = summary.correct_words ?? [];
   const mispronouncedWords = summary.mispronounced_words ?? [];
   const skippedWords = summary.skipped_words ?? [];
   const scoredWordCount =
     correctWords.length + mispronouncedWords.length + skippedWords.length;
   const hasWordAssessment =
-    summary.correct_words !== undefined ||
-    summary.mispronounced_words !== undefined ||
-    summary.skipped_words !== undefined;
+    summary.correct_words != null ||
+    summary.mispronounced_words != null ||
+    summary.skipped_words != null;
   const score =
     hasWordAssessment && scoredWordCount > 0
       ? Math.round((correctWords.length / scoredWordCount) * 100)
@@ -91,6 +92,7 @@ export function SessionComplete({
           </div>
         </div>
 
+        <ReadingAssessmentSummary assessment={summary.assessment} />
         {score !== null && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-card bg-cream border-2 border-primary/30 p-5 shadow-sm">
             <div className="flex items-center gap-4">
@@ -99,7 +101,7 @@ export function SessionComplete({
               </div>
               <div>
                 <p className="text-xs font-black uppercase tracking-wider text-primary">
-                  Điểm số chuẩn xác
+                  Đánh giá lượt đầu
                 </p>
                 <h3 className="text-lg font-extrabold text-ink">
                   {score >= 90
@@ -222,7 +224,7 @@ export function SessionComplete({
                   ? "Chưa ghi nhận"
                   : `${summary.practiced_words} từ`}
               </p>
-              <p className="text-label text-muted">đã luyện thêm</p>
+              <p className="text-label text-muted">trong lượt đọc</p>
             </div>
             <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-purple-ink group-hover:underline">
               {showWordList ? (
@@ -240,7 +242,10 @@ export function SessionComplete({
         </div>
 
         <div className="rounded-card border border-line bg-white p-4 shadow-sm sm:p-5">
-          <SessionReadingReports sessionId={sessionId} />
+          <SessionReadingReports
+            sessionId={sessionId}
+            showAssessment={!summary.assessment}
+          />
         </div>
 
         {showWordList && (
@@ -265,6 +270,24 @@ export function SessionComplete({
             mispronouncedWords.length > 0 ||
             skippedWords.length > 0 ? (
               <div className="space-y-4">
+                {!hasWordAssessment && spokenWords.length > 0 ? (
+                  <div>
+                    <p className="mb-2 text-sm text-muted">
+                      Các từ đã nhận diện; chưa đủ dữ liệu đánh giá đúng hoặc
+                      sai.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {spokenWords.map((word, index) => (
+                        <span
+                          key={`${word}-${index}`}
+                          className="rounded-full border border-border bg-white px-3 py-1.5 text-sm text-ink"
+                        >
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {correctWords.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">

@@ -188,6 +188,7 @@ class AdminPageLifecycleRead(BaseModel):
 
 class AdminPageImageRead(BaseModel):
     page_id: UUID
+    page_revision_id: UUID | None = None
     page_number: int = Field(gt=0)
     preview_url: str
     width: int = Field(gt=0)

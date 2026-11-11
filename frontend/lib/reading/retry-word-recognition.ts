@@ -6,6 +6,11 @@
  * hoàn chỉnh. Dấu thanh tiếng Việt vẫn được giữ nguyên.
  */
 
+import {
+  normalizeVietnameseWord,
+  tokenizeVietnameseText,
+} from "@/lib/reading/vietnamese-text";
+
 export type RetryRecognitionStatus =
   "CORRECT" | "INCORRECT" | "UNCERTAIN" | "NOT_RECOGNIZED";
 
@@ -19,13 +24,7 @@ export type RetryRecognitionStatus =
  * Chỉ loại bỏ dấu câu ở đầu và cuối từ.
  */
 export function normalizeVietnameseRetryToken(value: string): string {
-  return value
-    .normalize("NFC")
-    .toLocaleLowerCase("vi-VN")
-    .trim()
-    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
-    .normalize("NFC")
-    .trim();
+  return normalizeVietnameseWord(value);
 }
 
 /**
@@ -51,16 +50,7 @@ export function classifyRetryTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  const normalizedTranscript = rawTranscript
-    .normalize("NFC")
-    .toLocaleLowerCase("vi-VN")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .trim()
-    .replace(/\s+/gu, " ");
-  const tokens = normalizedTranscript
-    .split(" ")
-    .map(normalizeVietnameseRetryToken)
-    .filter(Boolean);
+  const tokens = tokenizeVietnameseText(rawTranscript);
 
   if (tokens.length === 0) {
     return "NOT_RECOGNIZED";

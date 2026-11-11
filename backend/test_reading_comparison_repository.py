@@ -18,6 +18,14 @@ SESSION_ID = UUID("10000000-0000-4000-8000-000000000001")
 PAGE_ID = UUID("30000000-0000-4000-8000-000000000001")
 REVISION_ID = UUID("40000000-0000-4000-8000-000000000001")
 class ReadingComparisonRepositoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_final_assessment_serializes_with_retry_and_finish_on_the_same_session(self):
+        db = MagicMock(scalar=AsyncMock(return_value=None))
+        await ReadingComparisonRepository(db).lock_session(SESSION_ID)
+        statement = db.scalar.await_args.args[0]
+        query = statement.compile(dialect=postgresql.dialect())
+        self.assertIn("FOR UPDATE", str(query))
+        self.assertIn(SESSION_ID, query.params.values())
+        self.assertTrue(statement.get_execution_options()["populate_existing"])
     async def test_find_exact_scopes_to_session_page_revision_and_transcript(self):
         db = MagicMock()
         db.scalar = AsyncMock(return_value=None)

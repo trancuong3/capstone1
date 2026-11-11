@@ -3,7 +3,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
-import { CameraPreview } from "@/components/reading/camera-preview";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -11,6 +10,10 @@ import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface ReadingLayoutProps {
+  selfCorrectedWordIds?: ReadonlySet<string>;
+  unresolvedWordIds?: ReadonlySet<string>;
+  uncertainWordIds?: ReadonlySet<string>;
+  progressLabel?: string;
   audioLevel?: number;
   bookTitle: string;
   children?: ReactNode;
@@ -21,6 +24,7 @@ interface ReadingLayoutProps {
   currentWordId: string | null;
   currentWordText?: string | null;
   exitHref: string;
+  onExit?: () => void;
   /** Optional voice settings control shown in the controls bar. */
   voiceSettings?: ReactNode;
   isCurrentWordMispronounced?: boolean;
@@ -50,6 +54,8 @@ interface ReadingLayoutProps {
   onRetrySave?: () => void;
   retryContextPhrase?: string | null;
   isPlayingSample?: boolean;
+  isSamplePaused?: boolean;
+  onToggleSamplePause?: () => void;
   isReadingWord?: boolean;
   isSpeaking?: boolean;
   latestTranscript?: string | null;
@@ -70,6 +76,10 @@ interface ReadingLayoutProps {
 }
 
 export function ReadingLayout({
+  selfCorrectedWordIds,
+  unresolvedWordIds,
+  uncertainWordIds,
+  progressLabel,
   bookTitle,
   children,
   controlsDisabled = false,
@@ -78,6 +88,7 @@ export function ReadingLayout({
   currentWordId,
   currentWordText,
   exitHref,
+  onExit,
   voiceSettings,
   isCurrentWordMispronounced = false,
   isListening,
@@ -92,6 +103,8 @@ export function ReadingLayout({
   onRetryMicrophonePermission,
   onRetrySave,
   isPlayingSample = false,
+  isSamplePaused = false,
+  onToggleSamplePause,
   isReadingWord = false,
   isSpeaking = false,
   latestTranscript,
@@ -112,28 +125,57 @@ export function ReadingLayout({
   previewSnapshot,
 }: ReadingLayoutProps) {
   return (
-    <section className="relative mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 p-4">
+    <section className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-3 p-4">
       <header className="flex min-h-12 items-center gap-3">
         <div className="flex shrink-0 items-center">
           <Link
             aria-label="Thoát khỏi buổi đọc"
             className="inline-flex h-11 shrink-0 items-center gap-2 rounded-control px-2 text-label font-bold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:px-3"
             href={exitHref}
+            onClick={
+              onExit
+                ? (event) => {
+                    event.preventDefault();
+                    onExit();
+                  }
+                : undefined
+            }
           >
             <ArrowLeft aria-hidden="true" className="size-5" />
             <span>Thoát</span>
           </Link>
         </div>
-        <p className="min-w-0 flex-1 truncate text-center text-label font-bold text-primary sm:text-ink">
+        <h1 className="min-w-0 flex-1 truncate text-center text-label font-bold text-primary sm:text-ink">
           {bookTitle} · Trang {page.page_number}
-        </p>
-        <p className="hidden w-[180px] text-label font-bold text-muted sm:block">
-          04:32
-        </p>
+        </h1>
+        {progressLabel ? (
+          <p className="hidden text-sm font-semibold text-muted sm:block">
+            {progressLabel}
+          </p>
+        ) : null}
       </header>
 
-      <CameraPreview>
+      <ReadingControls
+        pauseDisabled={false}
+        disabled={controlsDisabled}
+        isListening={isMicRecording}
+        isPlayingSample={isPlayingSample}
+        retryMode={retryMode}
+        onFinish={onFinish}
+        onHelp={onHelp}
+        onPause={onPause}
+        onReadSample={onReadSample}
+        onToggleListening={onToggleListening}
+        voiceSettings={voiceSettings}
+      />
+      <section
+        aria-label="Nội dung trang sách"
+        className="min-w-0 rounded-card bg-desk p-2 sm:p-4"
+      >
         <BookPageViewer
+          selfCorrectedWordIds={selfCorrectedWordIds}
+          unresolvedWordIds={unresolvedWordIds}
+          uncertainWordIds={uncertainWordIds}
           correctWordIds={correctWordIds}
           currentWordId={currentWordId}
           isTransitioning={isPageTransitioning}
@@ -147,7 +189,7 @@ export function ReadingLayout({
           hesitationWordIds={hesitationWordIds}
           comparisonResult={comparisonResult}
         />
-      </CameraPreview>
+      </section>
       {retryMode ? (
         <div
           className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border-2 border-primary bg-primary/5 px-4 py-3 shadow-sm animate-in fade-in"
@@ -172,7 +214,7 @@ export function ReadingLayout({
                       : retryFeedback === "processing"
                         ? "Đang kiểm tra giọng đọc..."
                         : retryFeedback === "correct"
-                          ? "Chính xác rồi!"
+                          ? "Bé đã tự sửa đúng!"
                           : retryFeedback === "incorrect"
                             ? "Từ này chưa đúng. Bé thử lại nhé!"
                             : retryFeedback === "not-recognized"
@@ -267,14 +309,25 @@ export function ReadingLayout({
               Đọc mẫu cả đoạn:
             </span>
             <span className="text-sm font-bold text-blue-950 truncate">
-              Đang phát âm toàn bộ trang sách theo giọng mẫu...
+              {isSamplePaused
+                ? "Đã tạm dừng đọc mẫu."
+                : "Đang phát âm toàn bộ trang sách theo giọng mẫu..."}
             </span>
           </div>
+          {onToggleSamplePause ? (
+            <button
+              type="button"
+              onClick={onToggleSamplePause}
+              className="min-h-11 shrink-0 rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white"
+            >
+              {isSamplePaused ? "Tiếp tục mẫu" : "Tạm dừng mẫu"}
+            </button>
+          ) : null}
           {onReadSample ? (
             <button
               type="button"
               onClick={onReadSample}
-              className="rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white hover:bg-blue-700 transition-all cursor-pointer shrink-0"
+              className="min-h-11 rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white hover:bg-blue-700 transition-all cursor-pointer shrink-0"
             >
               Dừng mẫu
             </button>
@@ -367,7 +420,7 @@ export function ReadingLayout({
       ) : latestTranscript ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5 shadow-sm">
           <span className="text-xs font-bold uppercase tracking-wider text-purple-ink">
-            Bé vừa đọc:
+            Thông tin buổi đọc:
           </span>
           <p className="min-w-0 flex-1 truncate text-sm font-bold text-ink italic">
             &ldquo;{latestTranscript}&rdquo;
@@ -375,18 +428,6 @@ export function ReadingLayout({
         </div>
       ) : null}
 
-      <ReadingControls
-        disabled={controlsDisabled}
-        isListening={isMicRecording}
-        isPlayingSample={isPlayingSample}
-        retryMode={retryMode}
-        onFinish={onFinish}
-        onHelp={onHelp}
-        onPause={onPause}
-        onReadSample={onReadSample}
-        onToggleListening={onToggleListening}
-        voiceSettings={voiceSettings}
-      />
       <ReadingProgress
         isListening={isListening}
         pageNumber={page.page_number}

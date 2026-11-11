@@ -22,6 +22,7 @@ import { AppServicesContext } from "@/components/providers/app-services-provider
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import type { ChildProgressAssessment } from "@/lib/api/child-progress-service";
 import { cn } from "@/lib/utils/cn";
 
@@ -432,6 +433,7 @@ function AssessmentBody({
         </ul>
       </div>
 
+      <ReadingAssessmentSummary assessment={metrics.reading_assessment} />
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           ["Buổi đọc", `${metrics.sessions}`],

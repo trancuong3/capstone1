@@ -289,19 +289,17 @@ class ElevenLabsVoiceProvider:
         *,
         text: str,
         requested_voice_id: str | None = None,
+        speed: float = 1.0,
     ) -> SynthesizedAudio:
         voice_id = quote(self._voice_id(requested_voice_id), safe="")
         model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
+            "voice_settings": self._tts_voice_settings(model_id, speed),
         }
         if "flash" in model_id or "turbo" in model_id:
             payload["language_code"] = "vi"
-            payload["voice_settings"] = {
-                "stability": 0.6,
-                "similarity_boost": 0.8,
-            }
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0, connect=10.0)
@@ -320,18 +318,16 @@ class ElevenLabsVoiceProvider:
 
         if response.status_code == 429 or response.status_code >= 500:
             logger.warning(
-                "ElevenLabs TTS HTTP error: status=%s, request_id=%s, body=%s",
+                "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
                 response.status_code,
                 response.headers.get("request-id", "unavailable"),
-                response.text[:1000] if response.status_code >= 400 else "",
             )
             raise VoiceProviderUnavailable()
         if response.is_error:
             logger.error(
-                "ElevenLabs TTS HTTP error: status=%s, request_id=%s, body=%s",
+                "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
                 response.status_code,
                 response.headers.get("request-id", "unavailable"),
-                response.text[:1000],
             )
             raise VoiceProviderError()
 
@@ -344,6 +340,16 @@ class ElevenLabsVoiceProvider:
             )
             raise VoiceProviderError()
         return SynthesizedAudio(content=response.content, content_type=content_type)
+
+    @staticmethod
+    def _tts_voice_settings(model_id: str, speed: float) -> dict[str, float]:
+        if isinstance(speed, bool) or not isinstance(speed, (float, int)) or not math.isfinite(speed) or not 0.7 <= speed <= 1.2:
+            raise VoiceProviderError()
+        # Keep the deployed Flash v2.5 range. Models without speed support must
+        # fail safely instead of silently discarding the reader's preference.
+        if model_id.startswith(("eleven_v3", "eleven_v4")) and speed != 1.0:
+            raise VoiceProviderUnavailable()
+        return {"stability": 0.6, "similarity_boost": 0.8, "speed": round(speed, 2)}
 
     async def transcribe(
         self,

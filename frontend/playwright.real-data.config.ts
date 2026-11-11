@@ -13,6 +13,7 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
   workers: 1,
+  globalSetup: "./test/browser/warm-routes.ts",
   retries: 0,
   outputDir: "test-results/real-data",
   reporter: [

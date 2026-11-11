@@ -1,4 +1,8 @@
 import type { ReadingPageWordDTO } from "@/types/reading";
+import {
+  normalizeVietnameseWord,
+  tokenizeVietnameseText,
+} from "@/lib/reading/vietnamese-text";
 
 export type RealtimeWordStatus = "MATCH" | "SUBSTITUTE" | "DELETE" | "REPEATED";
 
@@ -66,26 +70,20 @@ interface IndexedBookWord {
  * "da" và "đa" => khác nhau
  */
 export function normalizeRealtimeWord(text: string): string {
-  return text
-    .normalize("NFC")
-    .toLocaleLowerCase("vi-VN")
-    .replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "")
-    .normalize("NFC");
+  return normalizeVietnameseWord(text);
 }
 /**
  * Tách transcript thành các từ.
  */
 export function tokenizeRealtimeText(text: string): string[] {
-  const tokens = text.normalize("NFC").match(/[\p{L}\p{N}]+/gu) ?? [];
-
-  return tokens
-    .map((token) => normalizeRealtimeWord(token))
-    .filter((token) => token.length > 0);
+  return tokenizeVietnameseText(text);
 }
 
 export class RealtimeAlignmentEngine {
   private readonly bookWords: IndexedBookWord[];
 
+  private uncertain = false;
+  private readonly finalSegmentIds = new Set<string>();
   private currentBookIndex = 0;
   private spokenWords: string[] = [];
 
@@ -128,7 +126,21 @@ export class RealtimeAlignmentEngine {
    * Không truyền toàn bộ transcript tích lũy nhiều lần,
    * vì như vậy các từ cũ sẽ bị xử lý lặp lại.
    */
-  addFinalTranscript(text: string): RealtimeAlignmentSnapshot {
+  markUncertain(): void {
+    this.uncertain = true;
+  }
+
+  hasUncertainty(): boolean {
+    return this.uncertain;
+  }
+
+  addFinalTranscript(
+    text: string,
+    segmentId?: string,
+  ): RealtimeAlignmentSnapshot {
+    if (segmentId && this.finalSegmentIds.has(segmentId))
+      return this.getSnapshot();
+    if (segmentId) this.finalSegmentIds.add(segmentId);
     const tokens = tokenizeRealtimeText(text);
 
     for (const token of tokens) {
@@ -470,13 +482,8 @@ export class RealtimeAlignmentEngine {
     }
 
     this.repeatedWordIds.add(previousWord.wordId);
-
-    this.statusByWordId.set(previousWord.wordId, {
-      wordId: previousWord.wordId,
-      wordIndex: previousWord.wordIndex,
-      text: previousWord.text,
-      status: "REPEATED",
-    });
+    // Repetition is additional fluency evidence. Keep the confirmed first
+    // reading status instead of replacing a match/error with a presentation state.
 
     this.repeatedItems.push({
       word: token,
@@ -495,6 +502,9 @@ export class RealtimeAlignmentEngine {
     const word = this.bookWords[bookArrayIndex];
 
     if (!word) return;
+    // Missing/low-confidence audio is not evidence of a child omission or substitution.
+    if (this.uncertain && (status === "DELETE" || status === "SUBSTITUTE"))
+      return;
 
     this.statusByWordId.set(word.wordId, {
       wordId: word.wordId,
@@ -552,6 +562,7 @@ export class RealtimeAlignmentEngine {
    * Những từ còn lại phía sau con trỏ được đánh dấu DELETE.
    */
   finish(): RealtimeAlignmentSnapshot {
+    if (this.uncertain) return this.getSnapshot();
     this.flushPendingToken();
 
     while (this.currentBookIndex < this.bookWords.length) {
@@ -567,6 +578,8 @@ export class RealtimeAlignmentEngine {
    */
   reset(): RealtimeAlignmentSnapshot {
     this.currentBookIndex = 0;
+    this.uncertain = false;
+    this.finalSegmentIds.clear();
     this.spokenWords = [];
     this.pendingToken = null;
 

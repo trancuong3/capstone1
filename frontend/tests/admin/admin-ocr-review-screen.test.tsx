@@ -726,7 +726,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       screen.getByRole("heading", { name: /Kiểm tra OCR · R3/ }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Nội.");
-    expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
+    expect(services.pages.getImage).toHaveBeenCalledWith(
+      ADMIN_PAGE_ID,
+      replacementDetail.page_revision_id,
+    );
     expect(services.revisions.verify).not.toHaveBeenCalled();
   });
 
@@ -1415,7 +1418,10 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       words: expect.any(Array),
     });
     expect(services.revisions.list).toHaveBeenCalledWith(ADMIN_PAGE_ID);
-    expect(services.pages.getImage).toHaveBeenCalledWith(ADMIN_PAGE_ID);
+    expect(services.pages.getImage).toHaveBeenCalledWith(
+      ADMIN_PAGE_ID,
+      pending.page_revision_id,
+    );
   });
 
   it("rejects an AI suggestion without changing the draft or source image", async () => {

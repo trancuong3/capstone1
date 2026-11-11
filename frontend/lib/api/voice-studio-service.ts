@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ServiceError } from "@/lib/api/service-error";
+import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -27,7 +28,7 @@ const voiceListSchema = z.object({
 const timedSpeechSchema = z.object({
   audio_base64: z.string().min(1),
   content_type: z.string().startsWith("audio/"),
-  duration_seconds: z.number().nonnegative(),
+  duration_seconds: z.number().positive(),
   words: z.array(
     z.object({
       index: z.number().int().nonnegative(),
@@ -56,6 +57,7 @@ export interface TimedSpeechOptions {
   readonly voiceId?: string | null;
   readonly speed?: number;
   readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 export interface VoiceStudioService {
@@ -102,28 +104,38 @@ async function request(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
+  timeoutMs = 30_000,
 ): Promise<unknown> {
-  const token = await accessToken();
   try {
-    const response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(init.body ? { "Content-Type": "application/json" } : {}),
+    return await withRequestDeadline(
+      async (requestSignal) => {
+        const token = await accessToken();
+        requestSignal.throwIfAborted();
+        const response = await fetch(`${getApiBaseUrl()}${path}`, {
+          ...init,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+            ...(init.body ? { "Content-Type": "application/json" } : {}),
+          },
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: requestSignal,
+        });
+        if (!response.ok) {
+          throw failure(
+            response.status,
+            response.status === 429 || response.status >= 500,
+          );
+        }
+        const payload: unknown = await response.json();
+        requestSignal.throwIfAborted();
+        return payload;
       },
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
       signal,
-    });
-    if (!response.ok) {
-      throw failure(
-        response.status,
-        response.status === 429 || response.status >= 500,
-      );
-    }
-    return await response.json();
+      timeoutMs,
+    );
   } catch (error) {
     if (error instanceof ServiceError || signal?.aborted) throw error;
     throw failure(0, true);
@@ -145,7 +157,15 @@ export function createVoiceStudioService(): VoiceStudioService {
       const payload = await request("/voice/voices", { method: "GET" }, signal);
       const parsed = voiceListSchema.safeParse(payload);
       if (!parsed.success) throw failure(502);
-      return parsed.data;
+      const seen = new Set<string>();
+      return {
+        ...parsed.data,
+        voices: parsed.data.voices.filter((voice) => {
+          if (seen.has(voice.voice_id)) return false;
+          seen.add(voice.voice_id);
+          return true;
+        }),
+      };
     },
 
     async synthesizeTimed(words, options = {}) {
@@ -160,11 +180,24 @@ export function createVoiceStudioService(): VoiceStudioService {
           }),
         },
         options.signal,
+        options.timeoutMs,
       );
       const parsed = timedSpeechSchema.safeParse(payload);
       // Timings must describe every word, otherwise highlighting would drift.
       if (!parsed.success || parsed.data.words.length !== words.length) {
         throw failure(502);
+      }
+      let previousEnd = 0;
+      for (const [index, word] of parsed.data.words.entries()) {
+        if (
+          word.index !== index ||
+          word.start < previousEnd ||
+          word.end < word.start ||
+          word.end > parsed.data.duration_seconds
+        ) {
+          throw failure(502);
+        }
+        previousEnd = word.end;
       }
       let audio: Blob;
       try {

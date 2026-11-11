@@ -118,7 +118,18 @@ class ProgressPeriodsRead(BaseModel):
     next_cursor: str | None
 
 
+from app.schemas.reading import ReadingAssessmentMetrics
+
+
+class AssessmentCoverage(BaseModel):
+    assessed_sessions: int = Field(ge=0)
+    total_sessions: int = Field(ge=0)
+
+
 class ProgressRead(SavedProgressPeriodRead, ProgressPeriodOptionRead):
+    # Derived read-only from finalized session evidence within this saved period.
+    assessment: ReadingAssessmentMetrics | None = None
+    assessment_coverage: AssessmentCoverage | None = None
     difficult_words: list[DifficultWordRead] | None
     previous_period: ProgressPeriodRead | None
     trend_deltas: ProgressTrendRead | None

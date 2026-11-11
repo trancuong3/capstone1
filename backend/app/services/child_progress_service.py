@@ -80,6 +80,7 @@ assessment_cache = _AssessmentCache()
 
 def _metrics_read(m: WindowMetrics) -> ProgressMetricsRead:
     return ProgressMetricsRead(
+        reading_assessment=m.reading_assessment,
         sessions=m.sessions,
         active_days=m.active_days,
         reading_minutes=m.reading_minutes,

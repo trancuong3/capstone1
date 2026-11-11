@@ -44,6 +44,33 @@ def run(coro):
 
 
 class WordTimingTests(unittest.TestCase):
+    def test_rejects_equal_length_alignment_for_different_text(self):
+        value = alignment_for(TEXT)
+        value["characters"][0] = "X"
+        with self.assertRaises(VoiceProviderError):
+            word_timings(WORDS, value)
+
+    def test_maps_decomposed_vietnamese_without_losing_word_identity(self):
+        import unicodedata
+        text = unicodedata.normalize("NFD", TEXT)
+        timings, duration = word_timings(WORDS, alignment_for(text))
+        self.assertEqual([word.index for word in timings], [0, 1, 2, 3])
+        self.assertEqual(timings[-1].end, duration)
+        self.assertGreater(timings[0].end, 0.2)
+
+    def test_rejects_negative_reversed_or_overlapping_character_times(self):
+        for field, index, value in (
+            ("character_start_times_seconds", 0, -1),
+            ("character_end_times_seconds", 1, 0),
+            ("character_start_times_seconds", 3, 0),
+            ("character_end_times_seconds", 0, float("inf")),
+        ):
+            with self.subTest(field=field, index=index):
+                alignment = alignment_for(TEXT)
+                alignment[field][index] = value
+                with self.assertRaises(VoiceProviderError):
+                    word_timings(WORDS, alignment)
+
     def test_maps_character_times_to_exact_word_ranges(self):
         timings, duration = word_timings(WORDS, alignment_for(TEXT))
         # "Bé Na có mèo." -> Bé=0..1, space, Na=3..4, space, có=6..7, space, mèo.=9..12
@@ -55,11 +82,13 @@ class WordTimingTests(unittest.TestCase):
 
     def test_timings_never_go_backwards(self):
         alignment = alignment_for(TEXT)
-        alignment["character_start_times_seconds"][3] = 0.0  # provider glitch
         timings, _ = word_timings(WORDS, alignment)
         starts = [t.start for t in timings]
         self.assertEqual(starts, sorted(starts))
         self.assertTrue(all(t.end >= t.start for t in timings))
+        alignment["character_start_times_seconds"][3] = 0.0
+        with self.assertRaises(VoiceProviderError):
+            word_timings(WORDS, alignment)
 
     def test_rejects_misaligned_or_invalid_alignment(self):
         bad = alignment_for(TEXT)
@@ -159,6 +188,26 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(VoiceProviderError) as raised:
             run(ElevenLabsStudioProvider(api_key="").list_voices())
         self.assertEqual(raised.exception.code, "SPEECH_UNAVAILABLE")
+
+    def test_all_supported_speeds_reach_both_provider_paths(self):
+        from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+        for speed in (0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.2):
+            with self.subTest(speed=speed):
+                studio.clear_caches()
+                calls = []
+                body = {"audio_base64": base64.b64encode(b"mp3").decode(), "alignment": alignment_for(TEXT)}
+                responses = [json_response(body), httpx.Response(200, content=b"mp3", headers={"content-type": "audio/mpeg"})]
+                with patch.object(studio.httpx, "AsyncClient", fake_client(responses, calls)):
+                    run(ElevenLabsStudioProvider(api_key="speed-test").synthesize_timed(words=WORDS, speed=speed))
+                    run(ElevenLabsVoiceProvider(api_key="speed-test").synthesize(text=TEXT, speed=speed))
+                self.assertEqual([call[2]["json"]["voice_settings"]["speed"] for call in calls], [speed, speed])
+
+    def test_unsupported_model_does_not_silently_ignore_speed(self):
+        calls = []
+        with patch.dict(os.environ, {"ELEVENLABS_MODEL_ID": "eleven_v3"}), patch.object(studio.httpx, "AsyncClient", fake_client([], calls)):
+            with self.assertRaises(VoiceProviderError):
+                run(ElevenLabsStudioProvider(api_key="model-test").synthesize_timed(words=WORDS, speed=0.7))
+        self.assertEqual(calls, [])
 
     def test_timed_speech_sends_speed_and_caches_identical_requests(self):
         calls = []
