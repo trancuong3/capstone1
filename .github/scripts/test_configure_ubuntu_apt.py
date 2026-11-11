@@ -3,8 +3,13 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
+from urllib.error import URLError
 
-from configure_ubuntu_apt import ARCHIVE, NETWORK_OPTIONS, SECURITY, configure, direct_archives
+from configure_ubuntu_apt import (
+    ARCHIVE, ARCHIVE_MIRRORS, NETWORK_OPTIONS, SECURITY,
+    configure, direct_archives, probe_release, select_archive,
+)
 
 
 class ConfigureUbuntuAptTests(unittest.TestCase):
@@ -75,6 +80,73 @@ class ConfigureUbuntuAptTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No supported Ubuntu"):
                 configure(root)
             self.assertFalse((root / "apt.conf.d").exists())
+
+    def test_primary_dns_failure_selects_fallback_only_after_all_suites_pass(self):
+        seen = []
+        def probe(url):
+            seen.append(url)
+            if url.startswith(ARCHIVE):
+                raise URLError("Temporary failure resolving archive.ubuntu.com")
+        selected = select_archive("noble", probe)
+        self.assertEqual(selected, ARCHIVE_MIRRORS[1])
+        self.assertEqual(seen, [ARCHIVE + "dists/noble/InRelease"] + [
+            selected + f"dists/{suite}/InRelease"
+            for suite in ("noble", "noble-updates", "noble-backports", "noble-security")
+        ])
+
+    def test_missing_security_pocket_rejects_otherwise_available_archive(self):
+        def probe(url):
+            if url == ARCHIVE + "dists/noble-security/InRelease":
+                raise URLError("missing security metadata")
+        self.assertEqual(select_archive("noble", probe), ARCHIVE_MIRRORS[1])
+
+    def test_all_unreachable_archives_fail_without_choosing_an_unchecked_source(self):
+        def probe(url):
+            raise URLError("DNS unavailable")
+        with self.assertRaisesRegex(RuntimeError, "No Ubuntu archive"):
+            select_archive("noble", probe)
+
+    def test_reachable_primary_is_kept(self):
+        probe = MagicMock()
+        self.assertEqual(select_archive("noble", probe), ARCHIVE)
+        self.assertEqual(probe.call_count, 4)
+
+    def test_probe_rejects_html_or_https_downgrade_and_accepts_release_metadata(self):
+        payload = b"-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nOrigin: Ubuntu\n"
+        for final_url, content, valid in (
+            (ARCHIVE, b"<html>service unavailable</html>", False),
+            ("http://archive.ubuntu.com/ubuntu/", payload, False),
+            (ARCHIVE, payload, True),
+        ):
+            with self.subTest(final_url=final_url, valid=valid):
+                response = MagicMock()
+                response.status = 200
+                response.geturl.return_value = final_url
+                response.read.return_value = content
+                with patch("configure_ubuntu_apt.urlopen") as opener:
+                    opener.return_value.__enter__.return_value = response
+                    if valid:
+                        probe_release(ARCHIVE + "dists/noble/InRelease")
+                    else:
+                        with self.assertRaises(ValueError):
+                            probe_release(ARCHIVE + "dists/noble/InRelease")
+                    opener.assert_called_once_with(ARCHIVE + "dists/noble/InRelease", timeout=10)
+
+    def test_fallback_also_replaces_restored_mirror_lists_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "sources.list").write_text(
+                "deb mirror+file:/etc/apt/apt-mirrors.txt noble main\n", encoding="utf-8",
+            )
+            mirror_list = root / "apt-mirrors.txt"
+            mirror_list.write_text("http://azure.archive.ubuntu.com/ubuntu/ priority:1\n", encoding="utf-8")
+            selected = ARCHIVE_MIRRORS[1]
+            configure(root, selected)
+            self.assertEqual(mirror_list.read_text(encoding="utf-8"), selected + "\n")
+            self.assertIn(selected, (root / "sources.list").read_text(encoding="utf-8"))
+            self.assertEqual(configure(root, selected), [])
+            with self.assertRaisesRegex(ValueError, "approved HTTPS"):
+                configure(root, "http://unapproved.example/ubuntu/")
 
 
 if __name__ == "__main__":
