@@ -38,115 +38,103 @@ describe("admin components", () => {
     navigationMock.replace.mockClear();
   });
 
-  it(
-    "uses compact buttons inside Admin and preserves the default size elsewhere",
-    async () => {
-      const services = createAdminServiceFixture();
-      render(
-        withAdminFixture(
-          <div>
-            <AdminLayout>
-              <p>Content</p>
-            </AdminLayout>
-          </div>,
-          services,
-        ),
-      );
-      const logout = screen.getByRole("button", { name: "Đăng xuất" });
-      expect(logout.className).toContain("min-h-11");
-      expect(logout.className).not.toContain("h-16");
-
-      const outsideButton = render(<Button>Parent action</Button>);
-      expect(
-        within(outsideButton.container).getByRole("button"),
-      ).toHaveClass("h-16");
-    },
-  );
-
-  it(
-    "uses a safe message when the admin auth service rejects credentials",
-    async () => {
-      const services = createAdminServiceFixture();
-      services.auth.signIn.mockRejectedValue(
-        new AdminAuthError("invalid-credentials"),
-      );
-      const user = userEvent.setup();
-      render(
-        withAdminFixture(<AdminLoginScreen scenario="default" />, services),
-      );
-      await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
-      await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Thông tin đăng nhập chưa đúng",
-      );
-      expect(services.auth.signIn).toHaveBeenCalledOnce();
-      expect(navigationMock.replace).not.toHaveBeenCalled();
-      expect(navigationMock.push).not.toHaveBeenCalled();
-    },
-  );
-
-  it(
-    "awaits admin sign-out, blocks repeats, and replaces the protected route",
-    async () => {
-      const services = createAdminServiceFixture();
-      let completeSignOut: () => void = () => undefined;
-      services.auth.signOut.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            completeSignOut = resolve;
-          }),
-      );
-      const user = userEvent.setup();
-      render(
-        withAdminFixture(
+  it("uses compact buttons inside Admin and preserves the default size elsewhere", async () => {
+    const services = createAdminServiceFixture();
+    render(
+      withAdminFixture(
+        <div>
           <AdminLayout>
-            <p>Nội dung quản trị</p>
-          </AdminLayout>,
-          services,
-        ),
-      );
-      await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
-      expect(services.auth.signOut).toHaveBeenCalledOnce();
-      expect(
-        screen.getByRole("button", { name: "Đang đăng xuất…" }),
-      ).toBeDisabled();
-      await user.click(screen.getByRole("button", { name: "Đang đăng xuất…" }));
-      expect(services.auth.signOut).toHaveBeenCalledOnce();
-      expect(navigationMock.replace).not.toHaveBeenCalled();
-      await act(async () => {
-        completeSignOut();
-      });
-      await waitFor(() =>
-        expect(navigationMock.replace).toHaveBeenCalledWith("/admin/login"),
-      );
-      expect(navigationMock.refresh).toHaveBeenCalledOnce();
-    },
-  );
+            <p>Content</p>
+          </AdminLayout>
+        </div>,
+        services,
+      ),
+    );
+    const logout = screen.getByRole("button", { name: "Đăng xuất" });
+    expect(logout.className).toContain("min-h-11");
+    expect(logout.className).not.toContain("h-16");
 
-  it(
-    "keeps the protected route visible when admin sign-out fails",
-    async () => {
-      const services = createAdminServiceFixture();
-      services.auth.signOut.mockRejectedValueOnce(
-        new Error("provider unavailable"),
-      );
-      const user = userEvent.setup();
-      render(
-        withAdminFixture(
-          <AdminLayout>
-            <p>Nội dung quản trị</p>
-          </AdminLayout>,
-          services,
-        ),
-      );
-      await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("Chưa thể đăng xuất lúc này");
-      expect(alert).not.toHaveTextContent("provider unavailable");
-      expect(navigationMock.replace).not.toHaveBeenCalled();
-      expect(navigationMock.refresh).not.toHaveBeenCalled();
-    },
-  );
+    const outsideButton = render(<Button>Parent action</Button>);
+    expect(
+      within(outsideButton.container).getByRole("button"),
+    ).toHaveClass("h-16");
+  });
+
+  it("uses a safe message when the admin auth service rejects credentials", async () => {
+    const services = createAdminServiceFixture();
+    services.auth.signIn.mockRejectedValue(
+      new AdminAuthError("invalid-credentials"),
+    );
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(<AdminLoginScreen scenario="default" />, services),
+    );
+    await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Thông tin đăng nhập chưa đúng",
+    );
+    expect(services.auth.signIn).toHaveBeenCalledOnce();
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("awaits admin sign-out, blocks repeats, and replaces the protected route", async () => {
+    const services = createAdminServiceFixture();
+    let completeSignOut: () => void = () => undefined;
+    services.auth.signOut.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          completeSignOut = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminLayout>
+          <p>Nội dung quản trị</p>
+        </AdminLayout>,
+        services,
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+    expect(services.auth.signOut).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("button", { name: "Đang đăng xuất…" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Đang đăng xuất…" }));
+    expect(services.auth.signOut).toHaveBeenCalledOnce();
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+    await act(async () => {
+      completeSignOut();
+    });
+    await waitFor(() =>
+      expect(navigationMock.replace).toHaveBeenCalledWith("/admin/login"),
+    );
+    expect(navigationMock.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the protected route visible when admin sign-out fails", async () => {
+    const services = createAdminServiceFixture();
+    services.auth.signOut.mockRejectedValueOnce(
+      new Error("provider unavailable"),
+    );
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminLayout>
+          <p>Nội dung quản trị</p>
+        </AdminLayout>,
+        services,
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Chưa thể đăng xuất lúc này");
+    expect(alert).not.toHaveTextContent("provider unavailable");
+    expect(navigationMock.replace).not.toHaveBeenCalled();
+    expect(navigationMock.refresh).not.toHaveBeenCalled();
+  });
 
   it("rejects an inverted grade range in the book form", async () => {
     const user = userEvent.setup();
@@ -161,118 +149,109 @@ describe("admin components", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it(
-    "offers title repair and metadata editing directly from the inventory",
-    async () => {
-      const services = createAdminServiceFixture();
-      const missingTitle = {
-        ...adminBookListItemFixture,
-        book: {
-          ...adminBookListItemFixture.book,
-          id: "81000000-0000-4000-8000-000000000099",
-          title: "",
-        },
-      };
-      services.books.list.mockResolvedValue([
-        missingTitle,
-        adminBookListItemFixture,
-      ]);
-      render(withAdminFixture(<AdminBooksScreen />, services));
-
-      expect(
-        await screen.findByRole("link", { name: "Bổ sung tiêu đề" }),
-      ).toHaveAttribute(
-        "href",
-        `/admin/books/${missingTitle.book.id}/edit?issue=MISSING_TITLE`,
-      );
-
-      expect(
-        screen.getByRole("link", { name: "Chỉnh sửa thông tin" }),
-      ).toHaveAttribute(
-        "href",
-        `/admin/books/${adminBookListItemFixture.book.id}/edit`,
-      );
-    },
-  );
-
-  it(
-    "retires a book from the inventory and reloads the lifecycle from the service",
-    async () => {
-      const services = createAdminServiceFixture();
-      const retired = {
-        ...adminBookListItemFixture,
-        book: {
-          ...adminBookListItemFixture.book,
-          lifecycle_status: "RETIRED" as const,
-        },
-        parent_catalog_eligible: false,
-      };
-      services.books.list
-        .mockResolvedValueOnce([adminBookListItemFixture])
-        .mockResolvedValueOnce([retired]);
-      services.books.updateStatus.mockResolvedValue({
+  it("offers title repair and metadata editing directly from the inventory", async () => {
+    const services = createAdminServiceFixture();
+    const missingTitle = {
+      ...adminBookListItemFixture,
+      book: {
         ...adminBookListItemFixture.book,
-        lifecycle_status: "RETIRED",
-      });
-      vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
-      const user = userEvent.setup();
+        id: "81000000-0000-4000-8000-000000000099",
+        title: "",
+      },
+    };
+    services.books.list.mockResolvedValue([
+      missingTitle,
+      adminBookListItemFixture,
+    ]);
+    render(withAdminFixture(<AdminBooksScreen />, services));
 
-      render(withAdminFixture(<AdminBooksScreen />, services));
-      await screen.findByRole("button", { name: "Ngừng hoạt động" });
-      await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
+    expect(
+      await screen.findByRole("link", { name: "Bổ sung tiêu đề" }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/books/${missingTitle.book.id}/edit?issue=MISSING_TITLE`,
+    );
 
-      await waitFor(() => {
-        expect(services.books.updateStatus).toHaveBeenCalledWith(
-          adminBookListItemFixture.book.id,
-          { status: "RETIRED" },
-        );
-      });
-      expect(
-        await screen.findByRole("button", { name: "Kích hoạt lại" }),
-      ).toBeInTheDocument();
-      expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
-      expect(
-        await screen.findByText("Đã ngừng hoạt động sách"),
-      ).toBeInTheDocument();
-    },
-  );
+    expect(
+      screen.getByRole("link", { name: "Chỉnh sửa thông tin" }),
+    ).toHaveAttribute(
+      "href",
+      `/admin/books/${adminBookListItemFixture.book.id}/edit`,
+    );
+  });
 
-  it(
-    "renders lifecycle and OCR metrics from typed service responses and forwards filters",
-    async () => {
-      const services = createAdminServiceFixture();
-      const retired = {
-        ...adminBookListItemFixture,
-        book: {
-          ...adminBookListItemFixture.book,
-          lifecycle_status: "RETIRED" as const,
-        },
-        parent_catalog_eligible: false,
-      };
-      const user = userEvent.setup();
-      render(withAdminFixture(<AdminBooksScreen />, services));
-      await screen.findByRole("heading", {
-        name: adminBookListItemFixture.book.title,
-      });
-      expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
-      expect(
-      screen.getByText("Trang").nextElementSibling,
+  it("retires a book from the inventory and reloads the lifecycle from the service", async () => {
+    const services = createAdminServiceFixture();
+    const retired = {
+      ...adminBookListItemFixture,
+      book: {
+        ...adminBookListItemFixture.book,
+        lifecycle_status: "RETIRED" as const,
+      },
+      parent_catalog_eligible: false,
+    };
+    services.books.list
+      .mockResolvedValueOnce([adminBookListItemFixture])
+      .mockResolvedValueOnce([retired]);
+    services.books.updateStatus.mockResolvedValue({
+      ...adminBookListItemFixture.book,
+      lifecycle_status: "RETIRED",
+    });
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    const user = userEvent.setup();
+
+    render(withAdminFixture(<AdminBooksScreen />, services));
+    await screen.findByRole("button", { name: "Ngừng hoạt động" });
+    await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
+
+    await waitFor(() => {
+      expect(services.books.updateStatus).toHaveBeenCalledWith(
+        adminBookListItemFixture.book.id,
+        { status: "RETIRED" },
+      );
+    });
+    expect(
+      await screen.findByRole("button", { name: "Kích hoạt lại" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Đã ngừng")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã ngừng hoạt động sách"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders lifecycle and OCR metrics from typed service responses and forwards filters", async () => {
+    const services = createAdminServiceFixture();
+    const retired = {
+      ...adminBookListItemFixture,
+      book: {
+        ...adminBookListItemFixture.book,
+        lifecycle_status: "RETIRED" as const,
+      },
+      parent_catalog_eligible: false,
+    };
+    const user = userEvent.setup();
+    render(withAdminFixture(<AdminBooksScreen />, services));
+    await screen.findByRole("heading", {
+      name: adminBookListItemFixture.book.title,
+    });
+    expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
+    expect(
+    screen.getByText("Trang").nextElementSibling,
     ).toHaveTextContent("3");
-      for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-        expect(
-        screen.getByText(label).nextElementSibling,
-      ).toHaveTextContent("1");
-      }
-      services.books.list.mockResolvedValueOnce([retired]);
-      await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
-      expect(await screen.findByText("Đã ngừng")).toBeInTheDocument();
-      expect(services.books.list).toHaveBeenLastCalledWith({
-        search: "",
-        lifecycle_status: "RETIRED",
-        verification_status: undefined,
-      });
-      expect(services.books.create).not.toHaveBeenCalled();
-      expect(services.books.update).not.toHaveBeenCalled();
-    },
-  );
+    for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
+      expect(
+      screen.getByText(label).nextElementSibling,
+    ).toHaveTextContent("1");
+    }
+    services.books.list.mockResolvedValueOnce([retired]);
+    await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
+    expect(await screen.findByText("Đã ngừng")).toBeInTheDocument();
+    expect(services.books.list).toHaveBeenLastCalledWith({
+      search: "",
+      lifecycle_status: "RETIRED",
+      verification_status: undefined,
+    });
+    expect(services.books.create).not.toHaveBeenCalled();
+    expect(services.books.update).not.toHaveBeenCalled();
+  });
 });

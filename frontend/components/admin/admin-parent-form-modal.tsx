@@ -53,7 +53,7 @@ export function getAdminParentMutationErrorMessage(error: unknown): string {
       case 503:
         return error.request_id
           ? "Dịch vụ quản trị hoặc Supabase Auth đang gặp sự cố. Mã yêu cầu: " +
-            error.request_id
+              error.request_id
           : "Dịch vụ quản trị hoặc Supabase Auth đang tạm thời không khả dụng.";
       default:
         return error.status === 0
@@ -111,8 +111,7 @@ export function AdminParentFormModal({
     if (!displayName) {
       nextErrors.display_name = "Vui lòng nhập tên hiển thị.";
     } else if (displayName.length > 120) {
-      nextErrors.display_name =
-        "Tên hiển thị không được vượt quá 120 ký tự.";
+      nextErrors.display_name = "Tên hiển thị không được vượt quá 120 ký tự.";
     }
 
     if (mode === "create" && !email) {
@@ -149,10 +148,15 @@ export function AdminParentFormModal({
     if (mode === "create") {
       submission = {
         mode,
-        input: { display_name: displayName, email, ...(phone ? { phone } : {}) },
+        input: {
+          display_name: displayName,
+          email,
+          ...(phone ? { phone } : {}),
+        },
       };
     } else {
-      const input: { display_name?: string; email?: string; phone?: string } = {};
+      const input: { display_name?: string; email?: string; phone?: string } =
+        {};
       if (displayName !== originalName) input.display_name = displayName;
       if (contactInfoEditable && email !== originalEmail) input.email = email;
       if (contactInfoEditable && phone !== originalPhone) input.phone = phone;
@@ -239,8 +243,8 @@ export function AdminParentFormModal({
             </StatusMessage>
           ) : (
             <p className="text-sm text-muted">
-              Email và số điện thoại được cập nhật qua Supabase Auth ở
-              backend. API hiện không hỗ trợ xóa trống hai trường này.
+              Email và số điện thoại được cập nhật qua Supabase Auth ở backend.
+              API hiện không hỗ trợ xóa trống hai trường này.
             </p>
           )}
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
