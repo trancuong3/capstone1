@@ -181,14 +181,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           <h2 className="text-2xl font-black" id="pages-title">
             Trang sách
           </h2>
-          <button
-            className="flex min-h-12 items-center gap-2 rounded-control px-3 font-bold text-primary-hover hover:bg-sky"
-            onClick={() => void load()}
+          <Button
+            className="sm:w-auto"
             disabled={items === null || retiringPageId !== null}
+            onClick={() => void load()}
             type="button"
+            variant="secondary"
           >
             <RefreshCw aria-hidden className="size-5" /> Tải lại
-          </button>
+          </Button>
         </div>
         {pageActionNotice ? (
           <StatusMessage
