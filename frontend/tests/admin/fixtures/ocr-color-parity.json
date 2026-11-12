@@ -25308,7 +25308,7 @@
       },
       "review_reason": "test fixture"
     },
-    "expected_color": "green"
+    "expected_color": "yellow"
   },
   {
     "id": "engines-226",
@@ -26593,6 +26593,43 @@
       "vietocr_token_index": null,
       "source_text": "ước",
       "alignment": "split",
+      "engine_agreement_score": null,
+      "calibrated_word_accuracy": null,
+      "verification_source": null,
+      "reference_text": null,
+      "reference_alignment": null,
+      "selected_engine": "vietocr",
+      "selection_reason": "vietocr_nonempty_nonrepetitive_provisional",
+      "bbox_quality": "valid",
+      "crop_quality": "usable",
+      "crop_evidence": {
+        "status": "skipped"
+      },
+      "review_reason": "test fixture"
+    },
+    "expected_color": "yellow"
+  },
+  {
+    "id": "paddle-incomplete-prefix-multiengine",
+    "text": "Mỹ",
+    "ocr_review_status": "engine_disagreement",
+    "ocr_evidence": {
+      "contract": "hybrid_ocr_evidence_v4",
+      "engine_outputs": {
+        "paddleocr": "M",
+        "vietocr": "Mỹ",
+        "tesseract": "Mỹ"
+      },
+      "engine_statuses": {
+        "paddleocr": "success",
+        "vietocr": "success",
+        "tesseract": "success"
+      },
+      "engine_errors": {},
+      "paddle_token_index": 0,
+      "vietocr_token_index": 0,
+      "source_text": "Mỹ",
+      "alignment": "substitute",
       "engine_agreement_score": null,
       "calibrated_word_accuracy": null,
       "verification_source": null,

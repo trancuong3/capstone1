@@ -16,7 +16,11 @@ def _valid_sha(value: str) -> str:
 
 
 class TrainingRunCreate(BaseModel):
-    profile: Literal["FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG"]
+    profile: Literal[
+        "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
+        # Legacy names remain accepted during rolling deployment and old-run resume.
+        "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
+    ]
     dataset_version_id: UUID
     parent_checkpoint_sha256: HexSha256
     manifest_sha256: HexSha256
@@ -42,7 +46,10 @@ class TrainingRunRead(BaseModel):
 
 
 class TrainingRunComplete(BaseModel):
-    profile: Literal["FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG"]
+    profile: Literal[
+        "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
+        "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
+    ]
     parent_checkpoint_sha256: HexSha256
     manifest_sha256: HexSha256
     config_sha256: HexSha256
@@ -97,7 +104,8 @@ class DatasetSampleInput(BaseModel):
 
 class DatasetImport(BaseModel):
     source_flow: Literal["FLOW2_EXTERNAL", "FLOW2_TRDG", "FLOW2_EXTERNAL_TRDG", "LOCKED_TEST"]
-    samples: list[DatasetSampleInput] = Field(min_length=1, max_length=10000)
+    # Flow 1 targets up to 50k TRDG rows plus real samples in one independent manifest.
+    samples: list[DatasetSampleInput] = Field(min_length=1, max_length=60000)
     split_seed: str = Field(default="viread-vietocr-v2-split-v1", min_length=1, max_length=160)
     provenance: dict[str, Any] = Field(default_factory=dict)
 

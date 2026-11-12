@@ -127,8 +127,22 @@ export function adjudicateWord(
     let opposing = 0;
     let strongestOpponent = 0;
     let diacriticConflict = false;
+    let incompleteDetectorReading = false;
     for (const [otherToken, otherSupporters] of byToken) {
       if (otherToken === token) continue;
+      // PaddleOCR's generic Latin recognizer often drops Vietnamese marks,
+      // so a different full token is not a veto. A strict prefix suggests
+      // that it saw only part of the word (for example "M" while both
+      // Vietnamese engines say "Mỹ"); leave that token for human review.
+      if (
+        (otherToken.length < token.length && token.startsWith(otherToken)) ||
+        (token.length < otherToken.length && otherToken.startsWith(token))
+      ) {
+        const hasPaddlePrefix = otherSupporters.some(
+          (key) => READING_ENGINE[key] === "paddleocr",
+        );
+        incompleteDetectorReading ||= hasPaddlePrefix;
+      }
       const capable = otherSupporters.filter((key) =>
         VIETNAMESE_CAPABLE_ENGINES.has(READING_ENGINE[key]),
       );
@@ -145,7 +159,8 @@ export function adjudicateWord(
       enoughEngines &&
       strongestOpponent <= MAX_OPPOSING_READINGS_PER_TOKEN &&
       supporters.length > opposing &&
-      !diacriticConflict
+      !diacriticConflict &&
+      !incompleteDetectorReading
     ) {
       confirmed.push([token, supporters]);
     }

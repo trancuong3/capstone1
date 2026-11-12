@@ -96,7 +96,7 @@ class DatasetRow:
             label = normalize_label(raw["label"])
             verified = raw.get("verified") is True
             if flow == "FLOW1_VERIFIED" and not verified:
-                raise DatasetContractError("Flow 1 samples must originate from an Admin VERIFIED revision")
+                raise DatasetContractError("Flow 2 samples must originate from an Admin VERIFIED revision")
             if flow == "FLOW2_EXTERNAL" and not raw.get("annotation_id"):
                 raise DatasetContractError("external labels require an annotation_id")
             if flow == "FLOW2_EXTERNAL" and not verified:
@@ -115,6 +115,7 @@ class DatasetRow:
 def validate_rows(rows: Iterable[DatasetRow], *, expected_flow: Flow | None = None) -> list[DatasetRow]:
     materialized = list(rows)
     seen: set[tuple[str, str]] = set()
+    seen_hashes: set[str] = set()
     group_splits: dict[str, str] = {}
     for row in materialized:
         if expected_flow is not None and row.source_flow != expected_flow:
@@ -123,6 +124,10 @@ def validate_rows(rows: Iterable[DatasetRow], *, expected_flow: Flow | None = No
         if key in seen:
             raise DatasetContractError("duplicate source image within a flow")
         seen.add(key)
+        if row.image_sha256 and row.image_sha256 in seen_hashes:
+            raise DatasetContractError("duplicate image content within a dataset manifest")
+        if row.image_sha256:
+            seen_hashes.add(row.image_sha256)
         previous = group_splits.setdefault(row.group_id, row.split)
         if previous != row.split:
             raise DatasetContractError("group leakage across dataset splits")

@@ -14,6 +14,16 @@ function hash(value: string) {
   return `${value.slice(0, 12)}…${value.slice(-8)}`;
 }
 
+function trainingProfileName(profile: string) {
+  if (profile === "FLOW1_EXTERNAL_TRDG" || profile === "FLOW2_EXTERNAL_TRDG") {
+    return "Luồng 1 · ảnh thực tế + TRDG";
+  }
+  if (profile === "FLOW2_ADMIN_VERIFIED" || profile === "FLOW1_VERIFIED") {
+    return "Luồng 2 · Admin xác nhận";
+  }
+  return profile;
+}
+
 export function AdminVireadTrainingScreen() {
   const { vireadTraining } = useAdminServices();
   const [data, setData] = useState<VireadTrainingOverview | null>(null);
@@ -86,6 +96,22 @@ export function AdminVireadTrainingScreen() {
     data?.outbox
       .filter((item) => item.status === "PENDING" || item.status === "RETRY")
       .reduce((sum, item) => sum + item.count, 0) ?? 0;
+  const sourceCount = (flows: string[], split?: string) =>
+    data?.samples
+      .filter(
+        (item) =>
+          flows.includes(item.source_flow) && (!split || item.split === split),
+      )
+      .reduce((sum, item) => sum + item.count, 0) ?? 0;
+  const flow1External = sourceCount(["FLOW2_EXTERNAL"]);
+  const flow1Trdg = sourceCount(["FLOW2_TRDG"]);
+  const flow1Train = sourceCount(["FLOW2_EXTERNAL", "FLOW2_TRDG"], "train");
+  const flow1Validation = sourceCount(
+    ["FLOW2_EXTERNAL", "FLOW2_TRDG"],
+    "validation",
+  );
+  const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
+  const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
 
   return (
     <>
@@ -127,7 +153,9 @@ export function AdminVireadTrainingScreen() {
             <Card className="bg-white">
               <p className="font-bold text-muted">Model đang hoạt động</p>
               <h2 className="mt-2 text-xl font-black">
-                {data.active_model?.profile ?? "Chưa khởi tạo"}
+                {data.active_model
+                  ? trainingProfileName(data.active_model.profile)
+                  : "Chưa khởi tạo"}
               </h2>
               <p className="mt-2 break-all font-mono text-xs text-muted">
                 {data.active_model
@@ -157,23 +185,62 @@ export function AdminVireadTrainingScreen() {
 
           <Card className="mb-6 bg-white">
             <h2 className="text-xl font-black">Nguồn dữ liệu</h2>
-            <ul className="mt-4 grid gap-3 md:grid-cols-3">
-              {data.samples.map((item) => (
-                <li
-                  className="rounded-control border border-border p-4"
-                  key={`${item.source_flow}-${item.split}`}
-                >
-                  <p className="font-extrabold">{item.source_flow}</p>
-                  <p className="mt-1 text-sm text-muted">
-                    {item.split}: {item.count.toLocaleString("vi-VN")}
-                  </p>
-                </li>
-              ))}
-              {data.samples.length === 0 ? (
-                <li className="text-muted">
-                  Chưa có mẫu nào được đưa vào pipeline.
-                </li>
-              ) : null}
+            <p className="mt-2 text-sm text-muted">
+              Hai luồng dùng dataset và run riêng, cùng fine-tune VietOCR V2.
+            </p>
+            <ul className="mt-4 grid gap-3 md:grid-cols-2">
+              <li className="rounded-control border border-border p-4">
+                <p className="font-extrabold">
+                  Luồng 1 · ảnh thực tế + DBNet + TRDG
+                </p>
+                <p className="mt-2 text-sm">
+                  Ảnh thực tế: {flow1External.toLocaleString("vi-VN")} · TRDG:{" "}
+                  {flow1Trdg.toLocaleString("vi-VN")}
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  Train {flow1Train.toLocaleString("vi-VN")} · Validation{" "}
+                  {flow1Validation.toLocaleString("vi-VN")} · Holdout{" "}
+                  {sourceCount(
+                    ["FLOW2_EXTERNAL", "FLOW2_TRDG"],
+                    "holdout",
+                  ).toLocaleString("vi-VN")}
+                </p>
+                <p className="mt-2 text-sm font-bold text-muted">
+                  {flow1External > 1_000 || flow1Trdg > 50_000
+                    ? "Vượt khoảng dữ liệu cho phép: 500–1.000 mẫu thật và 20.000–50.000 mẫu TRDG"
+                    : flow1External < 500 ||
+                        flow1Trdg < 20_000 ||
+                        !flow1Train ||
+                        !flow1Validation
+                      ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
+                      : "Đủ khoảng dữ liệu; Colab cần chọn một version gộp chứa cả hai nguồn"}
+                </p>
+              </li>
+              <li className="rounded-control border border-border p-4">
+                <p className="font-extrabold">
+                  Luồng 2 · văn bản Admin xác nhận
+                </p>
+                <p className="mt-2 text-sm">
+                  Crop dòng từ revision VERIFIED:{" "}
+                  {sourceCount(["FLOW1_VERIFIED"]).toLocaleString("vi-VN")} mẫu
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  Train {flow2Train.toLocaleString("vi-VN")} · Validation{" "}
+                  {flow2Validation.toLocaleString("vi-VN")} · Holdout{" "}
+                  {sourceCount(["FLOW1_VERIFIED"], "holdout").toLocaleString(
+                    "vi-VN",
+                  )}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  Mỗi mẫu là một ảnh dòng chữ; nhiều từ trong cùng dòng được
+                  ghép thành một nhãn.
+                </p>
+                <p className="mt-2 text-sm font-bold text-muted">
+                  {flow2Train > 0 && flow2Validation > 0
+                    ? "Có cả train và validation; Colab kiểm tra theo snapshot được chọn"
+                    : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
+                </p>
+              </li>
             </ul>
           </Card>
 
@@ -195,7 +262,7 @@ export function AdminVireadTrainingScreen() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="font-extrabold">
-                        {run.profile} · {run.status}
+                        {trainingProfileName(run.profile)} · {run.status}
                       </h3>
                       <span className="text-sm text-muted">
                         Bước {run.step.toLocaleString("vi-VN")}

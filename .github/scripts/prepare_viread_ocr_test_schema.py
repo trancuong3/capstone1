@@ -10,6 +10,8 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "supabase" / "migrations" / "20261112110945_viread_vietocr_v2.sql"
+DUAL_FLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261112123000_viread_dual_training_profiles.sql"
+MIGRATIONS = (MIGRATION, DUAL_FLOW_MIGRATION)
 ALLOWED_DATABASE = "test"
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -43,8 +45,9 @@ def _test_database_dsn() -> str:
 async def prepare() -> None:
     import asyncpg
 
-    if not MIGRATION.is_file():
-        raise FileNotFoundError(f"VietOCR V2 migration is missing: {MIGRATION}")
+    for migration in MIGRATIONS:
+        if not migration.is_file():
+            raise FileNotFoundError(f"VietOCR V2 migration is missing: {migration}")
 
     connection = await asyncpg.connect(_test_database_dsn())
     try:
@@ -72,11 +75,12 @@ async def prepare() -> None:
             );
             """
         )
-        await connection.execute(MIGRATION.read_text(encoding="utf-8"))
+        for migration in MIGRATIONS:
+            await connection.execute(migration.read_text(encoding="utf-8"))
     finally:
         await connection.close()
 
 
 if __name__ == "__main__":
     asyncio.run(prepare())
-    print("Applied the VietOCR V2 migration to the disposable loopback PostgreSQL test database.")
+    print("Applied the VietOCR V2 and dual-flow migrations to the disposable loopback PostgreSQL test database.")

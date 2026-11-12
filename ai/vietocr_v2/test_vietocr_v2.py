@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+import types
 
 import pytest
 
@@ -20,6 +22,13 @@ from ai.vietocr_v2.contracts import (
 from ai.vietocr_v2.metrics import PairedLine, benchmark_metrics, edit_distance
 from ai.vietocr_v2.quality_gate import GatePolicy, evaluate_gate
 from ai.vietocr_v2.flow2_register import _locked_test_rows, _read_trdg_provenance
+from ai.vietocr_v2.flow2_prepare import match_external_annotations
+from ai.vietocr_v2.train import (
+    PROFILES,
+    _should_resume,
+    validate_flow1_sample_counts,
+)
+from ai.vietocr_v2.trdg_generate import generate_trdg
 
 
 def test_t01_vietnamese_text_is_normalized_to_nfc():
@@ -85,6 +94,16 @@ def test_t11_image_hash_must_be_sha256():
     with pytest.raises(DatasetContractError, match="image_sha256"):
         DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p", "source_flow": "FLOW2_TRDG",
                                  "split": "train", "image_sha256": "deadbeef"})
+
+
+def test_t11a_duplicate_image_content_is_rejected_even_when_paths_differ():
+    digest = hashlib.sha256(b"same image bytes").hexdigest()
+    rows = [
+        DatasetRow("real.png", "xin", "page", "FLOW2_EXTERNAL", "train", digest, True, "ann-1"),
+        DatasetRow("synthetic.png", "xin", "label", "FLOW2_TRDG", "train", digest),
+    ]
+    with pytest.raises(DatasetContractError, match="duplicate image content"):
+        validate_rows(rows)
 
 
 def test_t12_locked_test_cannot_enter_a_training_manifest():
@@ -212,3 +231,75 @@ def test_t24_trdg_provenance_must_be_explicit_and_unique(tmp_path):
     provenance.write_text(json.dumps([{"image": str(image), "generator": "unknown"}]), encoding="utf-8")
     with pytest.raises(ValueError, match="TRDG generator"):
         _read_trdg_provenance(provenance)
+
+
+def test_t25_public_training_profiles_map_to_separate_legacy_dataset_sources():
+    assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"] == {"FLOW2_EXTERNAL", "FLOW2_TRDG"}
+    assert PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"] == {"FLOW1_VERIFIED"}
+    assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"].isdisjoint(PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"])
+
+
+def test_t28_flow1_enforces_the_real_and_synthetic_sample_ranges():
+    validate_flow1_sample_counts({"FLOW2_EXTERNAL": 500, "FLOW2_TRDG": 20_000})
+    validate_flow1_sample_counts({"FLOW2_EXTERNAL": 1_000, "FLOW2_TRDG": 50_000})
+    with pytest.raises(ValueError, match="500-1,000 real and 20,000-50,000 TRDG"):
+        validate_flow1_sample_counts({"FLOW2_EXTERNAL": 499, "FLOW2_TRDG": 20_000})
+    with pytest.raises(ValueError, match="500-1,000 real and 20,000-50,000 TRDG"):
+        validate_flow1_sample_counts({"FLOW2_EXTERNAL": 1_001, "FLOW2_TRDG": 20_000})
+    with pytest.raises(ValueError, match="500-1,000 real and 20,000-50,000 TRDG"):
+        validate_flow1_sample_counts({"FLOW2_EXTERNAL": 500, "FLOW2_TRDG": 50_001})
+
+
+def test_t29_colab_resume_defaults_start_a_fresh_run_without_a_checkpoint(tmp_path):
+    checkpoint = tmp_path / "latest.pt"
+    assert _should_resume(True, checkpoint, tmp_path) is False
+    checkpoint.write_bytes(b"checkpoint")
+    assert _should_resume(True, checkpoint, tmp_path) is True
+
+
+def test_t30_resume_refuses_best_weights_without_the_matching_training_state(tmp_path):
+    (tmp_path / "best-example.pth").write_bytes(b"best weights")
+    with pytest.raises(FileNotFoundError, match="resumable checkpoint is missing"):
+        _should_resume(True, tmp_path / "latest.pt", tmp_path)
+
+
+def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):
+    pillow = pytest.importorskip("PIL.Image")
+    font_a, font_b = tmp_path / "font-a.ttf", tmp_path / "font-b.ttf"
+    font_a.write_bytes(b"font-a")
+    font_b.write_bytes(b"font-b")
+
+    class FakeGenerator:
+        def __init__(self, strings, count, fonts, language):
+            self.strings = strings
+            self.fonts = fonts
+
+        def __iter__(self):
+            yield pillow.new("RGB", (64, 24), "white"), self.strings[0]
+
+    trdg_module = types.ModuleType("trdg")
+    generator_module = types.ModuleType("trdg.generators")
+    generator_module.GeneratorFromStrings = FakeGenerator
+    trdg_module.generators = generator_module
+    monkeypatch.setitem(sys.modules, "trdg", trdg_module)
+    monkeypatch.setitem(sys.modules, "trdg.generators", generator_module)
+
+    rows, provenance = generate_trdg(texts=["Xin chào"], font=[str(font_a), str(font_b)],
+                                     output_dir=tmp_path / "generated", count_per_text=1)
+    assert len(rows) == 2
+    assert {row.label for row in rows} == {"Xin chào"}
+    assert {item["font_sha256"] for item in provenance} == {
+        hashlib.sha256(b"font-a").hexdigest(), hashlib.sha256(b"font-b").hexdigest(),
+    }
+
+
+def test_t27_invalid_external_boxes_go_to_review_instead_of_becoming_crops(tmp_path):
+    pillow = pytest.importorskip("PIL.Image")
+    image = tmp_path / "page.png"
+    pillow.new("RGB", (100, 50), "white").save(image)
+    annotations = [{"image": str(image), "annotation_id": "ann-1", "group_id": "page-1",
+                    "bbox": [10, 10, 120, 30], "label": "Xin chào", "verified": True}]
+    rows, review = match_external_annotations(annotations, lambda _path: [[[10, 10], [80, 10], [80, 30], [10, 30]]],
+                                              tmp_path / "crops")
+    assert rows == []
+    assert review[0]["reason"] == "invalid_annotation_box"
