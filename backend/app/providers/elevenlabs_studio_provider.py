@@ -11,7 +11,9 @@ import hashlib
 import logging
 import math
 import os
+import re
 import time
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
@@ -153,29 +155,46 @@ def word_timings(
         not isinstance(characters, list)
         or not isinstance(starts, list)
         or not isinstance(ends, list)
-        or not len(characters) == len(starts) == len(ends) == len(text)
+        or not words
+        or not len(characters) == len(starts) == len(ends)
+        or any(not isinstance(character, str) or not character for character in characters)
     ):
         raise VoiceProviderError()
 
     def number(value: Any) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise VoiceProviderError()
-        return max(0.0, float(value))
+        if value < 0:
+            raise VoiceProviderError()
+        return float(value)
+
+    raw_text = "".join(characters)
+    if unicodedata.normalize("NFC", raw_text) != unicodedata.normalize("NFC", text):
+        raise VoiceProviderError()
+    previous_end = 0.0
+    for start_value, end_value in zip(starts, ends):
+        start, end = number(start_value), number(end_value)
+        if start < previous_end or end < start:
+            raise VoiceProviderError()
+        previous_end = end
+
+    # Provider entries can be code points or combining sequences. Whitespace
+    # boundaries preserve word identity even when Vietnamese NFC/NFD lengths
+    # differ; never infer ranges by equal character duration or array length.
+    owners = [index for index, character in enumerate(characters) for _ in character]
+    ranges = list(re.finditer(r"\S+", raw_text))
+    if len(ranges) != len(words):
+        raise VoiceProviderError()
 
     result: list[TimedWord] = []
-    cursor = 0
-    previous_end = 0.0
-    for index, word in enumerate(words):
-        first, last = cursor, cursor + len(word) - 1
+    for index, (word, span) in enumerate(zip(words, ranges)):
+        if unicodedata.normalize("NFC", span.group()) != unicodedata.normalize("NFC", word):
+            raise VoiceProviderError()
+        first, last = owners[span.start()], owners[span.end() - 1]
         start = number(starts[first])
         end = number(ends[last])
-        # Keep timings monotonic so the highlight can only move forward.
-        start = max(start, previous_end if result else 0.0)
-        end = max(end, start)
         result.append(TimedWord(index=index, start=round(start, 3), end=round(end, 3)))
-        previous_end = end
-        cursor = last + 2  # skip the joining space
-    return result, round(max(previous_end, 0.0), 3)
+    return result, round(max(number(value) for value in ends), 3)
 
 
 class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
@@ -214,7 +233,10 @@ class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
                     payload = response.json()
                     if not isinstance(payload, dict):
                         raise VoiceProviderError()
-                    for item in payload.get("voices") or []:
+                    entries = payload.get("voices", [])
+                    if not isinstance(entries, list):
+                        raise VoiceProviderError()
+                    for item in entries:
                         voice = voice_from_payload(item)
                         if voice and voice["voice_id"] not in seen:
                             seen.add(voice["voice_id"])
@@ -244,7 +266,8 @@ class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
         voice_id = self._voice_id(requested_voice_id)
         model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
         text = " ".join(words)
-        speed = round(min(1.2, max(0.7, speed)), 2)
+        settings = self._tts_voice_settings(model_id, speed)
+        speed = settings["speed"]
 
         cache_key = hashlib.sha256(
             "\x1f".join(
@@ -258,11 +281,7 @@ class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
-            "voice_settings": {
-                "stability": 0.6,
-                "similarity_boost": 0.8,
-                "speed": speed,
-            },
+            "voice_settings": settings,
         }
         if "flash" in model_id or "turbo" in model_id:
             payload["language_code"] = "vi"

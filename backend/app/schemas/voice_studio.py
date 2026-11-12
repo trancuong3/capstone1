@@ -1,6 +1,7 @@
 """Contracts for voice selection and word-timed sample reading."""
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+import unicodedata
 
 MAX_TIMED_WORDS = 800
 MAX_TIMED_CHARACTERS = 5_000
@@ -37,7 +38,7 @@ class TimedSpeechRequest(BaseModel):
     @field_validator("words")
     @classmethod
     def normalize_words(cls, value: list[str]) -> list[str]:
-        words = [word.strip() for word in value]
+        words = [unicodedata.normalize("NFC", word.strip()) for word in value]
         if any(not word or len(word) > 80 or any(ch.isspace() for ch in word) for word in words):
             raise ValueError("each word must be a non-empty token without whitespace")
         return words
@@ -54,19 +55,19 @@ class TimedSpeechRequest(BaseModel):
 
     @model_validator(mode="after")
     def limit_total_size(self) -> "TimedSpeechRequest":
-        if sum(len(word) for word in self.words) + len(self.words) > MAX_TIMED_CHARACTERS:
+        if len(" ".join(self.words)) > MAX_TIMED_CHARACTERS:
             raise ValueError("text is too long")
         return self
 
 
 class TimedWordRead(BaseModel):
     index: int = Field(ge=0)
-    start: float = Field(ge=0)
-    end: float = Field(ge=0)
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(ge=0, allow_inf_nan=False)
 
 
 class TimedSpeechRead(BaseModel):
     audio_base64: str
     content_type: str
-    duration_seconds: float = Field(ge=0)
+    duration_seconds: float = Field(gt=0, allow_inf_nan=False)
     words: list[TimedWordRead]

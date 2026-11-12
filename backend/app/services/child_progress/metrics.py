@@ -10,7 +10,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from types import SimpleNamespace
 from uuid import UUID
+from app.schemas.reading import ReadingAssessmentMetrics
+from app.services.reading_assessment import aggregate_assessment, initial_snapshot
 
 VIETNAM_TZ = timezone(timedelta(hours=7))
 FINISHED_STATES = ("COMPLETED", "FINISHED")
@@ -34,6 +37,9 @@ class ReportRow:
     created_at: datetime
     alignment: Any
     summary: Any
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+    transcript: str = ""
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,10 @@ class RetryEventRow:
     session_id: UUID
     status: str
     created_at: datetime
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+    word_id: UUID | None = None
+    metadata: Any = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,7 @@ class AnswerRow:
 
 @dataclass
 class WindowMetrics:
+    reading_assessment: ReadingAssessmentMetrics | None = None
     sessions: int = 0
     active_days: int = 0
     reading_minutes: int = 0
@@ -199,6 +210,42 @@ def _summary_counts(summary: Any) -> tuple[int, int]:
     )
 
 
+def analyze_first_pass(report: ReportRow) -> dict[str, Any] | None:
+    if not isinstance(report.summary, dict) or report.summary.get("assessment_version") != 1:
+        return analyze_alignment(report.alignment)
+    words = initial_snapshot(report.summary)
+    if words is None:
+        return None
+    counts = Counter(word.get("status") for word in words if isinstance(word, dict))
+    errors = Counter(normalize_word(word.get("text")) for word in words if isinstance(word, dict)
+                     and word.get("status") in {"MISPRONUNCIATION", "OMISSION"}
+                     and len(normalize_word(word.get("text"))) >= MIN_WORD_LENGTH)
+    # Insertions have no target word ID, so they cannot live in the per-word
+    # snapshot. Preserve their evidence from this same finalized report.
+    alignment = analyze_alignment(report.alignment)
+    return {"reached": counts["CORRECT"] + counts["MISPRONUNCIATION"] + counts["OMISSION"],
+            "correct": counts["CORRECT"], "substituted": counts["MISPRONUNCIATION"],
+            "skipped": counts["OMISSION"], "inserted": alignment["inserted"] if alignment else 0,
+            "book_total": len(words),
+            "errors": errors, "heard": {}}
+
+
+def first_pass_reports(reports: list[ReportRow]) -> list[ReportRow]:
+    selected = {}
+    legacy_without_identity = []
+    for report in sorted(reports, key=lambda row: row.created_at, reverse=True):
+        if report.page_id is None or report.page_revision_id is None:
+            legacy_without_identity.append(report)
+            continue
+        key = (report.session_id, report.page_id, report.page_revision_id)
+        current = selected.get(key)
+        final = isinstance(report.summary, dict) and report.summary.get("assessment_version") == 1
+        current_final = current is not None and isinstance(current.summary, dict) and current.summary.get("assessment_version") == 1
+        if current is None or (final and (not current_final or report.created_at < current.created_at)):
+            selected[key] = report
+    return [*legacy_without_identity, *selected.values()]
+
+
 def session_minutes(session: SessionRow) -> float:
     if session.ended_at is None:
         return 0.0
@@ -234,10 +281,11 @@ def compute_window(
     compared_sessions: set[UUID] = set()
     weekly_words: dict[int, list[int]] = defaultdict(lambda: [0, 0])  # correct, reached
 
+    reports = first_pass_reports(reports)
     for report in reports:
         if report.session_id not in window_ids:
             continue
-        analysis = analyze_alignment(report.alignment)
+        analysis = analyze_first_pass(report)
         if analysis is None:
             continue
         metrics.pages_compared += 1
@@ -268,6 +316,23 @@ def compute_window(
                 metrics.retry_confirmed += 1
             elif retry.status == "FAILED":
                 metrics.retry_failed += 1
+
+    canonical_totals = Counter()
+    canonical_sessions = 0
+    for session_id in window_ids:
+        evidence_reports = [SimpleNamespace(SessionId=row.session_id, PageId=row.page_id,
+            PageRevisionId=row.page_revision_id, Summary=row.summary, Transcript=row.transcript)
+            for row in sorted(reports, key=lambda row: row.created_at, reverse=True)
+            if row.session_id == session_id and row.page_id is not None and row.page_revision_id is not None]
+        evidence_retries = [SimpleNamespace(SessionId=row.session_id, PageId=row.page_id,
+            PageRevisionId=row.page_revision_id, WordId=row.word_id, Type="WORD_RETRY",
+            Status=row.status, Metadata=row.metadata) for row in retries if row.session_id == session_id]
+        assessment = aggregate_assessment(session_id, evidence_reports, evidence_retries)["assessment"]
+        if assessment is not None:
+            canonical_sessions += 1
+            canonical_totals.update(assessment.model_dump())
+    if canonical_sessions:
+        metrics.reading_assessment = ReadingAssessmentMetrics(**canonical_totals)
 
     # Comprehension counts the first answer of each question (retries do not
     # make the first attempt any better).

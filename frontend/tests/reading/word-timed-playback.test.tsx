@@ -22,11 +22,14 @@ vi.mock("@/lib/api/voice-studio-service", () => ({
 class FakeAudio {
   static instances: FakeAudio[] = [];
   currentTime = 0;
+  duration = 2;
   paused = true;
   ended = false;
   src = "";
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  ontimeupdate: (() => void) | null = null;
+  onloadedmetadata: (() => void) | null = null;
   play = vi.fn<() => Promise<void>>().mockImplementation(async () => {
     this.paused = false;
   });
@@ -146,10 +149,14 @@ describe("word-timed sample playback", () => {
   it("asks for the chosen voice and speed", async () => {
     setSpeechPreferences({ voiceId: "voice_9", speed: 0.8 });
     const { promise } = await startPlayback();
-    expect(voiceStudioMock.synthesizeTimed).toHaveBeenCalledWith(WORDS, {
-      voiceId: "voice_9",
-      speed: 0.8,
-    });
+    expect(voiceStudioMock.synthesizeTimed).toHaveBeenCalledWith(
+      WORDS,
+      expect.objectContaining({
+        voiceId: "voice_9",
+        speed: 0.8,
+        signal: expect.any(AbortSignal),
+      }),
+    );
     act(() => FakeAudio.instances[0].finish());
     await promise;
   });
@@ -176,7 +183,7 @@ describe("word-timed sample playback", () => {
     await second;
   });
 
-  it("falls back to the estimated highlight when timings are unavailable", async () => {
+  it("runs an explicit caller fallback when timings are unavailable", async () => {
     voiceStudioMock.synthesizeTimed.mockRejectedValue(new Error("no timings"));
     const fallback = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useSpeechPlayer());
@@ -212,6 +219,7 @@ describe("word-timed sample playback", () => {
         .catch((error: unknown) => {
           outcome = error;
         });
+      await Promise.resolve();
       result.current.stop();
       resolveSpeech(TIMED);
       await promise;

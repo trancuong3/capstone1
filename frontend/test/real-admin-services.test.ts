@@ -179,6 +179,36 @@ describe("real Admin adapters", () => {
     expect(await createAdminPageService().reload(pageId)).toEqual(processing);
   });
 
+  it("binds an image to the selected revision and rejects another revision", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...image, page_revision_id: revisionId }),
+    );
+    await expect(
+      createAdminPageService().getImage(pageId, revisionId),
+    ).resolves.toMatchObject({ page_revision_id: revisionId });
+    expect(fetchMock.mock.calls[0][0]).toContain(`revision_id=${revisionId}`);
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ ...image, page_revision_id: bookId }),
+    );
+    await expect(
+      createAdminPageService().getImage(pageId, revisionId),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  });
+
+  it("reuses replacement upload identity for the same File after a lost response", async () => {
+    fetchMock.mockImplementation(async () => Response.json(detail));
+    const service = createAdminPageService();
+    const file = new File(["new image"], "page.png", { type: "image/png" });
+    await service.replaceImageAndReprocess(pageId, file);
+    await service.replaceImageAndReprocess(pageId, file);
+    const forms = fetchMock.mock.calls.map(
+      (call) => (call[1] as RequestInit).body as FormData,
+    );
+    expect(forms[0].get("upload_id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(forms[1].get("upload_id")).toBe(forms[0].get("upload_id"));
+    expect(forms[0].get("image")).toBeInstanceOf(File);
+  });
+
   it("uploads a replacement image without a page number", async () => {
     fetchMock.mockResolvedValue(Response.json(detail));
     const file = new File(["new page image"], "page-1.png", {

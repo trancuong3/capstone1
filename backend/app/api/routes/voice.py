@@ -41,6 +41,7 @@ async def text_to_speech(
         audio = await ElevenLabsVoiceProvider().synthesize(
             text=payload.text,
             requested_voice_id=payload.voice_id,
+            speed=payload.speed,
         )
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None

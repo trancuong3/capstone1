@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.reading_comparison_report import ReadingComparisonReport
 
 from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
@@ -16,6 +17,27 @@ class ReadingContentRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def comparison_reports(self, session_id: UUID) -> list[ReadingComparisonReport]:
+        result = await self.db.execute(
+            select(ReadingComparisonReport)
+            .where(ReadingComparisonReport.SessionId == session_id)
+            .order_by(ReadingComparisonReport.CreatedAt.desc(), ReadingComparisonReport.Id.desc())
+        )
+        return list(result.scalars().all())
+
+    async def initial_word_status(self, session_id: UUID, page_id: UUID,
+                                  revision_id: UUID, word_id: UUID) -> str | None:
+        for report in reversed(await self.comparison_reports(session_id)):
+            if (report.PageId != page_id or report.PageRevisionId != revision_id
+                    or not isinstance(report.Summary, dict)
+                    or report.Summary.get("assessment_version") != 1):
+                continue
+            for word in report.Summary.get("initial_assessment", []):
+                if isinstance(word, dict) and word.get("word_id") == str(word_id):
+                    return word.get("status")
+            return None
+        return None
 
     async def profile_role(self, profile_id: UUID) -> str | None:
         return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
@@ -167,6 +189,7 @@ class ReadingContentRepository:
             select(ReadingSession)
             .where(ReadingSession.Id == session_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
 
     async def session(self, session_id: UUID) -> ReadingSession | None:
@@ -197,6 +220,43 @@ class ReadingContentRepository:
             select(ReadingEvent)
             .where(ReadingEvent.SessionId == session_id)
             .order_by(ReadingEvent.StartMs, ReadingEvent.Id)
+        )
+        return list(result.scalars().all())
+
+    async def retry_event_for_attempt(
+        self, session_id: UUID, page_id: UUID, revision_id: UUID,
+        word_id: UUID, event_type: str, attempt: int,
+    ) -> ReadingEvent | None:
+        # The caller holds the session row lock until commit, so concurrent
+        # requests using this write path cannot insert the same attempt twice.
+        return await self.db.scalar(
+            select(ReadingEvent).where(
+                ReadingEvent.SessionId == session_id,
+                ReadingEvent.PageId == page_id,
+                ReadingEvent.PageRevisionId == revision_id,
+                ReadingEvent.WordId == word_id,
+                ReadingEvent.Type == event_type,
+                or_(
+                    ReadingEvent.Metadata.contains({"retry_attempt": attempt}),
+                    and_(
+                        ~ReadingEvent.Metadata.has_key("retry_attempt"),
+                        ReadingEvent.Metadata.contains({"attempt": attempt}),
+                    ),
+                ),
+            ).order_by(ReadingEvent.CreatedAt, ReadingEvent.Id).limit(1)
+        )
+
+    async def retry_events_for_word(
+        self, session_id: UUID, page_id: UUID, revision_id: UUID, word_id: UUID,
+    ) -> list[ReadingEvent]:
+        result = await self.db.execute(
+            select(ReadingEvent).where(
+                ReadingEvent.SessionId == session_id,
+                ReadingEvent.PageId == page_id,
+                ReadingEvent.PageRevisionId == revision_id,
+                ReadingEvent.WordId == word_id,
+                ReadingEvent.Type == "WORD_RETRY",
+            )
         )
         return list(result.scalars().all())
 

@@ -4,6 +4,7 @@ import type {
   ReportDateWindow,
 } from "@/types/reports";
 import { z } from "zod";
+import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { difficultWordSchema } from "@/lib/api/difficult-word-service";
 
@@ -37,6 +38,14 @@ const periodOptionSchema = z
   })
   .refine((item) => item.period_start <= item.period_end);
 const reportSchema = periodSchema.extend({
+  assessment: readingAssessmentSchema.nullable().optional(),
+  assessment_coverage: z
+    .object({
+      assessed_sessions: z.number().int().nonnegative(),
+      total_sessions: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
   id: z.uuid(),
   generated_at: z.iso.datetime({ offset: true }),
   child_id: z.uuid(),

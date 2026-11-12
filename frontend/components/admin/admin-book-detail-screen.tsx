@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
+import { AdminPageImagePreview } from "@/components/admin/admin-page-image-preview";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
@@ -217,6 +218,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               return (
                 <Card className="h-full bg-white" key={item.processing.page_id}>
                   <div className="flex h-full flex-col gap-4">
+                    <AdminPageImagePreview
+                      key={`${item.processing.page_id}:${item.processing.page_revision_id}`}
+                      pageId={item.processing.page_id}
+                      revisionId={item.processing.page_revision_id}
+                      pageNumber={item.page_number}
+                      onReplaced={() => {
+                        setPageActionNotice({
+                          tone: "info",
+                          title: "Ảnh mới đang chờ duyệt",
+                          message:
+                            "Bản mới cần được xác minh trước khi dùng cho lượt đọc. Ảnh và nội dung lịch sử vẫn được giữ nguyên.",
+                        });
+                        void load();
+                      }}
+                    />
                     <div className="flex items-start justify-between gap-3">
                       <div className="grid size-12 shrink-0 place-items-center rounded-control bg-sky text-primary">
                         <FileSearch aria-hidden />
@@ -247,7 +263,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                         href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                       >
-                        {active ? "Xem/Sửa nội dung" : "Xem lịch sử OCR"}
+                        {active
+                          ? "Xem / Thay ảnh / Duyệt OCR"
+                          : "Xem lịch sử OCR"}
                       </Link>
                       {active ? (
                         <Button

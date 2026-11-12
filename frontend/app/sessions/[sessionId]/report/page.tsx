@@ -12,6 +12,8 @@ import {
 
 import { ReadingReport } from "@/components/reading/ReadingReport";
 import { Button } from "@/components/common/button";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
+import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
 export default function ReadingReportPage() {
   const params = useParams<{ sessionId: string }>();
@@ -21,6 +23,8 @@ export default function ReadingReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [assessment, setAssessment] =
+    useState<ReadingAssessmentMetricsDTO | null>(null);
 
   async function handleDeleteReport(reportId: string) {
     const confirmed = window.confirm(
@@ -54,6 +58,7 @@ export default function ReadingReportPage() {
 
         if (active) {
           setReports(data.reports);
+          setAssessment(data.assessment ?? null);
         }
       } catch (err) {
         if (active) {
@@ -134,23 +139,34 @@ export default function ReadingReportPage() {
         </p>
       </div>
 
+      <ReadingAssessmentSummary assessment={assessment} />
       {reports.map((report, index) => (
         <section key={report.report_id} className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-semibold">Lần đọc {reports.length - index}</h2>
+            <h2 className="font-semibold">
+              {report.summary.assessment_version === 1
+                ? "Đánh giá lượt đầu đã lưu"
+                : `Đối chiếu đã lưu ${reports.length - index}`}
+            </h2>
 
             <div className="flex items-center gap-3">
               <p className="text-sm text-gray-500">
                 {new Date(report.created_at).toLocaleString("vi-VN")}
               </p>
 
-              <button
-                type="button"
-                onClick={() => handleDeleteReport(report.report_id)}
-                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-              >
-                Xóa báo cáo
-              </button>
+              {report.summary.assessment_version !== 1 ? (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteReport(report.report_id)}
+                  className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  Xóa báo cáo
+                </button>
+              ) : (
+                <span className="text-sm text-muted">
+                  Kết quả lượt đầu được giữ nguyên
+                </span>
+              )}
             </div>
           </div>
 

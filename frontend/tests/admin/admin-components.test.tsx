@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
+import { Button } from "@/components/common/button";
 import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { AdminLayout } from "@/components/admin/admin-layout";
 import { AdminLoginScreen } from "@/components/admin/admin-login-screen";
@@ -37,17 +38,24 @@ describe("admin components", () => {
     navigationMock.replace.mockClear();
   });
 
-  it("uses compact consistent button sizing and exposes a destructive variant", async () => {
+  it("uses compact buttons inside Admin and preserves the default size elsewhere", async () => {
     const services = createAdminServiceFixture();
-    render(withAdminFixture(
-      <div>
-        <AdminLayout><p>Content</p></AdminLayout>
-      </div>,
-      services,
-    ));
+    render(
+      withAdminFixture(
+        <div>
+          <AdminLayout>
+            <p>Content</p>
+          </AdminLayout>
+        </div>,
+        services,
+      ),
+    );
     const logout = screen.getByRole("button", { name: "Đăng xuất" });
     expect(logout.className).toContain("min-h-11");
     expect(logout.className).not.toContain("h-16");
+
+    const outsideButton = render(<Button>Parent action</Button>);
+    expect(outsideButton.getByRole("button")).toHaveClass("h-16");
   });
 
   it("uses a safe message when the admin auth service rejects credentials", async () => {

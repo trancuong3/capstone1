@@ -147,16 +147,17 @@ describe("AdminParentDetailScreen", () => {
     ).toBeInTheDocument();
   });
 
-
   it("keeps the edit dialog open and preserves entered values when the API fails", async () => {
     getById.mockResolvedValueOnce(parentDetail);
-    update.mockRejectedValueOnce(new ServiceError({
-      code: "NETWORK_ERROR",
-      message: "safe",
-      status: 503,
-      request_id: "req-admin-edit",
-      retryable: true,
-    }));
+    update.mockRejectedValueOnce(
+      new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "safe",
+        status: 503,
+        request_id: "req-admin-edit",
+        retryable: true,
+      }),
+    );
 
     renderScreen();
     fireEvent.click(await screen.findByRole("button", { name: /Sửa Parent/i }));
@@ -165,7 +166,9 @@ describe("AdminParentDetailScreen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText(/Mã yêu cầu: req-admin-edit/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Mã yêu cầu: req-admin-edit/i),
+    ).toBeInTheDocument();
     expect(screen.getByDisplayValue("Changed Name")).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(update).toHaveBeenCalledTimes(1);

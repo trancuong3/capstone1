@@ -37,11 +37,20 @@ class SavedProgressTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.repo = MagicMock()
         self.repo.latest = AsyncMock(return_value=row(report_payload()))
+        self.repo.period_assessment = AsyncMock(return_value={"assessment": None, "assessment_coverage": None})
         self.repo.report = AsyncMock(return_value=row(report_payload()))
         self.repo.periods = AsyncMock(return_value=[])
         self.access = MagicMock()
         self.access.require_child = AsyncMock()
         self.service = ProgressService(self.repo, self.access)
+
+    async def test_first_pass_and_retry_evidence_is_read_only_and_uses_saved_report_cutoff(self):
+        evidence = {"assessment": None, "assessment_coverage": {"assessed_sessions": 0, "total_sessions": 2}}
+        self.repo.period_assessment.return_value = evidence
+        result = await self.service.read(CHILD, ACTOR, None, None)
+        self.assertEqual(result.assessment_coverage.model_dump(), evidence["assessment_coverage"])
+        self.assertIsNone(result.assessment)
+        self.repo.period_assessment.assert_awaited_once_with(CHILD, ACTOR, START, END, GENERATED)
 
     async def test_default_reads_latest_without_a_current_calendar_window(self):
         result = await self.service.read(CHILD, ACTOR, None, None)
@@ -227,6 +236,7 @@ class SavedProgressHttpTests(unittest.TestCase):
     def test_real_router_serializes_latest_and_periods_public_contract(self):
         with patch("app.api.routes.reading.HistoryService.require_child", new=AsyncMock()), \
              patch.object(ProgressRepository, "latest", new=AsyncMock(return_value=row(report_payload()))), \
+             patch.object(ProgressRepository, "period_assessment", new=AsyncMock(return_value={"assessment": None, "assessment_coverage": None})), \
              patch.object(ProgressRepository, "periods", new=AsyncMock(return_value=[option()])):
             report = self.client.get(f"/system/progress/{CHILD}")
             periods = self.client.get(f"/system/progress/{CHILD}/periods")

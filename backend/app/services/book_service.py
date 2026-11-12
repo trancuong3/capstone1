@@ -219,17 +219,29 @@ class AdminCatalogService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Page list contract is not available yet") from None
 
-    async def image(self, page_id: UUID):
+    async def image(self, page_id: UUID, revision_id: UUID | None = None):
         page = await self.page(page_id)
         # Admin reviews the image that produced the latest revision, even when pending.
         # Parent/Child reading keeps BookPage.ImagePath until that revision is verified.
         revisions = await self.repository.revisions(page.Id)
+        selected = next((row for row in revisions if row.Id == revision_id), None) if revision_id else (revisions[0] if revisions else None)
+        if revision_id is not None and selected is None:
+            raise HTTPException(status_code=404, detail="Page revision not found")
         metadata = (
-            dict(getattr(revisions[0], "ProcessingMeta", None) or {})
-            if revisions
+            dict(getattr(selected, "ProcessingMeta", None) or {})
+            if selected is not None
             else {}
         )
         candidate_path = metadata.get("source_image_path")
+        if revision_id is not None:
+            has_source = isinstance(candidate_path, str) and bool(candidate_path)
+            if has_source and not (
+                type(metadata.get("source_image_width")) is int and metadata["source_image_width"] > 0
+                and type(metadata.get("source_image_height")) is int and metadata["source_image_height"] > 0
+            ):
+                raise HTTPException(status_code=409, detail="Revision source dimensions are not available")
+            if not has_source and selected.Id != page.CurrentVerifiedRevisionId and (not revisions or selected.Id != revisions[0].Id):
+                raise HTTPException(status_code=409, detail="Historical revision source image is not available")
         image_path = candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
         candidate_width = metadata.get("source_image_width")
         candidate_height = metadata.get("source_image_height")
@@ -237,11 +249,13 @@ class AdminCatalogService:
         height = candidate_height if type(candidate_height) is int and candidate_height > 0 else page.Height
         page_id = page.Id
         page_number = page.PageNumber
+        selected_revision_id = selected.Id if selected is not None else None
         await self.repository.db.rollback()
         preview_url = create_signed_image_url(image_path)
         try:
             return AdminPageImageRead(
                 page_id=page_id,
+                page_revision_id=selected_revision_id,
                 page_number=page_number,
                 preview_url=preview_url,
                 width=width,

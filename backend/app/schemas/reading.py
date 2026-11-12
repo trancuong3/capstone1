@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, ConfigDict, AwareDatetime
+import json
+
+from pydantic import BaseModel, Field, ConfigDict, AwareDatetime, field_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -42,10 +44,22 @@ class ReadingPageDTO(BaseModel):
     width: int = 1000
     height: int = 1000
     image_url: Optional[str] = None
+    # Legacy or edited geometry has no measured, content-bound proof.
+    image_overlay_safe: bool = False
     text: Optional[str] = None
     words: list[ReadingPageWordDTO]
     paragraph_start_line_indices: list[int] = Field(default_factory=list)
     indented_line_indices: list[int] = Field(default_factory=list)
+
+class ReadingAssessmentMetrics(BaseModel):
+    first_pass_correct: int = Field(ge=0)
+    first_pass_incorrect: int = Field(ge=0)
+    self_corrected_words: int = Field(ge=0)
+    unresolved_words: int = Field(ge=0)
+    retry_attempts: int = Field(ge=0)
+    skipped_after_retry_limit: int = Field(ge=0)
+    recognition_uncertain: int = Field(ge=0)
+
 
 class ReadingCompletionSummaryDTO(BaseModel):
     # Null means the current database schema has no persisted evidence for this metric.
@@ -55,6 +69,11 @@ class ReadingCompletionSummaryDTO(BaseModel):
     practiced_words: int | None = Field(default=None, ge=0)
     spoken_words: list[str] | None = None
     transcripts: list[str] | None = None
+    correct_words: list[str] | None = None
+    mispronounced_words: list[str] | None = None
+    skipped_words: list[str] | None = None
+    score: float | None = Field(default=None, ge=0, le=100)
+    assessment: ReadingAssessmentMetrics | None = None
 
 class ReadingSessionResponse(ReadingSessionBase):
     Id: UUID
@@ -83,6 +102,20 @@ class ReadingEventCreate(ReadingEventBase):
     PageId: UUID
     PageRevisionId: UUID
     WordId: Optional[UUID] = None
+
+    @field_validator("Metadata")
+    @classmethod
+    def bound_write_metadata(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+        # Bound new writes only. Historical metadata remains readable through
+        # ReadingEventResponse and is never rewritten by this validation.
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                 separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError, RecursionError) as error:
+            raise ValueError("Event metadata must be finite JSON data") from error
+        if len(encoded) > 64 * 1024:
+            raise ValueError("Event metadata must not exceed 64 KiB")
+        return value
 
 class ReadingEventResponse(ReadingEventBase):
     Id: UUID
@@ -270,6 +303,7 @@ class HistoryAvailabilityRead(BaseModel):
 
 
 class SessionDetailRead(HistorySessionSummaryRead):
+    assessment: ReadingAssessmentMetrics | None = None
     selected_range_pages: int | None = Field(default=None, ge=0)
     pages_completed: int | None = Field(default=None, ge=0)
     selected_page_revision_ids: list[UUID]
@@ -287,6 +321,40 @@ class WordTimestamp(BaseModel):
     end: float = Field(..., ge=0)
 
 
+class InitialWordAssessment(BaseModel):
+    word_id: UUID
+    status: Literal["CORRECT", "MISPRONUNCIATION", "OMISSION", "UNCERTAIN"]
+
+
+class StoredInitialWordAssessment(InitialWordAssessment):
+    word_index: int = Field(ge=0)
+    text: str = Field(min_length=1)
+
+
+class PracticePageRead(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    page_number: int = Field(gt=0)
+    transcript: str
+    initial_assessment: list[StoredInitialWordAssessment]
+
+
+class PracticeWordRead(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    word_id: UUID
+    retry_attempt_count: int = Field(ge=0)
+    incorrect_retry_count: int = Field(ge=0, le=3)
+    resolution_status: Literal["RETRYING", "SELF_CORRECTED", "UNRESOLVED"]
+
+
+class ReadingPracticeStateRead(BaseModel):
+    session_id: UUID
+    legacy_evidence_present: bool = False
+    pages: list[PracticePageRead]
+    words: list[PracticeWordRead]
+
+
 class CompareReadingRequest(BaseModel):
     transcript: str = Field(..., min_length=1)
     words: list[WordTimestamp] | None = None
@@ -294,6 +362,10 @@ class CompareReadingRequest(BaseModel):
     # Both fields remain optional for backward compatibility with legacy callers.
     page_id: UUID | None = None
     page_revision_id: UUID | None = None
+    # Only final page snapshots participate in first-pass/retry metrics.
+    # Existing ad-hoc comparison clients retain their previous behavior.
+    finalize: bool = False
+    initial_assessment: list[InitialWordAssessment] | None = None
 
 
 class ReadingComparisonReportRead(BaseModel):
@@ -309,6 +381,7 @@ class ReadingComparisonReportRead(BaseModel):
 
 
 class ReadingSessionReportsRead(BaseModel):
+    assessment: ReadingAssessmentMetrics | None = None
     session_id: UUID
     total: int = Field(ge=0)
     reports: list[ReadingComparisonReportRead]

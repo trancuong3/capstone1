@@ -35,7 +35,7 @@ describe("voice settings in the reading controls", () => {
     const labels = within(nav)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(labels.indexOf("Giọng đọc")).toBe(labels.indexOf("Đọc cả đoạn") + 1);
+    expect(labels.indexOf("Giọng đọc")).toBe(labels.indexOf("Nghe mẫu") + 1);
     expect(
       within(nav).getByRole("button", { name: "Giọng đọc" }),
     ).toBeVisible();

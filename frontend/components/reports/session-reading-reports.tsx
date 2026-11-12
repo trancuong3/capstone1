@@ -13,6 +13,8 @@ import {
   type SavedReadingReport,
 } from "@/lib/api/comparison-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
+import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
 type ReportsState =
   | { readonly status: "loading" }
@@ -22,6 +24,7 @@ type ReportsState =
       readonly reports: readonly SavedReadingReport[];
       readonly pages: ReadonlyMap<string, ReadingPage>;
       readonly partial: boolean;
+      readonly assessment?: ReadingAssessmentMetricsDTO | null;
     }
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
@@ -42,14 +45,27 @@ function reportKey(pageId: string, revisionId: string): string {
 }
 
 function reportMetrics(report: SavedReadingReport): readonly ReportMetric[] {
-  const correct = report.alignment
-    .filter((item) => item.status === "MATCH")
-    .map((item) => item.book_word ?? item.spoken_word ?? "")
-    .filter(Boolean);
-  const missing = report.summary.missing_words;
-  const substitutions = report.summary.substitutions.map(
-    (item) => `${item.book_word} → ${item.spoken_word}`,
-  );
+  const snapshot = report.summary.initial_assessment;
+  const correct = snapshot
+    ? snapshot
+        .filter((word) => word.status === "CORRECT")
+        .map((word) => word.text)
+    : report.alignment
+        .filter((item) => item.status === "MATCH")
+        .map((item) => item.book_word ?? item.spoken_word ?? "")
+        .filter(Boolean);
+  const missing = snapshot
+    ? snapshot
+        .filter((word) => word.status === "OMISSION")
+        .map((word) => word.text)
+    : report.summary.missing_words;
+  const substitutions = snapshot
+    ? snapshot
+        .filter((word) => word.status === "MISPRONUNCIATION")
+        .map((word) => word.text)
+    : report.summary.substitutions.map(
+        (item) => `${item.book_word} → ${item.spoken_word}`,
+      );
   const extra = report.summary.extra_words;
   const repeated = report.summary.repeated_words;
   const hesitation = report.summary.hesitations.map(
@@ -251,8 +267,10 @@ function ReportCard({
 
 export function SessionReadingReports({
   sessionId,
+  showAssessment = true,
 }: {
   readonly sessionId: string;
+  readonly showAssessment?: boolean;
 }) {
   const [requestKey, setRequestKey] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -280,7 +298,15 @@ export function SessionReadingReports({
           right.created_at.localeCompare(left.created_at),
         )) {
           const key = reportKey(report.page_id, report.page_revision_id);
-          if (!latestReports.has(key)) latestReports.set(key, report);
+          const current = latestReports.get(key);
+          if (
+            !current ||
+            (report.summary.assessment_version === 1 &&
+              (current.summary.assessment_version !== 1 ||
+                report.created_at < current.created_at))
+          ) {
+            latestReports.set(key, report);
+          }
         }
         const reportsToShow = [...latestReports.values()];
 
@@ -336,6 +362,7 @@ export function SessionReadingReports({
 
         setState({
           status: "ready",
+          assessment: result.assessment,
           reports,
           pages,
           partial:
@@ -400,6 +427,9 @@ export function SessionReadingReports({
       ) : null}
       {state.status === "ready" ? (
         <>
+          {showAssessment ? (
+            <ReadingAssessmentSummary assessment={state.assessment} />
+          ) : null}
           {state.partial ? (
             <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
               Một số nội dung trang hoặc revision lịch sử chưa tải được; không

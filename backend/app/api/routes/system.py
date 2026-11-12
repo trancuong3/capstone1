@@ -98,6 +98,28 @@ class ProgressRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def period_assessment(self, child_id, actor_id, start, end, generated_at):
+        from app.models import ReadingSession
+        from app.repositories.reading_content_repository import ReadingContentRepository
+        from app.services.reading_assessment import aggregate_period_assessment
+        local_tz = timezone(timedelta(hours=7))
+        begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
+        finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
+        rows = await self.db.execute(
+            select(ReadingSession)
+            .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .where(ChildProfile.ParentId == actor_id, ReadingSession.ChildId == child_id,
+                   ReadingSession.State == "COMPLETED", ReadingSession.StartedAt >= begin,
+                   ReadingSession.StartedAt < finish, ReadingSession.EndedAt <= generated_at)
+            .order_by(ReadingSession.StartedAt, ReadingSession.Id)
+        )
+        repository = ReadingContentRepository(self.db)
+        evidence = []
+        for session in rows.scalars().all():
+            evidence.append((session.Id, await repository.comparison_reports(session.Id),
+                             await repository.events_for_session(session.Id)))
+        return aggregate_period_assessment(evidence)
+
     async def report(self, child_id: UUID, period_start: date, period_end: date, actor_id: UUID):
         return await self.db.scalar(
             select(ProgressReport)
@@ -318,7 +340,11 @@ class ProgressService:
             )
             if row is None:
                 raise HTTPException(status_code=404, detail="Saved report not found")
-            return self.saved_report(row)
+            saved = self.saved_report(row)
+            evidence = await self.repository.period_assessment(
+                child_id, actor_id, row.PeriodStart, row.PeriodEnd, row.GeneratedAt,
+            )
+            return ProgressRead.model_validate({**saved.model_dump(), **evidence})
 
         today = datetime.now(timezone(timedelta(hours=7))).date()
         end = period_end or today

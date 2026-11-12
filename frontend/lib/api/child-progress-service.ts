@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 
 import { requestApi } from "@/lib/api/api-client";
 
@@ -28,6 +29,7 @@ const assessmentSchema = z.object({
     components: z.array(componentSchema),
   }),
   metrics: z.object({
+    reading_assessment: readingAssessmentSchema.nullable().optional(),
     sessions: z.number().int().nonnegative(),
     active_days: z.number().int().nonnegative(),
     reading_minutes: z.number().int().nonnegative(),

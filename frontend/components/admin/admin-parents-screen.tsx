@@ -7,7 +7,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Trash2,
+  UserX,
   UsersRound,
 } from "lucide-react";
 import {
@@ -68,7 +68,6 @@ export function AdminParentsScreen() {
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [form, setForm] = useState<ParentForm>(emptyForm);
-  const [originalForm, setOriginalForm] = useState<ParentForm>(emptyForm);
   const [formLoading, setFormLoading] = useState(false);
   const [formContactInfoEditable, setFormContactInfoEditable] = useState(false);
   const editRequestIdRef = useRef(0);
@@ -128,14 +127,11 @@ export function AdminParentsScreen() {
     setFormLoading(false);
     setFormParentId(null);
     setForm(emptyForm);
-    setOriginalForm(emptyForm);
     setFormContactInfoEditable(false);
   }
 
   function openCreate() {
     closeParentForm();
-    setForm(emptyForm);
-    setOriginalForm(emptyForm);
     setFormContactInfoEditable(true);
     setFormMode("create");
   }
@@ -161,8 +157,7 @@ export function AdminParentsScreen() {
         phone: detail.phone ?? "",
       };
       setForm(value);
-      setOriginalForm(value);
-      setFormContactInfoEditable(detail.contact_info_status === "available");
+        setFormContactInfoEditable(detail.contact_info_status === "available");
     } catch (cause) {
       if (requestId !== editRequestIdRef.current) return;
       setActionError(getAdminParentMutationErrorMessage(cause));
@@ -434,7 +429,7 @@ export function AdminParentsScreen() {
                       }}
                       variant="secondary"
                     >
-                      <Trash2 aria-hidden className="size-5" /> Vô hiệu hóa
+                      <UserX aria-hidden className="size-5" /> Vô hiệu hóa
                     </Button>
                   </div>
                 </div>
@@ -472,6 +467,11 @@ export function AdminParentsScreen() {
       {formMode ? (
         <AdminParentFormModal
           isOpen
+          key={
+            formMode === "edit" && !formLoading
+              ? (formParentId ?? "edit")
+              : formMode
+          }
           mode={formMode}
           isLoading={formLoading}
           initialValues={form}

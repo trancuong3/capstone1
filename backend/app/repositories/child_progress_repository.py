@@ -62,6 +62,9 @@ class ChildProgressRepository:
                 ReadingComparisonReport.CreatedAt,
                 ReadingComparisonReport.Alignment,
                 ReadingComparisonReport.Summary,
+                ReadingComparisonReport.PageId,
+                ReadingComparisonReport.PageRevisionId,
+                ReadingComparisonReport.Transcript,
             )
             .join(ReadingSession, ReadingSession.Id == ReadingComparisonReport.SessionId)
             .where(ReadingSession.ChildId == child_id, ReadingSession.StartedAt >= since)
@@ -72,7 +75,8 @@ class ChildProgressRepository:
 
     async def word_retries(self, child_id: UUID, since: datetime) -> list[RetryEventRow]:
         result = await self.db.execute(
-            select(ReadingEvent.SessionId, ReadingEvent.Status, ReadingEvent.CreatedAt)
+            select(ReadingEvent.SessionId, ReadingEvent.Status, ReadingEvent.CreatedAt,
+                   ReadingEvent.PageId, ReadingEvent.PageRevisionId, ReadingEvent.WordId, ReadingEvent.Metadata)
             .join(ReadingSession, ReadingSession.Id == ReadingEvent.SessionId)
             .where(
                 ReadingSession.ChildId == child_id,

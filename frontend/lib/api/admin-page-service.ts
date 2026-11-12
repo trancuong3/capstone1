@@ -15,7 +15,7 @@ import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 
 export interface AdminPageService {
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
-  getImage(pageId: string): Promise<AdminPageImageUI>;
+  getImage(pageId: string, revisionId?: string): Promise<AdminPageImageUI>;
   replaceImageAndReprocess(
     pageId: string,
     file: File,
@@ -45,6 +45,15 @@ export const adminProcessingSchema = z.object({
 });
 
 export function createAdminPageService(): AdminPageService {
+  const uploadIds = new WeakMap<File, string>();
+  function uploadIdFor(file: File): string {
+    let id = uploadIds.get(file);
+    if (!id) {
+      id = crypto.randomUUID();
+      uploadIds.set(file, id);
+    }
+    return id;
+  }
   return {
     list: (bookId) =>
       requestApi(
@@ -60,12 +69,13 @@ export function createAdminPageService(): AdminPageService {
           )
           .refine((items) => items.every((item) => item.book_id === bookId)),
       ),
-    getImage: (pageId) =>
+    getImage: (pageId, revisionId) =>
       requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/image`,
+        `/books/admin/pages/${encodeURIComponent(pageId)}/image${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
         z
           .object({
             page_id: z.uuid(),
+            page_revision_id: z.uuid().nullable().optional(),
             page_number: z.number().int().positive(),
             preview_url: z.url().refine((value) => {
               try {
@@ -82,7 +92,11 @@ export function createAdminPageService(): AdminPageService {
             width: z.number().int().positive(),
             height: z.number().int().positive(),
           })
-          .refine((image) => image.page_id === pageId),
+          .refine(
+            (image) =>
+              image.page_id === pageId &&
+              (!revisionId || image.page_revision_id === revisionId),
+          ),
       ),
     reload: (pageId) =>
       requestApi(
@@ -92,6 +106,7 @@ export function createAdminPageService(): AdminPageService {
     replaceImageAndReprocess: async (pageId, file) => {
       const form = new FormData();
       form.append("image", file, file.name);
+      form.append("upload_id", uploadIdFor(file));
       return requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr`,
         adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
@@ -108,6 +123,7 @@ export function createAdminPageService(): AdminPageService {
         });
         const form = new FormData();
         form.append("image", page.file, page.file_name);
+        form.append("upload_id", uploadIdFor(page.file));
         try {
           await requestApi(
             `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,

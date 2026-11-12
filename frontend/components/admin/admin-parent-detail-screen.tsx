@@ -11,12 +11,7 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import {
@@ -366,16 +361,18 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
         </div>
       ) : null}
 
-      <AdminParentFormModal
-        isOpen={editOpen}
-        mode="edit"
-        initialValues={editInitialValues}
-        contactInfoEditable={parent?.contact_info_status === "available"}
-        contactInfoMessage={contactNotice}
-        onClose={() => setEditOpen(false)}
-        onSubmit={submitEdit}
-        onSuccess={handleEditSuccess}
-      />
+      {editOpen ? (
+        <AdminParentFormModal
+          isOpen
+          mode="edit"
+          initialValues={editInitialValues}
+          contactInfoEditable={parent?.contact_info_status === "available"}
+          contactInfoMessage={contactNotice}
+          onClose={() => setEditOpen(false)}
+          onSubmit={submitEdit}
+          onSuccess={handleEditSuccess}
+        />
+      ) : null}
     </>
   );
 }

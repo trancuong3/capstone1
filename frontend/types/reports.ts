@@ -38,6 +38,12 @@ export interface ProgressTrendDeltasDTO {
 }
 
 export interface ProgressReportDTO extends ProgressPeriodSummaryDTO {
+  readonly assessment?:
+    import("@/types/reading").ReadingAssessmentMetricsDTO | null;
+  readonly assessment_coverage?: {
+    readonly assessed_sessions: number;
+    readonly total_sessions: number;
+  } | null;
   readonly id: UUID;
   readonly generated_at: ISODateTime;
   readonly child_id: UUID;

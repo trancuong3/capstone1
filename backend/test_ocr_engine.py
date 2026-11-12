@@ -93,9 +93,14 @@ class DualEngineOcrTests(unittest.TestCase):
         mock_paddle.ocr.return_value = [[]]
         mock_viet = MagicMock()
 
-        with patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)):
+        with (
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+            patch.object(ocr_engine, "_extract_text_and_boxes_tesseract",
+                         side_effect=ocr_engine.OcrNoTextDetected("No text in the test image")) as fallback,
+        ):
             with self.assertRaises(ocr_engine.OcrNoTextDetected):
                 ocr_engine.extract_text_and_boxes(sample_png_bytes())
+        fallback.assert_called_once()
 
     def test_extract_text_and_boxes_dual_engine_contract(self):
         """Kiểm tra hợp đồng dữ liệu chuẩn hóa của Dual-Engine."""
@@ -606,6 +611,7 @@ class DualEngineOcrTests(unittest.TestCase):
             patch.object(ocr_engine, "Cfg", config_loader),
             patch.object(ocr_engine, "Predictor", predictor_factory),
             patch.object(ocr_engine, "_find_cached_vietocr_weights", return_value=None),
+            patch.object(ocr_engine, "torch", MagicMock()),
             patch.object(ocr_engine.torch.cuda, "is_available", return_value=False),
             patch.object(ocr_engine.torch, "set_num_threads"),
         ):

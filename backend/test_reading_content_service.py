@@ -82,7 +82,12 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             create_reading_event=AsyncMock(side_effect=lambda row: row),
             create_fluency_assessment=AsyncMock(side_effect=lambda row: row),
             events_for_session=AsyncMock(return_value=[]),
+            comparison_reports=AsyncMock(return_value=[]),
+            initial_word_status=AsyncMock(return_value="OMISSION"),
         )
+        repo.session_for_update.side_effect = lambda session_id: repo.session.return_value
+        repo.retry_event_for_attempt = AsyncMock(return_value=None)
+        repo.retry_events_for_word = AsyncMock(return_value=[])
         return ReadingContentService(repo), repo
 
     async def test_list_sessions_is_scoped_to_authenticated_parent(self):
@@ -395,6 +400,266 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.WordId, word_id)
         repo.create_reading_event.assert_awaited_once_with(event)
 
+    async def test_retry_attempt_is_idempotent_under_the_session_lock(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="FAILED",
+            Metadata={"retry_attempt": 1, "original_status": "OMISSION"},
+        )
+        existing = SimpleNamespace(**payload.model_dump())
+        repo.retry_event_for_attempt.return_value = existing
+
+        result = await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertIs(result, existing)
+        repo.session_for_update.assert_awaited_once_with(session_id)
+        repo.retry_event_for_attempt.assert_awaited_once_with(
+            session_id, PAGE_ID, REVISION_ID, payload.WordId, "WORD_RETRY", 1,
+        )
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_cannot_start_without_a_saved_initial_error(self):
+        for status in (None, "CORRECT", "UNCERTAIN"):
+            service, repo = self.make_service()
+            session_id = UUID("77777777-7777-4777-8777-777777777777")
+            repo.session.return_value = SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS")
+            repo.initial_word_status.return_value = status
+            payload = ReadingEventCreate(SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                WordId=UUID("66666666-6666-4666-8666-666666666666"), Type="WORD_RETRY",
+                StartMs=0, Status="FAILED", Metadata={"retry_attempt": 1})
+            with self.assertRaises(HTTPException) as raised:
+                await service.create_reading_event(PARENT_ID, payload)
+            self.assertEqual(raised.exception.status_code, 409)
+            repo.create_reading_event.assert_not_awaited()
+
+    async def test_lost_response_replay_after_finish_does_not_create_another_attempt(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="COMPLETED")
+        payload = ReadingEventCreate(SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"), Type="WORD_RETRY",
+            StartMs=0, Status="CONFIRMED", Metadata={"retry_attempt": 1})
+        existing = SimpleNamespace(**payload.model_dump())
+        repo.retry_event_for_attempt.return_value = existing
+        self.assertIs(await service.create_reading_event(PARENT_ID, payload), existing)
+        repo.create_reading_event.assert_not_awaited()
+        repo.initial_word_status.assert_not_awaited()
+
+    async def test_retry_cannot_skip_attempt_numbers_or_falsify_incorrect_count(self):
+        for metadata in ({"retry_attempt": 3}, {"retry_attempt": 1, "incorrect_retry_count": 0}):
+            service, repo = self.make_service()
+            session_id = UUID("77777777-7777-4777-8777-777777777777")
+            repo.session.return_value = SimpleNamespace(Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS")
+            payload = ReadingEventCreate(SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                WordId=UUID("66666666-6666-4666-8666-666666666666"), Type="WORD_RETRY", StartMs=0,
+                Status="FAILED", Metadata=metadata)
+            with self.assertRaises(HTTPException):
+                await service.create_reading_event(PARENT_ID, payload)
+            repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_without_attempt_cannot_bypass_limit_or_idempotency(self):
+        for event_type in ("WORD_RETRY", "SELF_CORRECTION"):
+            with self.subTest(event_type=event_type):
+                service, repo = self.make_service()
+                session_id = UUID("77777777-7777-4777-8777-777777777777")
+                repo.session.return_value = SimpleNamespace(
+                    Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+                )
+                repo.retry_events_for_word.return_value = [
+                    SimpleNamespace(Status="FAILED", Metadata={"retry_attempt": n}) for n in (1, 2, 3)
+                ]
+                payload = ReadingEventCreate(
+                    SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                    WordId=UUID("66666666-6666-4666-8666-666666666666"),
+                    Type=event_type, StartMs=0, Status="FAILED", Metadata={},
+                )
+                for _ in range(2):
+                    with self.assertRaises(HTTPException) as raised:
+                        await service.create_reading_event(PARENT_ID, payload)
+                    self.assertEqual(raised.exception.status_code, 422)
+                repo.create_reading_event.assert_not_awaited()
+
+    async def test_legacy_retry_attempt_is_canonicalized_without_mutating_input_or_history(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="FAILED", Metadata={"attempt": 1},
+        )
+        event = await service.create_reading_event(PARENT_ID, payload)
+        self.assertEqual(event.Metadata, {"retry_attempt": 1})
+        self.assertEqual(payload.Metadata, {"attempt": 1})
+        existing = SimpleNamespace(**payload.model_dump())
+        repo.retry_event_for_attempt.return_value = existing
+        repo.create_reading_event.reset_mock()
+        payload.Metadata = {"retry_attempt": 1}
+        self.assertIs(await service.create_reading_event(PARENT_ID, payload), existing)
+        self.assertEqual(existing.Metadata, {"attempt": 1})
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_legacy_attempts_count_toward_retry_limit(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        repo.retry_events_for_word.return_value = [
+            SimpleNamespace(Status="FAILED", Metadata={"attempt": n}) for n in (1, 2, 3)
+        ]
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="FAILED", Metadata={"attempt": 4},
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_rejects_conflicting_or_invalid_legacy_attempts(self):
+        for metadata in ({"attempt": True}, {"attempt": 0}, {"attempt": "1"}, {"retry_attempt": 1, "attempt": 2}, {"retry_attempt": 1, "attempt": True}):
+            with self.subTest(metadata=metadata):
+                service, repo = self.make_service()
+                session_id = UUID("77777777-7777-4777-8777-777777777777")
+                repo.session.return_value = SimpleNamespace(
+                    Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+                )
+                payload = ReadingEventCreate(
+                    SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                    WordId=UUID("66666666-6666-4666-8666-666666666666"),
+                    Type="WORD_RETRY", StartMs=0, Status="FAILED", Metadata=metadata,
+                )
+                with self.assertRaises(HTTPException) as raised:
+                    await service.create_reading_event(PARENT_ID, payload)
+                self.assertEqual(raised.exception.status_code, 422)
+                repo.create_reading_event.assert_not_awaited()
+
+    async def test_historical_failed_rows_without_attempts_still_count(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        repo.retry_events_for_word.return_value = [
+            SimpleNamespace(Status="FAILED", Metadata={}) for _ in range(3)
+        ]
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="CONFIRMED", Metadata={"retry_attempt": 1},
+        )
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_attempt_cannot_change_a_previously_saved_result(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="CONFIRMED",
+            Metadata={"retry_attempt": 1},
+        )
+        repo.retry_event_for_attempt.return_value = SimpleNamespace(
+            **{**payload.model_dump(), "Status": "FAILED"},
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_attempt_requires_a_positive_integer_and_word_identity(self):
+        for attempt in (True, 0, -1, "1", 1.5, None):
+            with self.subTest(attempt=attempt):
+                service, repo = self.make_service()
+                session_id = UUID("77777777-7777-4777-8777-777777777777")
+                repo.session.return_value = SimpleNamespace(
+                    Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+                )
+                payload = ReadingEventCreate(
+                    SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                    WordId=UUID("66666666-6666-4666-8666-666666666666"),
+                    Type="WORD_RETRY", StartMs=0, Status="FAILED",
+                    Metadata={"retry_attempt": attempt},
+                )
+                with self.assertRaises(HTTPException) as raised:
+                    await service.create_reading_event(PARENT_ID, payload)
+                self.assertEqual(raised.exception.status_code, 422)
+                repo.create_reading_event.assert_not_awaited()
+
+        service, repo = self.make_service()
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        payload.WordId = None
+        payload.Metadata = {"retry_attempt": 1}
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_reading_event(PARENT_ID, payload)
+        self.assertEqual(raised.exception.status_code, 422)
+        repo.create_reading_event.assert_not_awaited()
+
+    async def test_retry_limit_counts_only_saved_incorrect_evaluations(self):
+        for failed_count in (0, 2, 3):
+            with self.subTest(failed_count=failed_count):
+                service, repo = self.make_service()
+                session_id = UUID("77777777-7777-4777-8777-777777777777")
+                repo.session.return_value = SimpleNamespace(
+                    Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+                )
+                # Technical/empty captures are not evaluated incorrect results.
+                repo.retry_events_for_word.return_value = [
+                    SimpleNamespace(Status="FAILED", Metadata={"retry_attempt": index + 1})
+                    for index in range(failed_count)
+                ] + [SimpleNamespace(Status="UNCERTAIN", Metadata={"retry_attempt": 20})]
+                payload = ReadingEventCreate(
+                    SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                    WordId=UUID("66666666-6666-4666-8666-666666666666"),
+                    Type="WORD_RETRY", StartMs=0, Status="CONFIRMED",
+                    Metadata={"retry_attempt": 21},
+                )
+                if failed_count < 3:
+                    await service.create_reading_event(PARENT_ID, payload)
+                    repo.create_reading_event.assert_awaited_once()
+                else:
+                    with self.assertRaises(HTTPException) as raised:
+                        await service.create_reading_event(PARENT_ID, payload)
+                    self.assertEqual(raised.exception.status_code, 409)
+                    repo.create_reading_event.assert_not_awaited()
+
+    async def test_saved_attempt_remains_idempotent_after_retry_limit(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        repo.session.return_value = SimpleNamespace(
+            Id=session_id, ChildId=CHILD_ID, BookId=BOOK_ID, State="IN_PROGRESS",
+        )
+        payload = ReadingEventCreate(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=UUID("66666666-6666-4666-8666-666666666666"),
+            Type="WORD_RETRY", StartMs=0, Status="FAILED", Metadata={"retry_attempt": 3},
+        )
+        existing = SimpleNamespace(**payload.model_dump())
+        repo.retry_event_for_attempt.return_value = existing
+        repo.retry_events_for_word.return_value = [existing] * 3
+        self.assertIs(await service.create_reading_event(PARENT_ID, payload), existing)
+        repo.create_reading_event.assert_not_awaited()
+
     async def test_word_retry_event_is_rejected_for_completed_session(self):
         service, repo = self.make_service()
         session_id = UUID("77777777-7777-4777-8777-777777777777")
@@ -628,6 +893,46 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReadingContentRepositoryQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_event_attempt_query_scopes_every_identity_and_uses_jsonb(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=None)
+        word_id = UUID("66666666-6666-4666-8666-666666666666")
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        await ReadingContentRepository(db).retry_event_for_attempt(
+            session_id, PAGE_ID, REVISION_ID, word_id, "WORD_RETRY", 2,
+        )
+        statement = db.scalar.await_args.args[0]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        parameters = list(compiled.params.values())
+        for value in (session_id, PAGE_ID, REVISION_ID, word_id, "WORD_RETRY", {"retry_attempt": 2}):
+            self.assertIn(value, parameters)
+        self.assertIn("@>", str(compiled))
+        self.assertIn({"attempt": 2}, parameters)
+        self.assertIn("OR", str(compiled))
+        self.assertIn("NOT", str(compiled))
+        self.assertIn("LIMIT", str(compiled))
+
+    async def test_retry_limit_query_is_word_page_revision_and_session_scoped(self):
+        db = MagicMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        db.execute = AsyncMock(return_value=result)
+        word_id = UUID("66666666-6666-4666-8666-666666666666")
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        await ReadingContentRepository(db).retry_events_for_word(session_id, PAGE_ID, REVISION_ID, word_id)
+        compiled = db.execute.await_args.args[0].compile(dialect=postgresql.dialect())
+        for value in (session_id, PAGE_ID, REVISION_ID, word_id, "WORD_RETRY"):
+            self.assertIn(value, compiled.params.values())
+
+    async def test_session_write_lookup_locks_the_same_row_as_completion(self):
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=None)
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        await ReadingContentRepository(db).session_for_update(session_id)
+        compiled = db.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
+        self.assertIn("FOR UPDATE", str(compiled))
+        self.assertIn(session_id, compiled.params.values())
+
     async def test_page_range_query_excludes_retired_rows_with_reused_page_numbers(self):
         db = MagicMock()
         result = MagicMock()

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminParentsScreen } from "@/components/admin/admin-parents-screen";
@@ -134,32 +140,48 @@ describe("AdminParentsScreen", () => {
   });
 
 
-  it("opens the selected parent's edit form, loads that ID, and saves changed fields once", async () => {
+  it("opens the edit dialog while loading and saves the selected parent's data once", async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",
       display_name: "Nguyen Van A",
       created_at: "2026-10-01T00:00:00Z",
       children_count: 1,
     };
-    list.mockResolvedValue({ items: [parent], total: 1, limit: 10, offset: 0 });
-    getById.mockResolvedValue({
+    const detail = {
       id: parent.id,
-      display_name: "Nguyen Van A",
+      display_name: parent.display_name,
       email: "parent@example.com",
       phone: "0900000000",
       created_at: parent.created_at,
       children: [],
       contact_info_status: "available",
-    });
+    } as const;
+    let resolveDetail!: (value: typeof detail) => void;
+    list.mockResolvedValue({ items: [parent], total: 1, limit: 10, offset: 0 });
+    getById.mockImplementationOnce(
+      () =>
+        new Promise<typeof detail>((resolve) => {
+          resolveDetail = resolve;
+        }),
+    );
     update.mockResolvedValue({});
 
     renderScreen();
     await screen.findByRole("heading", { name: "Nguyen Van A" });
     fireEvent.click(screen.getByRole("button", { name: /Sửa/i }));
 
-    expect(await screen.findByText("Đang tải thông tin tài khoản…")).toBeInTheDocument();
-    expect(await screen.findByDisplayValue("parent@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByText("Đang tải thông tin tài khoản…"),
+    ).toBeInTheDocument();
     expect(getById).toHaveBeenCalledWith(parent.id);
+
+    await act(async () => {
+      resolveDetail(detail);
+    });
+    expect(
+      await screen.findByDisplayValue("parent@example.com"),
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
       target: { value: "Nguyen Van Updated" },
@@ -172,7 +194,61 @@ describe("AdminParentsScreen", () => {
         display_name: "Nguyen Van Updated",
       });
     });
-    expect(await screen.findByText("Đã cập nhật hồ sơ Parent.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Đã cập nhật hồ sơ Parent."),
+    ).toBeInTheDocument();
+  });
+
+  it("updates email and phone through one locked contact-information request", async () => {
+    const parent = {
+      id: "22222222-2222-4222-8222-222222222222",
+      display_name: "Nguyen Van A",
+      created_at: "2026-10-01T00:00:00Z",
+      children_count: 0,
+    };
+    const detail = {
+      id: parent.id,
+      display_name: parent.display_name,
+      email: "parent@example.com",
+      phone: "0900000000",
+      created_at: parent.created_at,
+      children: [],
+      contact_info_status: "available",
+    } as const;
+    let completeUpdate!: () => void;
+    list.mockResolvedValue({ items: [parent], total: 1, limit: 10, offset: 0 });
+    getById.mockResolvedValueOnce(detail);
+    update.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeUpdate = () => resolve({});
+        }),
+    );
+
+    renderScreen();
+    await screen.findByRole("heading", { name: "Nguyen Van A" });
+    fireEvent.click(screen.getByRole("button", { name: /Sửa/i }));
+    const email = await screen.findByDisplayValue("parent@example.com");
+    const phone = screen.getByDisplayValue("0900000000");
+    fireEvent.change(email, { target: { value: "New.Parent@Example.com" } });
+    fireEvent.change(phone, { target: { value: "0911111111" } });
+
+    const saveButton = screen.getByRole("button", { name: "Lưu thay đổi" });
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(parent.id, {
+      email: "new.parent@example.com",
+      phone: "0911111111",
+    });
+
+    await act(async () => {
+      completeUpdate();
+    });
+    expect(
+      await screen.findByText("Đã cập nhật hồ sơ Parent."),
+    ).toBeInTheDocument();
   });
 
   it("does not send an update when a contact field is cleared", async () => {
@@ -200,10 +276,11 @@ describe("AdminParentsScreen", () => {
     fireEvent.change(email, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
-    expect(await screen.findByText(/Backend hiện không hỗ trợ xóa email/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Backend hiện không hỗ trợ xóa email/i),
+    ).toBeInTheDocument();
     expect(update).not.toHaveBeenCalled();
   });
-
   it("soft-deletes a Parent through the API and removes it from the refreshed list", async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",
@@ -231,9 +308,11 @@ describe("AdminParentsScreen", () => {
       await screen.findByRole("heading", { name: "Nguyen Van A" }),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Xóa" }));
-    expect(await screen.findByText(/Đây là xóa mềm/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Xóa Parent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa" }));
+    expect(
+      await screen.findByText(/Đây là xóa mềm/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa Parent" }));
 
     await waitFor(() => {
       expect(deactivate).toHaveBeenCalledWith(parent.id);

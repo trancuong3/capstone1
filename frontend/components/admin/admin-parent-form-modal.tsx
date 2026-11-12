@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
@@ -72,17 +72,12 @@ export function AdminParentFormModal({
   onSuccess,
 }: AdminParentFormModalProps) {
   const [values, setValues] = useState<AdminParentFormValues>(initialValues);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof AdminParentFormValues, string>>>({});
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<keyof AdminParentFormValues, string>>
+  >({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const submitLockRef = useRef(false);
-
-  useEffect(() => {
-    if (!isOpen || isLoading) return;
-    setValues(initialValues);
-    setFieldErrors({});
-    setFormError(null);
-  }, [initialValues, isLoading, isOpen]);
 
   function updateField(field: keyof AdminParentFormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -109,19 +104,37 @@ export function AdminParentFormModal({
     const originalPhone = initialValues.phone.trim();
     const nextErrors: Partial<Record<keyof AdminParentFormValues, string>> = {};
 
-    if (!displayName) nextErrors.display_name = "Vui lòng nhập tên hiển thị.";
-    else if (displayName.length > 120) nextErrors.display_name = "Tên hiển thị không được vượt quá 120 ký tự.";
+    if (!displayName) {
+      nextErrors.display_name = "Vui lòng nhập tên hiển thị.";
+    } else if (displayName.length > 120) {
+      nextErrors.display_name =
+        "Tên hiển thị không được vượt quá 120 ký tự.";
+    }
 
-    if (mode === "create" && !email) nextErrors.email = "Email là trường bắt buộc.";
-    else if (email && !emailPattern.test(email)) nextErrors.email = "Email chưa đúng định dạng.";
-    else if (mode === "edit" && contactInfoEditable && originalEmail && !email) {
-      nextErrors.email = "Backend hiện không hỗ trợ xóa email. Hãy giữ giá trị hiện tại hoặc nhập email mới.";
+    if (mode === "create" && !email) {
+      nextErrors.email = "Email là trường bắt buộc.";
+    } else if (email && !emailPattern.test(email)) {
+      nextErrors.email = "Email chưa đúng định dạng.";
+    } else if (
+      mode === "edit" &&
+      contactInfoEditable &&
+      originalEmail &&
+      !email
+    ) {
+      nextErrors.email =
+        "Backend hiện không hỗ trợ xóa email. Hãy giữ giá trị hiện tại hoặc nhập email mới.";
     }
 
     if (phone && (phone.length > 30 || !phonePattern.test(phone))) {
       nextErrors.phone = "Số điện thoại chưa đúng định dạng.";
-    } else if (mode === "edit" && contactInfoEditable && originalPhone && !phone) {
-      nextErrors.phone = "Backend hiện không hỗ trợ xóa số điện thoại. Hãy giữ giá trị hiện tại hoặc nhập số mới.";
+    } else if (
+      mode === "edit" &&
+      contactInfoEditable &&
+      originalPhone &&
+      !phone
+    ) {
+      nextErrors.phone =
+        "Backend hiện không hỗ trợ xóa số điện thoại. Hãy giữ giá trị hiện tại hoặc nhập số mới.";
     }
 
     setFieldErrors(nextErrors);
@@ -163,9 +176,17 @@ export function AdminParentFormModal({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={close} title={mode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}>
+    <Modal
+      isOpen={isOpen}
+      onClose={close}
+      title={mode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
+    >
       {isLoading ? (
-        <div aria-live="polite" className="grid min-h-40 place-items-center text-center" role="status">
+        <div
+          aria-live="polite"
+          className="grid min-h-40 place-items-center text-center"
+          role="status"
+        >
           <p className="font-bold text-muted">Đang tải thông tin tài khoản…</p>
         </div>
       ) : (
@@ -179,7 +200,9 @@ export function AdminParentFormModal({
             label="Tên hiển thị"
             autoComplete="name"
             value={values.display_name}
-            onChange={(event) => updateField("display_name", event.target.value)}
+            onChange={(event) =>
+              updateField("display_name", event.target.value)
+            }
             error={fieldErrors.display_name}
             required
             maxLength={120}
@@ -207,18 +230,31 @@ export function AdminParentFormModal({
           />
           {mode === "edit" && !contactInfoEditable ? (
             <StatusMessage tone="warning" title="Thông tin liên hệ chỉ đọc">
-              {contactInfoMessage ?? "Backend chưa xác nhận được thông tin Supabase Auth. Tên hiển thị vẫn có thể chỉnh sửa."}
+              {contactInfoMessage ??
+                "Backend chưa xác nhận được thông tin Supabase Auth. Tên hiển thị vẫn có thể chỉnh sửa."}
             </StatusMessage>
           ) : (
             <p className="text-sm text-muted">
-              Email và số điện thoại được cập nhật qua Supabase Auth ở backend. API hiện không hỗ trợ xóa trống hai trường này.
+              Email và số điện thoại được cập nhật qua Supabase Auth ở
+              backend. API hiện không hỗ trợ xóa trống hai trường này.
             </p>
           )}
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button className="sm:w-auto" disabled={saving} onClick={close} type="button" variant="secondary">
+            <Button
+              className="sm:w-auto"
+              disabled={saving}
+              onClick={close}
+              type="button"
+              variant="secondary"
+            >
               Hủy
             </Button>
-            <Button className="sm:w-auto" disabled={isLoading} isLoading={saving} type="submit">
+            <Button
+              className="sm:w-auto"
+              disabled={isLoading}
+              isLoading={saving}
+              type="submit"
+            >
               {mode === "create" ? "Tạo Parent" : "Lưu thay đổi"}
             </Button>
           </div>

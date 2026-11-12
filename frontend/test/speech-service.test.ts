@@ -26,13 +26,130 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 function headersFromCall(): Headers {
   return fetchMock.mock.calls[0]?.[1]?.headers as Headers;
 }
 
 describe("speech service", () => {
+  it("bounds TTS authentication and discards a late session restoration", async () => {
+    vi.useFakeTimers();
+    let restore!: (value: { error: null }) => void;
+    initialize.mockReturnValueOnce(
+      new Promise((resolve) => {
+        restore = resolve;
+      }),
+    );
+    const result = createSpeechService()
+      .synthesize("Bé đọc.", { timeoutMs: 100 })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(await result).toMatchObject({ name: "TimeoutError" });
+    restore({ error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.2])(
+    "passes speed %s through short TTS",
+    async (speed) => {
+      fetchMock.mockResolvedValue(
+        new Response("audio", { headers: { "content-type": "audio/mpeg" } }),
+      );
+      await createSpeechService().synthesize("Bé đi học.", { speed });
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).speed).toBe(
+        speed,
+      );
+    },
+  );
+  it("aborts a stalled STT request and reports a recoverable timeout", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+    const outcome = createSpeechService()
+      .transcribe(new Blob(["audio"]), { timeoutMs: 100 })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(await outcome).toMatchObject({
+      code: "STT_TIMEOUT",
+      retryable: true,
+    });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(
+      true,
+    );
+  });
+
+  it("times out session restoration and never uploads when it later resolves", async () => {
+    vi.useFakeTimers();
+    let restore: (value: { error: null }) => void = () => undefined;
+    initialize.mockReturnValueOnce(
+      new Promise<{ error: null }>((resolve) => {
+        restore = resolve;
+      }),
+    );
+    const outcome = createSpeechService()
+      .transcribe(new Blob(["audio"]), { timeoutMs: 100 })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(await outcome).toMatchObject({ code: "STT_TIMEOUT" });
+    restore({ error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not upload after capture cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      createSpeechService().transcribe(new Blob(["audio"]), {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 429, 500, 502, 503])(
+    "preserves safe failure for HTTP %s without automatic retry",
+    async (status) => {
+      fetchMock.mockResolvedValue(new Response("unavailable", { status }));
+      await expect(
+        createSpeechService().transcribe(new Blob(["audio"])),
+      ).rejects.toMatchObject({
+        status,
+        retryable: status === 429 || status >= 500,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("rejects empty audio before authentication or upload", async () => {
+    await expect(
+      createSpeechService().transcribe(new Blob([])),
+    ).rejects.toMatchObject({ code: "STT_INVALID_AUDIO" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(initialize).not.toHaveBeenCalled();
+  });
+
+  it("uses an mp4 filename for Safari recordings", async () => {
+    fetchMock.mockResolvedValue(Response.json({ text: "Bé" }));
+    await createSpeechService().transcribe(
+      new Blob(["audio"], { type: "audio/mp4" }),
+    );
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect((body.get("file") as File).name).toBe("recording.mp4");
+  });
+
   it("keeps ElevenLabs credentials server-side while requesting binary TTS audio", async () => {
     fetchMock.mockResolvedValue(
       new Response("audio-bytes", {

@@ -52,6 +52,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Configure reliable Ubuntu APT sources
+        timeout-minutes: 5
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+          sudo python3 -B .github/scripts/configure_ubuntu_apt.py
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:

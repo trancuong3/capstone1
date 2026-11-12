@@ -21,6 +21,7 @@ from app.schemas.reading import (
     ReadingSessionPageProgressItem,
 )
 from app.services.storage_service import create_signed_image_url
+from app.services.word_box_geometry import has_verified_geometry
 
 
 class ReadingContentService:
@@ -79,9 +80,8 @@ class ReadingContentService:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
 
-        # Page completion comes from the durable session-page table. The current
-        # schema still does not persist recognized words or audio transcripts, so
-        # those metrics remain null rather than fabricated zeroes.
+        # Page completion and first-pass assessment use durable evidence.
+        # Raw spoken-word counts stay unknown when only an assessment is saved.
         duration_min = None
         if session.EndedAt and session.StartedAt:
             start = session.StartedAt
@@ -92,6 +92,11 @@ class ReadingContentService:
                 end = end.replace(tzinfo=timezone.utc)
             duration_min = max(0, int((end - start).total_seconds() // 60))
         page_rows = await self.repository.session_page_rows(session.Id)
+        from app.services.reading_assessment import aggregate_assessment
+        assessment = aggregate_assessment(
+            session.Id, await self.repository.comparison_reports(session.Id),
+            await self.repository.events_for_session(session.Id),
+        )
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
             pages_explored=(
@@ -100,10 +105,77 @@ class ReadingContentService:
                 else None
             ),
             selected_range_pages=len(page_rows) if page_rows else None,
-            practiced_words=None,
-            spoken_words=None,
-            transcripts=None,
+            **assessment,
         )
+
+    async def get_practice_state(self, session_id: UUID, actor_id: UUID):
+        from pydantic import ValidationError
+        from app.schemas.reading import PracticePageRead, PracticeWordRead, ReadingPracticeStateRead, StoredInitialWordAssessment
+        await self.require_parent(actor_id)
+        session = await self.repository.session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+        await self.require_owned_child(session.ChildId, actor_id)
+        reports = await self.repository.comparison_reports(session_id)
+        events = await self.repository.events_for_session(session_id)
+        selected_rows = await self.repository.session_page_rows(session_id)
+        selected = {(row.PageId, row.PageRevisionId) for row in selected_rows}
+        pages = []
+        words = []
+        seen = set()
+        legacy = False
+        for report in reversed(reports):
+            metadata = report.Summary if isinstance(report.Summary, dict) else {}
+            if metadata.get("assessment_version") != 1:
+                legacy = True
+                continue
+            key = (report.PageId, report.PageRevisionId)
+            if key in seen:
+                continue
+            page = await self.repository.page_by_id(report.PageId)
+            revision = await self.repository.revision_snapshot(*key)
+            if (report.SessionId != session_id or page is None or page.BookId != session.BookId
+                    or revision is None or (selected and key not in selected)):
+                raise HTTPException(status_code=501, detail="Saved practice identity is not available")
+            try:
+                snapshot = [StoredInitialWordAssessment.model_validate(item)
+                            for item in metadata.get("initial_assessment", [])]
+                valid_words = await self.repository.revision_words(report.PageRevisionId)
+                if (not snapshot or len({word.word_id for word in snapshot}) != len(snapshot)
+                        or {word.word_id for word in snapshot} != {word.Id for word in valid_words}):
+                    raise ValueError("Invalid saved word identity")
+                saved_page = PracticePageRead(page_id=report.PageId, page_revision_id=report.PageRevisionId,
+                    page_number=page.PageNumber, transcript=report.Transcript, initial_assessment=snapshot)
+            except (ValidationError, TypeError, ValueError):
+                raise HTTPException(status_code=501, detail="Saved practice evidence is not available") from None
+            seen.add(key)
+            pages.append(saved_page)
+            for word in snapshot:
+                if word.status not in {"MISPRONUNCIATION", "OMISSION"}:
+                    continue
+                matching = [event for event in events if event.SessionId == session_id
+                    and event.PageId == report.PageId and event.PageRevisionId == report.PageRevisionId
+                    and event.WordId == word.word_id and event.Type == "WORD_RETRY"]
+                attempts = []
+                failed = set()
+                unkeyed_failed = 0
+                corrected = skipped = False
+                for event in matching:
+                    event_meta = self._canonical_retry_metadata(event.Metadata)
+                    attempt = event_meta.get("retry_attempt")
+                    if type(attempt) is int and attempt > 0:
+                        attempts.append(attempt)
+                        if event.Status == "FAILED":
+                            failed.add(attempt)
+                    elif event.Status == "FAILED":
+                        unkeyed_failed += 1
+                    corrected |= event.Status == "CONFIRMED"
+                    skipped |= event.Status == "UNCERTAIN" and event_meta.get("skip_reason") == "TECHNICAL_OR_MANUAL"
+                incorrect = min(3, len(failed) + unkeyed_failed)
+                words.append(PracticeWordRead(page_id=report.PageId, page_revision_id=report.PageRevisionId,
+                    word_id=word.word_id, retry_attempt_count=max(attempts, default=0), incorrect_retry_count=incorrect,
+                    resolution_status="SELF_CORRECTED" if corrected else "UNRESOLVED" if skipped or incorrect >= 3 else "RETRYING"))
+        return ReadingPracticeStateRead(session_id=session_id, legacy_evidence_present=legacy, pages=pages, words=words)
 
     async def create_reading_event(
         self,
@@ -111,11 +183,29 @@ class ReadingContentService:
         payload: ReadingEventCreate,
     ) -> ReadingEvent:
         await self.require_parent(actor_id)
-        session = await self.repository.session(payload.SessionId)
+        # Serialize event writes with session completion and other attempts.
+        session = await self.repository.session_for_update(payload.SessionId)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
         if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
+            # Another client may finish after an event committed but its HTTP
+            # response was lost. A read-only replay is still safe after finish.
+            metadata = self._canonical_retry_metadata(payload.Metadata)
+            attempt = metadata.get("retry_attempt")
+            if (payload.Type in {"WORD_RETRY", "SELF_CORRECTION"}
+                    and payload.WordId is not None and type(attempt) is int and attempt > 0):
+                existing = await self.repository.retry_event_for_attempt(
+                    session.Id, payload.PageId, payload.PageRevisionId,
+                    payload.WordId, payload.Type, attempt,
+                )
+                if existing is not None and (
+                    existing.Status == payload.Status
+                    and self._canonical_retry_metadata(existing.Metadata) == metadata
+                    and existing.StartMs == payload.StartMs and existing.EndMs == payload.EndMs
+                    and existing.Confidence == payload.Confidence
+                ):
+                    return existing
             raise HTTPException(
                 status_code=409,
                 detail="Cannot create reading events for a finished session",
@@ -161,8 +251,85 @@ class ReadingContentService:
         ):
             raise HTTPException(status_code=422, detail="Word does not belong to the referenced page revision")
 
+        if payload.Type in {"WORD_RETRY", "SELF_CORRECTION"}:
+            metadata = self._canonical_retry_metadata(payload.Metadata)
+            attempt = metadata.get("retry_attempt")
+            if type(attempt) is not int or attempt < 1 or payload.WordId is None:
+                raise HTTPException(status_code=422, detail="Retry attempts require a positive integer and a word identity")
+            if "attempt" in payload.Metadata and (
+                type(payload.Metadata["attempt"]) is not int
+                or payload.Metadata["attempt"] != attempt
+            ):
+                raise HTTPException(status_code=422, detail="Retry attempt identities must agree")
+            # Accept the legacy alias on new requests without rewriting history
+            # or mutating the caller's payload. All new writes use one key.
+            payload = payload.model_copy(update={"Metadata": metadata})
+            existing = await self.repository.retry_event_for_attempt(
+                session.Id, payload.PageId, payload.PageRevisionId,
+                payload.WordId, payload.Type, attempt,
+            )
+            if existing is not None:
+                if (
+                    existing.Status != payload.Status
+                    or self._canonical_retry_metadata(existing.Metadata) != payload.Metadata
+                    or existing.StartMs != payload.StartMs
+                    or existing.EndMs != payload.EndMs
+                    or existing.Confidence != payload.Confidence
+                ):
+                    raise HTTPException(status_code=409, detail="This retry attempt already has a different saved result")
+                return existing
+            if payload.Type == "WORD_RETRY":
+                initial_status = await self.repository.initial_word_status(
+                    session.Id, payload.PageId, payload.PageRevisionId, payload.WordId,
+                )
+                if initial_status not in {"MISPRONUNCIATION", "OMISSION"}:
+                    raise HTTPException(status_code=409, detail="Save the initial word error before retrying")
+                if payload.Status not in {"CONFIRMED", "FAILED", "UNCERTAIN"}:
+                    raise HTTPException(status_code=422, detail="Unsupported retry result")
+                previous = await self.repository.retry_events_for_word(
+                    session.Id, payload.PageId, payload.PageRevisionId, payload.WordId,
+                )
+                incorrect_attempts = set()
+                unkeyed_incorrect_count = 0
+                for previous_event in previous:
+                    if previous_event.Status != "FAILED":
+                        continue
+                    previous_attempt = self._canonical_retry_metadata(previous_event.Metadata).get("retry_attempt")
+                    if type(previous_attempt) is int and previous_attempt > 0:
+                        incorrect_attempts.add(previous_attempt)
+                    else:
+                        # Historical failed rows still count even if an older
+                        # writer omitted the attempt identity. Never edit them.
+                        unkeyed_incorrect_count += 1
+                if len(incorrect_attempts) + unkeyed_incorrect_count >= 3:
+                    raise HTTPException(status_code=409, detail="This word has reached three incorrect retry results")
+                if any(event.Status == "CONFIRMED" for event in previous):
+                    raise HTTPException(status_code=409, detail="This word is already self-corrected")
+                previous_attempts = [
+                    self._canonical_retry_metadata(event.Metadata).get("retry_attempt")
+                    for event in previous
+                ]
+                last_attempt = max((value for value in previous_attempts
+                                    if type(value) is int and value > 0), default=0)
+                if attempt != last_attempt + 1:
+                    raise HTTPException(status_code=409, detail="Retry attempts must be sequential")
+                expected_count = len(incorrect_attempts) + unkeyed_incorrect_count + (payload.Status == "FAILED")
+                if "incorrect_retry_count" in metadata and (
+                    type(metadata["incorrect_retry_count"]) is not int
+                    or metadata["incorrect_retry_count"] != expected_count
+                ):
+                    raise HTTPException(status_code=422, detail="Incorrect retry count does not match saved attempts")
+
         event = ReadingEvent(**payload.model_dump())
         return await self.repository.create_reading_event(event)
+
+    @staticmethod
+    def _canonical_retry_metadata(metadata: dict | None) -> dict:
+        result = dict(metadata) if isinstance(metadata, dict) else {}
+        if "retry_attempt" not in result and "attempt" in result:
+            result["retry_attempt"] = result["attempt"]
+        result.pop("attempt", None)
+        return result
 
     async def create_fluency_assessment(
         self,
@@ -742,12 +909,35 @@ class ReadingContentService:
         page_number = page.PageNumber
         page_width = int(page.Width)
         page_height = int(page.Height)
-        image_path = page.ImagePath
         processing_meta = getattr(revision, "ProcessingMeta", None)
         if not isinstance(processing_meta, dict):
             processing_meta = {}
         else:
             processing_meta = dict(processing_meta)
+
+        source_path = processing_meta.get("source_image_path")
+        source_width = processing_meta.get("source_image_width")
+        source_height = processing_meta.get("source_image_height")
+        has_source_snapshot = any(
+            key in processing_meta
+            for key in ("source_image_path", "source_image_width", "source_image_height")
+        )
+        image_path = None
+        if (
+            isinstance(source_path, str)
+            and source_path.strip()
+            and type(source_width) is int
+            and type(source_height) is int
+            and source_width > 0
+            and source_height > 0
+        ):
+            image_path = source_path
+            page_width = source_width
+            page_height = source_height
+        elif not has_source_snapshot and page.CurrentVerifiedRevisionId == page_revision_id:
+            # Legacy current revisions still use the page's source. Historical
+            # revisions without provenance must not borrow a replacement image.
+            image_path = page.ImagePath
 
         await self.repository.db.rollback()
 
@@ -778,6 +968,10 @@ class ReadingContentService:
             width=page_width,
             height=page_height,
             image_url=image_url,
+            image_overlay_safe=has_verified_geometry(
+                processing_meta.get("word_box_geometry"),
+                [word.model_dump() for word in words], page_width, page_height,
+            ),
             text=text_content,
             words=words,
             paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),

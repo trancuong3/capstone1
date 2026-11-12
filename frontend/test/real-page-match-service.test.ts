@@ -77,6 +77,21 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real PageMatchService", () => {
+  it("preserves the backend geometry decision without inferring safety from valid coordinates", async () => {
+    for (const image_overlay_safe of [true, false, undefined]) {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(Response.json(progress))
+        .mockResolvedValueOnce(Response.json({ ...page, image_overlay_safe }));
+      const selected = await createPageMatchService().selectPage(
+        sessionId,
+        pageId,
+      );
+      expect(selected.image_overlay_safe).toBe(image_overlay_safe);
+      expect(selected.words).toEqual(page.words);
+      expect(selected.page_revision_id).toBe(revisionId);
+    }
+  });
   it("persists page selection within the session range before loading content", async () => {
     fetchMock
       .mockResolvedValueOnce(Response.json(progress))

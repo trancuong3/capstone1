@@ -31,6 +31,8 @@ describe("SessionComplete component", () => {
     expect(screen.getByText("5 phút")).toBeInTheDocument();
     expect(screen.getByText("2 trang")).toBeInTheDocument();
     expect(screen.getByText("3 từ")).toBeInTheDocument();
+    expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/đọc thành công/)).not.toBeInTheDocument();
 
     // Spoken words list is collapsed initially
     expect(
@@ -107,5 +109,37 @@ describe("SessionComplete component", () => {
     expect(
       screen.getByRole("button", { name: /Chưa ghi nhận/i }),
     ).toBeInTheDocument();
+  });
+
+  it("presents self-correction separately from the immutable first-pass score", () => {
+    render(
+      <SessionComplete
+        booksHref="/books"
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          ...baseSummary,
+          correct_words: ["đỏ"],
+          mispronounced_words: ["đỏ"],
+          skipped_words: [],
+          score: 50,
+          assessment: {
+            first_pass_correct: 1,
+            first_pass_incorrect: 1,
+            self_corrected_words: 1,
+            unresolved_words: 0,
+            retry_attempts: 3,
+            skipped_after_retry_limit: 0,
+            recognition_uncertain: 0,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("Bé đã tự sửa đúng")).toBeInTheDocument();
+    expect(
+      screen.getByText(/không thay đổi kết quả lượt đầu/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Đúng 1\/2 từ/)).toBeInTheDocument();
   });
 });

@@ -25,7 +25,10 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -45,6 +48,36 @@ const timedBody = {
 };
 
 describe("voice studio service", () => {
+  it.each(["not base64!", "", "%%%%"])(
+    "rejects malformed or empty audio: %s",
+    async (audio_base64) => {
+      fetchMock.mockResolvedValue(json({ ...timedBody, audio_base64 }));
+      await expect(
+        createVoiceStudioService().synthesizeTimed(["Bé", "Na"]),
+      ).rejects.toMatchObject({ code: "TTS_UNAVAILABLE" });
+    },
+  );
+
+  it("times out pending authentication and never sends a late TTS request", async () => {
+    vi.useFakeTimers();
+    let restore!: (value: { error: null }) => void;
+    initialize.mockReturnValueOnce(
+      new Promise((resolve) => {
+        restore = resolve;
+      }),
+    );
+    const result = createVoiceStudioService()
+      .synthesizeTimed(["Bé"], { timeoutMs: 100 })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(await result).toMatchObject({
+      code: "TTS_UNAVAILABLE",
+      retryable: true,
+    });
+    restore({ error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("lists the voices with the user's token", async () => {
     fetchMock.mockResolvedValue(
       json({
@@ -102,6 +135,62 @@ describe("voice studio service", () => {
     await expect(
       createVoiceStudioService().synthesizeTimed(["a", "b", "c"]),
     ).rejects.toBeDefined();
+  });
+
+  it.each([
+    [
+      { index: 1, start: 0, end: 0.4 },
+      { index: 0, start: 0.5, end: 0.9 },
+    ],
+    [
+      { index: 0, start: 0.5, end: 0.4 },
+      { index: 1, start: 0.5, end: 0.9 },
+    ],
+    [
+      { index: 0, start: 0, end: 0.6 },
+      { index: 1, start: 0.5, end: 0.9 },
+    ],
+    [
+      { index: 0, start: 0, end: 0.4 },
+      { index: 1, start: 0.5, end: 2 },
+    ],
+  ])("rejects a complete but invalid word timeline: %j", async (...words) => {
+    fetchMock.mockResolvedValue(json({ ...timedBody, words }));
+    await expect(
+      createVoiceStudioService().synthesizeTimed(["Bé", "Na"]),
+    ).rejects.toMatchObject({ code: "TTS_UNAVAILABLE" });
+  });
+
+  it("deduplicates voice IDs without inventing missing metadata", async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        default_voice_id: "v1",
+        voices: [
+          { voice_id: "v1", name: "Giọng một" },
+          { voice_id: "v1", name: "Bản lặp", gender: "male" },
+        ],
+      }),
+    );
+    const result = await createVoiceStudioService().listVoices();
+    expect(result.voices).toHaveLength(1);
+    expect(result.voices[0].gender).toBeUndefined();
+  });
+
+  it("does not fetch after cancellation during session restoration", async () => {
+    let restore!: (value: { error: null }) => void;
+    initialize.mockReturnValueOnce(
+      new Promise((resolve) => {
+        restore = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const result = createVoiceStudioService()
+      .listVoices(controller.signal)
+      .catch((error: unknown) => error);
+    controller.abort();
+    restore({ error: null });
+    expect(await result).toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps backend failures to safe service errors", async () => {

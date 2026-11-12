@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
+import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -40,6 +41,8 @@ export interface SpeechTranscript {
 export interface TextToSpeechOptions {
   readonly signal?: AbortSignal;
   readonly voiceId?: string;
+  readonly speed?: number;
+  readonly timeoutMs?: number;
 }
 
 export interface SpeechToTextOptions {
@@ -47,6 +50,7 @@ export interface SpeechToTextOptions {
   readonly languageCode?: string;
   readonly keyterms?: readonly string[];
   readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 export interface SpeechService {
@@ -164,6 +168,7 @@ async function speechRequest(
   signal?: AbortSignal,
 ): Promise<Response> {
   const token = await accessToken(capabilityCode);
+  signal?.throwIfAborted();
   const headers = new Headers(init.headers);
   headers.set("Accept", headers.get("Accept") ?? "*/*");
   headers.set("Authorization", `Bearer ${token}`);
@@ -246,30 +251,41 @@ export function createSpeechService(): SpeechService {
       const normalizedText = text.trim();
       if (!normalizedText) throw failure("TTS_UNAVAILABLE", 422);
 
-      const response = await speechRequest(
-        "/voice/text-to-speech",
-        "TTS_UNAVAILABLE",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: normalizedText,
-            ...(options.voiceId ? { voice_id: options.voiceId } : {}),
-          }),
+      return withRequestDeadline(
+        async (signal) => {
+          const response = await speechRequest(
+            "/voice/text-to-speech",
+            "TTS_UNAVAILABLE",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: normalizedText,
+                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(options.speed !== undefined
+                  ? { speed: options.speed }
+                  : {}),
+              }),
+            },
+            signal,
+          );
+          const contentType = response.headers.get("content-type") ?? "";
+          if (!contentType.toLowerCase().startsWith("audio/")) {
+            throw failure("TTS_UNAVAILABLE", response.status);
+          }
+          const audio = await response.blob();
+          signal.throwIfAborted();
+          if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
+          return audio;
         },
         options.signal,
+        options.timeoutMs ?? 30_000,
       );
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.toLowerCase().startsWith("audio/")) {
-        throw failure("TTS_UNAVAILABLE", response.status);
-      }
-      const audio = await response.blob();
-      if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
-      return audio;
     },
 
     async transcribe(audio, options = {}) {
-      if (!audio.size) throw failure("STT_UNAVAILABLE", 422);
+      if (!audio.size || audio.size > 20 * 1024 * 1024)
+        throw failure("STT_UNAVAILABLE", 422, "", false, "STT_INVALID_AUDIO");
 
       const mimeType = audio.type || "audio/webm";
       const fileBlob = audio.type
@@ -277,7 +293,13 @@ export function createSpeechService(): SpeechService {
         : new Blob([audio], { type: mimeType });
       const filename =
         options.filename ??
-        (mimeType.includes("ogg") ? "recording.ogg" : "recording.webm");
+        (mimeType.includes("ogg")
+          ? "recording.ogg"
+          : mimeType.includes("mp4")
+            ? "recording.mp4"
+            : mimeType.includes("wav")
+              ? "recording.wav"
+              : "recording.webm");
 
       const form = new FormData();
 
@@ -289,26 +311,58 @@ export function createSpeechService(): SpeechService {
 
       appendKeyterms(form, options.keyterms);
 
-      const response = await speechRequest(
-        "/voice/speech-to-text",
-        "STT_UNAVAILABLE",
-        { method: "POST", body: form },
-        options.signal,
-      );
-      let payload: unknown;
+      const controller = new AbortController();
+      const abort = () => controller.abort(options.signal?.reason);
+      if (options.signal?.aborted) abort();
+      options.signal?.addEventListener("abort", abort, { once: true });
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort(
+          new DOMException("Transcription timed out", "TimeoutError"),
+        );
+      }, options.timeoutMs ?? 30_000);
+      const interrupted = new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => reject(controller.signal.reason),
+          { once: true },
+        );
+      });
       try {
-        payload = await response.json();
-      } catch {
-        throw failure("STT_UNAVAILABLE", response.status);
+        controller.signal.throwIfAborted();
+        return await Promise.race([
+          interrupted,
+          (async () => {
+            const response = await speechRequest(
+              "/voice/speech-to-text",
+              "STT_UNAVAILABLE",
+              { method: "POST", body: form },
+              controller.signal,
+            );
+            const payload: unknown = await response.json();
+            controller.signal.throwIfAborted();
+            const parsed = transcriptionSchema.safeParse(payload);
+            if (!parsed.success)
+              throw failure("STT_UNAVAILABLE", response.status);
+            return {
+              text: parsed.data.text,
+              language_code: parsed.data.language_code ?? null,
+              language_probability: parsed.data.language_probability ?? null,
+              words: parsed.data.words ?? null,
+            };
+          })(),
+        ]);
+      } catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason;
+        if (timedOut)
+          throw failure("STT_UNAVAILABLE", 408, "", true, "STT_TIMEOUT");
+        if (error instanceof ServiceError) throw error;
+        throw failure("STT_UNAVAILABLE", 0, "", true, "STT_NETWORK_ERROR");
+      } finally {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", abort);
       }
-      const parsed = transcriptionSchema.safeParse(payload);
-      if (!parsed.success) throw failure("STT_UNAVAILABLE", response.status);
-      return {
-        text: parsed.data.text,
-        language_code: parsed.data.language_code ?? null,
-        language_probability: parsed.data.language_probability ?? null,
-        words: parsed.data.words ?? null,
-      };
     },
   };
 }
