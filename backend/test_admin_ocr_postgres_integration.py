@@ -45,6 +45,25 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self.admin_engine.begin() as connection:
             await connection.execute(text(f'CREATE SCHEMA "{self.schema}"'))
+            await connection.execute(
+                text(
+                    "INSERT INTO public.profiles (id) VALUES (:id) ON CONFLICT DO NOTHING"
+                ),
+                {"id": ACTOR},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO public.bookpages (id) VALUES (:id) ON CONFLICT DO NOTHING"
+                ),
+                {"id": PAGE_ID},
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO public.pagerevisions (id, pageid) "
+                    "VALUES (:id, :page) ON CONFLICT DO NOTHING"
+                ),
+                {"id": R1_ID, "page": PAGE_ID},
+            )
 
         self.engine = create_async_engine(
             POSTGRES_TEST_DATABASE_URL,
@@ -260,7 +279,34 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         async with self.admin_engine.begin() as connection:
             await connection.execute(text(f'DROP SCHEMA "{self.schema}" CASCADE'))
+            await connection.execute(
+                text("DELETE FROM public.viread_ocr_outbox WHERE page_id = :page"),
+                {"page": PAGE_ID},
+            )
+            await connection.execute(
+                text("DELETE FROM public.pagerevisions WHERE pageid = :page"),
+                {"page": PAGE_ID},
+            )
+            await connection.execute(
+                text("DELETE FROM public.bookpages WHERE id = :page"),
+                {"page": PAGE_ID},
+            )
+            await connection.execute(
+                text("DELETE FROM public.profiles WHERE id = :actor"),
+                {"actor": ACTOR},
+            )
         await self.admin_engine.dispose()
+
+    async def _seed_public_revision_reference(self, revision_id: UUID) -> None:
+        """Mirror the isolated-schema revision IDs required by public FK constraints."""
+        async with self.admin_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO public.pagerevisions (id, pageid) "
+                    "VALUES (:id, :page) ON CONFLICT DO NOTHING"
+                ),
+                {"id": revision_id, "page": PAGE_ID},
+            )
 
     def _test_app(self):
         app = FastAPI()
@@ -372,6 +418,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 {"paddleocr": "bé.", "vietocr": "bé.", "tesseract": None},
             )
 
+            verified_revision_id = UUID(r2["page_revision_id"])
+            await self._seed_public_revision_reference(verified_revision_id)
+
             verified = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/verify",
                 json={
@@ -399,6 +448,25 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 [word["ocr_evidence"]["reference_text"] for word in verified.json()["words"]],
                 ["Ngày", "xưa", "có", "em."],
             )
+            async with self.admin_engine.begin() as connection:
+                outbox_event = (
+                    await connection.execute(
+                        text("""
+                            SELECT event_type, page_id, revision_id, actor_id, status,
+                                   payload::text AS payload_text
+                            FROM public.viread_ocr_outbox
+                            WHERE event_type = 'VERIFIED_REVISION' AND revision_id = :revision
+                        """),
+                        {"revision": verified_revision_id},
+                    )
+                ).mappings().one()
+            self.assertEqual(outbox_event["page_id"], PAGE_ID)
+            self.assertEqual(outbox_event["revision_id"], verified_revision_id)
+            self.assertEqual(outbox_event["actor_id"], ACTOR)
+            self.assertEqual(outbox_event["status"], "PENDING")
+            payload = json.loads(outbox_event["payload_text"])
+            self.assertEqual(payload["source_flow"], "FLOW1_VERIFIED")
+            self.assertEqual(payload["schema"], "viread-outbox-v1")
 
             async with self.sessions() as session:
                 reading_repository = ReadingContentRepository(session)

@@ -4,7 +4,11 @@ import { z } from "zod";
 const overviewSchema = z.object({
   outbox: z.array(z.object({ status: z.string(), count: z.number().int() })),
   samples: z.array(
-    z.object({ source_flow: z.string(), split: z.string(), count: z.number().int() }),
+    z.object({
+      source_flow: z.string(),
+      split: z.string(),
+      count: z.number().int(),
+    }),
   ),
   runs: z.array(
     z.object({
@@ -31,14 +35,16 @@ const overviewSchema = z.object({
       created_at: z.iso.datetime({ offset: true }),
     }),
   ),
-  active_model: z.object({
-    model_family: z.string(),
-    checkpoint_sha256: z.string(),
-    storage_path: z.string().nullable(),
-    profile: z.string(),
-    decision_id: z.uuid().nullable(),
-    updated_at: z.iso.datetime({ offset: true }),
-  }).nullable(),
+  active_model: z
+    .object({
+      model_family: z.string(),
+      checkpoint_sha256: z.string(),
+      storage_path: z.string().nullable(),
+      profile: z.string(),
+      decision_id: z.uuid().nullable(),
+      updated_at: z.iso.datetime({ offset: true }),
+    })
+    .nullable(),
 });
 
 export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
