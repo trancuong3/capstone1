@@ -241,6 +241,8 @@ def _engine_cases():
         w, paddle=w, vietocr=w, tesseract=w, alignment="unresolved"), "yellow"
     yield "D45 selected engine is PaddleOCR and Vietnamese engines back its token", three_engines(
         "AN", paddle="AN", vietocr="AN", tesseract="AN", selected="paddleocr"), "green"
+    yield "D46 PaddleOCR sees only a prefix, Vietnamese engines stay unresolved", three_engines(
+        "Mỹ", paddle="M", vietocr="Mỹ", tesseract="MỸ"), "yellow"
 
 
 def _unanchored():
@@ -278,7 +280,7 @@ class MultiEngineEvidence(unittest.TestCase):
             with self.subTest(case=name):
                 self.assertEqual(classify_word(word), expected)
                 seen += 1
-        self.assertEqual(seen, 45)
+        self.assertEqual(seen, 46)
 
     def test_no_engine_scenario_is_ever_red_without_a_reference(self):
         for name, word, _expected in _engine_cases():

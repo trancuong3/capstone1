@@ -109,7 +109,7 @@ async def _process(event: dict[str, Any]) -> None:
         raise ValueError("verified revision contains no usable line crops")
 
     for line_index, crop, label, fingerprint in crops:
-        object_path = f"ocr-training/flow1/{event['revision_id']}/{line_index:04d}-{fingerprint}.png"
+        object_path = f"ocr-training/flow2/admin-verified/{event['revision_id']}/{line_index:04d}-{fingerprint}.png"
         async with AsyncSessionLocal() as db:
             await ensure_storage_capacity(db, len(crop), existing_object_path=object_path)
             await db.commit()

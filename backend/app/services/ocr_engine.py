@@ -29,6 +29,7 @@ from app.services.ocr_evidence import (
     find_split_merge_candidates,
     token_alignment_cost,
 )
+from app.services.viread_vietocr_v2_preprocessing import preprocess_line_array
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -153,6 +154,7 @@ _vietocr_initialization_status = "not_initialized"
 _paddle_initialization_error: str | None = None
 _vietocr_initialization_error: str | None = None
 _vietocr_active_checkpoint_sha: str | None = None
+_vietocr_active_profile = "ORIGINAL"
 _active_model_info_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
 _active_model_cache_lock = threading.Lock()
 _ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
@@ -278,7 +280,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_engine, _vietocr_engine
     global _paddle_initialization_status, _vietocr_initialization_status
     global _paddle_initialization_error, _vietocr_initialization_error
-    global _vietocr_active_checkpoint_sha
+    global _vietocr_active_checkpoint_sha, _vietocr_active_profile
 
     with _engine_lock:
         if _paddle_engine is None:
@@ -290,6 +292,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     _paddle_engine = PaddleOCR(
                         use_angle_cls=False,
                         lang="vi",
+                        det_algorithm="DB",
                         det_limit_side_len=2048,
                         det_db_thresh=0.25,
                         det_db_box_thresh=0.18,
@@ -312,12 +315,16 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             logger.error("VietOCR registry Original pointer failed baseline hash validation")
             active_model = None
             active_sha = _ORIGINAL_VIETOCR_SHA256
-        if active_profile not in {"ORIGINAL", "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG"}:
+        if active_profile not in {
+            "ORIGINAL", "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
+            "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
+        }:
             active_model = None
             active_profile = "ORIGINAL"
             active_sha = _ORIGINAL_VIETOCR_SHA256
 
-        if _vietocr_engine is None or (_vietocr_active_checkpoint_sha is not None and active_sha != _vietocr_active_checkpoint_sha):
+        if (_vietocr_engine is None or active_sha != _vietocr_active_checkpoint_sha
+                or active_profile != _vietocr_active_profile):
             if Cfg is None or Predictor is None:
                 _vietocr_initialization_status = _vietocr_import_status
                 _vietocr_initialization_error = _vietocr_import_error
@@ -368,6 +375,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     next_engine = Predictor(viet_config)
                     _vietocr_engine = next_engine
                     _vietocr_active_checkpoint_sha = active_sha
+                    _vietocr_active_profile = active_profile
                     _vietocr_initialization_status = "success"
                     _vietocr_initialization_error = None
                 except Exception as exc:
@@ -1271,9 +1279,12 @@ def _recognize_uncertain_word_crops(
                 evidence["crop_evidence"]["vietocr_status"] = _vietocr_initialization_status
         else:
             try:
+                vietocr_crops = crops
+                if _vietocr_active_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                    vietocr_crops = [preprocess_line_array(crop) for crop in crops]
                 pil_crops = [
                     Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
-                    for crop in crops
+                    for crop in vietocr_crops
                 ]
                 predictor_config = getattr(vietocr_engine, "config", None)
                 prediction_options = (
@@ -1914,7 +1925,12 @@ def _extract_text_and_boxes_dual_engine(
         if vietocr_engine is not None:
             try:
                 with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
-                    viet_text = vietocr_engine.predict(line_img_pil)
+                    prediction_image = line_img_pil
+                    if _vietocr_active_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                        prediction_image = Image.fromarray(
+                            cv2.cvtColor(preprocess_line_array(dewarped_img_scaled), cv2.COLOR_BGR2RGB)
+                        )
+                    viet_text = vietocr_engine.predict(prediction_image)
                 if isinstance(viet_text, str) and viet_text.strip():
                     viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
                     vietocr_status = "success"

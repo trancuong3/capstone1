@@ -4,7 +4,7 @@ import argparse
 import json
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image
 
@@ -23,8 +23,27 @@ def _predictor(config: dict[str, Any], weights: str):
     return Predictor(selected)
 
 
+def _preprocess_v2_candidate_image(image: Image.Image) -> Image.Image:
+    import cv2
+    import numpy as np
+    import sys
+
+    service_dir = Path(__file__).resolve().parents[2] / "backend" / "app" / "services"
+    if str(service_dir) not in sys.path:
+        sys.path.insert(0, str(service_dir))
+    from viread_vietocr_v2_preprocessing import preprocess_line_array
+
+    bgr = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    processed = preprocess_line_array(bgr)
+    return Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB))
+
+
 def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, original_checkpoint: str,
                          candidate_checkpoint: str, output_path: str, image_cache_dir: str | None = None,
+                         candidate_profile: Literal[
+                             "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
+                             "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
+                         ],
                          policy: GatePolicy = GatePolicy()) -> dict[str, Any]:
     manifest_file = Path(manifest_path).resolve()
     actual_manifest_sha256 = sha256_file(manifest_file)
@@ -74,7 +93,10 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
         with Image.open(image) as source:
             crop = source.convert("RGB")
             original_text = unicodedata.normalize("NFC", str(original.predict(crop)))
-            candidate_text = unicodedata.normalize("NFC", str(candidate.predict(crop)))
+            candidate_image = crop
+            if candidate_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                candidate_image = _preprocess_v2_candidate_image(crop)
+            candidate_text = unicodedata.normalize("NFC", str(candidate.predict(candidate_image)))
         paired.append(PairedLine(group_id, reference, original_text, candidate_text, sample_id))
 
     metrics = benchmark_metrics(paired)
@@ -82,6 +104,7 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
                     "locked_manifest_id": manifest.get("manifest_id"),
                     "original_checkpoint_sha256": original_hash,
                     "candidate_checkpoint_sha256": sha256_file(candidate_checkpoint),
+                    "candidate_profile": candidate_profile,
                     "architecture_sha256": canonical_sha256({key: config.get(key) for key in ("backbone", "cnn", "transformer", "seq_modeling")}),
                     "outputs": [{"sample_id": line.sample_id, "group_id": line.group_id, "reference": line.reference,
                                  "original": line.original, "candidate": line.candidate} for line in paired]})
@@ -101,6 +124,8 @@ def main() -> None:
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--original", required=True)
     parser.add_argument("--candidate", required=True)
+    parser.add_argument("--candidate-profile", required=True,
+                        choices=["FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG"])
     parser.add_argument("--output", required=True)
     parser.add_argument("--image-cache", default=None)
     parser.add_argument("--min-pairs", type=int, default=200)
@@ -110,6 +135,7 @@ def main() -> None:
     print(json.dumps(run_locked_benchmark(manifest_path=args.manifest, expected_manifest_sha256=args.manifest_sha256,
                                           original_checkpoint=args.original, candidate_checkpoint=args.candidate,
                                           output_path=args.output, image_cache_dir=args.image_cache,
+                                          candidate_profile=args.candidate_profile,
                                           policy=policy), ensure_ascii=False, indent=2))
 
 

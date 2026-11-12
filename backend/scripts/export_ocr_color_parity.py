@@ -112,6 +112,14 @@ def build_cases() -> list[dict[str, object]]:
             word["ocr_evidence"]["engine_outputs"]["tesseract"] = tesseract
         cases.append(_case(f"engines-{index:03d}", word, rng.choice(STATUSES)))
 
+    # A truncated PaddleOCR token must keep a two-engine Vietnamese agreement
+    # unresolved; this is a regression for correlated mistakes on display fonts.
+    truncated_detector_word = engine_word(
+        "Mỹ", paddle="M", vietocr="Mỹ", tesseract="Mỹ",
+        statuses={"paddleocr": "success", "vietocr": "success", "tesseract": "success"},
+    )
+    cases.append(_case("paddle-incomplete-prefix-multiengine", truncated_detector_word))
+
     # Missing evidence.
     for status in STATUSES:
         cases.append({"id": f"no-evidence-{status}", "text": "SÁNG", "ocr_review_status": status,
@@ -121,7 +129,7 @@ def build_cases() -> list[dict[str, object]]:
 
 
 def render() -> str:
-    return json.dumps(build_cases(), ensure_ascii=False, indent=1) + "\n"
+    return json.dumps(build_cases(), ensure_ascii=False, indent=2) + "\n"
 
 
 if __name__ == "__main__":

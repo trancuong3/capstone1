@@ -94,7 +94,7 @@ def register_datasets(*, api_base: str, bearer_token: str, external_manifest: st
             raise ValueError("an image cannot be registered as both external and TRDG data")
         rows.extend(trdg_rows)
     if not rows and not locked_test_manifest:
-        raise ValueError("provide Flow 2 manifest(s), a Locked Test manifest, or both")
+        raise ValueError("provide Flow 1 external/TRDG manifest(s), a Locked Test manifest, or both")
 
     results = []
     with requests.Session() as session:
@@ -136,7 +136,7 @@ def register_datasets(*, api_base: str, bearer_token: str, external_manifest: st
             result = _api_call(session, "POST", f"{base}/books/admin/viread-training/datasets",
                                json={"source_flow": dataset_flow, "samples": samples,
                                      "split_seed": split_seed,
-                                     "provenance": {"pipeline": "flow2_dbnet_external_trdg_v1"}})
+                                     "provenance": {"pipeline": "flow1_dbnet_external_trdg_v1"}})
             results.append({"dataset_version": result, "source_flow": dataset_flow,
                             "sample_count": len(samples)})
 
@@ -165,7 +165,7 @@ def register_datasets(*, api_base: str, bearer_token: str, external_manifest: st
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Upload separate Flow 2 and Locked Test manifests to the Admin API")
+    parser = argparse.ArgumentParser(description="Upload Flow 1 external/TRDG and separate Locked Test manifests to the Admin API")
     parser.add_argument("--external-manifest")
     parser.add_argument("--trdg-manifest")
     parser.add_argument("--trdg-provenance")

@@ -165,16 +165,31 @@ def adjudicate_word(evidence: object) -> dict[str, Any]:
             by_token.setdefault(token, []).append(key)
     confirmed: list[tuple[str, list[str], list[str]]] = []
     preferred: list[tuple[str, list[str]]] = []
+    incomplete_detector_conflict = False
     for token, supporters in by_token.items():
         engines = {READING_ENGINE[key] for key in supporters}
         capable_engines = engines & VIETNAMESE_CAPABLE_ENGINES
         opposing: list[str] = []
+        incomplete_detector_readings: list[str] = []
         strongest_opponent = 0
         richer_reading = False
         diacritic_conflict = False
         for other_token, other_supporters in by_token.items():
             if other_token == token:
                 continue
+            # PaddleOCR's generic Vietnamese/Latin model often drops marks, so
+            # a different full token is not a veto. A strict prefix is
+            # different: it says the detector-side recognizer saw only part of
+            # the word (for example "M" while both Vietnamese engines say
+            # "Mỹ"). Keep that case unresolved instead of confirming two
+            # correlated full-word errors on a difficult display font.
+            if (len(other_token) < len(token) and token.startswith(other_token)) or (
+                len(token) < len(other_token) and other_token.startswith(token)
+            ):
+                incomplete_detector_readings.extend(
+                    key for key in other_supporters if READING_ENGINE[key] == "paddleocr"
+                )
+                incomplete_detector_conflict = incomplete_detector_conflict or bool(incomplete_detector_readings)
             capable = [
                 key for key in other_supporters
                 if READING_ENGINE[key] in VIETNAMESE_CAPABLE_ENGINES
@@ -209,14 +224,16 @@ def adjudicate_word(evidence: object) -> dict[str, Any]:
             if tesseract_ran
             else len(engines) >= MIN_SUPPORTING_ENGINES
         )
-        if enough_engines and outvotes_opposition and not diacritic_conflict:
+        if (enough_engines and outvotes_opposition and not diacritic_conflict
+                and not incomplete_detector_readings):
             confirmed.append((token, supporters, opposing))
 
     preferred_text = preferred[0][0] if len(preferred) == 1 else None
     if len(confirmed) != 1:
         return {
             **unresolved,
-            "reason": "no_candidate_with_independent_agreement",
+            "reason": "incomplete_paddle_reading" if incomplete_detector_conflict
+                      else "no_candidate_with_independent_agreement",
             "preferred_text": preferred_text,
             "preferred_support": preferred[0][1] if preferred_text else [],
             "readings": readings,

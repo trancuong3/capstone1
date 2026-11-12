@@ -19,7 +19,12 @@ def _box_bounds(box: Any) -> tuple[float, float, float, float]:
         raise ValueError("detector returned an invalid quadrilateral")
     xs = [float(point[0]) for point in points]
     ys = [float(point[1]) for point in points]
-    return min(xs), min(ys), max(xs), max(ys)
+    bounds = min(xs), min(ys), max(xs), max(ys)
+    if not all(math.isfinite(value) for value in bounds):
+        raise ValueError("detector returned non-finite coordinates")
+    if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+        raise ValueError("detector returned a zero-area text box")
+    return bounds
 
 
 def _iou(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> float:
@@ -57,11 +62,26 @@ def match_external_annotations(
     rows: list[DatasetRow] = []
     review: list[dict[str, Any]] = []
     for image_path, line_annotations in grouped.items():
-        detected = [_box_bounds(box) for box in detector(image_path)]
-        used: set[int] = set()
         with Image.open(image_path) as page:
             page = page.convert("RGB")
+            detected = []
+            for candidate in detector(image_path):
+                try:
+                    x1, y1, x2, y2 = _box_bounds(candidate)
+                except (TypeError, ValueError, IndexError):
+                    continue
+                bounds = (max(0.0, x1), max(0.0, y1), min(float(page.width), x2), min(float(page.height), y2))
+                if bounds[2] - bounds[0] >= 8 and bounds[3] - bounds[1] >= 8:
+                    detected.append(bounds)
+            used: set[int] = set()
             for annotation in line_annotations:
+                ann_x1, ann_y1, ann_x2, ann_y2 = annotation["bbox"]
+                if (not all(math.isfinite(value) for value in annotation["bbox"])
+                        or ann_x2 <= ann_x1 or ann_y2 <= ann_y1
+                        or ann_x1 < 0 or ann_y1 < 0 or ann_x2 > page.width or ann_y2 > page.height):
+                    review.append({"image": image_path, "annotation_id": annotation["annotation_id"],
+                                   "reason": "invalid_annotation_box"})
+                    continue
                 scores = sorted(((_iou(tuple(annotation["bbox"]), box), index) for index, box in enumerate(detected)), reverse=True)
                 best = scores[0] if scores else (0.0, -1)
                 second = scores[1][0] if len(scores) > 1 else 0.0
@@ -81,8 +101,12 @@ def match_external_annotations(
                 pad = max(2, round((y2 - y1) * 0.08))
                 crop_box = (max(0, math.floor(x1)), max(0, math.floor(y1 - pad)),
                             min(page.width, math.ceil(x2)), min(page.height, math.ceil(y2 + pad)))
+                if crop_box[2] - crop_box[0] < 8 or crop_box[3] - crop_box[1] < 8:
+                    review.append({"image": image_path, "annotation_id": annotation["annotation_id"],
+                                   "reason": "invalid_dbnet_crop"})
+                    continue
                 crop = page.crop(crop_box)
-                crop_path = target / "flow2_external" / annotation["annotation_id"] / "line.png"
+                crop_path = target / "flow1_external" / annotation["annotation_id"] / "line.png"
                 crop_path.parent.mkdir(parents=True, exist_ok=True)
                 crop.save(crop_path, format="PNG")
                 relative = crop_path.resolve().as_posix()
@@ -116,13 +140,13 @@ def _load_dbnet_detector() -> Callable[[str], list[Any]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare Flow 2 external labels with DBNet proposal matching")
+    parser = argparse.ArgumentParser(description="Prepare Flow 1 real-data labels with DBNet proposal matching")
     parser.add_argument("--annotations", required=True, help="JSON array: verified image/line-box/label annotations")
     parser.add_argument("--output", required=True, help="Output folder for line crops and JSONL manifest")
     args = parser.parse_args()
     annotations = json.loads(Path(args.annotations).read_text(encoding="utf-8"))
     rows, review = match_external_annotations(annotations, _load_dbnet_detector(), args.output)
-    manifest = Path(args.output) / "flow2_external.jsonl"
+    manifest = Path(args.output) / "flow1_external.jsonl"
     digest = write_jsonl(manifest, rows)
     review_path = Path(args.output) / "needs_review.json"
     review_path.write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")

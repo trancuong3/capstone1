@@ -31,6 +31,18 @@ ORIGINAL_ARCHITECTURE_SHA256 = "a26f0adfc33ffe32cdf73c7daa04c39a86a36a8ac0dcc604
 MAX_SHARD_BYTES = 40 * 1024 * 1024
 MIN_LOCKED_PAIRS = 200
 MIN_LOCKED_GROUPS = 30
+TRAINING_PROFILES = {
+    "FLOW1_EXTERNAL_TRDG": {
+        "dataset_flows": {"FLOW2_EXTERNAL_TRDG"},
+        "requires_components": {"FLOW2_EXTERNAL", "FLOW2_TRDG"},
+        "minimum_counts": {"FLOW2_EXTERNAL": 500, "FLOW2_TRDG": 20_000},
+        "maximum_counts": {"FLOW2_EXTERNAL": 1_000, "FLOW2_TRDG": 50_000},
+    },
+    "FLOW2_ADMIN_VERIFIED": {"dataset_flows": {"FLOW1_VERIFIED"}, "requires_components": set(), "minimum_counts": {}, "maximum_counts": {}},
+    # Retain the legacy profile mapping for stored runs and clients during deployment.
+    "FLOW1_VERIFIED": {"dataset_flows": {"FLOW1_VERIFIED"}, "requires_components": set(), "minimum_counts": {}, "maximum_counts": {}},
+    "FLOW2_EXTERNAL_TRDG": {"dataset_flows": {"FLOW2_EXTERNAL", "FLOW2_TRDG", "FLOW2_EXTERNAL_TRDG"}, "requires_components": set(), "minimum_counts": {}, "maximum_counts": {}},
+}
 
 
 def _canonical(value: Any) -> bytes:
@@ -39,6 +51,25 @@ def _canonical(value: Any) -> bytes:
 
 def _sha(value: str) -> bool:
     return len(value) == 64 and all(char in "0123456789abcdef" for char in value.lower())
+
+
+def _deduplicate_verified_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one crop per image hash and reject conflicting verified labels."""
+    by_hash: dict[str, dict[str, Any]] = {}
+    for item in samples:
+        digest = str(item["image_sha256"]).lower()
+        previous = by_hash.get(digest)
+        if previous is None:
+            by_hash[digest] = item
+            continue
+        if unicodedata.normalize("NFC", str(previous["label"])) != unicodedata.normalize(
+            "NFC", str(item["label"])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The same verified image crop has conflicting labels; resolve the source revision before dataset snapshotting",
+            )
+    return list(by_hash.values())
 
 
 def _edit_distance(left: list[str], right: list[str]) -> int:
@@ -120,7 +151,7 @@ class VireadOcrTrainingService:
     async def overview(self, actor_id: UUID) -> dict[str, Any]:
         await self._admin(actor_id)
         outbox = await self.repo.all("SELECT status, count(*)::integer AS count FROM public.viread_ocr_outbox GROUP BY status ORDER BY status")
-        samples = await self.repo.all("SELECT source_flow, split, count(*)::integer AS count FROM public.viread_ocr_samples GROUP BY source_flow, split ORDER BY source_flow, split")
+        samples = await self.repo.all("SELECT source_flow, split, count(DISTINCT image_sha256)::integer AS count FROM public.viread_ocr_samples GROUP BY source_flow, split ORDER BY source_flow, split")
         runs = await self.repo.all("""
             SELECT id AS run_id, profile, status, parent_checkpoint_sha256, manifest_sha256,
                    checkpoint_sha256, checkpoint_storage_path, step, created_at
@@ -139,16 +170,18 @@ class VireadOcrTrainingService:
         samples = [item.model_dump() for item in payload.samples]
         if len({item["sample_id"] for item in samples}) != len(samples):
             raise HTTPException(status_code=422, detail="Dataset sample IDs must be unique")
+        if len({item["image_sha256"] for item in samples}) != len(samples):
+            raise HTTPException(status_code=422, detail="Dataset image content must be unique within a version")
         for item in samples:
             path = item["image_storage_path"]
             item_flow = item.get("source_flow") or payload.source_flow
             if payload.source_flow == "FLOW2_EXTERNAL_TRDG" and item_flow not in {"FLOW2_EXTERNAL", "FLOW2_TRDG"}:
-                raise HTTPException(status_code=422, detail="Combined Flow 2 datasets must label each sample as external or TRDG")
+                raise HTTPException(status_code=422, detail="Flow 1 combined datasets must label each sample as external or TRDG")
             if item_flow == "FLOW2_EXTERNAL":
-                valid = path.startswith("ocr-training/flow2/external/") and item["verified"] and item["annotation_id"]
+                valid = path.startswith(("ocr-training/flow1/external/", "ocr-training/flow2/external/")) and item["verified"] and item["annotation_id"]
                 valid_split = item["split"] in {"train", "validation", "holdout"}
             elif item_flow == "FLOW2_TRDG":
-                valid = path.startswith("ocr-training/flow2/trdg/") and not item["verified"] and item["provenance"].get("generator") == "trdg"
+                valid = path.startswith(("ocr-training/flow1/trdg/", "ocr-training/flow2/trdg/")) and not item["verified"] and item["provenance"].get("generator") == "trdg"
                 valid_split = item["split"] in {"train", "validation", "holdout"}
             else:
                 valid = payload.source_flow == "LOCKED_TEST" and path.startswith("ocr-training/locked-test/") and item["verified"] and bool(item["annotation_id"])
@@ -171,14 +204,23 @@ class VireadOcrTrainingService:
                 data = await asyncio.to_thread(download_object, item["image_storage_path"])
                 if hashlib.sha256(data).hexdigest() != item["image_sha256"]:
                     raise HTTPException(status_code=422, detail="Dataset image hash does not match its registered object")
-        await asyncio.gather(*(verify_object(item) for item in samples))
+        # Bound task creation for the 20k-50k synthetic corpus target.
+        for start in range(0, len(samples), 256):
+            await asyncio.gather(*(verify_object(item) for item in samples[start:start + 256]))
 
         manifest = {"schema": "viread-locked-test-v1" if payload.source_flow == "LOCKED_TEST" else "viread-dataset-v1",
                     "source_flow": payload.source_flow, "sealed": payload.source_flow == "LOCKED_TEST",
                     "split_seed": payload.split_seed, "samples": samples, "provenance": payload.provenance}
         encoded = _canonical(manifest)
         version_sha = hashlib.sha256(encoded).hexdigest()
-        storage_path = f"ocr-training/manifests/{payload.source_flow.lower()}/{version_sha}.json"
+        manifest_folder = {
+            "FLOW2_EXTERNAL": "flow1_external",
+            "FLOW2_TRDG": "flow1_trdg",
+            "FLOW2_EXTERNAL_TRDG": "flow1_external_trdg",
+            "FLOW1_VERIFIED": "flow2_admin_verified",
+            "LOCKED_TEST": "locked_test",
+        }[payload.source_flow]
+        storage_path = f"ocr-training/manifests/{manifest_folder}/{version_sha}.json"
         existing = await self.repo.one("""
             SELECT id, source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test
             FROM public.viread_ocr_dataset_versions WHERE source_flow=:source_flow AND version_sha256=:version_sha
@@ -201,18 +243,21 @@ class VireadOcrTrainingService:
             """, {"source_flow": payload.source_flow, "version_sha": version_sha, "storage_path": storage_path,
                   "sample_count": len(samples), "locked_test": payload.source_flow == "LOCKED_TEST",
                   "split_seed": payload.split_seed, "provenance": json.dumps(payload.provenance), "actor_id": actor_id})
-            await self.repo.execute("""
+            sample_rows = [{"dataset_id": result["id"], "source_flow": item["source_flow"],
+                            "group_id": item["group_id"], "split": item["split"], "path": item["image_storage_path"],
+                            "image_sha": item["image_sha256"], "label": item["label"], "sample_id": item["sample_id"],
+                            "provenance": json.dumps({**item["provenance"], "verified": item["verified"],
+                                                       "annotation_id": item["annotation_id"]})}
+                           for item in samples]
+            for start in range(0, len(sample_rows), 1000):
+                await self.repo.execute("""
                 INSERT INTO public.viread_ocr_samples
                     (dataset_version_id, source_flow, source_group_id, split, image_storage_path,
                      image_sha256, label, source_annotation_id, provenance)
                 VALUES (:dataset_id, :source_flow, :group_id, :split, :path, :image_sha,
                         :label, :sample_id, CAST(:provenance AS jsonb))
                 ON CONFLICT DO NOTHING
-            """, [{"dataset_id": result["id"], "source_flow": item["source_flow"],
-                   "group_id": item["group_id"], "split": item["split"], "path": item["image_storage_path"],
-                   "image_sha": item["image_sha256"], "label": item["label"], "sample_id": item["sample_id"],
-                   "provenance": json.dumps({**item["provenance"], "verified": item["verified"],
-                                              "annotation_id": item["annotation_id"]})} for item in samples])
+                """, sample_rows[start:start + 1000])
             await self.repo.commit()
             return result
         except HTTPException:
@@ -222,7 +267,7 @@ class VireadOcrTrainingService:
             await self.repo.rollback()
             raise
 
-    async def flow1_manifest(self, actor_id: UUID, *, limit: int, offset: int) -> dict[str, Any]:
+    async def admin_verified_manifest(self, actor_id: UUID, *, limit: int, offset: int) -> dict[str, Any]:
         await self._admin(actor_id)
         await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_flow1_snapshot'))")
         source_rows = await self.repo.all("""
@@ -232,6 +277,7 @@ class VireadOcrTrainingService:
             WHERE source_flow='FLOW1_VERIFIED' AND split IN ('train','validation') AND dataset_version_id IS NULL
             ORDER BY created_at, id
         """)
+        source_rows = _deduplicate_verified_samples(source_rows)
         manifest = {"schema": "viread-dataset-v1", "source_flow": "FLOW1_VERIFIED",
                     "split_seed": "viread-vietocr-v2-split-v1",
                     "samples": [{**item, "verified": True} for item in source_rows]}
@@ -249,7 +295,7 @@ class VireadOcrTrainingService:
             if dataset:
                 version_sha = dataset["version_sha256"]
         if not dataset:
-            manifest_path = f"ocr-training/manifests/flow1_verified/{version_sha}.json"
+            manifest_path = f"ocr-training/manifests/flow2_admin_verified/{version_sha}.json"
             manifest_bytes = _canonical(manifest)
             estimated_db_bytes = len(manifest_bytes) + sum(len(item["label"].encode("utf-8")) + 2048 for item in source_rows)
             await ensure_database_capacity(self.db, estimated_db_bytes)
@@ -292,6 +338,7 @@ class VireadOcrTrainingService:
             item["source_flow"] = "FLOW1_VERIFIED"
             item["verified"] = True
         return {"dataset_version_id": dataset_id, "manifest_sha256": version_sha,
+                "source_flow": "FLOW1_VERIFIED", "training_profile": "FLOW2_ADMIN_VERIFIED",
                 "items": items, "total": int(total_row["total"] if total_row else 0),
                 "limit": limit, "offset": offset, "next_offset": offset + len(items) if offset + len(items) < int(total_row["total"] if total_row else 0) else None}
 
@@ -337,7 +384,7 @@ class VireadOcrTrainingService:
     async def upload_dataset_object(self, actor_id: UUID, source_flow: str, filename: str, data: bytes, content_type: str) -> dict[str, Any]:
         await self._admin(actor_id)
         if source_flow not in {"FLOW2_EXTERNAL", "FLOW2_TRDG", "LOCKED_TEST"}:
-            raise HTTPException(status_code=422, detail="Only Flow 2 and Locked Test objects can be uploaded here")
+            raise HTTPException(status_code=422, detail="Only Flow 1 external/TRDG and Locked Test objects can be uploaded here")
         if not data or len(data) > MAX_SHARD_BYTES:
             raise HTTPException(status_code=413, detail="Dataset image must be between 1 byte and 40 MiB")
         if content_type not in {"image/png", "image/jpeg", "image/webp"}:
@@ -352,7 +399,7 @@ class VireadOcrTrainingService:
         digest = hashlib.sha256(data).hexdigest()
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", filename or "image")[:100].strip("._") or "image"
         folder = {"FLOW2_EXTERNAL": "external", "FLOW2_TRDG": "trdg", "LOCKED_TEST": "locked-test"}[source_flow]
-        path = f"ocr-training/{'locked-test' if source_flow == 'LOCKED_TEST' else 'flow2/' + folder}/{digest[:2]}/{digest}-{safe_name}"
+        path = f"ocr-training/{'locked-test' if source_flow == 'LOCKED_TEST' else 'flow1/' + folder}/{digest[:2]}/{digest}-{safe_name}"
         await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
         await asyncio.to_thread(upload_object, path, data, content_type, upsert=True)
         return {"source_flow": source_flow, "image_storage_path": path, "image_sha256": digest,
@@ -363,8 +410,48 @@ class VireadOcrTrainingService:
         dataset = await self.repo.one("SELECT id, source_flow, version_sha256, is_locked_test FROM public.viread_ocr_dataset_versions WHERE id=:id", {"id": payload.dataset_version_id})
         if not dataset or dataset["is_locked_test"] or dataset["version_sha256"] != payload.manifest_sha256:
             raise HTTPException(status_code=422, detail="Training manifest version is unavailable or hash mismatched")
-        if (payload.profile == "FLOW1_VERIFIED" and dataset["source_flow"] != "FLOW1_VERIFIED") or (payload.profile == "FLOW2_EXTERNAL_TRDG" and dataset["source_flow"] not in {"FLOW2_EXTERNAL", "FLOW2_TRDG", "FLOW2_EXTERNAL_TRDG"}):
+        profile_contract = TRAINING_PROFILES[payload.profile]
+        if dataset["source_flow"] not in profile_contract["dataset_flows"]:
             raise HTTPException(status_code=422, detail="Training profile does not match its independent data flow")
+        split_counts = await self.repo.one("""
+            SELECT count(*) FILTER (WHERE split='train')::integer AS train_count,
+                   count(*) FILTER (WHERE split='validation')::integer AS validation_count
+            FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
+        """, {"dataset_id": dataset["id"]})
+        if not split_counts or not split_counts["train_count"] or not split_counts["validation_count"]:
+            raise HTTPException(status_code=422, detail={
+                "message": "The selected dataset version needs separate train and validation groups before a run can start",
+                "train_count": int((split_counts or {}).get("train_count") or 0),
+                "validation_count": int((split_counts or {}).get("validation_count") or 0),
+            })
+        if profile_contract["requires_components"]:
+            components = await self.repo.all("""
+                SELECT source_flow, count(*)::integer AS count FROM public.viread_ocr_samples
+                WHERE dataset_version_id=:dataset_id GROUP BY source_flow
+            """, {"dataset_id": dataset["id"]})
+            component_counts = {item["source_flow"]: int(item["count"]) for item in components}
+            if not profile_contract["requires_components"].issubset(component_counts):
+                raise HTTPException(status_code=422, detail="Flow 1 training requires its own dataset version to contain both verified real samples and TRDG samples")
+            shortages = {flow: minimum - component_counts.get(flow, 0)
+                         for flow, minimum in profile_contract["minimum_counts"].items()
+                         if component_counts.get(flow, 0) < minimum}
+            if shortages:
+                raise HTTPException(status_code=422, detail={
+                    "message": "Flow 1 dataset has not reached the minimum training volume",
+                    "minimum_samples": profile_contract["minimum_counts"],
+                    "registered_samples": component_counts,
+                    "missing_samples": shortages,
+                })
+            excesses = {flow: component_counts.get(flow, 0) - maximum
+                        for flow, maximum in profile_contract["maximum_counts"].items()
+                        if component_counts.get(flow, 0) > maximum}
+            if excesses:
+                raise HTTPException(status_code=422, detail={
+                    "message": "Flow 1 dataset exceeds its approved sample-volume range",
+                    "maximum_samples": profile_contract["maximum_counts"],
+                    "registered_samples": component_counts,
+                    "excess_samples": excesses,
+                })
         active = await self.repo.one("SELECT checkpoint_sha256 FROM public.viread_ocr_active_model WHERE singleton=TRUE FOR SHARE")
         if not active:
             raise HTTPException(status_code=503, detail="VietOCR active model registry is not initialized")

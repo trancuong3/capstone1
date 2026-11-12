@@ -26,7 +26,8 @@ async def get_viread_training_overview(
 
 
 @router.get("/admin/viread-training/datasets/flow1")
-async def get_flow1_training_manifest(
+@router.get("/admin/viread-training/datasets/flow2-admin-verified")
+async def get_admin_verified_training_manifest(
     limit: int = 200,
     offset: int = 0,
     actor_id: UUID = Depends(get_current_parent_id),
@@ -34,7 +35,7 @@ async def get_flow1_training_manifest(
 ):
     if not 1 <= limit <= 200 or offset < 0:
         raise HTTPException(status_code=422, detail="limit must be 1-200 and offset must be non-negative")
-    return await VireadOcrTrainingService(db).flow1_manifest(actor_id, limit=limit, offset=offset)
+    return await VireadOcrTrainingService(db).admin_verified_manifest(actor_id, limit=limit, offset=offset)
 
 
 @router.get("/admin/viread-training/active-model/artifact")
