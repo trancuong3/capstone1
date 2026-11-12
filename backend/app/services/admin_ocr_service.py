@@ -19,6 +19,7 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
@@ -2381,6 +2382,23 @@ class AdminOcrService:
                 )
             if page.LifecycleStatus == "ACTIVE":
                 self.repo.set_current_verified_revision(page, revision.Id)
+            # This insert shares the VERIFIED revision's PostgreSQL transaction. The worker
+            # cannot observe an event unless this exact verification commits successfully.
+            await self.db.execute(
+                text("""
+                    INSERT INTO public.viread_ocr_outbox
+                        (event_type, page_id, revision_id, actor_id, payload)
+                    VALUES ('VERIFIED_REVISION', :page_id, :revision_id, :actor_id,
+                            CAST(:payload AS jsonb))
+                    ON CONFLICT (event_type, revision_id) DO NOTHING
+                """),
+                {
+                    "page_id": page.Id,
+                    "revision_id": revision.Id,
+                    "actor_id": actor_id,
+                    "payload": json.dumps({"source_flow": "FLOW1_VERIFIED", "schema": "viread-outbox-v1"}),
+                },
+            )
             await self.db.commit()
             await self.db.refresh(revision)
             await self.db.refresh(page)

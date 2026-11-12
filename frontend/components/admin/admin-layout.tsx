@@ -3,6 +3,7 @@
 import {
   BookOpenCheck,
   ClipboardCheck,
+  BrainCircuit,
   HeartPulse,
   LogOut,
   ScrollText,
@@ -25,6 +26,11 @@ const links = [
     icon: ClipboardCheck,
   },
   { href: "/admin/audit-logs", label: "Nhật ký", icon: ScrollText },
+  {
+    href: "/admin/viread-training",
+    label: "Huấn luyện OCR",
+    icon: BrainCircuit,
+  },
   { href: "/admin/health", label: "Vận hành", icon: HeartPulse },
 ];
 

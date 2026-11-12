@@ -123,6 +123,7 @@ def upload_object(
     content_type: str,
     *,
     bucket_name: str | None = None,
+    upsert: bool = False,
 ) -> None:
     # Separate config/client initialization from the actual remote write. If this
     # fails, Storage was never asked to create an object and cleanup is pointless.
@@ -131,7 +132,7 @@ def upload_object(
         bucket.upload(
             object_path,
             data,
-            file_options={"content-type": content_type, "upsert": "false"},
+            file_options={"content-type": content_type, "upsert": "true" if upsert else "false"},
         )
     except Exception as exc:
         http_status = _safe_numeric_status(exc)

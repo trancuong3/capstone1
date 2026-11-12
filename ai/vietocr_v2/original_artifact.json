@@ -1,0 +1,46 @@
+{
+  "schema": "viread-vietocr-original-lock-v1",
+  "model_family": "vietocr_v2",
+  "upstream": {
+    "package": "vietocr",
+    "version": "0.3.12",
+    "config_name": "vgg_transformer",
+    "config_urls": [
+      "https://vocr.vn/data/vietocr/config/base.yml",
+      "https://vocr.vn/data/vietocr/config/vgg-transformer.yml"
+    ],
+    "checkpoint_url": "https://vocr.vn/data/vietocr/vgg_transformer.pth"
+  },
+  "checkpoint": {
+    "sha256": "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59",
+    "bytes": 151815373
+  },
+  "vocabulary": {
+    "unicode_scalar_count": 229,
+    "canonical_json_sha256": "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
+  },
+  "architecture": {
+    "backbone": "vgg19_bn",
+    "cnn": {
+      "ss": [[2, 2], [2, 2], [2, 1], [2, 1], [1, 1]],
+      "ks": [[2, 2], [2, 2], [2, 1], [2, 1], [1, 1]],
+      "hidden": 256
+    },
+    "seq_modeling": "transformer",
+    "transformer": {
+      "d_model": 256,
+      "nhead": 8,
+      "num_encoder_layers": 6,
+      "num_decoder_layers": 6,
+      "dim_feedforward": 2048,
+      "max_seq_length": 1024,
+      "pos_dropout": 0.1,
+      "trans_dropout": 0.1
+    },
+    "input": {
+      "image_height": 32,
+      "image_min_width": 32,
+      "image_max_width": 512
+    }
+  }
+}

@@ -32,9 +32,10 @@ from app.database.integrity import postgres_integrity_error_metadata
 from app.database.session import DatabaseConcurrencyLimitExceeded, engine
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
-from app.services.ocr_engine import warmup_ocr_engines
+from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
+from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 
 logger = logging.getLogger(__name__)
 
@@ -48,20 +49,49 @@ async def lifespan(_app: FastAPI):
         name="ocr_warmup_worker",
     ).start()
 
+    stop_active_model_worker = threading.Event()
+    active_model_worker = None
+    if APP_ENVIRONMENT != "test":
+        active_model_worker = threading.Thread(
+            target=run_active_viread_model_worker,
+            args=(stop_active_model_worker,),
+            daemon=True,
+            name="viread_active_model_registry_worker",
+        )
+        active_model_worker.start()
+
     worker_disabled = os.getenv(
         "BOOK_QUALITY_SCAN_WORKER_ENABLED", "true"
     ).strip().lower() in {"0", "false", "no", "off"}
     stop_book_quality_worker = asyncio.Event()
     book_quality_task = None
+    viread_outbox_task = None
     if APP_ENVIRONMENT != "test" and not worker_disabled:
         book_quality_task = asyncio.create_task(
             run_book_quality_worker(stop_book_quality_worker),
             name="book_quality_scan_worker",
         )
+    ocr_outbox_enabled = os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    stop_viread_ocr_outbox = asyncio.Event()
+    if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
+        viread_outbox_task = asyncio.create_task(
+            run_viread_ocr_outbox_worker(stop_viread_ocr_outbox),
+            name="viread_ocr_verified_outbox_worker",
+        )
 
     try:
         yield
     finally:
+        if active_model_worker is not None:
+            stop_active_model_worker.set()
+            active_model_worker.join(timeout=6)
+        if viread_outbox_task is not None:
+            stop_viread_ocr_outbox.set()
+            try:
+                await asyncio.wait_for(viread_outbox_task, timeout=10)
+            except TimeoutError:
+                viread_outbox_task.cancel()
+                await asyncio.gather(viread_outbox_task, return_exceptions=True)
         if book_quality_task is not None:
             stop_book_quality_worker.set()
             try:

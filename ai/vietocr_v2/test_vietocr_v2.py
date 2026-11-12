@@ -1,0 +1,214 @@
+from __future__ import annotations
+
+import hashlib
+import json
+
+import pytest
+
+from ai.vietocr_v2.artifact_store import assemble_shards, shard_file
+from ai.vietocr_v2.contracts import (
+    DatasetContractError,
+    DatasetRow,
+    assert_original_vocabulary,
+    load_jsonl,
+    normalize_label,
+    stable_split,
+    validate_rows,
+    vocabulary_fingerprint,
+    write_jsonl,
+)
+from ai.vietocr_v2.metrics import PairedLine, benchmark_metrics, edit_distance
+from ai.vietocr_v2.quality_gate import GatePolicy, evaluate_gate
+from ai.vietocr_v2.flow2_register import _locked_test_rows, _read_trdg_provenance
+
+
+def test_t01_vietnamese_text_is_normalized_to_nfc():
+    assert normalize_label("a\u0301") == "á"
+
+
+def test_t02_blank_ground_truth_is_rejected():
+    with pytest.raises(DatasetContractError):
+        normalize_label("  \n")
+
+
+def test_t03_vocabulary_fingerprint_is_stable():
+    expected = hashlib.sha256(b'"a"').hexdigest()
+    assert vocabulary_fingerprint("a") == (1, expected)
+
+
+def test_t04_non_original_vocabulary_is_rejected():
+    with pytest.raises(DatasetContractError, match="vocabulary"):
+        assert_original_vocabulary("a")
+
+
+def test_t05_page_group_split_is_deterministic():
+    assert stable_split("page-1") == stable_split("page-1")
+
+
+def test_t06_same_group_cannot_leak_between_splits():
+    rows = [
+        DatasetRow("a.png", "a", "page", "FLOW1_VERIFIED", "train", verified=True),
+        DatasetRow("b.png", "b", "page", "FLOW1_VERIFIED", "validation", verified=True),
+    ]
+    with pytest.raises(DatasetContractError, match="leakage"):
+        validate_rows(rows)
+
+
+def test_t07_flow1_requires_admin_verified_revision():
+    with pytest.raises(DatasetContractError, match="VERIFIED"):
+        DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p",
+                                 "source_flow": "FLOW1_VERIFIED", "split": "train"})
+
+
+def test_t08_external_labels_require_annotation_provenance():
+    with pytest.raises(DatasetContractError, match="annotation_id"):
+        DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p",
+                                 "source_flow": "FLOW2_EXTERNAL", "split": "train"})
+
+
+def test_t09_synthetic_rows_cannot_claim_admin_verification():
+    with pytest.raises(DatasetContractError, match="synthetic"):
+        DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p",
+                                 "source_flow": "FLOW2_TRDG", "split": "train", "verified": True})
+
+
+def test_t10_independent_flows_cannot_be_mixed_in_a_profile_manifest():
+    rows = [
+        DatasetRow("a", "a", "a", "FLOW1_VERIFIED", "train", verified=True),
+        DatasetRow("b", "b", "b", "FLOW2_TRDG", "train"),
+    ]
+    with pytest.raises(DatasetContractError, match="independent"):
+        validate_rows(rows, expected_flow="FLOW1_VERIFIED")
+
+
+def test_t11_image_hash_must_be_sha256():
+    with pytest.raises(DatasetContractError, match="image_sha256"):
+        DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p", "source_flow": "FLOW2_TRDG",
+                                 "split": "train", "image_sha256": "deadbeef"})
+
+
+def test_t12_locked_test_cannot_enter_a_training_manifest():
+    with pytest.raises(DatasetContractError, match="separately sealed"):
+        DatasetRow.from_mapping({"image": "x", "label": "xin", "group_id": "p", "source_flow": "FLOW2_TRDG",
+                                 "split": "locked_test"})
+
+
+def test_t13_levenshtein_distance_is_exact():
+    assert edit_distance("kitten", "sitting") == 3
+
+
+def test_t14_cer_keeps_vietnamese_diacritics():
+    line = PairedLine("page", "á", "á", "a", "sample")
+    result = benchmark_metrics([line], replicates=50, seed=11)
+    assert result["cer"]["candidate_error_count"] == 1
+
+
+def test_t15_wer_keeps_punctuation_tokens():
+    line = PairedLine("page", "xin chào,", "xin chào,", "xin chào", "sample")
+    result = benchmark_metrics([line], replicates=50, seed=11)
+    assert result["wer"]["candidate_error_count"] == 1
+
+
+def test_t16_cluster_bootstrap_is_reproducible():
+    rows = [PairedLine("page-a", "abc", "abc", "ab", "1"), PairedLine("page-b", "def", "def", "de", "2")]
+    assert benchmark_metrics(rows, replicates=100, seed=9) == benchmark_metrics(rows, replicates=100, seed=9)
+
+
+def test_t17_cluster_bootstrap_uses_document_groups():
+    rows = [PairedLine("page-a", "abc", "abc", "ab", "1"), PairedLine("page-a", "def", "def", "de", "2")]
+    result = benchmark_metrics(rows, replicates=100, seed=9)
+    assert result["group_count"] == 1
+    assert result["cer"]["cluster_count"] == 1
+
+
+def _metrics(status: str = "win"):
+    ci = [-0.02, -0.01] if status == "win" else ([0.0, 0.0] if status == "neutral" else [0.01, 0.02])
+    return {"sample_count": 200, "group_count": 30,
+            "cer": {"original_rate": 0.2, "candidate_rate": 0.1, "delta_candidate_minus_original": -0.1,
+                    "paired_cluster_bootstrap_95ci": ci},
+            "wer": {"original_rate": 0.3, "candidate_rate": 0.2, "delta_candidate_minus_original": -0.1,
+                    "paired_cluster_bootstrap_95ci": ci}}
+
+
+def test_t18_locked_test_manifest_hash_mismatch_fails_closed():
+    result = evaluate_gate(_metrics(), paired_manifest_hash="wrong", expected_locked_manifest_hash="right")
+    assert result["status"] == "EVALUATION_FAILED" and result["promotion_allowed"] is False
+
+
+def test_t19_small_locked_test_is_insufficient_evidence():
+    metrics = _metrics()
+    metrics["sample_count"] = 2
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_t20_non_regression_limit_blocks_promotion():
+    metrics = _metrics()
+    metrics["cer"]["delta_candidate_minus_original"] = 0.01
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "ORIGINAL_WIN" and not result["promotion_allowed"]
+
+
+def test_t21_neutral_paired_result_does_not_promote():
+    result = evaluate_gate(_metrics("neutral"), paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "NO_SIGNIFICANT_DIFFERENCE" and not result["promotion_allowed"]
+
+
+def test_t22_passing_gate_requires_admin_approval():
+    result = evaluate_gate(_metrics("win"), paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "V2_WIN"
+    assert result["promotion_allowed"] is True
+    assert result["requires_human_approval"] is True
+
+
+def test_manifest_round_trip_keeps_rows_and_file_hash(tmp_path):
+    image = tmp_path / "line.png"
+    image.write_bytes(b"image")
+    row = DatasetRow(str(image), "xin chào", "book-page", "FLOW1_VERIFIED", "train", verified=True)
+    path = tmp_path / "manifest.jsonl"
+    digest = write_jsonl(path, [row])
+    assert load_jsonl(path, expected_flow="FLOW1_VERIFIED") == [row]
+    assert len(digest) == 64
+
+
+def test_checkpoint_shards_round_trip_and_preserve_original(tmp_path):
+    source = tmp_path / "candidate.pth"
+    payload = bytes(range(251)) * 1000
+    source.write_bytes(payload)
+    manifest = shard_file(source, tmp_path / "shards", chunk_bytes=10_000)
+    assembled = tmp_path / "assembled.pth"
+    digest = assemble_shards(manifest, tmp_path / "shards", assembled)
+    assert assembled.read_bytes() == payload
+    assert digest == manifest["sha256"]
+    with pytest.raises(FileExistsError):
+        assemble_shards(manifest, tmp_path / "shards", source)
+
+
+def test_corrupt_checkpoint_shard_is_rejected(tmp_path):
+    source = tmp_path / "candidate.pth"
+    source.write_bytes(b"candidate bytes")
+    manifest = shard_file(source, tmp_path / "shards", chunk_bytes=5)
+    (tmp_path / "shards" / manifest["chunks"][0]["name"]).write_bytes(b"bad")
+    with pytest.raises(ValueError, match="integrity"):
+        assemble_shards(manifest, tmp_path / "shards", tmp_path / "assembled.pth")
+
+
+def test_t23_locked_test_registration_requires_human_verified_source(tmp_path):
+    image = tmp_path / "locked.png"
+    image.write_bytes(b"image-bytes")
+    source = tmp_path / "locked.json"
+    source.write_text(json.dumps([{"sample_id": "sample-1", "group_id": "book-page-1",
+                                   "image": str(image), "label": "Xin chào",
+                                   "annotation_id": "review-1"}]), encoding="utf-8")
+    with pytest.raises(ValueError, match="verified reference"):
+        _locked_test_rows(source)
+
+
+def test_t24_trdg_provenance_must_be_explicit_and_unique(tmp_path):
+    image = tmp_path / "synthetic.png"
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(json.dumps([{"image": str(image), "generator": "trdg", "seed": 7}]), encoding="utf-8")
+    assert _read_trdg_provenance(provenance)[str(image.resolve())]["seed"] == 7
+    provenance.write_text(json.dumps([{"image": str(image), "generator": "unknown"}]), encoding="utf-8")
+    with pytest.raises(ValueError, match="TRDG generator"):
+        _read_trdg_provenance(provenance)

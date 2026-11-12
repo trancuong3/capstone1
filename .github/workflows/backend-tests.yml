@@ -84,5 +84,9 @@ jobs:
           tesseract --list-langs
           python -c "import pytesseract; print(pytesseract.__version__)"
 
+      - name: Prepare VietOCR V2 migration schema in disposable PostgreSQL
+        working-directory: ${{ github.workspace }}
+        run: python -B .github/scripts/prepare_viread_ocr_test_schema.py
+
       - name: Run full backend unit and API test suite
         run: python -m unittest discover -v

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from contextlib import nullcontext
 import os
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -46,6 +48,7 @@ import cv2
 import jiwer
 import numpy as np
 import pytesseract
+import requests
 from pytesseract import Output
 try:
     import torch
@@ -54,6 +57,7 @@ except ImportError:
     # validation, revision management, or a working PaddleOCR detector.
     torch = None
 from PIL import Image
+from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
 
 _paddle_import_status = "success"
 _paddle_import_error: str | None = None
@@ -148,6 +152,102 @@ _paddle_initialization_status = "not_initialized"
 _vietocr_initialization_status = "not_initialized"
 _paddle_initialization_error: str | None = None
 _vietocr_initialization_error: str | None = None
+_vietocr_active_checkpoint_sha: str | None = None
+_active_model_info_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
+_active_model_cache_lock = threading.Lock()
+_ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
+_ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
+_ORIGINAL_VOCAB_SIZE = 229
+
+
+def _sha256_path(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _active_viread_model() -> dict[str, Any] | None:
+    """Return the pointer last refreshed by the background registry worker."""
+    with _active_model_cache_lock:
+        return _active_model_info_cache[1]
+
+
+def refresh_active_viread_model() -> dict[str, Any] | None:
+    """Refresh the private pointer with a short network timeout; retain the last good value on errors."""
+    global _active_model_info_cache
+    now = __import__("time").monotonic()
+    with _active_model_cache_lock:
+        cached = _active_model_info_cache[1]
+    if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
+        with _active_model_cache_lock:
+            _active_model_info_cache = (now, cached)
+        return cached
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL.rstrip('/')}/rest/v1/viread_ocr_active_model",
+            params={"select": "checkpoint_sha256,storage_path,profile", "singleton": "eq.true", "limit": "1"},
+            headers={"apikey": SUPABASE_ADMIN_KEY, "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}"},
+            timeout=(2, 3),
+        )
+        response.raise_for_status()
+        rows = response.json()
+        item = rows[0] if rows else None
+        if not isinstance(item, dict):
+            with _active_model_cache_lock:
+                _active_model_info_cache = (now, cached)
+            return cached
+        with _active_model_cache_lock:
+            _active_model_info_cache = (now, item)
+        return item
+    except Exception as exc:
+        logger.debug("VietOCR active model registry is unavailable: %s", type(exc).__name__)
+        with _active_model_cache_lock:
+            _active_model_info_cache = (now, cached)
+        return cached
+
+
+def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 15) -> None:
+    """Poll the registry away from request threads and retain the last good pointer."""
+    while not stop_event.is_set():
+        refresh_active_viread_model()
+        stop_event.wait(poll_seconds)
+
+
+def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:
+    expected_sha = str(active.get("checkpoint_sha256", "")).lower()
+    manifest_path = active.get("storage_path")
+    if len(expected_sha) != 64 or not isinstance(manifest_path, str) or not manifest_path:
+        raise ValueError("active VietOCR V2 checkpoint pointer is invalid")
+    from app.services.storage_service import download_object
+
+    manifest_bytes = download_object(manifest_path)
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    if manifest.get("checkpoint_sha256") != expected_sha or not isinstance(manifest.get("chunks"), list):
+        raise ValueError("active VietOCR V2 shard manifest does not match its database pointer")
+    local_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.pth")
+    if os.path.isfile(local_path):
+        if _sha256_path(local_path) != expected_sha:
+            raise ValueError("cached VietOCR V2 checkpoint hash mismatch; refusing to overwrite it")
+        return local_path
+    digest = hashlib.sha256()
+    temporary = local_path + ".assembling"
+    with open(temporary, "xb") as output:
+        chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
+        if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
+            raise ValueError("VietOCR V2 checkpoint shards are incomplete")
+        for item in chunks:
+            data = download_object(str(item["path"]))
+            if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
+                raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
+            output.write(data)
+            digest.update(data)
+    if digest.hexdigest() != expected_sha:
+        os.unlink(temporary)
+        raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
+    os.replace(temporary, local_path)
+    return local_path
 
 
 def _find_cached_vietocr_weights() -> str | None:
@@ -159,8 +259,12 @@ def _find_cached_vietocr_weights() -> str | None:
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "weights", "vgg_transformer.pth")),
     ]
     for path in candidates:
-        if path and os.path.isfile(path) and os.path.getsize(path) > 10 * 1024 * 1024:
-            return path
+        if path and os.path.isfile(path) and os.path.getsize(path) == 151_815_373:
+            try:
+                if _sha256_path(path) == _ORIGINAL_VIETOCR_SHA256:
+                    return path
+            except OSError:
+                continue
     return None
 
 
@@ -174,6 +278,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_engine, _vietocr_engine
     global _paddle_initialization_status, _vietocr_initialization_status
     global _paddle_initialization_error, _vietocr_initialization_error
+    global _vietocr_active_checkpoint_sha
 
     with _engine_lock:
         if _paddle_engine is None:
@@ -200,7 +305,19 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     _paddle_initialization_error = type(exc).__name__
                     logger.warning("PaddleOCR initialization failed: %s", type(exc).__name__)
 
-        if _vietocr_engine is None:
+        active_model = _active_viread_model()
+        active_profile = str((active_model or {}).get("profile", "ORIGINAL"))
+        active_sha = str((active_model or {}).get("checkpoint_sha256", _ORIGINAL_VIETOCR_SHA256)).lower()
+        if active_profile == "ORIGINAL" and active_sha != _ORIGINAL_VIETOCR_SHA256:
+            logger.error("VietOCR registry Original pointer failed baseline hash validation")
+            active_model = None
+            active_sha = _ORIGINAL_VIETOCR_SHA256
+        if active_profile not in {"ORIGINAL", "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG"}:
+            active_model = None
+            active_profile = "ORIGINAL"
+            active_sha = _ORIGINAL_VIETOCR_SHA256
+
+        if _vietocr_engine is None or (_vietocr_active_checkpoint_sha is not None and active_sha != _vietocr_active_checkpoint_sha):
             if Cfg is None or Predictor is None:
                 _vietocr_initialization_status = _vietocr_import_status
                 _vietocr_initialization_error = _vietocr_import_error
@@ -209,6 +326,20 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     viet_config = Cfg.load_config_from_name("vgg_transformer")
                     if torch is None:
                         raise OcrEngineUnavailable("The VietOCR torch runtime is not installed")
+                    lock_path = Path(__file__).resolve().parents[3] / "ai" / "vietocr_v2" / "original_artifact.json"
+                    original_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                    if package_version("vietocr") != original_lock["upstream"]["version"]:
+                        raise ValueError("VietOCR package version differs from the locked Original runtime")
+                    locked_architecture = original_lock["architecture"]
+                    current_architecture = {
+                        "backbone": viet_config.get("backbone"),
+                        "cnn": {key: viet_config.get("cnn", {}).get(key) for key in ("ss", "ks", "hidden")},
+                        "seq_modeling": viet_config.get("seq_modeling"),
+                        "transformer": dict(viet_config.get("transformer", {})),
+                        "input": {key: viet_config.get("dataset", {}).get(key) for key in ("image_height", "image_min_width", "image_max_width")},
+                    }
+                    if current_architecture != locked_architecture:
+                        raise ValueError("VietOCR Original architecture differs from its locked config")
                     target_device = "cuda" if torch.cuda.is_available() else "cpu"
                     viet_config["device"] = target_device
                     # The released checkpoint already contains every CNN
@@ -217,12 +348,26 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     # on machines without access to download.pytorch.org.
                     if isinstance(viet_config.get("cnn"), dict):
                         viet_config["cnn"]["pretrained"] = False
-                    cached_weight = _find_cached_vietocr_weights()
-                    if cached_weight:
+                    vocab = unicodedata.normalize("NFC", str(viet_config.get("vocab", "")))
+                    vocab_sha = hashlib.sha256(json.dumps(vocab, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    if len(vocab) != _ORIGINAL_VOCAB_SIZE or vocab_sha != _ORIGINAL_VOCAB_SHA256:
+                        raise ValueError("VietOCR Original vocabulary does not match the locked baseline")
+                    if active_model and active_profile != "ORIGINAL":
+                        viet_config["weights"] = _v2_checkpoint_from_storage(active_model)
+                    else:
+                        cached_weight = _find_cached_vietocr_weights()
+                        if cached_weight is None:
+                            from vietocr.tool.utils import download_weights
+
+                            cached_weight = download_weights(viet_config["weights"], quiet=True)
+                        if _sha256_path(cached_weight) != _ORIGINAL_VIETOCR_SHA256:
+                            raise ValueError("VietOCR Original checkpoint hash mismatch")
                         viet_config["weights"] = cached_weight
                     if target_device == "cpu":
                         torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
-                    _vietocr_engine = Predictor(viet_config)
+                    next_engine = Predictor(viet_config)
+                    _vietocr_engine = next_engine
+                    _vietocr_active_checkpoint_sha = active_sha
                     _vietocr_initialization_status = "success"
                     _vietocr_initialization_error = None
                 except Exception as exc:
