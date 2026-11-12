@@ -11,6 +11,7 @@ import type { AuditService } from "@/lib/api/audit-service";
 import type { HealthService } from "@/lib/api/health-service";
 import type { OcrReviewService } from "@/lib/api/ocr-review-service";
 import type { RevisionService } from "@/lib/api/revision-service";
+import type { VireadTrainingService } from "@/lib/api/viread-training-service";
 import { createAdminBookService } from "@/lib/api/admin-book-service";
 import { createAdminBookContentQualityService } from "@/lib/api/admin-book-content-quality-service";
 import { createAdminMetadataQualityService } from "@/lib/api/admin-metadata-quality-service";
@@ -20,6 +21,7 @@ import { createAuditService } from "@/lib/api/audit-service";
 import { createHealthService } from "@/lib/api/health-service";
 import { createOcrReviewService } from "@/lib/api/ocr-review-service";
 import { createRevisionService } from "@/lib/api/revision-service";
+import { createVireadTrainingService } from "@/lib/api/viread-training-service";
 import { createSupabaseAdminAuthService } from "@/lib/supabase/admin-auth-service";
 import type { AdminMockScenario } from "@/types/admin";
 
@@ -34,6 +36,7 @@ export interface AdminServices {
   revisions: RevisionService;
   audit: AuditService;
   health: HealthService;
+  vireadTraining?: VireadTrainingService;
 }
 
 export const AdminServicesContext = createContext<AdminServices | null>(null);
@@ -59,6 +62,7 @@ export function AdminServicesProvider({
       revisions: createRevisionService(),
       audit: createAuditService(),
       health: createHealthService(),
+      vireadTraining: createVireadTrainingService(),
     }),
     [],
   );
