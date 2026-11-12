@@ -251,13 +251,14 @@ export function AdminParentsScreen() {
       {actionError ? (
         <div className="mb-4">
           <StatusMessage tone="error" title={actionError}>
-            <button
-              className="font-extrabold underline"
+            <Button
+              className="sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Tải lại dữ liệu
-            </button>
+            </Button>
           </StatusMessage>
         </div>
       ) : null}
@@ -337,13 +338,14 @@ export function AdminParentsScreen() {
           ) : error === "forbidden" ? (
             "Chỉ tài khoản có role admin mới được phép xem dữ liệu này."
           ) : (
-            <button
-              className="font-extrabold underline"
+            <Button
+              className="sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Thử lại
-            </button>
+            </Button>
           )}
         </StatusMessage>
       ) : items.length === 0 ? (

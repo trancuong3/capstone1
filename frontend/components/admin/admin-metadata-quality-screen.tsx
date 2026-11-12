@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 
+import { Button } from "@/components/common/button";
+
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
@@ -102,15 +104,16 @@ export function AdminMetadataQualityScreen() {
         title="Chất lượng metadata sách"
         description="Phát hiện thông tin catalog cần kiểm tra. Các cảnh báo là gợi ý để Admin xem xét, không tự sửa hoặc xóa dữ liệu sách."
         actions={
-          <button
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control border border-border bg-white px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
+            className="sm:w-auto"
             disabled={loading}
             onClick={() => void load()}
             type="button"
+            variant="secondary"
           >
-            <RefreshCw aria-hidden className="size-4" />
+            <RefreshCw aria-hidden className="size-5" />
             Tải lại
-          </button>
+          </Button>
         }
       />
 
@@ -163,13 +166,14 @@ export function AdminMetadataQualityScreen() {
           </SelectField>
         </div>
         {hasFilters ? (
-          <button
-            className="mt-4 min-h-10 rounded-control px-2 font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+          <Button
+            className="mt-4 sm:w-auto"
             onClick={clearFilters}
             type="button"
+            variant="quiet"
           >
             Xóa bộ lọc
-          </button>
+          </Button>
         ) : null}
       </section>
 
@@ -194,13 +198,14 @@ export function AdminMetadataQualityScreen() {
               Đến trang đăng nhập
             </Link>
           ) : error === "safe" ? (
-            <button
-              className="mt-2 inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+            <Button
+              className="mt-2 sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Thử lại
-            </button>
+            </Button>
           ) : (
             <p>Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.</p>
           )}
@@ -397,27 +402,29 @@ export function AdminMetadataQualityScreen() {
                 {dashboard.total.toLocaleString("vi-VN")} kết quả
               </p>
               <div className="flex gap-2">
-                <button
-                  className="min-h-11 rounded-control border border-border px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
+                <Button
+                  className="w-auto"
                   disabled={dashboard.offset === 0 || loading}
                   onClick={() =>
                     setOffset((current) => Math.max(0, current - limit))
                   }
                   type="button"
+                  variant="secondary"
                 >
                   Trước
-                </button>
-                <button
-                  className="min-h-11 rounded-control border border-border px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
+                </Button>
+                <Button
+                  className="w-auto"
                   disabled={
                     dashboard.offset + dashboard.limit >= dashboard.total ||
                     loading
                   }
                   onClick={() => setOffset((current) => current + limit)}
                   type="button"
+                  variant="secondary"
                 >
                   Tiếp
-                </button>
+                </Button>
               </div>
             </div>
             <p className="mt-4 text-xs text-muted">

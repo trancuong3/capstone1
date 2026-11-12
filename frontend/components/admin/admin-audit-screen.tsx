@@ -95,8 +95,8 @@ export function AdminAuditScreen() {
       ) : error ? (
         <StatusMessage tone="error">
           Không thể tải nhật ký.{" "}
-          <button
-            className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+          <Button
+            className="sm:w-auto"
             onClick={() =>
               void load(
                 items.length ? (cursor ?? undefined) : undefined,
@@ -104,9 +104,10 @@ export function AdminAuditScreen() {
               )
             }
             type="button"
+            variant="secondary"
           >
             Thử lại
-          </button>
+          </Button>
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
