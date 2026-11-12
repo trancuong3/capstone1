@@ -143,7 +143,6 @@ export function AdminParentsScreen() {
     setActionError(null);
     setFormParentId(parentId);
     setForm(emptyForm);
-    setOriginalForm(emptyForm);
     setFormContactInfoEditable(false);
     setFormLoading(true);
     setFormMode("edit");
