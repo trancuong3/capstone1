@@ -71,7 +71,9 @@ describe("admin components", () => {
         new AdminAuthError("invalid-credentials"),
       );
       const user = userEvent.setup();
-      render(withAdminFixture(<AdminLoginScreen scenario="default" />, services));
+      render(
+        withAdminFixture(<AdminLoginScreen scenario="default" />, services),
+      );
       await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
       await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -253,9 +255,13 @@ describe("admin components", () => {
         name: adminBookListItemFixture.book.title,
       });
       expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
-      expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent("3");
+      expect(
+      screen.getByText("Trang").nextElementSibling,
+    ).toHaveTextContent("3");
       for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-        expect(screen.getByText(label).nextElementSibling).toHaveTextContent("1");
+        expect(
+        screen.getByText(label).nextElementSibling,
+      ).toHaveTextContent("1");
       }
       services.books.list.mockResolvedValueOnce([retired]);
       await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
