@@ -67,8 +67,8 @@ describe("AdminParentsScreen", () => {
       screen.getByText(/ID: 22222222-2222-4222-8222-222222222222/),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Xem chi tiết/i })).toHaveAttribute(
-      "href",
-      "/admin/parents/22222222-2222-4222-8222-222222222222",
+    "href",
+    "/admin/parents/22222222-2222-4222-8222-222222222222",
     );
     expect(list).toHaveBeenCalledWith({
       search: undefined,
@@ -103,8 +103,8 @@ describe("AdminParentsScreen", () => {
   });
 
   it(
-      "creates a Parent through the API service instead of local mock data",
-      async () => {
+    "creates a Parent through the API service instead of local mock data",
+    async () => {
       list.mockResolvedValue({
         items: [],
         total: 0,
@@ -143,8 +143,8 @@ describe("AdminParentsScreen", () => {
   );
 
   it(
-      "opens the edit dialog while loading and saves the selected parent's data once",
-      async () => {
+    "opens the edit dialog while loading and saves the selected parent's data once",
+    async () => {
       const parent = {
         id: "22222222-2222-4222-8222-222222222222",
         display_name: "Nguyen Van A",
@@ -205,8 +205,8 @@ describe("AdminParentsScreen", () => {
   );
 
   it(
-      "updates email and phone through one locked contact-information request",
-      async () => {
+    "updates email and phone through one locked contact-information request",
+    async () => {
       const parent = {
         id: "22222222-2222-4222-8222-222222222222",
         display_name: "Nguyen Van A",
@@ -290,8 +290,8 @@ describe("AdminParentsScreen", () => {
     expect(update).not.toHaveBeenCalled();
   });
   it(
-      "soft-deletes a Parent through the API and removes it from the refreshed list",
-      async () => {
+    "soft-deletes a Parent through the API and removes it from the refreshed list",
+    async () => {
       const parent = {
         id: "22222222-2222-4222-8222-222222222222",
         display_name: "Nguyen Van A",

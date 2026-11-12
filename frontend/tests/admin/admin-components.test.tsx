@@ -39,8 +39,8 @@ describe("admin components", () => {
   });
 
   it(
-      "uses compact buttons inside Admin and preserves the default size elsewhere",
-      async () => {
+    "uses compact buttons inside Admin and preserves the default size elsewhere",
+    async () => {
       const services = createAdminServiceFixture();
       render(
         withAdminFixture(
@@ -64,8 +64,8 @@ describe("admin components", () => {
   );
 
   it(
-      "uses a safe message when the admin auth service rejects credentials",
-      async () => {
+    "uses a safe message when the admin auth service rejects credentials",
+    async () => {
       const services = createAdminServiceFixture();
       services.auth.signIn.mockRejectedValue(
         new AdminAuthError("invalid-credentials"),
@@ -84,8 +84,8 @@ describe("admin components", () => {
   );
 
   it(
-      "awaits admin sign-out, blocks repeats, and replaces the protected route",
-      async () => {
+    "awaits admin sign-out, blocks repeats, and replaces the protected route",
+    async () => {
       const services = createAdminServiceFixture();
       let completeSignOut: () => void = () => undefined;
       services.auth.signOut.mockImplementationOnce(
@@ -122,8 +122,8 @@ describe("admin components", () => {
   );
 
   it(
-      "keeps the protected route visible when admin sign-out fails",
-      async () => {
+    "keeps the protected route visible when admin sign-out fails",
+    async () => {
       const services = createAdminServiceFixture();
       services.auth.signOut.mockRejectedValueOnce(
         new Error("provider unavailable"),
@@ -160,8 +160,8 @@ describe("admin components", () => {
   });
 
   it(
-      "offers title repair and metadata editing directly from the inventory",
-      async () => {
+    "offers title repair and metadata editing directly from the inventory",
+    async () => {
       const services = createAdminServiceFixture();
       const missingTitle = {
         ...adminBookListItemFixture,
@@ -194,8 +194,8 @@ describe("admin components", () => {
   );
 
   it(
-      "retires a book from the inventory and reloads the lifecycle from the service",
-      async () => {
+    "retires a book from the inventory and reloads the lifecycle from the service",
+    async () => {
       const services = createAdminServiceFixture();
       const retired = {
         ...adminBookListItemFixture,
@@ -236,8 +236,8 @@ describe("admin components", () => {
   );
 
   it(
-      "renders lifecycle and OCR metrics from typed service responses and forwards filters",
-      async () => {
+    "renders lifecycle and OCR metrics from typed service responses and forwards filters",
+    async () => {
       const services = createAdminServiceFixture();
       const retired = {
         ...adminBookListItemFixture,
