@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
@@ -55,7 +55,9 @@ describe("admin components", () => {
     expect(logout.className).not.toContain("h-16");
 
     const outsideButton = render(<Button>Parent action</Button>);
-    expect(outsideButton.getByRole("button")).toHaveClass("h-16");
+    expect(
+      within(outsideButton.container).getByRole("button"),
+    ).toHaveClass("h-16");
   });
 
   it("uses a safe message when the admin auth service rejects credentials", async () => {
