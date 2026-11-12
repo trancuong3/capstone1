@@ -227,13 +227,14 @@ export function AdminBooksScreen() {
           }
         >
           {error === "safe" ? (
-            <button
-              className="mt-2 inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+            <Button
+              className="mt-2 sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Thử lại
-            </button>
+            </Button>
           ) : (
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"

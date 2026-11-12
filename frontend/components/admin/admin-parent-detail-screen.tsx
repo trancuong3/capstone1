@@ -11,19 +11,16 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminParentFormModal,
+  type AdminParentFormValues,
+  type AdminParentFormSubmission,
+} from "@/components/admin/admin-parent-form-modal";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
-import { Modal } from "@/components/common/modal";
-import { TextField } from "@/components/common/text-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -76,13 +73,12 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({
-    display_name: "",
-    email: "",
-    phone: "",
-  });
-  const [editError, setEditError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [editInitialValues, setEditInitialValues] =
+    useState<AdminParentFormValues>({
+      display_name: "",
+      email: "",
+      phone: "",
+    });
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -129,55 +125,28 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
   function openEdit() {
     if (!parent) return;
-    setEditForm({
+    setEditInitialValues({
       display_name: parent.display_name ?? "",
       email: parent.email ?? "",
       phone: parent.phone ?? "",
     });
-    setEditError(null);
     setActionError(null);
     setEditOpen(true);
   }
 
-  async function submitEdit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!parent || saving) return;
-    const displayName = editForm.display_name.trim();
-    const email = editForm.email.trim().toLowerCase();
-    const phone = editForm.phone.trim();
-    if (!displayName) {
-      setEditError("Vui lòng nhập tên hiển thị.");
-      return;
+  async function submitEdit(
+    submission: AdminParentFormSubmission,
+  ): Promise<void> {
+    if (!parent || submission.mode !== "edit") {
+      throw new Error("Parent is unavailable.");
     }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setEditError("Email chưa đúng định dạng.");
-      return;
-    }
-    const update: { display_name: string; email?: string; phone?: string } = {
-      display_name: displayName,
-    };
-    if (email && email !== (parent.email ?? "").trim().toLowerCase())
-      update.email = email;
-    if (phone && phone !== (parent.phone ?? "").trim()) update.phone = phone;
+    const updated = await parents.update(parent.id, submission.input);
+    setParent(updated);
+  }
 
-    setSaving(true);
-    setEditError(null);
-    try {
-      const updated = await parents.update(parent.id, update);
-      setParent(updated);
-      setEditOpen(false);
-      setActionNotice("Đã cập nhật hồ sơ Parent.");
-    } catch (cause) {
-      setEditError(
-        isServiceError(cause) && cause.status === 409
-          ? "Email hoặc số điện thoại bị trùng với tài khoản khác."
-          : isServiceError(cause) && cause.status === 422
-            ? "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại."
-            : "Không thể cập nhật hồ sơ lúc này. Vui lòng thử lại.",
-      );
-    } finally {
-      setSaving(false);
-    }
+  function handleEditSuccess() {
+    setEditOpen(false);
+    setActionNotice("Đã cập nhật hồ sơ Parent.");
   }
 
   const fallbackContact =
@@ -392,72 +361,18 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
         </div>
       ) : null}
 
-      <Modal
-        isOpen={editOpen}
-        onClose={() => {
-          if (!saving) {
-            setEditOpen(false);
-            setEditError(null);
-          }
-        }}
-        title="Sửa hồ sơ Parent"
-      >
-        <form className="grid gap-4" noValidate onSubmit={submitEdit}>
-          {editError ? (
-            <StatusMessage tone="error" title={editError}>
-              Kiểm tra thông tin và thử lại.
-            </StatusMessage>
-          ) : null}
-          <TextField
-            label="Tên hiển thị"
-            autoComplete="name"
-            value={editForm.display_name}
-            onChange={(event) =>
-              setEditForm({ ...editForm, display_name: event.target.value })
-            }
-            required
-            disabled={saving}
-          />
-          <TextField
-            label="Email"
-            type="email"
-            autoComplete="email"
-            value={editForm.email}
-            onChange={(event) =>
-              setEditForm({ ...editForm, email: event.target.value })
-            }
-            disabled={saving}
-          />
-          <TextField
-            label="Số điện thoại"
-            type="tel"
-            autoComplete="tel"
-            value={editForm.phone}
-            onChange={(event) =>
-              setEditForm({ ...editForm, phone: event.target.value })
-            }
-            disabled={saving}
-          />
-          <p className="text-sm text-muted">
-            Các trường liên hệ được cập nhật qua backend và Supabase Auth. Để
-            giữ nguyên email hoặc số điện thoại, hãy để nguyên giá trị hiện tại.
-          </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button
-              className="sm:w-auto"
-              disabled={saving}
-              onClick={() => setEditOpen(false)}
-              type="button"
-              variant="secondary"
-            >
-              Hủy
-            </Button>
-            <Button className="sm:w-auto" isLoading={saving} type="submit">
-              Lưu thay đổi
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {editOpen ? (
+        <AdminParentFormModal
+          isOpen
+          mode="edit"
+          initialValues={editInitialValues}
+          contactInfoEditable={parent?.contact_info_status === "available"}
+          contactInfoMessage={contactNotice}
+          onClose={() => setEditOpen(false)}
+          onSubmit={submitEdit}
+          onSuccess={handleEditSuccess}
+        />
+      ) : null}
     </>
   );
 }

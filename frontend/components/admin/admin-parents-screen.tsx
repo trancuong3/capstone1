@@ -7,7 +7,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Trash2,
+  UserX,
   UsersRound,
 } from "lucide-react";
 import {
@@ -20,6 +20,12 @@ import {
 import Link from "next/link";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminParentFormModal,
+  type AdminParentFormValues,
+  type AdminParentFormSubmission,
+  getAdminParentMutationErrorMessage,
+} from "@/components/admin/admin-parent-form-modal";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -32,7 +38,7 @@ import type { AdminParentProfileItemDTO } from "@/types/admin";
 
 const PAGE_SIZE = 10;
 type LoadError = "auth" | "forbidden" | "unavailable";
-type ParentForm = { display_name: string; email: string; phone: string };
+type ParentForm = AdminParentFormValues;
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -43,19 +49,6 @@ function formatDate(value: string) {
         month: "2-digit",
         day: "2-digit",
       }).format(date);
-}
-
-function safeMutationError(error: unknown) {
-  if (isServiceError(error) && error.status === 409) {
-    return "Email hoặc số điện thoại bị trùng với tài khoản khác.";
-  }
-  if (isServiceError(error) && error.status === 422) {
-    return "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường.";
-  }
-  if (isServiceError(error) && error.status === 503) {
-    return "Backend thiếu khóa Supabase Auth Admin. Hãy cấu hình SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY trong backend/.env rồi khởi động lại Backend.";
-  }
-  return "Không thể hoàn thành thao tác. Vui lòng thử lại.";
 }
 
 const emptyForm: ParentForm = { display_name: "", email: "", phone: "" };
@@ -75,10 +68,10 @@ export function AdminParentsScreen() {
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [form, setForm] = useState<ParentForm>(emptyForm);
-  const [originalForm, setOriginalForm] = useState<ParentForm>(emptyForm);
-  const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [formContactInfoEditable, setFormContactInfoEditable] = useState(false);
+  const editRequestIdRef = useRef(0);
+  const editLoadingRef = useRef(false);
   const [pendingDelete, setPendingDelete] =
     useState<AdminParentProfileItemDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -127,87 +120,75 @@ export function AdminParentsScreen() {
     setSearch(searchInput.trim());
   }
 
-  function openCreate() {
+  function closeParentForm() {
+    editRequestIdRef.current += 1;
+    editLoadingRef.current = false;
+    setFormMode(null);
+    setFormLoading(false);
     setFormParentId(null);
     setForm(emptyForm);
-    setOriginalForm(emptyForm);
-    setFormError(null);
+    setFormContactInfoEditable(false);
+  }
+
+  function openCreate() {
+    closeParentForm();
+    setFormContactInfoEditable(true);
     setFormMode("create");
   }
 
   async function openEdit(parentId: string) {
-    setFormLoading(true);
-    setFormError(null);
+    if (editLoadingRef.current || formMode !== null) return;
+    const requestId = ++editRequestIdRef.current;
+    editLoadingRef.current = true;
     setActionError(null);
+    setFormParentId(parentId);
+    setForm(emptyForm);
+    setFormContactInfoEditable(false);
+    setFormLoading(true);
+    setFormMode("edit");
+
     try {
       const detail = await parents.getById(parentId);
+      if (requestId !== editRequestIdRef.current) return;
       const value = {
         display_name: detail.display_name ?? "",
         email: detail.email ?? "",
         phone: detail.phone ?? "",
       };
       setForm(value);
-      setOriginalForm(value);
-      setFormParentId(parentId);
-      setFormMode("edit");
+      setFormContactInfoEditable(detail.contact_info_status === "available");
     } catch (cause) {
-      setActionError(safeMutationError(cause));
+      if (requestId !== editRequestIdRef.current) return;
+      setActionError(getAdminParentMutationErrorMessage(cause));
+      setFormMode(null);
+      setFormParentId(null);
     } finally {
-      setFormLoading(false);
+      if (requestId === editRequestIdRef.current) {
+        editLoadingRef.current = false;
+        setFormLoading(false);
+      }
     }
   }
 
-  async function submitParentForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (saving) return;
-    const displayName = form.display_name.trim();
-    const email = form.email.trim().toLowerCase();
-    const phone = form.phone.trim();
-    if (!displayName) {
-      setFormError("Vui lòng nhập tên hiển thị.");
+  async function submitParentForm(
+    submission: AdminParentFormSubmission,
+  ): Promise<void> {
+    if (submission.mode === "create") {
+      await parents.create(submission.input);
+      setNotice(
+        "Đã gửi lời mời tạo tài khoản Parent. Tài khoản cần hoàn tất quy trình xác minh theo cấu hình Supabase.",
+      );
       return;
     }
-    if (
-      formMode === "create" &&
-      (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    ) {
-      setFormError("Vui lòng nhập email hợp lệ.");
-      return;
-    }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setFormError("Email chưa đúng định dạng.");
-      return;
-    }
-    setSaving(true);
-    setFormError(null);
-    try {
-      if (formMode === "create") {
-        await parents.create({
-          display_name: displayName,
-          email,
-          ...(phone ? { phone } : {}),
-        });
-        setNotice(
-          "Đã gửi lời mời tạo tài khoản Parent. Tài khoản cần hoàn tất quy trình xác minh theo cấu hình Supabase.",
-        );
-      } else if (formMode === "edit" && formParentId) {
-        const update: { display_name: string; email?: string; phone?: string } =
-          {
-            display_name: displayName,
-          };
-        if (email && email !== originalForm.email.trim().toLowerCase())
-          update.email = email;
-        if (phone && phone !== originalForm.phone.trim()) update.phone = phone;
-        await parents.update(formParentId, update);
-        setNotice("Đã cập nhật hồ sơ Parent.");
-      }
-      setFormMode(null);
-      await load();
-    } catch (cause) {
-      setFormError(safeMutationError(cause));
-    } finally {
-      setSaving(false);
-    }
+
+    if (!formParentId) throw new Error("Parent id is unavailable.");
+    await parents.update(formParentId, submission.input);
+    setNotice("Đã cập nhật hồ sơ Parent.");
+  }
+
+  function handleParentFormSuccess() {
+    closeParentForm();
+    void load();
   }
 
   async function confirmDeleteParent() {
@@ -226,7 +207,7 @@ export function AdminParentsScreen() {
         await load();
       }
     } catch (cause) {
-      setDeleteError(safeMutationError(cause));
+      setDeleteError(getAdminParentMutationErrorMessage(cause));
     } finally {
       setDeleting(false);
     }
@@ -270,13 +251,14 @@ export function AdminParentsScreen() {
       {actionError ? (
         <div className="mb-4">
           <StatusMessage tone="error" title={actionError}>
-            <button
-              className="font-extrabold underline"
+            <Button
+              className="sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Tải lại dữ liệu
-            </button>
+            </Button>
           </StatusMessage>
         </div>
       ) : null}
@@ -336,10 +318,6 @@ export function AdminParentsScreen() {
         </form>
       </Card>
 
-      {formLoading ? (
-        <AdminLoading label="Đang tải dữ liệu Parent để chỉnh sửa…" />
-      ) : null}
-
       {items === null ? (
         <AdminLoading label="Đang tải danh sách phụ huynh từ database…" />
       ) : error ? (
@@ -360,13 +338,14 @@ export function AdminParentsScreen() {
           ) : error === "forbidden" ? (
             "Chỉ tài khoản có role admin mới được phép xem dữ liệu này."
           ) : (
-            <button
-              className="font-extrabold underline"
+            <Button
+              className="sm:w-auto"
               onClick={() => void load()}
               type="button"
+              variant="secondary"
             >
               Thử lại
-            </button>
+            </Button>
           )}
         </StatusMessage>
       ) : items.length === 0 ? (
@@ -437,6 +416,7 @@ export function AdminParentsScreen() {
                     </ButtonLink>
                     <Button
                       className="sm:w-auto"
+                      disabled={formLoading || formMode !== null}
                       onClick={() => void openEdit(parent.id)}
                       variant="secondary"
                     >
@@ -450,7 +430,7 @@ export function AdminParentsScreen() {
                       }}
                       variant="secondary"
                     >
-                      <Trash2 aria-hidden className="size-5" /> Xóa
+                      <UserX aria-hidden className="size-5" /> Vô hiệu hóa
                     </Button>
                   </div>
                 </div>
@@ -485,73 +465,23 @@ export function AdminParentsScreen() {
         </>
       )}
 
-      <Modal
-        isOpen={formMode !== null}
-        onClose={() => {
-          if (!saving) {
-            setFormMode(null);
-            setFormError(null);
+      {formMode ? (
+        <AdminParentFormModal
+          isOpen
+          key={
+            formMode === "edit" && !formLoading
+              ? (formParentId ?? "edit")
+              : formMode
           }
-        }}
-        title={formMode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
-      >
-        <form className="grid gap-4" noValidate onSubmit={submitParentForm}>
-          {formError ? (
-            <StatusMessage tone="error" title={formError}>
-              Kiểm tra thông tin và thử lại.
-            </StatusMessage>
-          ) : null}
-          <TextField
-            label="Tên hiển thị"
-            autoComplete="name"
-            value={form.display_name}
-            onChange={(event) =>
-              setForm({ ...form, display_name: event.target.value })
-            }
-            required
-            disabled={saving}
-          />
-          <TextField
-            label="Email"
-            type="email"
-            autoComplete="email"
-            value={form.email}
-            onChange={(event) =>
-              setForm({ ...form, email: event.target.value })
-            }
-            required={formMode === "create"}
-            disabled={saving}
-          />
-          <TextField
-            label="Số điện thoại"
-            type="tel"
-            autoComplete="tel"
-            value={form.phone}
-            onChange={(event) =>
-              setForm({ ...form, phone: event.target.value })
-            }
-            disabled={saving}
-          />
-          <p className="text-sm text-muted">
-            Tài khoản được tạo qua lời mời Supabase Auth. Đổi email/số điện
-            thoại được xử lý bởi backend; không thay đổi role Parent.
-          </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button
-              className="sm:w-auto"
-              disabled={saving}
-              onClick={() => setFormMode(null)}
-              type="button"
-              variant="secondary"
-            >
-              Hủy
-            </Button>
-            <Button className="sm:w-auto" isLoading={saving} type="submit">
-              {formMode === "create" ? "Tạo Parent" : "Lưu thay đổi"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+          mode={formMode}
+          isLoading={formLoading}
+          initialValues={form}
+          contactInfoEditable={formContactInfoEditable}
+          onClose={closeParentForm}
+          onSubmit={submitParentForm}
+          onSuccess={handleParentFormSuccess}
+        />
+      ) : null}
 
       <Modal
         isOpen={pendingDelete !== null}
@@ -561,12 +491,12 @@ export function AdminParentsScreen() {
             setDeleteError(null);
           }
         }}
-        title="Xóa Parent"
+        title="Vô hiệu hóa Parent"
       >
         {pendingDelete ? (
           <div className="grid gap-4">
             <p>
-              Bạn có chắc muốn ẩn Parent{" "}
+              Bạn có chắc muốn vô hiệu hóa Parent{" "}
               <strong>
                 {pendingDelete.display_name?.trim() || pendingDelete.id}
               </strong>{" "}
@@ -600,8 +530,9 @@ export function AdminParentsScreen() {
                 isLoading={deleting}
                 onClick={() => void confirmDeleteParent()}
                 type="button"
+                variant="destructive"
               >
-                Xóa Parent
+                Vô hiệu hóa Parent
               </Button>
             </div>
           </div>
