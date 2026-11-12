@@ -308,9 +308,7 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa" }));
-    expect(
-      await screen.findByText(/Đây là xóa mềm/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Đây là xóa mềm/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa Parent" }));
 
     await waitFor(() => {
