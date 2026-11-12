@@ -38,7 +38,9 @@ describe("admin components", () => {
     navigationMock.replace.mockClear();
   });
 
-  it("uses compact buttons inside Admin and preserves the default size elsewhere", async () => {
+  it(
+    "uses compact buttons inside Admin and preserves the default size elsewhere",
+    async () => {
     const services = createAdminServiceFixture();
     render(
       withAdminFixture(
@@ -58,9 +60,12 @@ describe("admin components", () => {
     expect(
       within(outsideButton.container).getByRole("button"),
     ).toHaveClass("h-16");
-  });
+    },
+  );
 
-  it("uses a safe message when the admin auth service rejects credentials", async () => {
+  it(
+    "uses a safe message when the admin auth service rejects credentials",
+    async () => {
     const services = createAdminServiceFixture();
     services.auth.signIn.mockRejectedValue(
       new AdminAuthError("invalid-credentials"),
@@ -75,9 +80,12 @@ describe("admin components", () => {
     expect(services.auth.signIn).toHaveBeenCalledOnce();
     expect(navigationMock.replace).not.toHaveBeenCalled();
     expect(navigationMock.push).not.toHaveBeenCalled();
-  });
+    },
+  );
 
-  it("awaits admin sign-out, blocks repeats, and replaces the protected route", async () => {
+  it(
+    "awaits admin sign-out, blocks repeats, and replaces the protected route",
+    async () => {
     const services = createAdminServiceFixture();
     let completeSignOut: () => void = () => undefined;
     services.auth.signOut.mockImplementationOnce(
@@ -110,9 +118,12 @@ describe("admin components", () => {
       expect(navigationMock.replace).toHaveBeenCalledWith("/admin/login"),
     );
     expect(navigationMock.refresh).toHaveBeenCalledOnce();
-  });
+    },
+  );
 
-  it("keeps the protected route visible when admin sign-out fails", async () => {
+  it(
+    "keeps the protected route visible when admin sign-out fails",
+    async () => {
     const services = createAdminServiceFixture();
     services.auth.signOut.mockRejectedValueOnce(
       new Error("provider unavailable"),
@@ -132,7 +143,8 @@ describe("admin components", () => {
     expect(alert).not.toHaveTextContent("provider unavailable");
     expect(navigationMock.replace).not.toHaveBeenCalled();
     expect(navigationMock.refresh).not.toHaveBeenCalled();
-  });
+    },
+  );
 
   it("rejects an inverted grade range in the book form", async () => {
     const user = userEvent.setup();
@@ -147,7 +159,9 @@ describe("admin components", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it("offers title repair and metadata editing directly from the inventory", async () => {
+  it(
+    "offers title repair and metadata editing directly from the inventory",
+    async () => {
     const services = createAdminServiceFixture();
     const missingTitle = {
       ...adminBookListItemFixture,
@@ -176,9 +190,12 @@ describe("admin components", () => {
       "href",
       `/admin/books/${adminBookListItemFixture.book.id}/edit`,
     );
-  });
+    },
+  );
 
-  it("retires a book from the inventory and reloads the lifecycle from the service", async () => {
+  it(
+    "retires a book from the inventory and reloads the lifecycle from the service",
+    async () => {
     const services = createAdminServiceFixture();
     const retired = {
       ...adminBookListItemFixture,
@@ -215,9 +232,12 @@ describe("admin components", () => {
     expect(
       await screen.findByText("Đã ngừng hoạt động sách"),
     ).toBeInTheDocument();
-  });
+    },
+  );
 
-  it("renders lifecycle and OCR metrics from typed service responses and forwards filters", async () => {
+  it(
+    "renders lifecycle and OCR metrics from typed service responses and forwards filters",
+    async () => {
     const services = createAdminServiceFixture();
     const retired = {
       ...adminBookListItemFixture,
@@ -247,5 +267,6 @@ describe("admin components", () => {
     });
     expect(services.books.create).not.toHaveBeenCalled();
     expect(services.books.update).not.toHaveBeenCalled();
-  });
+    },
+  );
 });

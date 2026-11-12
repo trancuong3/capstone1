@@ -5,7 +5,10 @@ import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
-import type { AdminParentCreateInput, AdminParentUpdateInput } from "@/lib/api/admin-parent-service";
+import type {
+  AdminParentCreateInput,
+  AdminParentUpdateInput,
+} from "@/lib/api/admin-parent-service";
 import { isServiceError } from "@/lib/api/service-error";
 
 export interface AdminParentFormValues {
@@ -49,7 +52,8 @@ export function getAdminParentMutationErrorMessage(error: unknown): string {
       case 500:
       case 503:
         return error.request_id
-          ? "Dịch vụ quản trị hoặc Supabase Auth đang gặp sự cố. Mã yêu cầu: " + error.request_id
+          ? "Dịch vụ quản trị hoặc Supabase Auth đang gặp sự cố. Mã yêu cầu: " +
+            error.request_id
           : "Dịch vụ quản trị hoặc Supabase Auth đang tạm thời không khả dụng.";
       default:
         return error.status === 0

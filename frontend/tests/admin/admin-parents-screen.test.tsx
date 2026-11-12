@@ -102,7 +102,9 @@ describe("AdminParentsScreen", () => {
     });
   });
 
-  it("creates a Parent through the API service instead of local mock data", async () => {
+  it(
+    "creates a Parent through the API service instead of local mock data",
+    async () => {
     list.mockResolvedValue({
       items: [],
       total: 0,
@@ -137,10 +139,12 @@ describe("AdminParentsScreen", () => {
     expect(
       await screen.findByText(/Đã gửi lời mời tạo tài khoản Parent/i),
     ).toBeInTheDocument();
-  });
+    },
+  );
 
-
-  it("opens the edit dialog while loading and saves the selected parent's data once", async () => {
+  it(
+    "opens the edit dialog while loading and saves the selected parent's data once",
+    async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",
       display_name: "Nguyen Van A",
@@ -197,9 +201,12 @@ describe("AdminParentsScreen", () => {
     expect(
       await screen.findByText("Đã cập nhật hồ sơ Parent."),
     ).toBeInTheDocument();
-  });
+    },
+  );
 
-  it("updates email and phone through one locked contact-information request", async () => {
+  it(
+    "updates email and phone through one locked contact-information request",
+    async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",
       display_name: "Nguyen Van A",
@@ -249,7 +256,8 @@ describe("AdminParentsScreen", () => {
     expect(
       await screen.findByText("Đã cập nhật hồ sơ Parent."),
     ).toBeInTheDocument();
-  });
+    },
+  );
 
   it("does not send an update when a contact field is cleared", async () => {
     const parent = {
@@ -281,7 +289,9 @@ describe("AdminParentsScreen", () => {
     ).toBeInTheDocument();
     expect(update).not.toHaveBeenCalled();
   });
-  it("soft-deletes a Parent through the API and removes it from the refreshed list", async () => {
+  it(
+    "soft-deletes a Parent through the API and removes it from the refreshed list",
+    async () => {
     const parent = {
       id: "22222222-2222-4222-8222-222222222222",
       display_name: "Nguyen Van A",
@@ -323,5 +333,6 @@ describe("AdminParentsScreen", () => {
     expect(
       screen.queryByRole("heading", { name: "Nguyen Van A" }),
     ).not.toBeInTheDocument();
-  });
+    },
+  );
 });

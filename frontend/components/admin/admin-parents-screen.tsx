@@ -156,7 +156,7 @@ export function AdminParentsScreen() {
         phone: detail.phone ?? "",
       };
       setForm(value);
-        setFormContactInfoEditable(detail.contact_info_status === "available");
+      setFormContactInfoEditable(detail.contact_info_status === "available");
     } catch (cause) {
       if (requestId !== editRequestIdRef.current) return;
       setActionError(getAdminParentMutationErrorMessage(cause));
