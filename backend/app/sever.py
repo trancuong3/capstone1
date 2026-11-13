@@ -4,9 +4,11 @@ import asyncio
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException as FastAPIHTTPException, Request
@@ -43,12 +45,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Start OCR warmup and the durable PostgreSQL book-quality worker."""
-    threading.Thread(
-        target=warmup_ocr_engines,
-        daemon=True,
-        name="ocr_warmup_worker",
-    ).start()
+    """Start lightweight durable workers; OCR models load only on OCR requests."""
+    warmup_enabled = os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if warmup_enabled:
+        threading.Thread(
+            target=warmup_ocr_engines,
+            daemon=True,
+            name="ocr_warmup_worker",
+        ).start()
 
     stop_active_model_worker = threading.Event()
     active_model_worker = None
@@ -89,10 +95,33 @@ async def lifespan(_app: FastAPI):
             run_viread_ocr_training_auto_worker(stop_viread_training),
             name="viread_ocr_flow2_auto_training_worker",
         )
+    local_trainer_process = None
+    local_training_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "true").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+    local_autostart_enabled = os.getenv(
+        "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if APP_ENVIRONMENT != "test" and local_training_enabled and local_autostart_enabled:
+        try:
+            local_trainer_process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "app.jobs.viread_ocr_local_training_worker",
+                cwd=str(Path(__file__).resolve().parents[1]),
+                env=os.environ.copy(),
+            )
+        except Exception as exc:
+            logger.warning("Could not start the local VietOCR worker (%s)", type(exc).__name__)
 
     try:
         yield
     finally:
+        if local_trainer_process is not None and local_trainer_process.returncode is None:
+            local_trainer_process.terminate()
+            try:
+                await asyncio.wait_for(local_trainer_process.wait(), timeout=10)
+            except TimeoutError:
+                local_trainer_process.kill()
+                await local_trainer_process.wait()
         if active_model_worker is not None:
             stop_active_model_worker.set()
             active_model_worker.join(timeout=6)

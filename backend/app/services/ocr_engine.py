@@ -51,45 +51,21 @@ import numpy as np
 import pytesseract
 import requests
 from pytesseract import Output
-try:
-    import torch
-except ImportError:
-    # VietOCR is optional; its missing runtime must not prevent image
-    # validation, revision management, or a working PaddleOCR detector.
-    torch = None
 from PIL import Image
 from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
 
-_paddle_import_status = "success"
+# OCR runtimes are deliberately imported on the first OCR request. Importing
+# PyTorch and PaddleOCR during FastAPI startup exceeded Render Free's 512 MiB
+# memory limit before the API could bind its port.
+torch = None
+PaddleOCR = None
+Cfg = None
+Predictor = None
+_paddle_import_status = "not_initialized"
 _paddle_import_error: str | None = None
-try:
-    from paddleocr import PaddleOCR
-except Exception as exc:
-    PaddleOCR = None  # type: ignore
-    try:
-        package_version("paddleocr")
-    except PackageNotFoundError:
-        _paddle_import_status = "not_installed"
-    else:
-        # The distribution exists, but one of its imports/dependencies failed.
-        _paddle_import_status = "not_initialized"
-        _paddle_import_error = type(exc).__name__
-
-_vietocr_import_status = "success"
+_vietocr_import_status = "not_initialized"
 _vietocr_import_error: str | None = None
-try:
-    from vietocr.tool.config import Cfg
-    from vietocr.tool.predictor import Predictor
-except Exception as exc:
-    Cfg = None  # type: ignore
-    Predictor = None  # type: ignore
-    try:
-        package_version("vietocr")
-    except PackageNotFoundError:
-        _vietocr_import_status = "not_installed"
-    else:
-        _vietocr_import_status = "not_initialized"
-        _vietocr_import_error = type(exc).__name__
+_ocr_dependencies_loaded = False
 
 logger = logging.getLogger(__name__)
 
@@ -281,8 +257,50 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_initialization_status, _vietocr_initialization_status
     global _paddle_initialization_error, _vietocr_initialization_error
     global _vietocr_active_checkpoint_sha, _vietocr_active_profile
+    global _ocr_dependencies_loaded, torch, PaddleOCR, Cfg, Predictor
+    global _paddle_import_status, _paddle_import_error
+    global _vietocr_import_status, _vietocr_import_error
 
     with _engine_lock:
+        if not _ocr_dependencies_loaded:
+            _ocr_dependencies_loaded = True
+            try:
+                import torch as torch_runtime
+                torch = torch_runtime
+            except Exception as exc:
+                torch = None
+                _vietocr_import_status = "not_installed"
+                _vietocr_import_error = type(exc).__name__
+            try:
+                from paddleocr import PaddleOCR as paddle_runtime
+                PaddleOCR = paddle_runtime
+                _paddle_import_status = "success"
+                _paddle_import_error = None
+            except Exception as exc:
+                PaddleOCR = None
+                try:
+                    package_version("paddleocr")
+                except PackageNotFoundError:
+                    _paddle_import_status = "not_installed"
+                else:
+                    _paddle_import_status = "not_initialized"
+                    _paddle_import_error = type(exc).__name__
+            try:
+                from vietocr.tool.config import Cfg as vietocr_config
+                from vietocr.tool.predictor import Predictor as vietocr_predictor
+                Cfg, Predictor = vietocr_config, vietocr_predictor
+                _vietocr_import_status = "success"
+                _vietocr_import_error = None
+            except Exception as exc:
+                Cfg = Predictor = None
+                try:
+                    package_version("vietocr")
+                except PackageNotFoundError:
+                    _vietocr_import_status = "not_installed"
+                else:
+                    _vietocr_import_status = "not_initialized"
+                    _vietocr_import_error = type(exc).__name__
+
         if _paddle_engine is None:
             if PaddleOCR is None:
                 _paddle_initialization_status = _paddle_import_status

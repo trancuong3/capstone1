@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from app.services.viread_ocr_training_service import (
     TRAINING_PROFILES,
     _deduplicate_verified_samples,
+    _verified_snapshot,
+    _verified_snapshot_db_rows,
 )
 
 
@@ -35,6 +37,26 @@ class VireadDualTrainingContracts(unittest.TestCase):
             _deduplicate_verified_samples([first, conflict])
 
         self.assertEqual(raised.exception.status_code, 409)
+
+    def test_verified_snapshot_manifest_and_rows_use_the_same_deduplicated_sources(self):
+        first = {
+            "sample_id": "source-1", "group_id": "page-1", "split": "train",
+            "image_storage_path": "ocr-training/flow2/admin-verified/one.png",
+            "image_sha256": "a" * 64, "label": "Tiếng Việt", "source_page_id": "page-1",
+            "source_revision_id": "revision-1", "provenance": {"verified_by_admin": True},
+        }
+        duplicate = {**first, "sample_id": "source-2"}
+
+        manifest, unique_sources = _verified_snapshot([first, duplicate])
+        rows = _verified_snapshot_db_rows("dataset-1", unique_sources)
+
+        self.assertEqual(manifest["schema"], "viread-dataset-v1")
+        self.assertEqual(manifest["snapshot_strategy"], "cumulative-deduplicated-v2")
+        self.assertEqual(len(manifest["samples"]), 1)
+        self.assertEqual(len(rows), len(manifest["samples"]))
+        self.assertEqual(rows[0]["source_annotation_id"], "source-1")
+        self.assertEqual(rows[0]["dataset_id"], "dataset-1")
+        self.assertEqual(rows[0]["source_revision_id"], "revision-1")
 
 
 if __name__ == "__main__":

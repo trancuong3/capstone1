@@ -217,7 +217,7 @@ export function AdminVireadTrainingScreen() {
                         !flow1Train ||
                         !flow1Validation
                       ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
-                      : "Đủ khoảng dữ liệu; Colab cần chọn một version gộp chứa cả hai nguồn"}
+                      : "Đủ dữ liệu; hệ thống tự đăng ký job Flow 1 riêng sau khi snapshot hợp lệ"}
                 </p>
               </li>
               <li className="rounded-control border border-border p-4">
@@ -241,7 +241,7 @@ export function AdminVireadTrainingScreen() {
                 </p>
                 <p className="mt-2 text-sm font-bold text-muted">
                   {flow2Train > 0 && flow2Validation > 0
-                    ? "Đủ Train và Validation; hệ thống tự tạo job và chọn GPU local hoặc Colab"
+                    ? "Đủ Train và Validation; hệ thống tự tạo job Flow 2 riêng"
                     : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
@@ -249,10 +249,10 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Hàng đợi tự động Flow 2</h2>
+            <h2 className="text-xl font-black">Hàng đợi huấn luyện tự động</h2>
             <p className="mt-2 text-sm text-muted">
-              Job tự chọn máy local khi đủ GPU, RAM và dung lượng; nếu không,
-              job chờ worker Colab đã kết nối. Màn hình cập nhật định kỳ.
+              Mỗi job giữ riêng dataset, profile và lineage. Colab Enterprise tự
+              chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin duyệt.
             </p>
             <div className="mt-4 space-y-3">
               {data.jobs.map((job) => {
@@ -302,6 +302,29 @@ export function AdminVireadTrainingScreen() {
                               : "Chưa có Colab worker sẵn sàng. Khi worker đã cấu hình và kết nối, job sẽ tự được nhận."}
                       </p>
                     ) : null}
+                    {job.status === "COLAB_SUBMITTED" ||
+                    job.status === "COLAB_EXECUTING" ? (
+                      <p className="mt-1 text-sm text-muted">
+                        {job.status === "COLAB_SUBMITTED"
+                          ? "Colab Enterprise đã nhận execution; chờ runtime GPU bắt đầu."
+                          : "Colab Enterprise đang chạy notebook cho job này."}
+                      </p>
+                    ) : null}
+                    {job.status === "BLOCKED_CONFIGURATION" ? (
+                      <p className="mt-1 text-sm text-danger">
+                        Job chưa được gửi lên Google Cloud. Mã cấu hình: {job.last_error_code ?? "chưa cấu hình"}. Hãy hoàn tất checklist trong docs/viread-colab-enterprise-setup.md rồi thử lại.
+                      </p>
+                    ) : null}
+                    {job.colab_execution_resource_name ? (
+                      <p className="mt-1 break-all font-mono text-xs text-muted">
+                        Execution {job.colab_execution_resource_name}
+                      </p>
+                    ) : null}
+                    {job.status === "QUALITY_GATE_REJECTED" ? (
+                      <p className="mt-1 text-sm text-muted">
+                        Candidate không đạt quality gate và chưa được kích hoạt.
+                      </p>
+                    ) : null}
                     {job.target === "COLAB" &&
                     typeof localUnavailable === "string" ? (
                       <p className="mt-1 text-sm text-muted">
@@ -327,9 +350,7 @@ export function AdminVireadTrainingScreen() {
                 );
               })}
               {data.jobs.length === 0 ? (
-                <p className="text-sm text-muted">
-                  Chưa có job Flow 2; cần snapshot có cả Train và Validation.
-                </p>
+                <p className="text-sm text-muted">Chưa có dataset nào đủ điều kiện tạo job.</p>
               ) : null}
             </div>
           </Card>

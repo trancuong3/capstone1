@@ -72,6 +72,58 @@ def _deduplicate_verified_samples(samples: list[dict[str, Any]]) -> list[dict[st
     return list(by_hash.values())
 
 
+def _verified_snapshot(source_rows: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build one immutable cumulative manifest and its exact DB materialization rows.
+
+    Keep the schema at v1 for existing workers, but version the snapshot strategy so
+    already-persisted snapshots created by the former INSERT..SELECT path cannot be
+    mistaken for this canonical, deduplicated snapshot.
+    """
+    samples = _deduplicate_verified_samples(source_rows)
+    manifest_samples = []
+    for item in samples:
+        manifest_samples.append({
+            "sample_id": str(item["sample_id"]),
+            "group_id": str(item["group_id"]),
+            "split": str(item["split"]),
+            "image_storage_path": str(item["image_storage_path"]),
+            "image_sha256": str(item["image_sha256"]).lower(),
+            "label": unicodedata.normalize("NFC", str(item["label"])),
+            "source_page_id": str(item["source_page_id"]) if item.get("source_page_id") else None,
+            "source_revision_id": str(item["source_revision_id"]) if item.get("source_revision_id") else None,
+            "verified": True,
+        })
+    manifest = {
+        "schema": "viread-dataset-v1",
+        "source_flow": "FLOW1_VERIFIED",
+        "split_seed": "viread-vietocr-v2-split-v1",
+        "snapshot_strategy": "cumulative-deduplicated-v2",
+        "samples": manifest_samples,
+    }
+    return manifest, samples
+
+
+def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map exactly the canonical source rows to immutable version-owned rows."""
+    return [{
+        "dataset_id": dataset_id,
+        "source_flow": "FLOW1_VERIFIED",
+        "group_id": item["group_id"],
+        "split": item["split"],
+        "path": item["image_storage_path"],
+        "image_sha": str(item["image_sha256"]).lower(),
+        "label": unicodedata.normalize("NFC", str(item["label"])),
+        "source_page_id": item.get("source_page_id"),
+        "source_revision_id": item.get("source_revision_id"),
+        "source_annotation_id": item["sample_id"],
+        "provenance": json.dumps({
+            **(item.get("provenance") or {}),
+            "snapshot": "admin_verified_outbox",
+            "source_sample_id": item["sample_id"],
+        }),
+    } for item in source_rows]
+
+
 def _edit_distance(left: list[str], right: list[str]) -> int:
     if len(left) < len(right):
         left, right = right, left
@@ -160,7 +212,9 @@ class VireadOcrTrainingService:
         jobs = await self.repo.all("""
             SELECT id AS job_id, profile, target, status, dataset_version_id,
                    manifest_sha256, config_sha256, parent_checkpoint_sha256, run_id,
-                   attempts, progress, last_error_code, metadata, created_at, updated_at
+                   attempts, progress, last_error_code, metadata, colab_execution_id,
+                   colab_execution_resource_name, colab_operation_name,
+                   colab_execution_number, created_at, updated_at
             FROM public.viread_ocr_training_jobs ORDER BY created_at DESC LIMIT 30
         """)
         benchmarks = await self.repo.all("""
@@ -279,19 +333,17 @@ class VireadOcrTrainingService:
         await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_flow1_snapshot'))")
         source_rows = await self.repo.all("""
             SELECT id::text AS sample_id, source_group_id AS group_id, split, image_storage_path,
-                   image_sha256, label, source_revision_id::text AS source_revision_id
+                   image_sha256, label, source_page_id, source_revision_id, provenance
             FROM public.viread_ocr_samples
             WHERE source_flow='FLOW1_VERIFIED' AND split IN ('train','validation') AND dataset_version_id IS NULL
             ORDER BY created_at, id
         """)
-        source_rows = _deduplicate_verified_samples(source_rows)
-        manifest = {"schema": "viread-dataset-v1", "source_flow": "FLOW1_VERIFIED",
-                    "split_seed": "viread-vietocr-v2-split-v1",
-                    "samples": [{**item, "verified": True} for item in source_rows]}
+        manifest, source_rows = _verified_snapshot(source_rows)
         version_sha = hashlib.sha256(_canonical(manifest)).hexdigest()
         if source_rows:
             dataset = await self.repo.one("""
-                SELECT id, version_sha256, manifest_storage_path FROM public.viread_ocr_dataset_versions
+                SELECT id, version_sha256, manifest_storage_path, sample_count
+                FROM public.viread_ocr_dataset_versions
                 WHERE source_flow='FLOW1_VERIFIED' AND version_sha256=:version_sha
             """, {"version_sha": version_sha})
         else:
@@ -301,6 +353,18 @@ class VireadOcrTrainingService:
             """)
             if dataset:
                 version_sha = dataset["version_sha256"]
+        if dataset and source_rows:
+            actual_count = await self.repo.one("""
+                SELECT count(*)::integer AS total
+                FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
+            """, {"dataset_id": dataset["id"]})
+            expected_count = len(source_rows)
+            if (int(dataset["sample_count"]) != expected_count
+                    or not actual_count or int(actual_count["total"]) != expected_count):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Verified dataset snapshot does not match its canonical manifest; refusing to schedule training",
+                )
         if not dataset:
             manifest_path = f"ocr-training/manifests/flow2_admin_verified/{version_sha}.json"
             manifest_bytes = _canonical(manifest)
@@ -319,18 +383,25 @@ class VireadOcrTrainingService:
             """, {"version_sha": version_sha, "manifest_path": manifest_path,
                   "sample_count": len(source_rows), "provenance": json.dumps({"snapshot": "admin_verified_outbox"})})
             if source_rows:
+                snapshot_rows = _verified_snapshot_db_rows(dataset["id"], source_rows)
                 await self.repo.execute("""
                     INSERT INTO public.viread_ocr_samples
                         (dataset_version_id, source_flow, source_group_id, split, image_storage_path,
                          image_sha256, label, source_page_id, source_revision_id, source_annotation_id, provenance)
-                    SELECT :dataset_id, source_flow, source_group_id, split, image_storage_path,
-                           image_sha256, label, source_page_id, source_revision_id, id::text, provenance
-                    FROM public.viread_ocr_samples
-                    WHERE source_flow='FLOW1_VERIFIED' AND split IN ('train','validation')
-                      AND dataset_version_id IS NULL
+                    VALUES (:dataset_id, :source_flow, :group_id, :split, :path,
+                            :image_sha, :label, :source_page_id, :source_revision_id,
+                            :source_annotation_id, CAST(:provenance AS jsonb))
                     ON CONFLICT DO NOTHING
+                """, snapshot_rows)
+                actual_count = await self.repo.one("""
+                    SELECT count(*)::integer AS total
+                    FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
                 """, {"dataset_id": dataset["id"]})
+                if not actual_count or int(actual_count["total"]) != len(snapshot_rows):
+                    raise RuntimeError("verified dataset snapshot insert count differs from manifest")
             await self.repo.commit()
+        elif dataset and not source_rows:
+            version_sha = dataset["version_sha256"]
         dataset_id = dataset["id"]
         total_row = await self.repo.one("SELECT count(*)::integer AS total FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id", {"dataset_id": dataset_id})
         items = await self.repo.all("""

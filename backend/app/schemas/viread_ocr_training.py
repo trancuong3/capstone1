@@ -120,6 +120,7 @@ class ModelDecisionRequest(BaseModel):
 class TrainingWorkerClaim(BaseModel):
     worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
     runtime: dict[str, Any] = Field(default_factory=dict)
+    training_job_id: UUID | None = None
 
 
 class TrainingWorkerStatus(BaseModel):
@@ -140,6 +141,6 @@ class TrainingWorkerHeartbeat(BaseModel):
 class TrainingWorkerFinish(BaseModel):
     worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
     run_id: UUID | None = None
-    status: Literal["CANDIDATE", "BENCHMARKED", "FAILED"]
+    status: Literal["CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED", "FAILED"]
     error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_]+$")
     runtime: dict[str, Any] = Field(default_factory=dict)

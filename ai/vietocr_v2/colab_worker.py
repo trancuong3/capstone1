@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -23,7 +23,8 @@ API_PREFIX = "/books/admin/viread-training/worker"
 
 
 class ColabWorker:
-    def __init__(self, api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30):
+    def __init__(self, api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30,
+                 state_store_factory: Callable[[dict[str, Any], Path], Any] | None = None):
         if not api_base.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             raise ValueError("VIREAD_API_BASE must use HTTPS outside localhost")
         if len(token) < 32:
@@ -33,6 +34,7 @@ class ColabWorker:
         self.work_root = Path(work_root)
         self.work_root.mkdir(parents=True, exist_ok=True)
         self.poll_seconds = max(5, poll_seconds)
+        self.state_store_factory = state_store_factory
         self.worker_id = f"colab-{uuid.uuid4()}"
         self.runtime_data: dict[str, Any] = {}
         self.session = requests.Session()
@@ -43,10 +45,11 @@ class ColabWorker:
         response.raise_for_status()
         return response.json() if response.content else {}
 
-    def claim(self) -> dict[str, Any] | None:
-        response = self.call("POST", f"{API_PREFIX}/claim", json={
-            "worker_id": self.worker_id, "runtime": self.runtime_data,
-        })
+    def claim(self, training_job_id: str | None = None) -> dict[str, Any] | None:
+        payload = {"worker_id": self.worker_id, "runtime": self.runtime_data}
+        if training_job_id is not None:
+            payload["training_job_id"] = training_job_id
+        response = self.call("POST", f"{API_PREFIX}/claim", json=payload)
         return response.get("job")
 
     def report_status(self, status: str, reason_code: str | None = None) -> None:
@@ -229,7 +232,7 @@ class ColabWorker:
         if sha256_file(stable_candidate) != candidate["checkpoint_sha256"]:
             raise ValueError("PERSISTED_CANDIDATE_HASH_MISMATCH")
         run_payload = {
-            "profile": "FLOW2_ADMIN_VERIFIED", "dataset_version_id": job["dataset_version_id"],
+            "profile": job["profile"], "dataset_version_id": job["dataset_version_id"],
             "parent_checkpoint_sha256": candidate["parent_checkpoint_sha256"],
             "manifest_sha256": candidate["manifest_sha256"], "config_sha256": candidate["config_sha256"],
             "architecture_sha256": candidate["architecture_sha256"],
@@ -271,6 +274,9 @@ class ColabWorker:
         job_id = str(job["id"])
         run_dir = self.work_root / job_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        state_store = self.state_store_factory(job, run_dir) if self.state_store_factory else None
+        if state_store is not None:
+            state_store.restore()
         stop = threading.Event()
         progress: dict[str, Any] = {"stage": "downloading_dataset"}
         heartbeat = threading.Thread(target=self.heartbeat_loop, args=(job_id, stop, progress), daemon=True)
@@ -299,6 +305,12 @@ class ColabWorker:
                     raise ValueError("PERSISTED_CANDIDATE_HASH_MISMATCH")
             else:
                 from .train import run_training
+
+                def persist_training_progress(completed: int, total: int) -> None:
+                    progress.update({"stage": "training", "completed_steps": completed, "total_steps": total})
+                    if state_store is not None:
+                        state_store.sync()
+
                 candidate = run_training(
                     profile=job["profile"], manifest_path=str(manifest), output_dir=str(run_dir),
                     parent_checkpoint=str(parent), total_steps=int(config["steps"]),
@@ -306,19 +318,34 @@ class ColabWorker:
                     batch_size=int(config["batch_size"]), seed=int(config["seed"]),
                     resume=(run_dir / "latest.pt").is_file(), freeze_epochs=int(config["freeze_epochs"]),
                     use_fp16=bool(config["fp16"]),
-                    progress_callback=lambda completed, total: progress.update(
-                        {"stage": "training", "completed_steps": completed, "total_steps": total}),
+                    progress_callback=persist_training_progress,
                 )
                 temporary = stable_candidate.with_suffix(".tmp")
                 shutil.copyfile(candidate["candidate_path"], temporary)
                 temporary.replace(stable_candidate)
                 candidate["candidate_path"] = str(stable_candidate)
-                candidate_record.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+                record_json = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+                record_temporary = candidate_record.with_suffix(".json.tmp")
+                record_temporary.write_text(record_json, encoding="utf-8")
+                record_temporary.replace(candidate_record)
+                stable_manifest = run_dir / "candidate.manifest.json"
+                manifest_temporary = stable_manifest.with_suffix(".json.tmp")
+                manifest_temporary.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2),
+                                              encoding="utf-8")
+                manifest_temporary.replace(stable_manifest)
+            if state_store is not None:
+                # Commit the finished candidate before registering its run in the database.
+                state_store.sync()
             progress["stage"] = "uploading_candidate"
             run_id, run_status, stable_candidate = self.upload_candidate(job, candidate, run_dir)
             if run_status == "BENCHMARKED":
+                registered_result = self.call(
+                    "GET", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/result",
+                    params={"worker_id": self.worker_id},
+                )
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
-                    "worker_id": self.worker_id, "run_id": run_id, "status": "BENCHMARKED",
+                    "worker_id": self.worker_id, "run_id": run_id,
+                    "status": registered_result["job_status"],
                     "runtime": self.runtime_data,
                 })
                 return
@@ -364,6 +391,8 @@ class ColabWorker:
             if (report["candidate_checkpoint_sha256"] != candidate["checkpoint_sha256"]
                     or report["locked_manifest_sha256"] != test_job["locked_test_manifest_sha256"]):
                 raise ValueError("BENCHMARK_REPORT_HASH_MISMATCH")
+            if state_store is not None:
+                state_store.sync()
             self.call("POST", f"{API_PREFIX}/jobs/{job_id}/benchmarks",
                       params={"worker_id": self.worker_id}, json={
                           "run_id": run_id,
@@ -373,12 +402,15 @@ class ColabWorker:
                                       for row in report["outputs"]],
                       })
             self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
-                "worker_id": self.worker_id, "run_id": run_id, "status": "BENCHMARKED",
+                "worker_id": self.worker_id, "run_id": run_id,
+                "status": "BENCHMARKED" if report.get("gate_status") == "V2_WIN" else "QUALITY_GATE_REJECTED",
                 "runtime": self.runtime_data,
             })
         finally:
             stop.set()
             heartbeat.join(timeout=2)
+            if state_store is not None:
+                state_store.sync()
 
     def run_forever(self) -> None:
         logger.info("ViRead Colab worker started; worker id=%s", self.worker_id)
@@ -417,6 +449,36 @@ class ColabWorker:
             except Exception as exc:
                 logger.error("Training queue poll failed (%s)", type(exc).__name__)
             time.sleep(self.poll_seconds)
+
+    def run_job_once(self, training_job_id: str, *, expected_profile: str | None = None) -> bool:
+        """Claim and finish exactly one already-dispatched Enterprise execution job."""
+        self.runtime_data = self.assert_runtime_capacity(self.work_root)
+        self.report_status("READY")
+        job = self.claim(training_job_id)
+        if not job:
+            return False
+        if expected_profile and job.get("profile") != expected_profile:
+            error = "COLAB_PROFILE_MISMATCH"
+            try:
+                self.call("POST", f"{API_PREFIX}/jobs/{training_job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": job.get("run_id"),
+                    "status": "FAILED", "error_code": error, "runtime": self.runtime_data,
+                })
+            finally:
+                raise RuntimeError(error)
+        try:
+            self.process_job(job)
+        except Exception as exc:
+            try:
+                self.call("POST", f"{API_PREFIX}/jobs/{training_job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": job.get("run_id"),
+                    "status": "FAILED", "error_code": type(exc).__name__.upper()[:64],
+                    "runtime": self.runtime_data,
+                })
+            except Exception as finish_exc:
+                logger.error("Could not record Enterprise job failure (%s)", type(finish_exc).__name__)
+            raise
+        return True
 
 
 def run_worker(api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30) -> None:

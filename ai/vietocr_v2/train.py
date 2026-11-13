@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -169,6 +170,14 @@ def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:
     else:
         temporary.replace(target)
     return target, digest
+
+
+def _prune_stale_best_models(run_dir: Path, keep: Path | None) -> None:
+    """Drop obsolete validation-best weights only after latest.pt points to the current best."""
+    keep_name = keep.name if keep is not None else None
+    for candidate in run_dir.glob("best-*.pth"):
+        if candidate.name != keep_name and re.fullmatch(r"best-[a-f0-9]{64}\.pth", candidate.name):
+            candidate.unlink(missing_ok=True)
 
 
 def _should_resume(requested: bool, checkpoint_path: Path, run_dir: Path) -> bool:
@@ -399,6 +408,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
             temporary = checkpoint_path.with_suffix(".tmp")
             torch.save(state, temporary)
             temporary.replace(checkpoint_path)
+            _prune_stale_best_models(run_dir, best_model_path)
         if progress_callback is not None and (step % 100 == 0 or validated or step == total_steps):
             progress_callback(step, total_steps)
     if (best_model_path is None or not best_model_path.is_file()
