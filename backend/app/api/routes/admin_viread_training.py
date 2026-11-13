@@ -190,11 +190,11 @@ async def claim_viread_colab_training_job(
         WITH next_job AS (
             SELECT id FROM public.viread_ocr_training_jobs
             WHERE target='COLAB' AND available_at <= now() AND attempts < 3 AND (
-                (:requested_job_id IS NULL AND status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB'))
-                OR (:requested_job_id IS NOT NULL AND id=:requested_job_id
+                (CAST(:requested_job_id AS uuid) IS NULL AND status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB'))
+                OR (CAST(:requested_job_id AS uuid) IS NOT NULL AND id=CAST(:requested_job_id AS uuid)
                     AND status IN ('COLAB_SUBMITTING', 'COLAB_SUBMITTED', 'COLAB_EXECUTING'))
                 OR (status='COLAB_RUNNING' AND lease_expires_at < now()
-                    AND (:requested_job_id IS NULL OR id=:requested_job_id))
+                    AND (CAST(:requested_job_id AS uuid) IS NULL OR id=CAST(:requested_job_id AS uuid)))
             )
             ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
         )
@@ -219,7 +219,7 @@ async def claim_viread_colab_training_job(
     locked = await db.execute(text("""
         SELECT id, version_sha256 FROM public.viread_ocr_dataset_versions
         WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-          AND (:locked_id IS NULL OR id=:locked_id)
+          AND (CAST(:locked_id AS uuid) IS NULL OR id=CAST(:locked_id AS uuid))
         ORDER BY created_at DESC LIMIT 1
     """), {"locked_id": job["locked_test_version_id"]})
     locked_row = locked.mappings().first()
