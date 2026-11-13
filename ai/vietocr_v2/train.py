@@ -157,6 +157,39 @@ def _restore_rng(torch, state: dict[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
+def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
+    """Make VietOCR 0.3.12's LMDB image validator work with NumPy 2.x.
+
+    Upstream VietOCR decodes encoded image bytes with ``np.fromstring``. NumPy
+    2 removed that binary-input behavior, so use ``frombuffer`` at this single
+    call site instead of changing NumPy globally or modifying the installed
+    VietOCR package. The validator keeps VietOCR's ``(valid, height, width)``
+    return contract used by its LMDB dataset builder.
+    """
+    from vietocr.tool import create_dataset as vietocr_dataset
+
+    current = vietocr_dataset.checkImageIsValid
+    if getattr(current, "_viread_numpy_bytes_compatibility", False):
+        return
+
+    def check_image_is_valid(image_bytes):
+        height = width = None
+        try:
+            if image_bytes is None:
+                return False, height, width
+            encoded = np.frombuffer(image_bytes, dtype=np.uint8)
+            image = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                return False, height, width
+            height, width = (int(image.shape[0]), int(image.shape[1]))
+            return bool(height * width), height, width
+        except Exception:
+            return False, height, width
+
+    check_image_is_valid._viread_numpy_bytes_compatibility = True
+    vietocr_dataset.checkImageIsValid = check_image_is_valid
+
+
 def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:
     """Store an immutable validation-best weights file for crash-safe resume."""
     temporary = run_dir / f".best-{uuid4().hex}.tmp"
@@ -218,6 +251,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     from prefetch_generator import background  # noqa: F401 - required by VietOCR's dataloader
     from vietocr.model.trainer import Trainer  # noqa: F401 - imports imgaug
     from vietocr.tool.config import Cfg  # noqa: F401
+    _install_vietocr_numpy_bytes_compatibility(np, cv2)
 
     torch_version = torch.__version__.split("+", 1)[0]
     torchvision_version = torchvision.__version__.split("+", 1)[0]

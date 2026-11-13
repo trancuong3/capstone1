@@ -25,6 +25,7 @@ from ai.vietocr_v2.flow2_register import _locked_test_rows, _read_trdg_provenanc
 from ai.vietocr_v2.flow2_prepare import match_external_annotations
 from ai.vietocr_v2.train import (
     PROFILES,
+    _install_vietocr_numpy_bytes_compatibility,
     _should_resume,
     validate_flow1_sample_counts,
 )
@@ -261,6 +262,53 @@ def test_t30_resume_refuses_best_weights_without_the_matching_training_state(tmp
     (tmp_path / "best-example.pth").write_bytes(b"best weights")
     with pytest.raises(FileNotFoundError, match="resumable checkpoint is missing"):
         _should_resume(True, tmp_path / "latest.pt", tmp_path)
+
+
+def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    lmdb = pytest.importorskip("lmdb")
+    pytest.importorskip("vietocr")
+    import vietocr.tool.create_dataset as vietocr_dataset
+
+    original_validator = vietocr_dataset.checkImageIsValid
+    monkeypatch.setattr(vietocr_dataset, "checkImageIsValid", original_validator)
+
+    original_fromstring = np.fromstring
+
+    def numpy2_fromstring_behavior(value, *args, **kwargs):
+        if isinstance(value, (bytes, bytearray, memoryview)) and not kwargs.get("sep", ""):
+            raise ValueError("The binary mode of fromstring is removed, use frombuffer instead")
+        return original_fromstring(value, *args, **kwargs)
+
+    monkeypatch.setattr(np, "fromstring", numpy2_fromstring_behavior)
+    _install_vietocr_numpy_bytes_compatibility(np, cv2)
+
+    image = np.full((23, 57), 255, dtype=np.uint8)
+    encoded_ok, encoded = cv2.imencode(".png", image)
+    assert encoded_ok
+    image_bytes = encoded.tobytes()
+    assert vietocr_dataset.checkImageIsValid(image_bytes) == (True, 23, 57)
+    assert vietocr_dataset.checkImageIsValid(b"not an encoded image") == (False, None, None)
+
+    (tmp_path / "line-a.png").write_bytes(image_bytes)
+    (tmp_path / "line-b.png").write_bytes(image_bytes)
+    (tmp_path / "train.tsv").write_text(
+        "line-a.png\tverified label one\nline-b.png\tverified label two\n",
+        encoding="utf-8",
+    )
+    lmdb_path = tmp_path / "train.lmdb"
+    vietocr_dataset.createDataset(str(lmdb_path), str(tmp_path), "train.tsv")
+
+    environment = lmdb.open(str(lmdb_path), readonly=True, lock=False, readahead=False)
+    try:
+        with environment.begin() as transaction:
+            assert transaction.get(b"image-000000000") == image_bytes
+            assert transaction.get(b"label-000000000") == b"verified label one"
+            assert transaction.get(b"image-000000001") == image_bytes
+            assert transaction.get(b"label-000000001") == b"verified label two"
+    finally:
+        environment.close()
 
 
 def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):
