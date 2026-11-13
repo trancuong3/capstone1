@@ -26,6 +26,20 @@ logger = logging.getLogger("viread.vietocr.colab_worker")
 API_PREFIX = "/books/admin/viread-training/worker"
 
 
+def verify_worker_source_lock(config: dict[str, Any]) -> None:
+    """Fail closed unless this checkout matches the job's trainer/dependency pins."""
+    expected_files = {
+        "trainer_sha256": Path(__file__).with_name("train.py"),
+        "requirements_sha256": Path(__file__).with_name("requirements.txt"),
+        "colab_requirements_sha256": Path(__file__).with_name("requirements-colab.txt"),
+    }
+    if any(
+        not isinstance(config.get(key), str) or sha256_file(path) != config[key]
+        for key, path in expected_files.items()
+    ):
+        raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
+
+
 class ColabWorker:
     def __init__(self, api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30,
                  state_store_factory: Callable[[dict[str, Any], Path], Any] | None = None):
@@ -297,9 +311,7 @@ class ColabWorker:
             progress.update(stage="training", completed_steps=0,
                             total_steps=int(job["metadata"]["training_config"]["steps"]))
             config = job["metadata"]["training_config"]
-            if (sha256_file(Path(__file__).with_name("train.py")) != config["trainer_sha256"]
-                    or sha256_file(Path(__file__).with_name("requirements.txt")) != config["requirements_sha256"]):
-                raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
+            verify_worker_source_lock(config)
             self.assert_runtime_capacity(run_dir)
             candidate_record = run_dir / "candidate.json"
             stable_candidate = run_dir / "candidate.pth"

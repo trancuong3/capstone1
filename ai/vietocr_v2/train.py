@@ -188,6 +188,63 @@ def _should_resume(requested: bool, checkpoint_path: Path, run_dir: Path) -> boo
     return requested
 
 
+def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
+    """Import the pinned training stack before a Colab worker claims a job.
+
+    VietOCR 0.3.12 pins imgaug 0.4.0, which reads ``numpy.sctypes`` during
+    import and uses the removed ``numpy.complex`` alias in one augmentation.
+    Restore only those legacy compatibility names; this does not alter arrays,
+    model weights, labels, or the OCR architecture.
+    """
+    from importlib.metadata import version as package_version
+
+    import numpy as np
+
+    if not hasattr(np, "sctypes"):
+        np.sctypes = {
+            "int": [np.int8, np.int16, np.int32, np.int64],
+            "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+            "float": [np.float16, np.float32, np.float64, np.longdouble],
+            "complex": [np.complex64, np.complex128, np.clongdouble],
+            "others": [np.bool_, np.object_, np.str_, np.bytes_, np.void],
+        }
+    if not hasattr(np, "complex"):
+        np.complex = complex
+
+    import cv2
+    import torch
+    import torchvision
+    from PIL import Image  # noqa: F401 - verify the image dependency before claim
+    from vietocr.model.trainer import Trainer  # noqa: F401 - imports imgaug
+    from vietocr.tool.config import Cfg  # noqa: F401
+
+    torch_version = torch.__version__.split("+", 1)[0]
+    torchvision_version = torchvision.__version__.split("+", 1)[0]
+    vietocr_version = package_version("vietocr")
+    imgaug_version = package_version("imgaug")
+    if np.__version__ not in {"1.26.4", "2.3.5"}:
+        raise RuntimeError(f"COLAB_NUMPY_VERSION_MISMATCH:{np.__version__}")
+    if vietocr_version != "0.3.12" or imgaug_version != "0.4.0":
+        raise RuntimeError(
+            f"VIETOCR_TRAINING_PACKAGE_VERSION_MISMATCH:{vietocr_version}/{imgaug_version}"
+        )
+    if torch_version != "2.14.1" or torchvision_version != "0.29.1":
+        raise RuntimeError(
+            f"COLAB_TORCH_VERSION_MISMATCH:{torch_version}/{torchvision_version}"
+        )
+    if np.__version__ == "2.3.5" and package_version("opencv-python") != "4.13.0.92":
+        raise RuntimeError(f"COLAB_OPENCV_VERSION_MISMATCH:{cv2.__version__}")
+    return {
+        "numpy_version": np.__version__,
+        "vietocr_version": vietocr_version,
+        "imgaug_version": imgaug_version,
+        "torch_version": torch_version,
+        "torchvision_version": torchvision_version,
+        "opencv_version": cv2.__version__,
+        "cuda_available": bool(torch.cuda.is_available()),
+    }
+
+
 def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_checkpoint: str,
                  total_steps: int, dataset_receipt_path: str, dataset_version_sha256: str,
                  batch_size: int = 32, seed: int = 20261112, resume: bool = False,
@@ -212,6 +269,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     if any(row.split == "holdout" or row.split == "locked_test" for row in rows) and all(row.split != "train" for row in rows):
         raise ValueError("holdout or Locked Test samples cannot be used as training data")
     original_parent = parent_checkpoint.lower() in {"original", ORIGINAL_CHECKPOINT_SHA256}
+    prepare_vietocr_training_runtime()
+
     if original_parent:
         parent_path = run_dir / "vgg_transformer_original.pth"
         if not parent_path.exists():

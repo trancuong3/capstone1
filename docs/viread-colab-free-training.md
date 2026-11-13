@@ -49,11 +49,12 @@ Sau khi notebook thay đổi này đã được merge vào `main`:
 ## 4. Khởi động từng job
 
 1. Trong ViRead Admin, kiểm tra có job đang chờ Colab và đã chọn đúng profile (`FLOW1_EXTERNAL_TRDG` hoặc `FLOW2_ADMIN_VERIFIED`).
-2. Trong Colab chọn **Runtime → Run all**. Cell kết nối Drive để giữ thư mục job, cài dependency đã khóa, rồi kiểm tra GPU và nhận tối đa một job đang sẵn sàng. Bạn không nhập job ID hay nhãn dữ liệu.
-3. Để cell chạy đến khi kết thúc. Nó sẽ tải manifest/ảnh/checkpoint và kiểm tra SHA256, fine-tune, upload candidate, chạy benchmark nếu có Locked Test, rồi báo trạng thái về backend.
-4. Nếu notebook báo không có job, chưa có training run nào bắt đầu. Quay lại Admin và kiểm tra dataset readiness hoặc trạng thái job.
-5. Nếu runtime bị ngắt giữa chừng, lease của job có thể còn hiệu lực tối đa 15 phút. Kết nối runtime mới, mount lại cùng Google Drive, chờ lease hết hạn rồi chạy lại cell để tiếp tục cùng job. Không tạo job trùng hoặc xóa thư mục `MyDrive/ViRead/VietOCR-V2-worker` vì trong đó có state/checkpoint phục hồi.
-6. Muốn xử lý job kế tiếp, chạy lại cell một lần nữa. Notebook không tự poll nền.
+2. Trong Colab chọn **Runtime → Run all**. Cell kết nối Drive để giữ thư mục job, cài `ai/vietocr_v2/requirements-colab.txt` (bộ phụ thuộc riêng cho Colab Python 3.12/3.13), kiểm tra import VietOCR/PyTorch/torchvision và GPU trước khi nhận tối đa một job đang sẵn sàng. TRDG không được cài vào worker vì nó chỉ dùng ở bước tạo corpus Flow 1; bước đó dùng `requirements.txt` trên môi trường chuẩn bị dữ liệu. Bạn không nhập job ID hay nhãn dữ liệu.
+3. Nếu bước cài hoặc kiểm tra dependency thất bại, worker dừng trước khi claim job; gửi phần `ERROR:` cuối cell để xử lý. Đừng chạy worker bằng một bộ dependency tự cài khác.
+4. Để cell chạy đến khi kết thúc. Nó sẽ tải manifest/ảnh/checkpoint và kiểm tra SHA256, fine-tune, upload candidate, chạy benchmark nếu có Locked Test, rồi báo trạng thái về backend.
+5. Nếu notebook báo không có job, chưa có training run nào bắt đầu. Quay lại Admin và kiểm tra dataset readiness hoặc trạng thái job.
+6. Nếu runtime bị ngắt giữa chừng, lease của job có thể còn hiệu lực tối đa 15 phút. Kết nối runtime mới, mount lại cùng Google Drive, chờ lease hết hạn rồi chạy lại cell để tiếp tục cùng job. Không tạo job trùng hoặc xóa thư mục `MyDrive/ViRead/VietOCR-V2-worker` vì trong đó có state/checkpoint phục hồi.
+7. Muốn xử lý job kế tiếp, chạy lại cell một lần nữa. Notebook không tự poll nền.
 
 ## 5. Xác nhận đã train thật
 
