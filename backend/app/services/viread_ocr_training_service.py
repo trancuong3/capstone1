@@ -54,9 +54,22 @@ def _sha(value: str) -> bool:
 
 
 def _deduplicate_verified_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep one crop per image hash and reject conflicting verified labels."""
+    """Keep one crop per image hash and reject conflicting verified labels.
+
+    If the same image was assigned to more than one split, retain the strongest
+    evaluation split (holdout, then validation) to prevent evaluation leakage.
+    """
     by_hash: dict[str, dict[str, Any]] = {}
-    for item in samples:
+
+    def selection_key(item: dict[str, Any]) -> tuple[int, str]:
+        # Holdout then validation win on duplicate pixels. The sample id tie-breaker
+        # makes the canonical row independent of query/input order.
+        split_priority = {"holdout": 0, "validation": 1, "train": 2}.get(
+            str(item.get("split", "")), 3
+        )
+        return split_priority, str(item.get("sample_id", ""))
+
+    for item in sorted(samples, key=selection_key):
         digest = str(item["image_sha256"]).lower()
         previous = by_hash.get(digest)
         if previous is None:
@@ -97,7 +110,7 @@ def _verified_snapshot(source_rows: list[dict[str, Any]]) -> tuple[dict[str, Any
         "schema": "viread-dataset-v1",
         "source_flow": "FLOW1_VERIFIED",
         "split_seed": "viread-vietocr-v2-split-v1",
-        "snapshot_strategy": "cumulative-deduplicated-v2",
+        "snapshot_strategy": "cumulative-deduplicated-v3-split-safe",
         "samples": manifest_samples,
     }
     return manifest, samples

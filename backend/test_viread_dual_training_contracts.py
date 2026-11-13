@@ -30,6 +30,49 @@ class VireadDualTrainingContracts(unittest.TestCase):
 
         self.assertEqual(_deduplicate_verified_samples([first, duplicate]), [first])
 
+    def test_verified_snapshot_prefers_validation_copy_to_prevent_split_leakage(self):
+        common = {
+            "image_storage_path": "ocr-training/flow2/admin-verified/sample.png",
+            "label": "Tiếng Việt", "source_revision_id": "revision-1", "provenance": {},
+        }
+        train = {
+            **common, "sample_id": "train-copy", "group_id": "page-train", "split": "train",
+            "image_sha256": "a" * 64, "source_page_id": "page-train",
+        }
+        validation = {
+            **common, "sample_id": "validation-copy", "group_id": "page-validation",
+            "split": "validation", "image_sha256": "a" * 64,
+            "source_page_id": "page-validation",
+        }
+        unique_train = {
+            **common, "sample_id": "unique-train", "group_id": "page-train", "split": "train",
+            "image_sha256": "b" * 64, "source_page_id": "page-train",
+        }
+
+        manifest, selected = _verified_snapshot([train, validation, unique_train])
+
+        self.assertEqual({item["sample_id"] for item in selected}, {"validation-copy", "unique-train"})
+        self.assertEqual({item["split"] for item in manifest["samples"]}, {"train", "validation"})
+        self.assertEqual(len({item["image_sha256"] for item in manifest["samples"]}), 2)
+        reversed_manifest, reversed_selected = _verified_snapshot([unique_train, validation, train])
+        self.assertEqual(reversed_selected, selected)
+        self.assertEqual(reversed_manifest, manifest)
+
+    def test_verified_snapshot_preserves_holdout_copy_over_train_and_validation(self):
+        base = {
+            "image_storage_path": "ocr-training/flow2/admin-verified/sample.png",
+            "label": "Tiếng Việt", "image_sha256": "c" * 64,
+        }
+        rows = [
+            {**base, "sample_id": "train-copy", "group_id": "train-page", "split": "train"},
+            {**base, "sample_id": "validation-copy", "group_id": "validation-page", "split": "validation"},
+            {**base, "sample_id": "holdout-copy", "group_id": "holdout-page", "split": "holdout"},
+        ]
+
+        _, selected = _verified_snapshot(rows)
+
+        self.assertEqual([item["sample_id"] for item in selected], ["holdout-copy"])
+
     def test_verified_snapshot_rejects_same_image_with_conflicting_labels(self):
         first = {"sample_id": "first", "image_sha256": "a" * 64, "label": "Mỹ"}
         conflict = {"sample_id": "second", "image_sha256": "a" * 64, "label": "Mẹ"}
@@ -52,7 +95,7 @@ class VireadDualTrainingContracts(unittest.TestCase):
         rows = _verified_snapshot_db_rows("dataset-1", unique_sources)
 
         self.assertEqual(manifest["schema"], "viread-dataset-v1")
-        self.assertEqual(manifest["snapshot_strategy"], "cumulative-deduplicated-v2")
+        self.assertEqual(manifest["snapshot_strategy"], "cumulative-deduplicated-v3-split-safe")
         self.assertEqual(len(manifest["samples"]), 1)
         self.assertEqual(len(rows), len(manifest["samples"]))
         self.assertEqual(rows[0]["source_annotation_id"], "source-1")
