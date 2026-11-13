@@ -40,7 +40,9 @@ def _signature(secret: str, timestamp: str, method: str, path: str, body: bytes)
 
 def enterprise_configuration(env: dict[str, str] | None = None) -> dict[str, str]:
     source = os.environ if env is None else env
-    mode = source.get("VIREAD_COLAB_EXECUTION_MODE", "enterprise").strip().lower()
+    # Default to the no-cost interactive queue. Paid Enterprise dispatch must be
+    # opted into explicitly so an unset environment cannot create cloud jobs.
+    mode = source.get("VIREAD_COLAB_EXECUTION_MODE", "manual").strip().lower()
     if mode not in {"enterprise", "manual", "disabled"}:
         raise ColabEnterpriseConfigurationError("COLAB_EXECUTION_MODE_INVALID")
     if mode != "enterprise":
