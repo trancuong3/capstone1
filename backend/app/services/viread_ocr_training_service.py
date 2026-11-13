@@ -103,6 +103,26 @@ def _verified_snapshot(source_rows: list[dict[str, Any]]) -> tuple[dict[str, Any
     return manifest, samples
 
 
+def _canonicalize_legacy_verified_snapshot(
+    source_rows: list[dict[str, Any]],
+) -> tuple[bool, dict[str, Any], list[dict[str, Any]]]:
+    """Return a deduplicated snapshot only when a legacy immutable version needs repair."""
+    manifest, canonical_rows = _verified_snapshot(source_rows)
+    if len(canonical_rows) == len(source_rows):
+        return False, manifest, canonical_rows
+
+    group_splits: dict[str, str] = {}
+    for row in source_rows:
+        group_id, split = str(row["group_id"]), str(row["split"])
+        previous_split = group_splits.setdefault(group_id, split)
+        if previous_split != split:
+            raise HTTPException(
+                status_code=409,
+                detail="Verified dataset group appears in multiple splits; refusing to rebuild its snapshot",
+            )
+    return True, manifest, canonical_rows
+
+
 def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Map exactly the canonical source rows to immutable version-owned rows."""
     return [{
@@ -348,11 +368,46 @@ class VireadOcrTrainingService:
             """, {"version_sha": version_sha})
         else:
             dataset = await self.repo.one("""
-                SELECT id, version_sha256, manifest_storage_path FROM public.viread_ocr_dataset_versions
+                SELECT id, version_sha256, manifest_storage_path, sample_count FROM public.viread_ocr_dataset_versions
                 WHERE source_flow='FLOW1_VERIFIED' ORDER BY created_at DESC LIMIT 1
             """)
             if dataset:
-                version_sha = dataset["version_sha256"]
+                actual_count = await self.repo.one("""
+                    SELECT count(*)::integer AS total
+                    FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
+                """, {"dataset_id": dataset["id"]})
+                if (not actual_count or int(actual_count["total"]) != int(dataset["sample_count"])):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Verified dataset snapshot count differs from its immutable version; refusing to rebuild it",
+                    )
+                legacy_rows = await self.repo.all("""
+                    SELECT COALESCE(source_annotation_id, id::text) AS sample_id,
+                           source_group_id AS group_id, split, image_storage_path,
+                           image_sha256, label, source_page_id, source_revision_id, provenance
+                    FROM public.viread_ocr_samples
+                    WHERE dataset_version_id=:dataset_id AND source_flow='FLOW1_VERIFIED'
+                    ORDER BY created_at, id
+                """, {"dataset_id": dataset["id"]})
+                if len(legacy_rows) != int(dataset["sample_count"]):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Verified dataset rows do not match the immutable version count",
+                    )
+                needs_canonical_snapshot, legacy_manifest, canonical_rows = (
+                    _canonicalize_legacy_verified_snapshot(legacy_rows)
+                )
+                if needs_canonical_snapshot:
+                    source_rows = canonical_rows
+                    manifest = legacy_manifest
+                    version_sha = hashlib.sha256(_canonical(manifest)).hexdigest()
+                    dataset = await self.repo.one("""
+                        SELECT id, version_sha256, manifest_storage_path, sample_count
+                        FROM public.viread_ocr_dataset_versions
+                        WHERE source_flow='FLOW1_VERIFIED' AND version_sha256=:version_sha
+                    """, {"version_sha": version_sha})
+                else:
+                    version_sha = dataset["version_sha256"]
         if dataset and source_rows:
             actual_count = await self.repo.one("""
                 SELECT count(*)::integer AS total

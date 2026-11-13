@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.services.viread_ocr_training_service import (
     TRAINING_PROFILES,
     _deduplicate_verified_samples,
+    _canonicalize_legacy_verified_snapshot,
     _verified_snapshot,
     _verified_snapshot_db_rows,
 )
@@ -57,6 +58,35 @@ class VireadDualTrainingContracts(unittest.TestCase):
         self.assertEqual(rows[0]["source_annotation_id"], "source-1")
         self.assertEqual(rows[0]["dataset_id"], "dataset-1")
         self.assertEqual(rows[0]["source_revision_id"], "revision-1")
+
+    def test_legacy_snapshot_is_rebuilt_only_when_duplicate_hashes_exist(self):
+        first = {
+            "sample_id": "source-1", "group_id": "page-1", "split": "train",
+            "image_storage_path": "ocr-training/flow2/admin-verified/one.png",
+            "image_sha256": "a" * 64, "label": "Tiếng Việt", "source_page_id": "page-1",
+            "source_revision_id": "revision-1", "provenance": {},
+        }
+        duplicate = {**first, "sample_id": "source-2"}
+
+        needs_rebuild, manifest, canonical = _canonicalize_legacy_verified_snapshot([first, duplicate])
+
+        self.assertTrue(needs_rebuild)
+        self.assertEqual(len(canonical), 1)
+        self.assertEqual(manifest["samples"][0]["sample_id"], "source-1")
+
+    def test_legacy_snapshot_refuses_duplicate_rows_that_leak_page_across_splits(self):
+        first = {
+            "sample_id": "source-1", "group_id": "page-1", "split": "train",
+            "image_storage_path": "ocr-training/flow2/admin-verified/one.png",
+            "image_sha256": "a" * 64, "label": "Tiếng Việt", "source_page_id": "page-1",
+            "source_revision_id": "revision-1", "provenance": {},
+        }
+        conflicting_split = {**first, "sample_id": "source-2", "split": "validation"}
+
+        with self.assertRaises(HTTPException) as raised:
+            _canonicalize_legacy_verified_snapshot([first, conflicting_split])
+
+        self.assertEqual(raised.exception.status_code, 409)
 
 
 if __name__ == "__main__":
