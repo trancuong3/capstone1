@@ -272,7 +272,7 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
 
-  // AI proposals must never be preselected: require an explicit admin choice.
+  // Proposals start unchecked; confirming zero selections explicitly rejects all.
   const review = page.getByRole("region", { name: "Rà soát đề xuất AI" });
   const applySelected = page.getByRole("button", {
     name: /Xác nhận lựa chọn gợi ý/,
@@ -280,7 +280,7 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   const proposedChanges = review.getByRole("checkbox");
   await expect(proposedChanges).toHaveCount(1);
   await expect(proposedChanges.first()).not.toBeChecked();
-  await expect(applySelected).toBeDisabled();
+  await expect(applySelected).toBeEnabled();
 
   await proposedChanges.first().check();
   await expect(applySelected).toBeEnabled();
