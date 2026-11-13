@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 import os
+import hashlib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +18,19 @@ from app.jobs.viread_ocr_training_auto_worker import (
     dataset_snapshot_count_matches,
     flow1_dataset_readiness,
     local_training_capacity,
+    _training_config,
 )
 
 
 class TrainingCapacityTests(unittest.TestCase):
+    def test_training_config_pins_colab_runtime_dependencies(self):
+        config, config_sha256 = _training_config("FLOW2_ADMIN_VERIFIED", REPO_ROOT)
+        expected = hashlib.sha256(
+            (REPO_ROOT / "ai" / "vietocr_v2" / "requirements-colab.txt").read_bytes()
+        ).hexdigest()
+        self.assertEqual(config["colab_requirements_sha256"], expected)
+        self.assertEqual(len(config_sha256), 64)
+
     def test_cpu_only_torch_routes_away_from_local_training(self):
         torch_stub = SimpleNamespace(
             __version__="test-cpu",

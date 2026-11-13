@@ -6,10 +6,31 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from .colab_worker import ColabWorker
+from .colab_worker import ColabWorker, verify_worker_source_lock
+from .contracts import sha256_file
 
 
 class ColabWorkerTests(unittest.TestCase):
+    def test_worker_requires_current_hashes_for_all_training_inputs(self):
+        training_dir = Path(__file__).parent
+        config = {
+            "trainer_sha256": sha256_file(training_dir / "train.py"),
+            "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+            "colab_requirements_sha256": sha256_file(training_dir / "requirements-colab.txt"),
+        }
+        verify_worker_source_lock(config)
+        with self.assertRaisesRegex(ValueError, "WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH"):
+            verify_worker_source_lock({**config, "colab_requirements_sha256": "0" * 64})
+
+    def test_worker_rejects_jobs_without_colab_dependency_lock(self):
+        training_dir = Path(__file__).parent
+        config = {
+            "trainer_sha256": sha256_file(training_dir / "train.py"),
+            "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+        }
+        with self.assertRaisesRegex(ValueError, "WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH"):
+            verify_worker_source_lock(config)
+
     def test_worker_requires_https_for_remote_backend_and_long_token(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             ColabWorker("http://viread.example", "x" * 48, tempfile.gettempdir())

@@ -149,6 +149,9 @@ def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str
     config["requirements_sha256"] = hashlib.sha256(
         (repo_root / "ai" / "vietocr_v2" / "requirements.txt").read_bytes()
     ).hexdigest()
+    config["colab_requirements_sha256"] = hashlib.sha256(
+        (repo_root / "ai" / "vietocr_v2" / "requirements-colab.txt").read_bytes()
+    ).hexdigest()
     config_sha = hashlib.sha256(json.dumps(
         config, sort_keys=True, separators=(",", ":")
     ).encode()).hexdigest()
@@ -685,7 +688,9 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
         if (hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "train.py").read_bytes()).hexdigest()
                 != config.get("trainer_sha256")
                 or hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "requirements.txt").read_bytes()).hexdigest()
-                != config.get("requirements_sha256")):
+                != config.get("requirements_sha256")
+                or hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "requirements-colab.txt").read_bytes()).hexdigest()
+                != config.get("colab_requirements_sha256")):
             raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
         from ai.vietocr_v2.train import run_training
         progress.update({"stage": "training", "completed_steps": 0,
