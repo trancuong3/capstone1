@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +13,28 @@ from .contracts import sha256_file
 
 
 class ColabWorkerTests(unittest.TestCase):
+    def test_free_colab_capacity_gate_accepts_four_to_eight_gib_available_ram(self):
+        available_ram = 6 * 1024**3
+        fake_torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(
+                is_available=lambda: True,
+                mem_get_info=lambda _device: (8 * 1024**3, 16 * 1024**3),
+                get_device_name=lambda _device: "Tesla T4",
+            ),
+            version=types.SimpleNamespace(cuda="13.0"),
+            __version__="2.14.1",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.dict(sys.modules, {"torch": fake_torch}),
+                patch.object(ColabWorker, "available_ram_bytes", return_value=available_ram),
+                patch("ai.vietocr_v2.colab_worker.os.getenv", side_effect=lambda _key, default=None: default),
+                patch("ai.vietocr_v2.colab_worker.shutil.disk_usage",
+                      return_value=types.SimpleNamespace(free=16 * 1024**3)),
+            ):
+                capacity = ColabWorker.assert_runtime_capacity(Path(temp_dir))
+        self.assertEqual(capacity["ram_available_bytes"], available_ram)
+
     def test_colab_lock_does_not_replace_preloaded_pillow_mid_kernel(self):
         requirements = Path(__file__).with_name("requirements-colab.txt").read_text()
         pins = [
