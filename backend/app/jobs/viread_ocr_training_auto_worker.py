@@ -333,9 +333,31 @@ async def _schedule_ready_flow2() -> int:
 
 async def _expire_exhausted_jobs() -> None:
     async with AsyncSessionLocal() as db:
+        # Older free/manual Colab workers reported a failure, but the API stored
+        # COLAB_EXECUTING even though no Google execution existed to poll. Repair
+        # only terminal pre-run jobs with an error and no execution/run identity.
         await db.execute(text("""
             UPDATE public.viread_ocr_training_jobs
-            SET status='COLAB_EXECUTING', worker_id=NULL, lease_expires_at=NULL,
+            SET status='FAILED', worker_id=NULL, lease_expires_at=NULL,
+                progress='{"stage":"failed"}'::jsonb,
+                metadata=metadata || '{"manual_colab_failure_reconciled":true}'::jsonb,
+                updated_at=now()
+            WHERE target='COLAB' AND status='COLAB_EXECUTING'
+              AND last_error_code IS NOT NULL AND run_id IS NULL
+              AND colab_execution_id IS NULL
+              AND colab_execution_resource_name IS NULL
+              AND colab_operation_name IS NULL
+        """))
+        await db.execute(text("""
+            UPDATE public.viread_ocr_training_jobs
+            SET status=CASE
+                    WHEN colab_execution_id IS NOT NULL
+                      OR colab_execution_resource_name IS NOT NULL
+                      OR colab_operation_name IS NOT NULL
+                    THEN 'COLAB_EXECUTING'
+                    ELSE 'WAITING_FOR_COLAB_WORKER'
+                END,
+                worker_id=NULL, lease_expires_at=NULL,
                 last_error_code=COALESCE(last_error_code, 'COLAB_WORKER_LEASE_EXPIRED'), updated_at=now()
             WHERE target='COLAB' AND status='COLAB_RUNNING'
               AND lease_expires_at < now() AND attempts < :max_attempts

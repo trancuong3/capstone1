@@ -54,10 +54,25 @@ def _safe_runtime(runtime: dict) -> dict[str, str | int]:
     return safe
 
 
+def _colab_worker_failure_state(job: dict, payload_run_id: UUID | None) -> tuple[str, str]:
+    """Classify failures without leaving manual Colab jobs in an unpollable state."""
+    tracked_execution = any((
+        job.get("colab_execution_id"),
+        job.get("colab_execution_resource_name"),
+        job.get("colab_operation_name"),
+    ))
+    if tracked_execution:
+        return "COLAB_EXECUTING", "COLAB_WORKER_FAILED"
+    if job.get("run_id") is None and payload_run_id is None:
+        return "FAILED", "COLAB_WORKER_FAILED"
+    return "BLOCKED", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"
+
+
 async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, worker_id: str):
     job = await service.repo.one("""
         SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
-               config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts
+               config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts,
+               colab_execution_id, colab_execution_resource_name, colab_operation_name
         FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
     """, {"id": job_id})
     if not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING" or job["worker_id"] != worker_id:
@@ -561,10 +576,10 @@ async def finish_viread_colab_training_job(
     retry_delay = 0
     error_code = payload.error_code
     if payload.status == "FAILED":
-        # Preserve the execution identity until Google reports this notebook
-        # execution as terminal. The scheduler then retries only when safe.
-        new_status = "COLAB_EXECUTING"
-        error_code = payload.error_code or "COLAB_WORKER_FAILED"
+        # Enterprise execution is polled through Google; manual/free Colab has no
+        # execution identity and must not remain in COLAB_EXECUTING forever.
+        new_status, default_error_code = _colab_worker_failure_state(job, payload.run_id)
+        error_code = payload.error_code or default_error_code
     runtime = _safe_runtime(payload.runtime)
     await service.repo.execute("""
         UPDATE public.viread_ocr_training_jobs SET status=:status, run_id=:run_id,
