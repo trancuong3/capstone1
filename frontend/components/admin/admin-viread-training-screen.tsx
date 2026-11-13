@@ -252,7 +252,8 @@ export function AdminVireadTrainingScreen() {
             <h2 className="text-xl font-black">Hàng đợi huấn luyện tự động</h2>
             <p className="mt-2 text-sm text-muted">
               Mỗi job giữ riêng dataset, profile và lineage. Colab Enterprise tự
-              chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin duyệt.
+              chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin
+              duyệt.
             </p>
             <div className="mt-4 space-y-3">
               {data.jobs.map((job) => {
@@ -312,7 +313,10 @@ export function AdminVireadTrainingScreen() {
                     ) : null}
                     {job.status === "BLOCKED_CONFIGURATION" ? (
                       <p className="mt-1 text-sm text-danger">
-                        Job chưa được gửi lên Google Cloud. Mã cấu hình: {job.last_error_code ?? "chưa cấu hình"}. Hãy hoàn tất checklist trong docs/viread-colab-enterprise-setup.md rồi thử lại.
+                        Job chưa được gửi lên Google Cloud. Mã cấu hình:{" "}
+                        {job.last_error_code ?? "chưa cấu hình"}. Hãy hoàn tất
+                        checklist trong docs/viread-colab-enterprise-setup.md
+                        rồi thử lại.
                       </p>
                     ) : null}
                     {job.colab_execution_resource_name ? (
@@ -350,7 +354,9 @@ export function AdminVireadTrainingScreen() {
                 );
               })}
               {data.jobs.length === 0 ? (
-                <p className="text-sm text-muted">Chưa có dataset nào đủ điều kiện tạo job.</p>
+                <p className="text-sm text-muted">
+                  Chưa có dataset nào đủ điều kiện tạo job.
+                </p>
               ) : null}
             </div>
           </Card>
