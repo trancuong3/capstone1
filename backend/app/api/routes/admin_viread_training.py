@@ -190,8 +190,11 @@ async def claim_viread_colab_training_job(
         WITH next_job AS (
             SELECT id FROM public.viread_ocr_training_jobs
             WHERE target='COLAB' AND available_at <= now() AND attempts < 3 AND (
-                status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB') OR
-                (status='COLAB_RUNNING' AND lease_expires_at < now())
+                (:requested_job_id IS NULL AND status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB'))
+                OR (:requested_job_id IS NOT NULL AND id=:requested_job_id
+                    AND status IN ('COLAB_SUBMITTING', 'COLAB_SUBMITTED', 'COLAB_EXECUTING'))
+                OR (status='COLAB_RUNNING' AND lease_expires_at < now()
+                    AND (:requested_job_id IS NULL OR id=:requested_job_id))
             )
             ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
         )
@@ -205,7 +208,7 @@ async def claim_viread_colab_training_job(
                   job.config_sha256, job.parent_checkpoint_sha256, job.created_by,
                   job.attempts, job.run_id, job.metadata,
                   job.locked_test_version_id, job.locked_test_manifest_sha256
-    """), {"worker_id": payload.worker_id,
+    """), {"worker_id": payload.worker_id, "requested_job_id": payload.training_job_id,
           "progress": json.dumps({"stage": "claimed", "runtime": runtime}),
           "metadata": json.dumps({"colab_worker_id": payload.worker_id,
                                    "colab_worker_status": {"status": "READY", "runtime": runtime}})})
@@ -379,6 +382,42 @@ async def create_viread_colab_job_run(
     return created
 
 
+@router.get("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/result")
+async def get_viread_colab_job_run_result(
+    job_id: UUID,
+    run_id: UUID,
+    worker_id: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    if str(job["run_id"]) != str(run_id):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Run is not attached to this training job")
+    run = await service.repo.one("""
+        SELECT id, status, profile FROM public.viread_ocr_training_runs WHERE id=:run_id
+    """, {"run_id": run_id})
+    if not run or run["profile"] != job["profile"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training run profile differs from its job")
+    if run["status"] == "BENCHMARKED":
+        benchmark = await service.repo.one("""
+            SELECT gate_status FROM public.viread_ocr_benchmarks
+            WHERE run_id=:run_id ORDER BY created_at DESC LIMIT 1
+        """, {"run_id": run_id})
+        if not benchmark:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Benchmark result is missing")
+        status_value = "BENCHMARKED" if benchmark["gate_status"] == "V2_WIN" else "QUALITY_GATE_REJECTED"
+        await db.commit()
+        return {"run_id": run_id, "run_status": run["status"],
+                "gate_status": benchmark["gate_status"], "job_status": status_value}
+    await db.commit()
+    return {"run_id": run_id, "run_status": run["status"], "gate_status": None,
+            "job_status": "CANDIDATE" if run["status"] == "CANDIDATE" else run["status"]}
+
+
 @router.post("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/chunks")
 async def upload_viread_colab_job_chunk(
     job_id: UUID,
@@ -492,28 +531,40 @@ async def finish_viread_colab_training_job(
 ):
     service = VireadOcrTrainingService(db)
     job = await _leased_colab_job(service, job_id, payload.worker_id)
-    if payload.status in {"CANDIDATE", "BENCHMARKED"}:
+    if payload.status in {"CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED"}:
         run = await service.repo.one("""
             SELECT id, status, profile, dataset_version_id, manifest_sha256,
                    parent_checkpoint_sha256, created_by
             FROM public.viread_ocr_training_runs WHERE id=:id
         """, {"id": payload.run_id}) if payload.run_id else None
         expected_status = "CANDIDATE" if payload.status == "CANDIDATE" else "BENCHMARKED"
-        if (not run or run["status"] != expected_status or run["profile"] != "FLOW2_ADMIN_VERIFIED"
+        if (not run or run["status"] != expected_status or run["profile"] != job["profile"]
                 or run["dataset_version_id"] != job["dataset_version_id"]
                 or run["manifest_sha256"] != job["manifest_sha256"]
                 or run["parent_checkpoint_sha256"] != job["parent_checkpoint_sha256"]
                 or str(run["created_by"]) != str(job["created_by"])
                 or str(payload.run_id) != str(job["run_id"])):
             await db.rollback()
-            raise HTTPException(status_code=422, detail="Worker result does not match a registered Flow 2 run")
+            raise HTTPException(status_code=422, detail="Worker result does not match the registered training job")
+        if payload.status in {"BENCHMARKED", "QUALITY_GATE_REJECTED"}:
+            benchmark = await service.repo.one("""
+                SELECT gate_status FROM public.viread_ocr_benchmarks
+                WHERE run_id=:run_id ORDER BY created_at DESC LIMIT 1
+            """, {"run_id": payload.run_id})
+            expected_gate = "V2_WIN" if payload.status == "BENCHMARKED" else None
+            if not benchmark or (expected_gate and benchmark["gate_status"] != expected_gate) or (
+                payload.status == "QUALITY_GATE_REJECTED" and benchmark["gate_status"] == "V2_WIN"
+            ):
+                await db.rollback()
+                raise HTTPException(status_code=422, detail="Training result does not match its registered quality gate")
     new_status = payload.status
     retry_delay = 0
     error_code = payload.error_code
-    if payload.status == "FAILED" and int(job["attempts"]) < 3:
-        retry_delay = min(300, 30 * 2 ** max(0, int(job["attempts"]) - 1))
-        new_status = "WAITING_FOR_COLAB_WORKER"
-        error_code = payload.error_code or "COLAB_WORKER_RETRY"
+    if payload.status == "FAILED":
+        # Preserve the execution identity until Google reports this notebook
+        # execution as terminal. The scheduler then retries only when safe.
+        new_status = "COLAB_EXECUTING"
+        error_code = payload.error_code or "COLAB_WORKER_FAILED"
     runtime = _safe_runtime(payload.runtime)
     await service.repo.execute("""
         UPDATE public.viread_ocr_training_jobs SET status=:status, run_id=:run_id,

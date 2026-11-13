@@ -579,6 +579,7 @@ class DualEngineOcrTests(unittest.TestCase):
         with (
             patch.object(ocr_engine, "_paddle_engine", None),
             patch.object(ocr_engine, "_vietocr_engine", MagicMock()),
+            patch.object(ocr_engine, "_ocr_dependencies_loaded", True),
             patch.object(ocr_engine, "PaddleOCR", None),
             patch.object(ocr_engine, "_paddle_import_status", "not_initialized"),
             patch.object(ocr_engine, "_paddle_import_error", "ModuleNotFoundError"),
@@ -606,6 +607,7 @@ class DualEngineOcrTests(unittest.TestCase):
             patch.object(ocr_engine, "_vietocr_engine", None),
             patch.object(ocr_engine, "_paddle_initialization_status", "success"),
             patch.object(ocr_engine, "_paddle_initialization_error", None),
+            patch.object(ocr_engine, "_ocr_dependencies_loaded", True),
             patch.object(ocr_engine, "_vietocr_initialization_status", "not_initialized"),
             patch.object(ocr_engine, "_vietocr_initialization_error", None),
             patch.object(ocr_engine, "Cfg", config_loader),

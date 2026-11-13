@@ -80,6 +80,22 @@ class ColabWorkerTests(unittest.TestCase):
                     ColabWorker.download("https://storage.example/signed", target, "0" * 64)
             self.assertFalse(target.exists())
 
+    def test_enterprise_one_shot_claims_only_the_requested_job_and_profile(self):
+        worker = ColabWorker("https://viread.example", "x" * 48, tempfile.gettempdir())
+        job_id = "a5fd82cb-490a-4e59-bad3-64e8a6f88d70"
+        job = {"id": job_id, "profile": "FLOW1_EXTERNAL_TRDG"}
+        with (
+            patch.object(ColabWorker, "assert_runtime_capacity", return_value={"device": "Test GPU"}),
+            patch.object(worker, "report_status") as report_status,
+            patch.object(worker, "claim", return_value=job) as claim,
+            patch.object(worker, "process_job") as process_job,
+        ):
+            self.assertTrue(worker.run_job_once(job_id, expected_profile="FLOW1_EXTERNAL_TRDG"))
+        claim.assert_called_once_with(job_id)
+        report_status.assert_called_once_with("READY")
+        process_job.assert_called_once_with(job)
+        worker.session.close()
+
 
 if __name__ == "__main__":
     unittest.main()
