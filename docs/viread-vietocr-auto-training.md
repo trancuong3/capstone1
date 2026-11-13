@@ -1,6 +1,6 @@
-# VietOCR V2: two independent datasets, automatic Colab Enterprise runs
+# VietOCR V2: two independent datasets, free interactive Colab or paid Enterprise
 
-User setup checklist in Vietnamese: [VietOCR Colab Enterprise setup guide](viread-colab-enterprise-setup.md).
+User setup checklists: [free interactive Colab](viread-colab-free-training.md) or [optional paid Colab Enterprise](viread-colab-enterprise-setup.md).
 
 The two data flows use separate immutable datasets, manifests, profiles, jobs, and reports. Both fine-tune the same hash-locked VietOCR Original `vgg_transformer` lineage into candidate VietOCR V2 checkpoints. A candidate remains inactive until it passes the independent paired Locked Test gate and an Admin approves it. Original weights are never overwritten.
 
@@ -18,11 +18,17 @@ Admin confirmation creates the existing transactional outbox event. The outbox w
 
 ### Sequential scheduling and local-vs-cloud choice
 
-The backend scheduler checks both profiles and allows only one unresolved training job at a time. A capable local GPU is selected only when CUDA PyTorch, at least 6 GiB free VRAM, 8 GiB free RAM, and 8 GiB disk all pass. On a local installation, `VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART=true` starts the dedicated trainer as a separate process; the FastAPI web process only schedules and tracks jobs. If local capacity is unavailable, the trainer exits and the scheduler routes a ready job to Colab Enterprise. The same environment variable must be false on Render.
+The backend scheduler checks both profiles and allows only one unresolved training job at a time. A capable local GPU is selected only when CUDA PyTorch, at least 6 GiB free VRAM, 8 GiB free RAM, and 8 GiB disk all pass. On a local installation, `VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART=true` starts the dedicated trainer as a separate process; the FastAPI web process only schedules and tracks jobs. If local capacity is unavailable, the job waits for an interactive Colab worker by default. Colab Enterprise dispatch happens only when explicitly enabled. The local worker autostart must be false on Render.
 
 On Render Free, explicitly set `VIREAD_LOCAL_TRAINING_ENABLED=false` and `VIREAD_OCR_WARMUP_ENABLED=false`. The 512 MiB web process is not a training host and should not import CUDA or load PaddleOCR/VietOCR on startup. This allows backend API endpoints and queue scheduling to start with lower memory use. OCR inference itself remains a memory-heavy operation; a successful API deployment does not prove OCR inference fits the Free instance.
 
-## Automatic Colab Enterprise architecture
+## No-cost Colab Free architecture
+
+The backend automatically creates a durable job when the selected profile's immutable dataset is ready. With `VIREAD_COLAB_EXECUTION_MODE=manual`, the job remains `WAITING_FOR_COLAB_WORKER`; a user opens the Colab notebook, connects an available GPU runtime, and runs one cell. That cell claims at most one ready job and processes it end-to-end. It exits after the job and never polls in the background. Rerun it to claim the next job. Colab Free cannot be started through a supported backend API, its GPU availability is not guaranteed, and sessions can disconnect. See [the step-by-step free guide](viread-colab-free-training.md).
+
+The repository defaults to manual mode when `VIREAD_COLAB_EXECUTION_MODE` is unset. Do not configure Cloud Run, Colab Enterprise, a GCS resume bucket, or an Enterprise commit variable for the free path. Keep the Render worker token and put the same token in Colab Secrets; never expose it in notebook output.
+
+## Optional paid Colab Enterprise architecture
 
 The supported automatic path is:
 
@@ -33,7 +39,7 @@ The supported automatic path is:
 5. The worker restores job-scoped resume files from `gs://<output-bucket>/viread-resume/jobs/<job-id>` only when the manifest matches the exact job, profile, dataset, parent checkpoint, config, repository commit, and Locked Test version. Every 100 steps (and on validation) it uploads the latest optimizer/model state and the referenced best-validation weights; it publishes the checksummed manifest last. A retry after an interrupted execution resumes this same lineage. Corrupt, incomplete, or mismatched state is rejected instead of silently starting over. Candidate and paired Locked Test report files are included so a retry before run registration can continue from the completed training stage.
 6. The worker fine-tunes the requested profile, uploads checkpoint shards, runs the paired Locked Test if one is registered, and reports the real result. The scheduler polls the Google execution resource and records its ID, operation, state, and safe failure code. A failure after a checkpoint run has already been registered remains `BLOCKED`; the current Admin UI has no safe requeue action for that partial run, so do not edit the database or blindly retry it.
 
-This is a Google Cloud paid service, not a way to start standard free browser Colab remotely. Google bills for the selected VM/GPU and persistent disks while provisioned; Cloud Run, Cloud Storage, and Secret Manager can also incur charges. A budget alert is not a hard spending cap. If the project must stay at exactly 0 cost, do not enable Enterprise dispatch; use the already-provided manual Colab worker and keep its runtime connected. Automatic unattended GPU execution cannot be promised at 0 cost.
+This is a Google Cloud paid service, not a way to start standard free browser Colab remotely. Google bills for the selected VM/GPU and persistent disks while provisioned; Cloud Run, Cloud Storage, and Secret Manager can also incur charges. A budget alert is not a hard spending cap. If the project must stay at exactly 0 cost, do not enable Enterprise dispatch; use the interactive one-job Colab Free notebook described below. Automatic unattended GPU execution cannot be promised at 0 cost.
 
 ## One-time Google Cloud setup (manual)
 
@@ -105,7 +111,7 @@ If an execution fails before it creates a training run, the scheduler retries up
 
 ## Stop, rotate, and troubleshoot
 
-- To stop new paid jobs, set `VIREAD_COLAB_EXECUTION_MODE=disabled` in the backend and redeploy. For manual queue polling, use `manual`; for automatic Enterprise, use `enterprise`.
+- To stop new paid jobs, set `VIREAD_COLAB_EXECUTION_MODE=disabled` in the backend and redeploy. For interactive Colab Free, use `manual`; for automatic Enterprise, explicitly opt in with `enterprise` and configure its billable Google Cloud resources.
 - Cancel an in-progress NotebookExecutionJob in the Google Cloud console, then verify its terminal state and the matching ViRead job state. Delete unused runtimes and output artifacts; deleting a runtime does not remove stored execution outputs.
 - `BLOCKED_CONFIGURATION` means the scheduler cannot safely submit. Use its `last_error_code`, check the Render variables, Cloud Run signature, pinned commit, runtime template/region, IAM, Secret Manager access, and migration status. After correcting configuration or IAM, the scheduler rechecks this state and retries after up to five minutes.
 - `COLAB_EXECUTION_FINISHED_WITHOUT_JOB_RESULT` means Google execution ended but the worker did not report a durable result; inspect Cloud Run/Colab logs and the job's run record before retrying.
@@ -113,6 +119,6 @@ If an execution fails before it creates a training run, the scheduler retries up
 
 ## Manual browser Colab fallback
 
-`ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb` remains a manual persistent worker for cases where Enterprise is disabled. Add the API base and worker token to Colab Secrets, connect a GPU runtime, and run the worker cell. While the runtime remains connected it polls and processes both profiles. Browser Colab cannot be automatically started through a supported public API after the runtime disconnects; re-connect and start the cell manually. The Enterprise path above is the unattended option, and it incurs Google Cloud charges.
+`ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb` is the interactive free worker. Add the API base and worker token to Colab Secrets, connect a GPU runtime, and run the cell to claim at most one ready job. It exits after that job and does not poll in the background. Browser Colab cannot be automatically started through a supported public API after the runtime disconnects; reconnect and run the cell again manually. The Enterprise path above is the unattended option and can incur Google Cloud charges.
 
 No real GPU run, checkpoint, quality-gate result, or automatic Google execution is claimed until a real job record and execution evidence exist.

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-"""Long-running, one-time-configured Colab worker for queued Flow 2 jobs."""
+"""Colab worker for queued ViRead VietOCR jobs.
+
+Use ``run_next_job_once`` from an interactive Colab Free session. The persistent
+polling entrypoint is retained for explicitly managed runtimes only.
+"""
 
 import hashlib
 import json
@@ -480,6 +484,50 @@ class ColabWorker:
             raise
         return True
 
+    def run_next_job_once(self) -> bool:
+        """Claim and process at most one ready job from an interactive Colab session.
+
+        Unlike ``run_forever``, this method performs one queue request and exits, so
+        a free browser runtime is not used as an unattended background poller.
+        """
+        try:
+            self.runtime_data = self.assert_runtime_capacity(self.work_root)
+        except RuntimeError as exc:
+            reason = str(exc).upper()[:64]
+            state = ("WAITING_FOR_GPU" if any(
+                token in reason for token in ("CUDA", "GPU", "VRAM")
+            ) else "WAITING_FOR_RESOURCES")
+            try:
+                self.report_status(state, reason)
+            except Exception as report_exc:
+                logger.error("Could not report Colab capacity (%s)", type(report_exc).__name__)
+            raise
+
+        self.report_status("READY")
+        job = self.claim()
+        if not job:
+            return False
+
+        job_id = str(job["id"])
+        try:
+            self.process_job(job)
+        except Exception as exc:
+            try:
+                self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": job.get("run_id"),
+                    "status": "FAILED", "error_code": type(exc).__name__.upper()[:64],
+                    "runtime": self.runtime_data,
+                })
+            except Exception as finish_exc:
+                logger.error("Could not record one-shot job failure (%s)", type(finish_exc).__name__)
+            raise
+        return True
+
 
 def run_worker(api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30) -> None:
     ColabWorker(api_base, token, work_root, poll_seconds=poll_seconds).run_forever()
+
+
+def run_next_job_once(api_base: str, token: str, work_root: str | Path) -> bool:
+    """Process no more than one ready job; intended for a user-started Colab cell."""
+    return ColabWorker(api_base, token, work_root).run_next_job_once()

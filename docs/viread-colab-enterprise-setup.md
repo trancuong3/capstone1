@@ -1,6 +1,6 @@
-# Hướng dẫn thiết lập tự động train VietOCR V2 bằng Colab Enterprise
+# Hướng dẫn tùy chọn: tự động train VietOCR V2 bằng Colab Enterprise
 
-> **Chi phí:** Colab Enterprise không phải Colab Free và không thể bảo đảm 0 đồng. Google có thể tính phí GPU/runtime/disk, Cloud Run, Cloud Storage và Secret Manager. Xem [giá runtime Colab Enterprise](https://docs.cloud.google.com/colab/docs/runtimes). Trial credit nếu đủ điều kiện chỉ là tạm thời; xem [điều khoản trial](https://cloud.google.com/signup-faqs) và [dịch vụ bị loại trừ](https://docs.cloud.google.com/free/docs/free-cloud-features). Budget alert chỉ gửi cảnh báo, không chặn chắc chắn mọi chi phí; xem [Cloud Billing budgets](https://docs.cloud.google.com/billing/docs/how-to/budgets).
+> **Có thể phát sinh phí:** Colab Enterprise không phải Colab Free. Hướng dẫn này chỉ dành cho người chủ động chọn dịch vụ Google Cloud trả theo mức sử dụng. Nếu cần phương án không mất phí, dùng [hướng dẫn Colab Free tương tác](viread-colab-free-training.md) và không tạo Cloud Run dispatcher.
 
 ## Phần A — Bạn làm một lần
 
@@ -124,7 +124,7 @@ Notebook có mặt, job đã enqueue hay HTTP 200 không chứng minh model đã
 - Flow 1: khi dataset ảnh thật được DBNet xử lý, TRDG sinh dữ liệu và hai manifest được đăng ký, scheduler tự tạo job khi đủ ngưỡng. **Intake tự động từ bundle ảnh/annotation đến DBNet/TRDG/đăng ký hiện chưa có**; hiện vẫn cần chạy công cụ chuẩn bị/đăng ký thủ công.
 - Dispatcher tự gửi từng job sẵn sàng tới Colab Enterprise; một job chạy tại một thời điểm. Worker kiểm tra hash, fine-tune đúng parent, upload checkpoint, benchmark và báo trạng thái.
 - Admin duyệt candidate. Hệ thống không tự kích hoạt model mới.
-- Colab Free trên trình duyệt là chế độ thủ công: cần người dùng kết nối runtime và chạy worker; backend không thể tự đánh thức Colab Free bằng API được hỗ trợ.
+- Colab Free trên trình duyệt là chế độ tương tác một job mỗi lần chạy cell; backend không thể tự đánh thức runtime. Không dùng poller nền liên tục trên runtime miễn phí.
 
 ### 14. Dừng và giảm chi phí
 
