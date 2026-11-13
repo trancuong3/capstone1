@@ -21,6 +21,7 @@ from app.schemas.viread_ocr_training import (
     TrainingWorkerClaim,
     TrainingWorkerFinish,
     TrainingWorkerHeartbeat,
+    TrainingWorkerStatus,
 )
 from app.services.viread_ocr_training_service import (
     MAX_SHARD_BYTES,
