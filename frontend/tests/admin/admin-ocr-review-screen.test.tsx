@@ -1201,7 +1201,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /Xác minh trang/ }),
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
     ).toBeDisabled();
 
     await user.clear(pageText);
@@ -1297,7 +1297,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const originalBoxes = boxLabels.map(
       (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
     );
-    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
 
     const textarea = screen.getByLabelText("Nội dung trang");
     expect(
@@ -1317,11 +1319,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(within(review).getByText("mới", { selector: "strong" })).toHaveClass(
       "bg-amber-100",
     );
+    expect(within(review).getAllByText(/Vì sao AI gợi ý/)).toHaveLength(3);
     expect(
-      within(review).getAllByText(/Từ AI: chưa đối chiếu ảnh/),
-    ).toHaveLength(3);
-    expect(
-      within(review).getAllByText(/không có điểm OCR cấp từ/),
+      within(review).getAllByText(/không có điểm tin cậy riêng cho từ này/),
     ).toHaveLength(3);
 
     await user.click(proposalCheckboxes[1]!);
@@ -1329,7 +1329,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       within(review).getByText(/Đã chọn 1 \/ 3 đề xuất/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+      screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
     ).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Chọn tất cả" }));
     expect(
@@ -1345,7 +1345,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+      screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
     );
     expect(textarea).toHaveValue("Nội dung revision đã hành");
     const wordInputs = screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/);
@@ -1363,7 +1363,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       ),
     ).toEqual(originalBoxes);
     expect(
-      screen.getByText(/Đã áp dụng .* thay đổi AI vào bản nháp/),
+      screen.getByText(/Đã ghi nhận 1 gợi ý được Admin chấp nhận/),
     ).toBeInTheDocument();
   });
 
@@ -1381,6 +1381,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       })),
     };
     services.ocr.getRevision.mockResolvedValue(pending);
+    services.ocr.aiCorrectText.mockResolvedValue(pending.draft_text ?? "");
     services.revisions.verify.mockResolvedValue(verified);
     const user = userEvent.setup();
     render(
@@ -1400,7 +1401,17 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       pending.draft_text,
     );
 
-    await user.click(screen.getByRole("button", { name: /Xác minh trang/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
+    expect(
+      await screen.findByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: /Xác nhận nội dung và hoàn tất VERIFIED/,
+      }),
+    );
 
     expect(await screen.findByText(/Đã xác minh revision/)).toBeInTheDocument();
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
@@ -1416,6 +1427,11 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       page_revision_id: pending.page_revision_id,
       corrected_text: pending.draft_text,
       words: expect.any(Array),
+      proofread_audit: {
+        mode: "AI_CHECKED",
+        checked_text: pending.draft_text,
+        suggestions: [],
+      },
     });
     expect(services.revisions.list).toHaveBeenCalledWith(ADMIN_PAGE_ID);
     expect(services.pages.getImage).toHaveBeenCalledWith(
@@ -1441,7 +1457,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
     );
-    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
     await screen.findByRole("heading", { name: "Rà soát đề xuất AI" });
     expect(textarea).toHaveValue(source.draft_text);
 
@@ -1467,11 +1485,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
 
     expect(
       await screen.findByText(
-        /Không thể áp dụng kết quả AI vì số từ không khớp/,
+        /AI trả về kết quả không thể ghép chắc chắn với các vùng chữ/,
       ),
     ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
@@ -1505,7 +1525,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
     await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
     expect(textarea).toBeDisabled();
     expect(
@@ -1521,7 +1543,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(textarea).toHaveValue(source.draft_text);
     await user.click(screen.getByRole("button", { name: "Chọn tất cả" }));
     await user.click(
-      screen.getByRole("button", { name: /Áp dụng thay đổi đã chọn/ }),
+      screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
     );
     await waitFor(() => expect(textarea).toHaveValue("Nội dung AI đã sửa"));
   });
@@ -1555,7 +1577,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /AI sửa chính tả/ }));
+    await user.click(
+      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+    );
     expect(
       await screen.findByText(/đang xử lý đoạn 1\/3/i),
     ).toBeInTheDocument();
