@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import os
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas.viread_ocr_training import (
@@ -12,10 +18,51 @@ from app.schemas.viread_ocr_training import (
     ModelDecisionRequest,
     TrainingRunComplete,
     TrainingRunCreate,
+    TrainingWorkerClaim,
+    TrainingWorkerFinish,
+    TrainingWorkerHeartbeat,
 )
-from app.services.viread_ocr_training_service import MAX_SHARD_BYTES, VireadOcrTrainingService
+from app.services.viread_ocr_training_service import (
+    MAX_SHARD_BYTES,
+    VireadOcrTrainingService,
+)
+from app.services.storage_service import create_signed_image_url
 
 router = APIRouter()
+
+
+def _require_training_worker_token(token: str | None = Header(default=None, alias="X-ViRead-Training-Worker")) -> None:
+    expected = os.getenv("VIREAD_TRAINING_WORKER_TOKEN", "")
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="Colab worker authentication is not configured")
+    if not token or not hmac.compare_digest(hashlib.sha256(token.encode()).digest(),
+                                             hashlib.sha256(expected.encode()).digest()):
+        raise HTTPException(status_code=401, detail="Invalid training worker credential")
+
+
+def _safe_runtime(runtime: dict) -> dict[str, str | int]:
+    safe: dict[str, str | int] = {}
+    for key in ("device", "cuda_version", "torch_version"):
+        value = runtime.get(key)
+        if isinstance(value, str):
+            safe[key] = value[:120]
+    for key in ("vram_free_bytes", "vram_total_bytes", "ram_available_bytes", "disk_free_bytes"):
+        value = runtime.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            safe[key] = value
+    return safe
+
+
+async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, worker_id: str):
+    job = await service.repo.one("""
+        SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
+               config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts
+        FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
+    """, {"id": job_id})
+    if not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING" or job["worker_id"] != worker_id:
+        await service.repo.rollback()
+        raise HTTPException(status_code=409, detail="Training job lease is no longer owned by this worker")
+    return job
 
 
 @router.get("/admin/viread-training/overview")
@@ -129,3 +176,362 @@ async def decide_viread_model(
     db: AsyncSession = Depends(get_db),
 ):
     return await VireadOcrTrainingService(db).decide(actor_id, payload)
+
+
+@router.post("/admin/viread-training/worker/claim")
+async def claim_viread_colab_training_job(
+    payload: TrainingWorkerClaim,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    runtime = _safe_runtime(payload.runtime)
+    result = await db.execute(text("""
+        WITH next_job AS (
+            SELECT id FROM public.viread_ocr_training_jobs
+            WHERE target='COLAB' AND available_at <= now() AND attempts < 3 AND (
+                status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB') OR
+                (status='COLAB_RUNNING' AND lease_expires_at < now())
+            )
+            ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+        )
+        UPDATE public.viread_ocr_training_jobs AS job
+        SET status='COLAB_RUNNING', worker_id=:worker_id,
+            lease_expires_at=now() + interval '15 minutes', attempts=job.attempts+1,
+            progress=CAST(:progress AS jsonb),
+            metadata=job.metadata || CAST(:metadata AS jsonb), updated_at=now()
+        FROM next_job WHERE job.id=next_job.id
+        RETURNING job.id, job.profile, job.dataset_version_id, job.manifest_sha256,
+                  job.config_sha256, job.parent_checkpoint_sha256, job.created_by,
+                  job.attempts, job.run_id, job.metadata,
+                  job.locked_test_version_id, job.locked_test_manifest_sha256
+    """), {"worker_id": payload.worker_id,
+          "progress": json.dumps({"stage": "claimed", "runtime": runtime}),
+          "metadata": json.dumps({"colab_worker_id": payload.worker_id,
+                                   "colab_worker_status": {"status": "READY", "runtime": runtime}})})
+    job = result.mappings().first()
+    if not job:
+        await db.commit()
+        return {"job": None}
+    locked = await db.execute(text("""
+        SELECT id, version_sha256 FROM public.viread_ocr_dataset_versions
+        WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
+          AND (:locked_id IS NULL OR id=:locked_id)
+        ORDER BY created_at DESC LIMIT 1
+    """), {"locked_id": job["locked_test_version_id"]})
+    locked_row = locked.mappings().first()
+    dataset = await db.execute(text("""
+        SELECT source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
+        FROM public.viread_ocr_dataset_versions WHERE id=:id
+    """), {"id": job["dataset_version_id"]})
+    dataset_row = dataset.mappings().first()
+    if not dataset_row or dataset_row["version_sha256"] != job["manifest_sha256"] or dataset_row["is_locked_test"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training dataset is missing or its registered hash changed")
+    service = VireadOcrTrainingService(db)
+    if not job["created_by"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training job no longer has an Admin owner")
+    await service._admin(UUID(str(job["created_by"])))
+    manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
+    if locked_row:
+        if job["locked_test_manifest_sha256"] and job["locked_test_manifest_sha256"] != locked_row["version_sha256"]:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Job Locked Test manifest changed")
+        await db.execute(text("""
+            UPDATE public.viread_ocr_training_jobs SET locked_test_version_id=:test_id,
+                locked_test_manifest_sha256=:test_sha WHERE id=:job_id
+        """), {"test_id": locked_row["id"], "test_sha": locked_row["version_sha256"],
+              "job_id": job["id"]})
+    active = await service.active_model_artifact(UUID(str(job["created_by"])))
+    if active["checkpoint_sha256"] != job["parent_checkpoint_sha256"]:
+        await db.execute(text("""
+            UPDATE public.viread_ocr_training_jobs SET status='BLOCKED', worker_id=NULL,
+                lease_expires_at=NULL, last_error_code='ACTIVE_PARENT_CHANGED', updated_at=now()
+            WHERE id=:id
+        """), {"id": job["id"]})
+        await db.commit()
+        raise HTTPException(status_code=409, detail="Training parent checkpoint is no longer active; job must be requeued")
+    await db.commit()
+    return {"job": {**dict(job),
+                     "dataset": {**dict(dataset_row), "manifest_url": manifest_url},
+                     "active_model": active,
+                     "locked_test_version_id": locked_row["id"] if locked_row else None,
+                     "locked_test_manifest_sha256": locked_row["version_sha256"] if locked_row else None}}
+
+
+@router.post("/admin/viread-training/worker/status")
+async def report_viread_colab_worker_status(
+    payload: TrainingWorkerStatus,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    runtime = _safe_runtime(payload.runtime)
+    status_data = {"worker_id": payload.worker_id, "status": payload.status,
+                   "reason_code": payload.reason_code, "runtime": runtime,
+                   "reported_at": datetime.now(timezone.utc).isoformat()}
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs
+        SET metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
+        WHERE target='COLAB' AND status IN ('WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')
+    """), {"metadata": json.dumps({"colab_worker_status": status_data})})
+    await db.commit()
+    return {"status": payload.status}
+
+
+@router.get("/admin/viread-training/worker/jobs/{job_id}/dataset")
+async def get_viread_colab_job_dataset(
+    job_id: UUID,
+    worker_id: str,
+    limit: int = 200,
+    offset: int = 0,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    if not 1 <= limit <= 200 or offset < 0:
+        raise HTTPException(status_code=422, detail="limit must be 1-200 and offset must be non-negative")
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    await service._admin(UUID(str(job["created_by"])))
+    result = await service.dataset_samples(UUID(str(job["created_by"])), job["dataset_version_id"],
+                                           limit=limit, offset=offset)
+    if result["dataset"]["version_sha256"] != job["manifest_sha256"]:
+        raise HTTPException(status_code=409, detail="Job dataset hash does not match the claimed manifest")
+    await db.commit()
+    return result
+
+
+@router.get("/admin/viread-training/worker/jobs/{job_id}/locked-test")
+async def get_viread_colab_job_locked_test(
+    job_id: UUID,
+    worker_id: str,
+    limit: int = 200,
+    offset: int = 0,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    if not 1 <= limit <= 200 or offset < 0:
+        raise HTTPException(status_code=422, detail="limit must be 1-200 and offset must be non-negative")
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    await service._admin(UUID(str(job["created_by"])))
+    locked = await service.repo.one("""
+        SELECT id, source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
+        FROM public.viread_ocr_dataset_versions
+        WHERE id=COALESCE(:locked_id, (SELECT id FROM public.viread_ocr_dataset_versions
+                  WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
+                  ORDER BY created_at DESC LIMIT 1))
+          AND source_flow='LOCKED_TEST' AND is_locked_test=TRUE
+    """, {"locked_id": job["locked_test_version_id"]})
+    if not locked:
+        await db.commit()
+        return {"dataset": None, "items": [], "next_offset": None}
+    if job["locked_test_manifest_sha256"] and job["locked_test_manifest_sha256"] != locked["version_sha256"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Job Locked Test manifest changed")
+    if not job["locked_test_version_id"]:
+        await db.execute(text("""
+            UPDATE public.viread_ocr_training_jobs SET locked_test_version_id=:test_id,
+                locked_test_manifest_sha256=:test_sha WHERE id=:job_id
+        """), {"test_id": locked["id"], "test_sha": locked["version_sha256"], "job_id": job_id})
+    result = await service.dataset_samples(UUID(str(job["created_by"])), locked["id"],
+                                           limit=limit, offset=offset)
+    await db.commit()
+    return result
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/runs")
+async def create_viread_colab_job_run(
+    job_id: UUID,
+    worker_id: str,
+    payload: TrainingRunCreate,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    await service._admin(UUID(str(job["created_by"])))
+    if (payload.profile != job["profile"] or payload.dataset_version_id != job["dataset_version_id"]
+            or payload.manifest_sha256 != job["manifest_sha256"]
+            or payload.parent_checkpoint_sha256 != job["parent_checkpoint_sha256"]):
+        await db.rollback()
+        raise HTTPException(status_code=422, detail="Run lineage does not match its claimed Flow 2 job")
+    if job["run_id"]:
+        run = await service.repo.one("""
+            SELECT id AS run_id, status, profile, parent_checkpoint_sha256,
+                   manifest_sha256, config_sha256, architecture_sha256, vocabulary_sha256
+            FROM public.viread_ocr_training_runs WHERE id=:id
+        """, {"id": job["run_id"]})
+        if not run or any(run[key] != getattr(payload, key) for key in (
+            "profile", "parent_checkpoint_sha256", "manifest_sha256", "config_sha256",
+            "architecture_sha256", "vocabulary_sha256")):
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Existing job run has different training lineage")
+        await db.commit()
+        return run
+    created = await service.create_run(UUID(str(job["created_by"])), payload)
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs SET run_id=:run_id,
+            progress='{"stage":"candidate_upload"}'::jsonb, updated_at=now()
+        WHERE id=:job_id AND worker_id=:worker_id AND status='COLAB_RUNNING'
+    """), {"run_id": created["run_id"], "job_id": job_id, "worker_id": worker_id})
+    await db.commit()
+    return created
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/chunks")
+async def upload_viread_colab_job_chunk(
+    job_id: UUID,
+    run_id: UUID,
+    worker_id: str = Form(...),
+    chunk_index: int = Form(ge=0),
+    file: UploadFile = File(...),
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    if str(job["run_id"]) != str(run_id):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Checkpoint upload run is not attached to this job")
+    actor_id = UUID(str(job["created_by"]))
+    await service._admin(actor_id)
+    data = await file.read(MAX_SHARD_BYTES + 1)
+    if len(data) > MAX_SHARD_BYTES:
+        raise HTTPException(status_code=413, detail="Checkpoint shard exceeds 40 MiB")
+    result = await service.upload_checkpoint_chunk(actor_id, run_id, chunk_index, data)
+    return result
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/complete")
+async def complete_viread_colab_job_run(
+    job_id: UUID,
+    run_id: UUID,
+    worker_id: str,
+    payload: TrainingRunComplete,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    if str(job["run_id"]) != str(run_id) or payload.profile != job["profile"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Completed run is not attached to this job")
+    await service._admin(UUID(str(job["created_by"])))
+    result = await service.complete_run(UUID(str(job["created_by"])), run_id, payload)
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
+        WHERE id=:run_id
+    """), {"run_id": run_id, "metadata": json.dumps({
+        "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
+    })})
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs
+        SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
+        WHERE id=:id
+    """), {"id": job_id})
+    await db.commit()
+    return result
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/benchmarks")
+async def benchmark_viread_colab_job(
+    job_id: UUID,
+    worker_id: str,
+    payload: BenchmarkCreate,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    if (str(payload.run_id) != str(job["run_id"]) or
+            str(payload.locked_test_version_id) != str(job["locked_test_version_id"]) or
+            payload.locked_test_manifest_sha256 != job["locked_test_manifest_sha256"]):
+        await db.rollback()
+        raise HTTPException(status_code=422, detail="Benchmark dataset or run differs from the immutable job selection")
+    result = await service.benchmark(UUID(str(job["created_by"])), payload)
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs SET progress=CAST(:progress AS jsonb),
+            updated_at=now() WHERE id=:id
+    """), {"id": job_id, "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]})})
+    await db.commit()
+    return result
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/heartbeat")
+async def heartbeat_viread_colab_training_job(
+    job_id: UUID,
+    payload: TrainingWorkerHeartbeat,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    runtime = _safe_runtime(payload.runtime)
+    result = await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs SET
+            lease_expires_at=now() + interval '15 minutes',
+            progress=CAST(:progress AS jsonb), updated_at=now()
+        WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
+        RETURNING id
+    """), {"id": job_id, "worker_id": payload.worker_id,
+          "progress": json.dumps({"stage": payload.stage,
+              "completed_steps": payload.completed_steps, "total_steps": payload.total_steps,
+              "runtime": runtime})})
+    if not result.scalar_one_or_none():
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training job lease is no longer owned by this worker")
+    await db.commit()
+    return {"job_id": job_id, "status": "COLAB_RUNNING"}
+
+
+@router.post("/admin/viread-training/worker/jobs/{job_id}/finish")
+async def finish_viread_colab_training_job(
+    job_id: UUID,
+    payload: TrainingWorkerFinish,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, payload.worker_id)
+    if payload.status in {"CANDIDATE", "BENCHMARKED"}:
+        run = await service.repo.one("""
+            SELECT id, status, profile, dataset_version_id, manifest_sha256,
+                   parent_checkpoint_sha256, created_by
+            FROM public.viread_ocr_training_runs WHERE id=:id
+        """, {"id": payload.run_id}) if payload.run_id else None
+        expected_status = "CANDIDATE" if payload.status == "CANDIDATE" else "BENCHMARKED"
+        if (not run or run["status"] != expected_status or run["profile"] != "FLOW2_ADMIN_VERIFIED"
+                or run["dataset_version_id"] != job["dataset_version_id"]
+                or run["manifest_sha256"] != job["manifest_sha256"]
+                or run["parent_checkpoint_sha256"] != job["parent_checkpoint_sha256"]
+                or str(run["created_by"]) != str(job["created_by"])
+                or str(payload.run_id) != str(job["run_id"])):
+            await db.rollback()
+            raise HTTPException(status_code=422, detail="Worker result does not match a registered Flow 2 run")
+    new_status = payload.status
+    retry_delay = 0
+    error_code = payload.error_code
+    if payload.status == "FAILED" and int(job["attempts"]) < 3:
+        retry_delay = min(300, 30 * 2 ** max(0, int(job["attempts"]) - 1))
+        new_status = "WAITING_FOR_COLAB_WORKER"
+        error_code = payload.error_code or "COLAB_WORKER_RETRY"
+    runtime = _safe_runtime(payload.runtime)
+    await service.repo.execute("""
+        UPDATE public.viread_ocr_training_jobs SET status=:status, run_id=:run_id,
+            last_error_code=:error_code, lease_expires_at=NULL, worker_id=NULL,
+            available_at=now() + (:retry_delay * interval '1 second'),
+            progress=CAST(:progress AS jsonb),
+            metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
+        WHERE id=:id
+    """, {"id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"],
+          "error_code": error_code, "retry_delay": retry_delay,
+          "progress": json.dumps({"stage": new_status.lower()}),
+          "metadata": json.dumps({"runtime": runtime})})
+    if payload.run_id and runtime:
+        await service.repo.execute("""
+            UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
+            WHERE id=:run_id
+        """, {"run_id": payload.run_id, "metadata": json.dumps({
+            "execution_target": "COLAB", "training_job_id": str(job_id),
+            "worker_id": payload.worker_id, "runtime": runtime,
+        })})
+    await service.repo.commit()
+    return {"job_id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"]}

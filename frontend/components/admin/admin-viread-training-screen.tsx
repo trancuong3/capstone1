@@ -49,7 +49,11 @@ export function AdminVireadTrainingScreen() {
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
-    return () => globalThis.clearTimeout(timeout);
+    const interval = globalThis.setInterval(() => void load(), 30_000);
+    return () => {
+      globalThis.clearTimeout(timeout);
+      globalThis.clearInterval(interval);
+    };
   }, [load]);
 
   const latestPassing = useMemo(() => {
@@ -237,11 +241,97 @@ export function AdminVireadTrainingScreen() {
                 </p>
                 <p className="mt-2 text-sm font-bold text-muted">
                   {flow2Train > 0 && flow2Validation > 0
-                    ? "Có cả train và validation; Colab kiểm tra theo snapshot được chọn"
+                    ? "Đủ Train và Validation; hệ thống tự tạo job và chọn GPU local hoặc Colab"
                     : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
             </ul>
+          </Card>
+
+          <Card className="mb-6 bg-white">
+            <h2 className="text-xl font-black">Hàng đợi tự động Flow 2</h2>
+            <p className="mt-2 text-sm text-muted">
+              Job tự chọn máy local khi đủ GPU, RAM và dung lượng; nếu không,
+              job chờ worker Colab đã kết nối. Màn hình cập nhật định kỳ.
+            </p>
+            <div className="mt-4 space-y-3">
+              {data.jobs.map((job) => {
+                const stage = job.progress.stage;
+                const waitingReason = job.metadata.waiting_reason;
+                const localUnavailable = job.metadata.local_unavailable;
+                const workerStatusValue = job.metadata.colab_worker_status;
+                const workerStatus =
+                  typeof workerStatusValue === "object" &&
+                  workerStatusValue !== null &&
+                  !Array.isArray(workerStatusValue)
+                    ? (workerStatusValue as Record<string, unknown>)
+                    : null;
+                return (
+                  <article
+                    className="rounded-control border border-border p-4"
+                    key={job.job_id}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-extrabold">
+                        {trainingProfileName(job.profile)} · {job.status}
+                      </h3>
+                      <span className="text-sm text-muted">
+                        {job.target} · lần thử {job.attempts}
+                      </span>
+                    </div>
+                    <p className="mt-2 break-all font-mono text-xs text-muted">
+                      Job {job.job_id} · manifest {hash(job.manifest_sha256)}
+                    </p>
+                    <p className="mt-1 text-sm">
+                      Giai đoạn:{" "}
+                      {typeof stage === "string" ? stage : "đang chờ"}
+                      {typeof job.progress.completed_steps === "number" &&
+                      typeof job.progress.total_steps === "number"
+                        ? ` · ${job.progress.completed_steps}/${job.progress.total_steps} bước`
+                        : ""}
+                    </p>
+                    {job.status === "WAITING_FOR_COLAB_WORKER" ||
+                    job.status === "FALLBACK_QUEUED_COLAB" ? (
+                      <p className="mt-1 text-sm text-muted">
+                        {workerStatus?.status === "READY"
+                          ? `Colab worker báo READY lần gần nhất${typeof workerStatus.reported_at === "string" ? ` lúc ${new Date(workerStatus.reported_at).toLocaleString("vi-VN")}` : ""}.`
+                          : workerStatus?.status === "WAITING_FOR_GPU"
+                            ? `Colab worker đang chờ GPU phù hợp (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu GPU/CUDA/VRAM"}). Job vẫn được giữ trong hàng đợi.`
+                            : workerStatus?.status === "WAITING_FOR_RESOURCES"
+                              ? `Colab worker đang chờ đủ RAM hoặc dung lượng đĩa (${typeof workerStatus.reason_code === "string" ? workerStatus.reason_code : "thiếu tài nguyên"}). Job vẫn được giữ trong hàng đợi.`
+                              : "Chưa có Colab worker sẵn sàng. Khi worker đã cấu hình và kết nối, job sẽ tự được nhận."}
+                      </p>
+                    ) : null}
+                    {job.target === "COLAB" &&
+                    typeof localUnavailable === "string" ? (
+                      <p className="mt-1 text-sm text-muted">
+                        Máy local chuyển job sang Colab vì: {localUnavailable}.
+                      </p>
+                    ) : null}
+                    {typeof waitingReason === "string" ? (
+                      <p className="mt-1 text-sm text-muted">
+                        Đang chờ dữ liệu: cần cả Train và Validation.
+                      </p>
+                    ) : null}
+                    {job.last_error_code ? (
+                      <p className="mt-1 text-sm text-danger">
+                        Mã lỗi: {job.last_error_code}
+                      </p>
+                    ) : null}
+                    {job.run_id ? (
+                      <p className="mt-1 break-all font-mono text-xs text-muted">
+                        Run {job.run_id}
+                      </p>
+                    ) : null}
+                  </article>
+                );
+              })}
+              {data.jobs.length === 0 ? (
+                <p className="text-sm text-muted">
+                  Chưa có job Flow 2; cần snapshot có cả Train và Validation.
+                </p>
+              ) : null}
+            </div>
           </Card>
 
           <Card className="mb-6 bg-white">

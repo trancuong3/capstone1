@@ -38,7 +38,7 @@ async def _claim_one() -> dict[str, Any] | None:
                 locked_at = now(), updated_at = now()
             FROM next_event
             WHERE outbox.id = next_event.id
-            RETURNING outbox.id, outbox.page_id, outbox.revision_id, outbox.attempts
+            RETURNING outbox.id, outbox.page_id, outbox.revision_id, outbox.actor_id, outbox.attempts
         """))
         row = result.mappings().first()
         await db.commit()

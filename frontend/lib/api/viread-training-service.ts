@@ -10,6 +10,27 @@ const overviewSchema = z.object({
       count: z.number().int(),
     }),
   ),
+  jobs: z
+    .array(
+      z.object({
+        job_id: z.uuid(),
+        profile: z.string(),
+        target: z.string(),
+        status: z.string(),
+        dataset_version_id: z.uuid(),
+        manifest_sha256: z.string(),
+        config_sha256: z.string(),
+        parent_checkpoint_sha256: z.string(),
+        run_id: z.uuid().nullable(),
+        attempts: z.number().int(),
+        progress: z.record(z.string(), z.unknown()),
+        last_error_code: z.string().nullable(),
+        metadata: z.record(z.string(), z.unknown()),
+        created_at: z.iso.datetime({ offset: true }),
+        updated_at: z.iso.datetime({ offset: true }),
+      }),
+    )
+    .default([]),
   runs: z.array(
     z.object({
       run_id: z.uuid(),

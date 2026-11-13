@@ -205,6 +205,11 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
       page_revision_id: ADMIN_R1_ID,
       corrected_text: adminR1Fixture.draft_text ?? "",
       words: adminR1Fixture.words,
+      proofread_audit: {
+        mode: "AI_CHECKED",
+        checked_text: adminR1Fixture.draft_text ?? "",
+        suggestions: [],
+      },
     });
     expect(verified).toEqual(adminR1Fixture);
     expect(requestedApiUrl().pathname).toBe(

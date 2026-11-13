@@ -427,6 +427,11 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "page_revision_id": r2["page_revision_id"],
                     "corrected_text": "Ngày xưa có em.",
                     "words": saved.json()["words"],
+                    "proofread_audit": {
+                        "mode": "AI_CHECKED",
+                        "checked_text": "Ngày xưa có em.",
+                        "suggestions": [],
+                    },
                 },
             )
             self.assertEqual(verified.status_code, 200, verified.text)

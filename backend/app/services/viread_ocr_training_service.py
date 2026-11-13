@@ -157,13 +157,20 @@ class VireadOcrTrainingService:
                    checkpoint_sha256, checkpoint_storage_path, step, created_at
             FROM public.viread_ocr_training_runs ORDER BY created_at DESC LIMIT 20
         """)
+        jobs = await self.repo.all("""
+            SELECT id AS job_id, profile, target, status, dataset_version_id,
+                   manifest_sha256, config_sha256, parent_checkpoint_sha256, run_id,
+                   attempts, progress, last_error_code, metadata, created_at, updated_at
+            FROM public.viread_ocr_training_jobs ORDER BY created_at DESC LIMIT 30
+        """)
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
                    candidate_checkpoint_sha256, locked_test_manifest_sha256, created_at
             FROM public.viread_ocr_benchmarks ORDER BY created_at DESC LIMIT 20
         """)
         active = await self.repo.one("SELECT model_family, checkpoint_sha256, storage_path, profile, decision_id, updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE")
-        return {"outbox": outbox, "samples": samples, "runs": runs, "benchmarks": benchmarks, "active_model": active}
+        return {"outbox": outbox, "samples": samples, "jobs": jobs, "runs": runs,
+                "benchmarks": benchmarks, "active_model": active}
 
     async def register_dataset(self, actor_id: UUID, payload: DatasetImport) -> dict[str, Any]:
         await self._admin(actor_id)
@@ -465,13 +472,14 @@ class VireadOcrTrainingService:
         try:
             row = await self.repo.one("""
                 INSERT INTO public.viread_ocr_training_runs
-                    (id, profile, status, parent_checkpoint_sha256, manifest_sha256, config_sha256,
+                    (id, profile, status, dataset_version_id, parent_checkpoint_sha256, manifest_sha256, config_sha256,
                      architecture_sha256, vocabulary_sha256, created_by)
-                VALUES (:id, :profile, 'CREATED', :parent_sha, :manifest_sha, :config_sha,
+                VALUES (:id, :profile, 'CREATED', :dataset_id, :parent_sha, :manifest_sha, :config_sha,
                         :architecture_sha, :vocabulary_sha, :actor_id)
                 RETURNING id AS run_id, status, profile, parent_checkpoint_sha256, manifest_sha256,
                           config_sha256, architecture_sha256, vocabulary_sha256
-            """, {"id": run_id, "profile": payload.profile, "parent_sha": active["checkpoint_sha256"],
+            """, {"id": run_id, "profile": payload.profile, "dataset_id": payload.dataset_version_id,
+                  "parent_sha": active["checkpoint_sha256"],
                   "manifest_sha": payload.manifest_sha256, "config_sha": payload.config_sha256,
                   "architecture_sha": payload.architecture_sha256, "vocabulary_sha": payload.vocabulary_sha256,
                   "actor_id": actor_id})

@@ -610,6 +610,11 @@ describe("real Admin adapters", () => {
       page_revision_id: revisionId,
       corrected_text: "Chú",
       words: [word],
+      proofread_audit: {
+        mode: "AI_CHECKED",
+        checked_text: "Chú",
+        suggestions: [],
+      },
     });
     expect(verified.verification_status).toBe("VERIFIED");
     const [verifyUrl, verifyInit] = fetchMock.mock.calls[0] as [

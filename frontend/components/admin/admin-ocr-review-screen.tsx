@@ -51,6 +51,7 @@ import type {
   AdminPageRevisionDetailDTO,
   AdminRevisionSummaryUI,
   AdminRevisionWordDTO,
+  AdminRevisionVerifyRequestDTO,
 } from "@/types/admin";
 
 type LoadError = "not-found" | "unavailable" | "safe";
@@ -847,6 +848,10 @@ export function AdminOcrReviewScreen({
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [proofreadAudit, setProofreadAudit] = useState<
+    AdminRevisionVerifyRequestDTO["proofread_audit"] | null
+  >(null);
+  const [aiCheckUnavailable, setAiCheckUnavailable] = useState(false);
   const [aiAcceptedChanges, setAiAcceptedChanges] = useState<Set<number>>(
     () => new Set(),
   );
@@ -872,6 +877,8 @@ export function AdminOcrReviewScreen({
     setDraftText(next.draft_text ?? "");
     setWordSyncError(null);
     setAiSuggestion(null);
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setWordFilter("all");
@@ -1065,10 +1072,14 @@ export function AdminOcrReviewScreen({
     [detail, draftText, wordFilter, words],
   );
 
-  function handleDraftTextChange(value: string) {
+  function handleDraftTextChange(value: string, preserveProofread = false) {
     draftEditVersionRef.current += 1;
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
+    if (!preserveProofread) {
+      setProofreadAudit(null);
+      setAiCheckUnavailable(false);
+    }
     setAiDiffPage(0);
     const normalizedText = value.normalize("NFC");
     setDraftText(normalizedText);
@@ -1087,6 +1098,8 @@ export function AdminOcrReviewScreen({
     draftEditVersionRef.current += 1;
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     const nextWords = words.map((word) => {
       if (word.word_index !== index) return word;
       const nextText =
@@ -1132,6 +1145,8 @@ export function AdminOcrReviewScreen({
     draftEditVersionRef.current += 1;
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     setWords((current) =>
       current.map((word) => {
         if (word.word_index !== index) return word;
@@ -1144,6 +1159,10 @@ export function AdminOcrReviewScreen({
 
   function syncTextFromWords() {
     draftEditVersionRef.current += 1;
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     const nextText = words
       .map((word) => word.text.trim())
       .filter(Boolean)
@@ -1163,6 +1182,10 @@ export function AdminOcrReviewScreen({
 
   function reconcileAllMatchedWords() {
     draftEditVersionRef.current += 1;
+    setAiSuggestion(null);
+    setAiAcceptedChanges(new Set());
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     const result = syncPageTextToWords(draftText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
@@ -1196,6 +1219,8 @@ export function AdminOcrReviewScreen({
     setBusy("ai_correct");
     setAiProgress(null);
     setAiSuggestion(null);
+    setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setNotice(null);
@@ -1224,8 +1249,9 @@ export function AdminOcrReviewScreen({
         result.tokens.length !== expectedTokenCount ||
         result.tokens.length !== words.length
       ) {
+        setAiCheckUnavailable(true);
         setNotice(
-          "Không thể áp dụng kết quả AI vì số từ không khớp. Văn bản và tọa độ hiện tại vẫn được giữ nguyên.",
+          "AI trả về kết quả không thể ghép chắc chắn với các vùng chữ. Văn bản và tọa độ được giữ nguyên; hãy thử lại hoặc tiếp tục xác minh thủ công có ghi audit.",
         );
         return;
       }
@@ -1233,8 +1259,13 @@ export function AdminOcrReviewScreen({
         token === requestedTokens[index] ? [] : [{ index, token }],
       );
       if (changes.length === 0) {
+        setProofreadAudit({
+          mode: "AI_CHECKED",
+          checked_text: requestedText,
+          suggestions: [],
+        });
         setNotice(
-          "AI không đề xuất thay đổi nào. Bản nháp hiện tại được giữ nguyên.",
+          "AI không phát hiện lỗi chính tả trong văn bản. Hãy xác nhận để hoàn tất VERIFIED.",
         );
         return;
       }
@@ -1257,6 +1288,7 @@ export function AdminOcrReviewScreen({
       ) {
         setNotice("Đã hủy tác vụ AI OCR. Bản nháp hiện tại được giữ nguyên.");
       } else {
+        setAiCheckUnavailable(true);
         const safeMessage = isServiceError(cause)
           ? cause.message
           : cause instanceof Error
@@ -1266,7 +1298,7 @@ export function AdminOcrReviewScreen({
           safeMessage.startsWith("Không thể") ||
             safeMessage.startsWith("AI OCR")
             ? safeMessage
-            : "Không thể sửa OCR bằng AI: " + safeMessage,
+            : "Không thể kiểm tra văn bản bằng AI: " + safeMessage,
         );
       }
     } finally {
@@ -1283,7 +1315,16 @@ export function AdminOcrReviewScreen({
   }
 
   function applySelectedAiChanges() {
-    if (!aiSuggestion || aiAcceptedChanges.size === 0) return;
+    if (!aiSuggestion) return;
+    const checkedText = draftText;
+    const suggestions = aiChanges.map((change) => ({
+      word_index: change.index,
+      original: change.original,
+      proposed: change.proposed,
+      decision: aiAcceptedChanges.has(change.index)
+        ? ("ACCEPTED" as const)
+        : ("REJECTED" as const),
+    }));
     const sourceRanges = [...draftText.matchAll(/\S+/gu)];
     const proposedTokens = tokenizePageText(aiSuggestion);
     let nextText = draftText;
@@ -1297,9 +1338,32 @@ export function AdminOcrReviewScreen({
         proposed +
         nextText.slice(source.index + source[0].length);
     }
-    handleDraftTextChange(nextText);
+    if (aiAcceptedChanges.size > 0) handleDraftTextChange(nextText, true);
+    else {
+      setAiSuggestion(null);
+      setAiAcceptedChanges(new Set());
+    }
+    setProofreadAudit({
+      mode: "AI_CHECKED",
+      checked_text: checkedText,
+      suggestions,
+    });
+    setAiCheckUnavailable(false);
     setNotice(
-      `Đã áp dụng ${selected.length} thay đổi AI vào bản nháp. Hãy rà soát rồi lưu bản nháp để giữ lại.`,
+      `Đã ghi nhận ${selected.length} gợi ý được Admin chấp nhận và ${suggestions.length - selected.length} gợi ý bị từ chối. Hãy rà soát rồi xác nhận VERIFIED.`,
+    );
+  }
+
+  function continueManualVerification() {
+    setProofreadAudit({
+      mode: "MANUAL_FALLBACK",
+      checked_text: draftText,
+      suggestions: [],
+      reason_code: "AI_CHECK_UNAVAILABLE",
+    });
+    setAiCheckUnavailable(false);
+    setNotice(
+      "AI không khả dụng. Bạn đang tiếp tục xác minh thủ công; nội dung này được ghi nhận trong audit.",
     );
   }
 
@@ -1480,6 +1544,16 @@ export function AdminOcrReviewScreen({
     ) {
       return;
     }
+    if (aiSuggestion !== null) {
+      setNotice(
+        "Hãy xác nhận lựa chọn với các gợi ý AI trước khi hoàn tất VERIFIED.",
+      );
+      return;
+    }
+    if (proofreadAudit === null) {
+      await correctWithAi();
+      return;
+    }
     const requestedRevisionId = detail.page_revision_id;
     const requestedVersion = draftEditVersionRef.current;
     setBusy("verify");
@@ -1489,6 +1563,7 @@ export function AdminOcrReviewScreen({
         page_revision_id: requestedRevisionId,
         corrected_text: draftText,
         words,
+        proofread_audit: proofreadAudit,
       });
       if (
         !mountedRef.current ||
@@ -1626,11 +1701,9 @@ export function AdminOcrReviewScreen({
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
 
-  const aiSuggestionTokens = useMemo(
-    () => (aiSuggestion === null ? [] : tokenizePageText(aiSuggestion)),
-    [aiSuggestion],
-  );
-  const aiChanges = useMemo<AiTokenChange[]>(() => {
+  const aiSuggestionTokens =
+    aiSuggestion === null ? [] : tokenizePageText(aiSuggestion);
+  const aiChanges: AiTokenChange[] = (() => {
     if (
       aiSuggestion === null ||
       aiSuggestionTokens.length !== draftTokens.length
@@ -1642,7 +1715,7 @@ export function AdminOcrReviewScreen({
         ? [{ index, original, proposed }]
         : [];
     });
-  }, [aiSuggestion, aiSuggestionTokens, draftTokens]);
+  })();
   const aiDiffPageSize = 40;
   const aiDiffPageCount = Math.max(
     1,
@@ -1947,13 +2020,12 @@ export function AdminOcrReviewScreen({
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
               Khi chỉnh sửa văn bản, từ đã thay đổi sẽ trở về trạng thái cần
-              kiểm tra. Scan OCR không gọi các model AI sửa. Khi bấm “AI sửa”,
-              hệ thống lần lượt dùng gemini-3.5-flash-lite,
-              gemini-3.1-flash-lite và qwen/qwen3.8-27b; Ollama chỉ là phương án
-              cuối nếu các model đó không hoạt động. Ảnh và văn bản cần thiết
-              được gửi tới dịch vụ AI khi bạn chủ động bấm nút này. Đề xuất giữ
-              nguyên số từ để bảo toàn bounding box; lỗi cần tách/gộp từ cần
-              được rà soát thủ công.
+              kiểm tra. Khi bấm nút xác minh, AI sẽ rà soát chính tả trước; hệ
+              thống lần lượt dùng gemini-3.5-flash-lite, gemini-3.1-flash-lite
+              và qwen/qwen3.8-27b; Ollama chỉ là phương án cuối nếu các model đó
+              không hoạt động. Ảnh và văn bản cần thiết được gửi tới dịch vụ AI
+              khi bạn bấm nút. AI chỉ đề xuất; Admin phải duyệt từng thay đổi và
+              xác nhận cuối. Lỗi cần tách/gộp từ cần được rà soát thủ công.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2013,9 +2085,10 @@ export function AdminOcrReviewScreen({
                     Rà soát đề xuất AI
                   </h3>
                   <p className="mt-1 text-sm text-purple-900">
-                    Có {aiChanges.length} thay đổi từ. Các bbox được giữ nguyên;
-                    đề xuất chưa được lưu. AI không cung cấp điểm tin cậy cấp
-                    từ; mọi từ đề xuất cần Admin đối chiếu với ảnh.
+                    Có {aiChanges.length} gợi ý chính tả/OCR. Các bbox được giữ
+                    nguyên; gợi ý chưa được lưu. AI không cung cấp điểm tin cậy
+                    cấp từ; Admin cần đối chiếu từng gợi ý với ảnh. Từ được chọn
+                    sẽ chấp nhận; từ bỏ chọn sẽ bị từ chối.
                   </p>
                   <p
                     aria-live="polite"
@@ -2139,8 +2212,9 @@ export function AdminOcrReviewScreen({
                                 · {originalScoreLabel}
                               </span>
                               <span className="text-amber-900">
-                                Từ AI: chưa đối chiếu ảnh · không có điểm OCR
-                                cấp từ.
+                                Vì sao AI gợi ý: nội dung khác với bản OCR khi
+                                đối chiếu ảnh và ngữ cảnh. Đây chỉ là gợi ý;
+                                không có điểm tin cậy riêng cho từ này.
                               </span>
                             </span>
                           </span>
@@ -2180,12 +2254,11 @@ export function AdminOcrReviewScreen({
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-purple-200 pt-3">
                   <Button
                     className="sm:w-auto"
-                    disabled={aiAcceptedChanges.size === 0}
                     onClick={applySelectedAiChanges}
                     type="button"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Áp dụng thay
-                    đổi đã chọn
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận lựa
+                    chọn gợi ý
                   </Button>
                 </div>
               </section>
@@ -2223,34 +2296,40 @@ export function AdminOcrReviewScreen({
                   </Button>
 
                   <Button
-                    className="sm:w-auto border-purple-600 bg-purple-600 text-white hover:bg-purple-700"
-                    disabled={
-                      busy !== null ||
-                      detail.lifecycle_status !== "ACTIVE" ||
-                      !draftText.trim()
-                    }
-                    isLoading={busy === "ai_correct"}
-                    onClick={() => void correctWithAi()}
-                    type="button"
-                  >
-                    <Sparkles aria-hidden className="size-4" /> AI sửa chính tả
-                    &amp; dấu
-                  </Button>
-
-                  <Button
                     className="sm:w-auto"
                     disabled={
                       busy !== null ||
                       detail.lifecycle_status !== "ACTIVE" ||
                       words.length === 0 ||
-                      wordSyncError !== null
+                      wordSyncError !== null ||
+                      aiSuggestion !== null
                     }
-                    isLoading={busy === "verify"}
+                    isLoading={busy === "verify" || busy === "ai_correct"}
                     onClick={() => void verifyRevision()}
+                    type="button"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác minh
-                    trang
+                    {proofreadAudit ? (
+                      <CheckCircle2 aria-hidden className="size-4" />
+                    ) : (
+                      <Sparkles aria-hidden className="size-4" />
+                    )}
+                    {busy === "ai_correct"
+                      ? "AI đang kiểm tra…"
+                      : proofreadAudit
+                        ? "Xác nhận nội dung và hoàn tất VERIFIED"
+                        : "AI kiểm tra trước khi xác minh"}
                   </Button>
+                  {aiCheckUnavailable && proofreadAudit === null ? (
+                    <Button
+                      className="sm:w-auto"
+                      disabled={busy !== null}
+                      onClick={continueManualVerification}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Tiếp tục xác minh thủ công
+                    </Button>
+                  ) : null}
                 </>
               )}
             </div>
