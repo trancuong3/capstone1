@@ -11,6 +11,15 @@ from .contracts import sha256_file
 
 
 class ColabWorkerTests(unittest.TestCase):
+    def test_colab_lock_does_not_replace_preloaded_pillow_mid_kernel(self):
+        requirements = Path(__file__).with_name("requirements-colab.txt").read_text()
+        pins = [
+            line.strip().lower()
+            for line in requirements.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertFalse(any(line.startswith("pillow==") for line in pins))
+
     def test_worker_requires_current_hashes_for_all_training_inputs(self):
         training_dir = Path(__file__).parent
         config = {

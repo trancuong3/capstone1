@@ -222,6 +222,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     torchvision_version = torchvision.__version__.split("+", 1)[0]
     vietocr_version = package_version("vietocr")
     imgaug_version = package_version("imgaug")
+    pillow_version = package_version("Pillow")
     if np.__version__ not in {"1.26.4", "2.3.5"}:
         raise RuntimeError(f"COLAB_NUMPY_VERSION_MISMATCH:{np.__version__}")
     if vietocr_version != "0.3.12" or imgaug_version != "0.4.0":
@@ -238,6 +239,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
         "numpy_version": np.__version__,
         "vietocr_version": vietocr_version,
         "imgaug_version": imgaug_version,
+        "pillow_version": pillow_version,
         "torch_version": torch_version,
         "torchvision_version": torchvision_version,
         "opencv_version": cv2.__version__,

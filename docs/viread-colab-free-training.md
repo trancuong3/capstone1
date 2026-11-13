@@ -49,7 +49,7 @@ Sau khi notebook thay đổi này đã được merge vào `main`:
 ## 4. Khởi động từng job
 
 1. Trong ViRead Admin, kiểm tra có job đang chờ Colab và đã chọn đúng profile (`FLOW1_EXTERNAL_TRDG` hoặc `FLOW2_ADMIN_VERIFIED`).
-2. Trong Colab chọn **Runtime → Run all**. Cell kết nối Drive để giữ thư mục job, cài `ai/vietocr_v2/requirements-colab.txt` (bộ phụ thuộc riêng cho Colab Python 3.12/3.13), kiểm tra import VietOCR/PyTorch/torchvision và GPU trước khi nhận tối đa một job đang sẵn sàng. TRDG không được cài vào worker vì nó chỉ dùng ở bước tạo corpus Flow 1; bước đó dùng `requirements.txt` trên môi trường chuẩn bị dữ liệu. Bạn không nhập job ID hay nhãn dữ liệu.
+2. Trong Colab chọn **Runtime → Run all**. Cell kết nối Drive để giữ thư mục job, cài `ai/vietocr_v2/requirements-colab.txt` (bộ phụ thuộc riêng cho Colab Python 3.12/3.13), giữ nguyên Pillow có sẵn trong runtime, kiểm tra import VietOCR/PyTorch/torchvision và GPU trước khi nhận tối đa một job đang sẵn sàng. TRDG không được cài vào worker vì nó chỉ dùng ở bước tạo corpus Flow 1; bước đó dùng `requirements.txt` trên môi trường chuẩn bị dữ liệu. Bạn không nhập job ID hay nhãn dữ liệu.
 3. Nếu bước cài hoặc kiểm tra dependency thất bại, worker dừng trước khi claim job; gửi phần `ERROR:` cuối cell để xử lý. Đừng chạy worker bằng một bộ dependency tự cài khác.
 4. Để cell chạy đến khi kết thúc. Nó sẽ tải manifest/ảnh/checkpoint và kiểm tra SHA256, fine-tune, upload candidate, chạy benchmark nếu có Locked Test, rồi báo trạng thái về backend.
 5. Nếu notebook báo không có job, chưa có training run nào bắt đầu. Quay lại Admin và kiểm tra dataset readiness hoặc trạng thái job.
