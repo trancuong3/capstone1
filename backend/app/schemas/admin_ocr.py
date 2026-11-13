@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import unicodedata
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 from uuid import UUID
 
@@ -70,7 +72,40 @@ class AdminOcrCreateDraftRequest(BaseModel):
     expected_source_revision_id: UUID
 
 
+class AdminOcrProofreadSuggestionInput(BaseModel):
+    word_index: int = Field(ge=0)
+    original: str = Field(min_length=1, max_length=500)
+    proposed: str = Field(min_length=1, max_length=500)
+    decision: Literal["ACCEPTED", "REJECTED"]
+
+
+class AdminOcrProofreadAuditInput(BaseModel):
+    mode: Literal["AI_CHECKED", "MANUAL_FALLBACK"]
+    checked_text: str = Field(min_length=1, max_length=500_000)
+    suggestions: list[AdminOcrProofreadSuggestionInput] = Field(max_length=30_000)
+    reason_code: Literal["AI_CHECK_UNAVAILABLE"] | None = None
+
+    @field_validator("checked_text")
+    @classmethod
+    def checked_text_must_not_be_blank(cls, value: str) -> str:
+        normalized = unicodedata.normalize("NFC", value).strip()
+        if not normalized:
+            raise ValueError("checked_text must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode(self):
+        if self.mode == "AI_CHECKED" and self.reason_code is not None:
+            raise ValueError("AI_CHECKED must not include a manual fallback reason")
+        if self.mode == "MANUAL_FALLBACK" and (
+            self.reason_code != "AI_CHECK_UNAVAILABLE" or self.suggestions
+        ):
+            raise ValueError("manual fallback requires AI_CHECK_UNAVAILABLE and no AI suggestions")
+        return self
+
+
 class AdminOcrVerifyRequest(BaseModel):
     page_revision_id: UUID
     corrected_text: str = Field(min_length=1, max_length=500_000)
     words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
+    proofread_audit: AdminOcrProofreadAuditInput

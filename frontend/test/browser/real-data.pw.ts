@@ -245,7 +245,7 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   expect(api.unexpected).toEqual([]);
 });
 
-test("Admin OCR draft → local AI correction → save → verify preserves bounding boxes", async ({
+test("Admin OCR draft → integrated AI proofread → save → verify preserves bounding boxes", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
@@ -264,21 +264,23 @@ test("Admin OCR draft → local AI correction → save → verify preserves boun
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
   expect(api.draftCreateSourceRevisionId).toBe(ids.revision);
 
-  await page.getByRole("button", { name: /AI sửa chính tả/ }).click();
+  await page
+    .getByRole("button", { name: /AI kiểm tra trước khi xác minh/ })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Rà soát đề xuất AI" }),
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
 
-  // AI proposals must never be preselected: require an explicit admin choice.
+  // Proposals start unchecked; confirming zero selections explicitly rejects all.
   const review = page.getByRole("region", { name: "Rà soát đề xuất AI" });
   const applySelected = page.getByRole("button", {
-    name: /Áp dụng thay đổi đã chọn/,
+    name: /Xác nhận lựa chọn gợi ý/,
   });
   const proposedChanges = review.getByRole("checkbox");
   await expect(proposedChanges).toHaveCount(1);
   await expect(proposedChanges.first()).not.toBeChecked();
-  await expect(applySelected).toBeDisabled();
+  await expect(applySelected).toBeEnabled();
 
   await proposedChanges.first().check();
   await expect(applySelected).toBeEnabled();
@@ -301,9 +303,22 @@ test("Admin OCR draft → local AI correction → save → verify preserves boun
     Array<Record<string, unknown>> | undefined;
   expect(savedWords?.[0]?.bbox).toEqual([0.1, 0.2, 0.14, 0.05]);
 
-  await page.getByRole("button", { name: /Xác minh trang/ }).click();
+  await page
+    .getByRole("button", { name: /AI kiểm tra trước khi xác minh/ })
+    .click();
+  await expect(
+    page.getByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Xác nhận nội dung và hoàn tất VERIFIED/ })
+    .click();
   await expect(page.getByText(/Đã xác minh revision/)).toBeVisible();
   expect(api.verifyRequest?.corrected_text).toBe("Văn bản đã sửa");
+  expect(api.verifyRequest?.proofread_audit).toMatchObject({
+    mode: "AI_CHECKED",
+    checked_text: "Văn bản đã sửa",
+    suggestions: [],
+  });
   expect(api.unexpected).toEqual([]);
 });
 

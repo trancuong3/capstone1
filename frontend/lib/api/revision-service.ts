@@ -77,6 +77,7 @@ export function createRevisionService(): RevisionService {
               bbox: [...word.bbox],
               ocr_confidence: word.ocr_confidence,
             })),
+            proofread_audit: request.proofread_audit,
           },
         },
       ),

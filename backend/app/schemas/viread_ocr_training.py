@@ -115,3 +115,31 @@ class ModelDecisionRequest(BaseModel):
     run_id: UUID | None = None
     benchmark_id: UUID | None = None
     reason: str = Field(min_length=8, max_length=1000)
+
+
+class TrainingWorkerClaim(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrainingWorkerStatus(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    status: Literal["READY", "WAITING_FOR_GPU", "WAITING_FOR_RESOURCES"]
+    reason_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_]+$")
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrainingWorkerHeartbeat(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    stage: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    completed_steps: int = Field(default=0, ge=0)
+    total_steps: int = Field(default=0, ge=0)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrainingWorkerFinish(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    run_id: UUID | None = None
+    status: Literal["CANDIDATE", "BENCHMARKED", "FAILED"]
+    error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_]+$")
+    runtime: dict[str, Any] = Field(default_factory=dict)

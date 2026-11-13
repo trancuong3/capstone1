@@ -2083,6 +2083,33 @@ class AdminOcrService:
             item["bbox"] = list(item["bbox"])
         return raw
 
+    @staticmethod
+    def _validate_proofread_final(proofread, corrected_text: str) -> list[dict[str, object]]:
+        checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
+        checked_tokens = normalize_text_tokens(checked_text)
+        final_tokens = normalize_text_tokens(corrected_text)
+        if len(checked_tokens) != len(final_tokens):
+            raise HTTPException(status_code=422, detail="AI proofread input no longer aligns with the verified text")
+        decisions: list[dict[str, object]] = []
+        seen_suggestions: set[int] = set()
+        for suggestion in proofread.suggestions:
+            index = suggestion.word_index
+            if index >= len(checked_tokens) or index in seen_suggestions:
+                raise HTTPException(status_code=422, detail="AI proofread suggestions contain an invalid or duplicate word index")
+            seen_suggestions.add(index)
+            original_tokens = normalize_text_tokens(suggestion.original)
+            proposed_tokens = normalize_text_tokens(suggestion.proposed)
+            if len(original_tokens) != 1 or len(proposed_tokens) != 1 or original_tokens[0] != checked_tokens[index]:
+                raise HTTPException(status_code=422, detail="AI proofread suggestion does not match the text version reviewed by Admin")
+            expected_final = proposed_tokens[0] if suggestion.decision == "ACCEPTED" else original_tokens[0]
+            if final_tokens[index] != expected_final:
+                raise HTTPException(status_code=422, detail="Final verified text does not match the Admin's AI suggestion decisions")
+            decisions.append({"word_index": index, "original": suggestion.original,
+                              "proposed": suggestion.proposed, "decision": suggestion.decision})
+        if proofread.mode == "MANUAL_FALLBACK" and checked_text != corrected_text:
+            raise HTTPException(status_code=422, detail="Manual fallback audit must describe the exact text being verified")
+        return decisions
+
     async def create_edit_draft(
         self,
         actor_id: UUID,
@@ -2322,6 +2349,9 @@ class AdminOcrService:
         word_tokens = [str(item["normalized_text"]) for item in words]
         if text_tokens != word_tokens:
             raise HTTPException(status_code=422, detail="Corrected text must match the ordered word list; edit the word entries before verifying")
+        proofread = payload.proofread_audit
+        checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
+        decisions = self._validate_proofread_final(proofread, corrected_text)
         content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -2356,6 +2386,18 @@ class AdminOcrService:
             verification_metadata["word_review_statuses"] = ["verified"] * len(words)
             verification_metadata["word_evidence_v2"] = admin_verified_evidence
             verification_metadata["word_evidence_v2_authoritative"] = True
+            verification_metadata["ai_proofread_audit"] = {
+                "mode": proofread.mode,
+                "outcome": "AI_NO_SUGGESTIONS" if proofread.mode == "AI_CHECKED" and not decisions else "ADMIN_REVIEWED" if proofread.mode == "AI_CHECKED" else "MANUAL_FALLBACK",
+                "source_revision_id": str(revision.Id),
+                "checked_text_sha256": hashlib.sha256(checked_text.encode("utf-8")).hexdigest(),
+                "checked_text": checked_text,
+                "suggestions": decisions,
+                "reason_code": proofread.reason_code,
+                "final_content_sha256": content_hash,
+                "reviewed_by": str(actor_id),
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            }
             revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
@@ -2396,7 +2438,9 @@ class AdminOcrService:
                     "page_id": page.Id,
                     "revision_id": revision.Id,
                     "actor_id": actor_id,
-                    "payload": json.dumps({"source_flow": "FLOW1_VERIFIED", "schema": "viread-outbox-v1"}),
+                    "payload": json.dumps({"source_flow": "FLOW1_VERIFIED", "schema": "viread-outbox-v1",
+                                            "proofread_mode": proofread.mode,
+                                            "verified_content_sha256": content_hash}),
                 },
             )
             await self.db.commit()

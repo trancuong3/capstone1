@@ -64,6 +64,9 @@ const auditItem = {
 const fetchMock = vi.fn();
 let pageRetired = false;
 let manualDraftCreated = false;
+let aiReviewDraftEnabled = false;
+let aiCorrectionResult = "Xin chào";
+let aiCorrectionUnavailable = false;
 
 function readyResponse(url: string): Response {
   if (new URL(url, "http://localhost").pathname.endsWith("/image"))
@@ -153,6 +156,9 @@ function readyResponse(url: string): Response {
 beforeEach(() => {
   pageRetired = false;
   manualDraftCreated = false;
+  aiReviewDraftEnabled = false;
+  aiCorrectionResult = "Xin chào";
+  aiCorrectionUnavailable = false;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
     const target = String(url);
@@ -176,8 +182,27 @@ beforeEach(() => {
           page_revision_id: newRevisionId,
           revision_no: 3,
           verification_status: "NEEDS_REVIEW",
-          draft_text: "Văn bản đã lưu thật",
-          words: [],
+          draft_text: aiReviewDraftEnabled ? "Xin chao" : "Văn bản đã lưu thật",
+          words: aiReviewDraftEnabled
+            ? [
+                {
+                  word_index: 0,
+                  line_index: 0,
+                  text: "Xin",
+                  normalized_text: "xin",
+                  bbox: [0.1, 0.1, 0.2, 0.1],
+                  ocr_confidence: 0.92,
+                },
+                {
+                  word_index: 1,
+                  line_index: 0,
+                  text: "chao",
+                  normalized_text: "chao",
+                  bbox: [0.32, 0.1, 0.25, 0.1],
+                  ocr_confidence: 0.62,
+                },
+              ]
+            : [],
           ocr_metadata: {},
           created_at: timestamp,
           verified_at: null,
@@ -185,6 +210,43 @@ beforeEach(() => {
         },
         { status: 201 },
       );
+    }
+    if (
+      target.endsWith(`/admin/pages/${pageId}/ai-correct/jobs`) &&
+      options?.method === "POST"
+    ) {
+      if (aiCorrectionUnavailable)
+        return Response.json(
+          { detail: "AI OCR is not configured" },
+          { status: 503 },
+        );
+      return Response.json({
+        job_id: "66666666-6666-4666-8666-666666666666",
+        page_id: pageId,
+        status: "SUCCEEDED",
+        completed_chunks: 1,
+        total_chunks: 1,
+        result: aiCorrectionResult,
+        error: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      });
+    }
+    if (
+      target.endsWith(`/admin/pages/${pageId}/verify`) &&
+      options?.method === "POST"
+    ) {
+      return Response.json({
+        ...processing,
+        page_revision_id: newRevisionId,
+        revision_no: 3,
+        verification_status: "VERIFIED",
+        draft_text: "Xin chào",
+        words: [],
+        ocr_metadata: {},
+        created_at: timestamp,
+        verified_by: "11111111-1111-4111-8111-111111111111",
+      });
     }
     return readyResponse(target);
   });
@@ -382,6 +444,170 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    { accept: false, expectedText: "Xin chao", decision: "REJECTED" },
+    { accept: true, expectedText: "Xin chào", decision: "ACCEPTED" },
+  ])(
+    "requires Admin to review AI suggestions before VERIFIED (accept=$accept)",
+    async ({ accept, expectedText, decision }) => {
+      aiReviewDraftEnabled = true;
+      const user = userEvent.setup();
+      render(
+        <AdminServicesProvider>
+          <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+        </AdminServicesProvider>,
+      );
+      await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+      await user.click(
+        screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+      );
+      const textArea = await screen.findByLabelText("Nội dung trang");
+      await waitFor(() => expect(textArea).toHaveValue("Xin chao"));
+
+      await user.click(
+        screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+      );
+      expect(await screen.findByText("Rà soát đề xuất AI")).toBeInTheDocument();
+      expect(textArea).toHaveValue("Xin chao");
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(false);
+
+      if (accept) {
+        await user.click(
+          screen.getByRole("checkbox", { name: "Duyệt đề xuất cho từ 2" }),
+        );
+      }
+      await user.click(
+        screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name: "Xác nhận nội dung và hoàn tất VERIFIED",
+          }),
+        ).toBeEnabled(),
+      );
+      expect(textArea).toHaveValue(expectedText);
+      await user.click(
+        screen.getByRole("button", {
+          name: "Xác nhận nội dung và hoàn tất VERIFIED",
+        }),
+      );
+      await waitFor(() => {
+        const verifyCall = fetchMock.mock.calls.find(
+          ([url, init]) =>
+            String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+            (init as RequestInit | undefined)?.method === "POST",
+        );
+        expect(verifyCall).toBeDefined();
+        const body = JSON.parse(String((verifyCall?.[1] as RequestInit).body));
+        expect(body.corrected_text).toBe(expectedText);
+        expect(body.proofread_audit.suggestions[0].decision).toBe(decision);
+      });
+    },
+  );
+
+  it("reports a clean AI check but still waits for final Admin confirmation", async () => {
+    aiReviewDraftEnabled = true;
+    aiCorrectionResult = "Xin chao";
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+      </AdminServicesProvider>,
+    );
+    await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+    await user.click(
+      screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Xin chao"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+    );
+    expect(
+      await screen.findByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+          (init as RequestInit | undefined)?.method === "POST",
+      ),
+    ).toBe(false);
+    await user.click(
+      screen.getByRole("button", {
+        name: "Xác nhận nội dung và hoàn tất VERIFIED",
+      }),
+    );
+    await waitFor(() => {
+      const verifyCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+          (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(verifyCall).toBeDefined();
+      const body = JSON.parse(String((verifyCall?.[1] as RequestInit).body));
+      expect(body.proofread_audit).toMatchObject({
+        mode: "AI_CHECKED",
+        suggestions: [],
+      });
+    });
+  });
+
+  it("does not claim a clean result when AI is unavailable and audits manual fallback", async () => {
+    aiReviewDraftEnabled = true;
+    aiCorrectionUnavailable = true;
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+      </AdminServicesProvider>,
+    );
+    await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+    await user.click(
+      screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Xin chao"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Tiếp tục xác minh thủ công" }),
+    );
+    expect(
+      await screen.findByText(
+        /AI không khả dụng\. Bạn đang tiếp tục xác minh thủ công/,
+      ),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Xác nhận nội dung và hoàn tất VERIFIED",
+      }),
+    );
+    await waitFor(() => {
+      const verifyCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+          (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(verifyCall).toBeDefined();
+      const body = JSON.parse(String((verifyCall?.[1] as RequestInit).body));
+      expect(body.proofread_audit).toMatchObject({
+        mode: "MANUAL_FALLBACK",
+        reason_code: "AI_CHECK_UNAVAILABLE",
+      });
+    });
   });
 
   it("shows true empty pages with the upload workflow available", async () => {

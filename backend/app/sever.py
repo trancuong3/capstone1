@@ -36,6 +36,7 @@ from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_e
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
+from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ async def lifespan(_app: FastAPI):
     stop_book_quality_worker = asyncio.Event()
     book_quality_task = None
     viread_outbox_task = None
+    viread_training_task = None
     if APP_ENVIRONMENT != "test" and not worker_disabled:
         book_quality_task = asyncio.create_task(
             run_book_quality_worker(stop_book_quality_worker),
@@ -77,6 +79,15 @@ async def lifespan(_app: FastAPI):
         viread_outbox_task = asyncio.create_task(
             run_viread_ocr_outbox_worker(stop_viread_ocr_outbox),
             name="viread_ocr_verified_outbox_worker",
+        )
+    training_worker_enabled = os.getenv(
+        "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    stop_viread_training = asyncio.Event()
+    if APP_ENVIRONMENT != "test" and training_worker_enabled:
+        viread_training_task = asyncio.create_task(
+            run_viread_ocr_training_auto_worker(stop_viread_training),
+            name="viread_ocr_flow2_auto_training_worker",
         )
 
     try:
@@ -92,6 +103,13 @@ async def lifespan(_app: FastAPI):
             except TimeoutError:
                 viread_outbox_task.cancel()
                 await asyncio.gather(viread_outbox_task, return_exceptions=True)
+        if viread_training_task is not None:
+            stop_viread_training.set()
+            try:
+                await asyncio.wait_for(viread_training_task, timeout=10)
+            except TimeoutError:
+                viread_training_task.cancel()
+                await asyncio.gather(viread_training_task, return_exceptions=True)
         if book_quality_task is not None:
             stop_book_quality_worker.set()
             try:

@@ -221,6 +221,17 @@ export interface AdminRevisionVerifyRequestDTO {
   readonly page_revision_id: UUID;
   readonly corrected_text: string;
   readonly words: readonly AdminRevisionWordDTO[];
+  readonly proofread_audit: {
+    readonly mode: "AI_CHECKED" | "MANUAL_FALLBACK";
+    readonly checked_text: string;
+    readonly suggestions: readonly {
+      readonly word_index: number;
+      readonly original: string;
+      readonly proposed: string;
+      readonly decision: "ACCEPTED" | "REJECTED";
+    }[];
+    readonly reason_code?: "AI_CHECK_UNAVAILABLE" | null;
+  };
 }
 
 export interface StatusPatchDTO {
