@@ -20,6 +20,15 @@ class ColabWorkerTests(unittest.TestCase):
         ]
         self.assertFalse(any(line.startswith("pillow==") for line in pins))
 
+    def test_colab_lock_includes_vietocr_dataloader_dependency(self):
+        requirements = Path(__file__).with_name("requirements-colab.txt").read_text()
+        pins = {
+            line.strip().lower()
+            for line in requirements.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertIn("prefetch-generator==1.0.1", pins)
+
     def test_worker_requires_current_hashes_for_all_training_inputs(self):
         training_dir = Path(__file__).parent
         config = {

@@ -215,6 +215,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     import torch
     import torchvision
     from PIL import Image  # noqa: F401 - verify the image dependency before claim
+    from prefetch_generator import background  # noqa: F401 - required by VietOCR's dataloader
     from vietocr.model.trainer import Trainer  # noqa: F401 - imports imgaug
     from vietocr.tool.config import Cfg  # noqa: F401
 
@@ -222,6 +223,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     torchvision_version = torchvision.__version__.split("+", 1)[0]
     vietocr_version = package_version("vietocr")
     imgaug_version = package_version("imgaug")
+    prefetch_generator_version = package_version("prefetch-generator")
     pillow_version = package_version("Pillow")
     if np.__version__ not in {"1.26.4", "2.3.5"}:
         raise RuntimeError(f"COLAB_NUMPY_VERSION_MISMATCH:{np.__version__}")
@@ -229,6 +231,8 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
         raise RuntimeError(
             f"VIETOCR_TRAINING_PACKAGE_VERSION_MISMATCH:{vietocr_version}/{imgaug_version}"
         )
+    if prefetch_generator_version != "1.0.1":
+        raise RuntimeError(f"PREFETCH_GENERATOR_VERSION_MISMATCH:{prefetch_generator_version}")
     if torch_version != "2.14.1" or torchvision_version != "0.29.1":
         raise RuntimeError(
             f"COLAB_TORCH_VERSION_MISMATCH:{torch_version}/{torchvision_version}"
@@ -239,6 +243,7 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
         "numpy_version": np.__version__,
         "vietocr_version": vietocr_version,
         "imgaug_version": imgaug_version,
+        "prefetch_generator_version": prefetch_generator_version,
         "pillow_version": pillow_version,
         "torch_version": torch_version,
         "torchvision_version": torchvision_version,
