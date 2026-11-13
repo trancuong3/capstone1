@@ -29,6 +29,16 @@ class ColabWorkerTests(unittest.TestCase):
         }
         self.assertIn("prefetch-generator==1.0.1", pins)
 
+    def test_colab_lock_matches_preloaded_numpy_without_replacing_it(self):
+        requirements = Path(__file__).with_name("requirements-colab.txt").read_text()
+        pins = {
+            line.strip().lower()
+            for line in requirements.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertIn("numpy==2.4.6", pins)
+        self.assertNotIn("numpy==2.3.5", pins)
+
     def test_worker_requires_current_hashes_for_all_training_inputs(self):
         training_dir = Path(__file__).parent
         config = {
