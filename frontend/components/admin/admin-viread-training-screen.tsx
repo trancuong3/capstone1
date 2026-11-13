@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
@@ -29,6 +29,7 @@ export function AdminVireadTrainingScreen() {
   const [data, setData] = useState<VireadTrainingOverview | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [reason, setReason] = useState(
     "Đã rà soát báo cáo Locked Test và chấp thuận bản VietOCR V2.",
@@ -91,6 +92,29 @@ export function AdminVireadTrainingScreen() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function deleteJob(jobId: string) {
+    if (!vireadTraining || deletingJobId) return;
+    if (
+      !globalThis.confirm(
+        "Xóa job huấn luyện cũ này? Run, checkpoint và dữ liệu dataset sẽ được giữ nguyên.",
+      )
+    )
+      return;
+    setDeletingJobId(jobId);
+    setMessage(null);
+    try {
+      await vireadTraining.deleteJob(jobId);
+      setMessage("Đã xóa job cũ. Dữ liệu dataset và các run/checkpoint vẫn được giữ.");
+      await load();
+    } catch {
+      setMessage(
+        "Không thể xóa job. Job có thể đang chờ hoặc đang chạy; hãy làm mới trạng thái rồi thử lại.",
+      );
+    } finally {
+      setDeletingJobId(null);
     }
   }
 
@@ -280,6 +304,29 @@ export function AdminVireadTrainingScreen() {
                         {job.target} · lần thử {job.attempts}
                       </span>
                     </div>
+                    {[
+                      "QUEUED",
+                      "LOCAL_RUNNING",
+                      "FALLBACK_QUEUED_COLAB",
+                      "COLAB_RUNNING",
+                      "WAITING_FOR_DATA",
+                      "WAITING_FOR_COLAB_WORKER",
+                      "COLAB_SUBMITTING",
+                      "COLAB_SUBMITTED",
+                      "COLAB_EXECUTING",
+                    ].includes(job.status) ? null : (
+                      <Button
+                        className="mt-3 h-10 w-auto"
+                        disabled={busy || deletingJobId !== null}
+                        onClick={() => void deleteJob(job.job_id)}
+                        variant="destructive"
+                      >
+                        <Trash2 aria-hidden className="size-4" />
+                        {deletingJobId === job.job_id
+                          ? "Đang xóa…"
+                          : "Xóa job cũ"}
+                      </Button>
+                    )}
                     <p className="mt-2 break-all font-mono text-xs text-muted">
                       Job {job.job_id} · manifest {hash(job.manifest_sha256)}
                     </p>

@@ -13,13 +13,19 @@ import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAdminBookAiReviewHistory } from "@/hooks/use-admin-book-ai-review-history";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import { AdminPageImagePreview } from "@/components/admin/admin-page-image-preview";
+import { AdminBookAiBatchReview } from "@/components/admin/admin-book-ai-batch-review";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const aiReviewHistory = useAdminBookAiReviewHistory(bookId);
+  const aiReviewedRevisionIds = new Set(
+    aiReviewHistory.map((record) => record.pageRevisionId),
+  );
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
@@ -72,6 +78,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setItems([]);
     }
   }, [bookId, books, pages]);
+  const refreshPages = useCallback(async () => {
+    try {
+      const nextPages = (await pages.list(bookId)).filter(
+        (item) => item.processing.lifecycle_status === "ACTIVE",
+      );
+      setItems(nextPages);
+    } catch {
+      setPageActionNotice({
+        tone: "error",
+        title: "Không thể làm mới trạng thái trang",
+        message:
+          "Thao tác đã gửi tới Backend; hãy bấm Tải lại để xác nhận trạng thái cuối cùng.",
+      });
+    }
+  }, [bookId, pages]);
   async function retirePendingPage() {
     const item = pendingRetire;
     const pageId = item?.processing.page_id;
@@ -176,6 +197,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         </Link>
       </div>
       <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
+      {items && items.length > 0 ? (
+        <section className="mt-6" aria-label="Rà soát OCR hàng loạt">
+          <AdminBookAiBatchReview
+            bookId={book.id}
+            items={items}
+            onCompleted={() => void refreshPages()}
+          />
+        </section>
+      ) : null}
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-2xl font-black" id="pages-title">
@@ -246,6 +276,20 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         }
                       />
                     </div>
+                    {item.processing.verification_status === "NEEDS_REVIEW" &&
+                    aiReviewedRevisionIds.has(
+                      item.processing.page_revision_id,
+                    ) ? (
+                      <span className="inline-flex w-fit rounded-full bg-sky px-3 py-1 text-sm font-extrabold text-primary">
+                        {aiReviewHistory.find(
+                          (record) =>
+                            record.pageRevisionId ===
+                            item.processing.page_revision_id,
+                        )?.outcome === "failed"
+                          ? "AI đã thử · bỏ qua lần sau"
+                          : "AI đã rà soát · chờ xác minh"}
+                      </span>
+                    ) : null}
                     <div>
                       <h3 className="text-xl font-black">
                         Trang {item.page_number}
