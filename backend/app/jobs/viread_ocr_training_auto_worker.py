@@ -340,14 +340,14 @@ async def _expire_exhausted_jobs() -> None:
             UPDATE public.viread_ocr_training_jobs
             SET status='FAILED', worker_id=NULL, lease_expires_at=NULL,
                 progress='{"stage":"failed"}'::jsonb,
-                metadata=metadata || '{"manual_colab_failure_reconciled":true}'::jsonb,
+                metadata=metadata || CAST(:reconciliation_metadata AS jsonb),
                 updated_at=now()
             WHERE target='COLAB' AND status='COLAB_EXECUTING'
               AND last_error_code IS NOT NULL AND run_id IS NULL
               AND colab_execution_id IS NULL
               AND colab_execution_resource_name IS NULL
               AND colab_operation_name IS NULL
-        """))
+        """), {"reconciliation_metadata": json.dumps({"manual_colab_failure_reconciled": True})})
         await db.execute(text("""
             UPDATE public.viread_ocr_training_jobs
             SET status=CASE

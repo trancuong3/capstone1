@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import os
 import hashlib
+import json
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,8 +19,10 @@ from app.jobs.viread_ocr_training_auto_worker import (
     dataset_snapshot_count_matches,
     flow1_dataset_readiness,
     local_training_capacity,
+    _expire_exhausted_jobs,
     _training_config,
 )
+from sqlalchemy import text
 
 
 class TrainingCapacityTests(unittest.TestCase):
@@ -134,6 +137,42 @@ class TrainingCapacityTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "COLAB_INSUFFICIENT_DISK"):
                 ColabWorker.assert_runtime_capacity(Path(temp_dir))
+
+
+class _RecordingSession:
+    def __init__(self):
+        self.calls = []
+        self.committed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def execute(self, statement, params=None):
+        self.calls.append((str(statement), params or {}))
+
+    async def commit(self):
+        self.committed = True
+
+
+class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconciliation_metadata_json_does_not_create_an_unbound_sql_parameter(self):
+        from app.jobs import viread_ocr_training_auto_worker as worker
+
+        session = _RecordingSession()
+        with patch.object(worker, "AsyncSessionLocal", return_value=session):
+            await _expire_exhausted_jobs()
+
+        self.assertTrue(session.committed)
+        self.assertEqual(len(session.calls), 3)
+        for statement, params in session.calls:
+            self.assertEqual(set(text(statement)._bindparams), set(params))
+        reconciliation_params = session.calls[0][1]
+        self.assertTrue(json.loads(reconciliation_params["reconciliation_metadata"])[
+            "manual_colab_failure_reconciled"
+        ])
 
 
 if __name__ == "__main__":
