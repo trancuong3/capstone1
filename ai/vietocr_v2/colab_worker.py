@@ -105,9 +105,16 @@ class ColabWorker:
         if free_vram < minimum_vram:
             raise RuntimeError("COLAB_INSUFFICIENT_VRAM")
         available_ram = ColabWorker.available_ram_bytes()
-        minimum_ram = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "8")) * 1024**3
+        # Free Colab T4 runtimes have limited host RAM after PyTorch imports.
+        # Dataset images stream from local disk with dataloader workers disabled,
+        # so 4 GiB available RAM is the safe minimum for this worker.
+        minimum_ram_gb = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "4"))
+        minimum_ram = minimum_ram_gb * 1024**3
         if available_ram < minimum_ram:
-            raise RuntimeError("COLAB_INSUFFICIENT_RAM")
+            available_ram_gb = available_ram / 1024**3
+            raise RuntimeError(
+                f"COLAB_INSUFFICIENT_RAM:{available_ram_gb:.1f}GB_AVAILABLE_REQUIRED_{minimum_ram_gb}GB"
+            )
         work_dir.mkdir(parents=True, exist_ok=True)
         free_disk = shutil.disk_usage(work_dir).free
         minimum_disk = int(os.getenv("VIETOCR_TRAINING_MIN_DISK_GB", "8")) * 1024**3
