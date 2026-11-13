@@ -5,7 +5,9 @@
 # --no-deps because its published metadata also pins unavailable gdown==4.4.0.
 torch==2.14.1
 torchvision==0.29.1
-numpy==2.3.5
+# Match Colab's preloaded NumPy so pip does not replace a module already loaded
+# into the notebook kernel. The local training lock remains NumPy 1.26.4.
+numpy==2.4.6
 # Keep the Colab-provided Pillow version. Replacing Pillow inside the live
 # notebook kernel can mix already-imported modules with the newly installed wheel.
 requests==2.32.5
