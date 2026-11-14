@@ -312,7 +312,7 @@ export function AdminVireadTrainingScreen() {
                     ? "Đủ Train, Validation và Locked Test; hệ thống tự tạo job Flow 2 riêng"
                     : flow2Train > 0 && flow2Validation > 0
                       ? "Train/Validation đủ; job chờ Locked Test độc lập từ holdout VERIFIED đạt ngưỡng"
-                    : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
+                      : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
             </ul>
@@ -331,24 +331,41 @@ export function AdminVireadTrainingScreen() {
                 {data.locked_test.status === "READY" ? (
                   <>
                     <p className="mt-2 text-sm">
-                      Sẵn sàng · {data.locked_test.sample_count.toLocaleString("vi-VN")} mẫu ·{" "}
-                      {data.locked_test.group_count.toLocaleString("vi-VN")} trang/nhóm
+                      Sẵn sàng ·{" "}
+                      {data.locked_test.sample_count.toLocaleString("vi-VN")}{" "}
+                      mẫu ·{" "}
+                      {data.locked_test.group_count.toLocaleString("vi-VN")}{" "}
+                      trang/nhóm
                     </p>
                     <p className="mt-1 break-all font-mono text-xs text-muted">
-                      Manifest {data.locked_test.manifest_sha256
+                      Manifest{" "}
+                      {data.locked_test.manifest_sha256
                         ? hash(data.locked_test.manifest_sha256)
                         : "—"}
                     </p>
                   </>
                 ) : (
                   <p className="mt-2 text-sm text-muted">
-                    Chưa đủ dữ liệu holdout VERIFIED độc lập: còn {(
+                    Chưa đủ dữ liệu holdout VERIFIED độc lập: còn{" "}
+                    {(
                       data.locked_test.missing_sample_count ??
-                      Math.max(0, data.locked_test.minimum_samples - data.locked_test.eligible_sample_count)
-                    ).toLocaleString("vi-VN")} cặp ảnh-nhãn và {(
+                      Math.max(
+                        0,
+                        data.locked_test.minimum_samples -
+                          data.locked_test.eligible_sample_count,
+                      )
+                    ).toLocaleString("vi-VN")}{" "}
+                    cặp ảnh-nhãn và{" "}
+                    {(
                       data.locked_test.missing_group_count ??
-                      Math.max(0, data.locked_test.minimum_groups - data.locked_test.eligible_group_count)
-                    ).toLocaleString("vi-VN")} trang/nhóm. Không dùng mẫu Train/Validation hoặc tự sinh nhãn để lấp phần thiếu.
+                      Math.max(
+                        0,
+                        data.locked_test.minimum_groups -
+                          data.locked_test.eligible_group_count,
+                      )
+                    ).toLocaleString("vi-VN")}{" "}
+                    trang/nhóm. Không dùng mẫu Train/Validation hoặc tự sinh
+                    nhãn để lấp phần thiếu.
                   </p>
                 )}
               </div>
@@ -499,18 +516,24 @@ export function AdminVireadTrainingScreen() {
                     job.run_status === "CANDIDATE" &&
                     job.candidate_has_benchmark === false &&
                     job.run_config_sha256 === job.config_sha256 &&
-                    job.worker_id === null &&
-                    (!job.lease_expires_at || new Date(job.lease_expires_at).getTime() <= Date.now()) ? (
+                    job.worker_id === null ? (
                       <div className="mt-3">
                         <Button
                           disabled={busy}
-                          onClick={() => void closeUnbenchmarkedCandidate(job.job_id)}
+                          onClick={() =>
+                            void closeUnbenchmarkedCandidate(job.job_id)
+                          }
                           variant="secondary"
                         >
                           Đóng candidate, chờ job thay thế
                         </Button>
                         <p className="mt-1 text-xs text-muted">
-                          Chỉ đóng candidate đã dừng và chưa benchmark. Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo khi Locked Test đạt tối thiểu {data.locked_test?.minimum_samples ?? 200} cặp và {data.locked_test?.minimum_groups ?? 30} trang độc lập.
+                          Chỉ đóng candidate đã dừng và chưa benchmark.
+                          Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo
+                          khi Locked Test đạt tối thiểu{" "}
+                          {data.locked_test?.minimum_samples ?? 200} cặp và{" "}
+                          {data.locked_test?.minimum_groups ?? 30} trang độc
+                          lập.
                         </p>
                       </div>
                     ) : null}

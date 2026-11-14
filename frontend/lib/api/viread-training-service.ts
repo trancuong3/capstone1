@@ -35,7 +35,10 @@ const overviewSchema = z.object({
         colab_operation_name: z.string().nullable().optional(),
         colab_execution_number: z.number().int().optional(),
         worker_id: z.string().nullable().optional(),
-        lease_expires_at: z.iso.datetime({ offset: true }).nullable().optional(),
+        lease_expires_at: z.iso
+          .datetime({ offset: true })
+          .nullable()
+          .optional(),
         locked_test_version_id: z.uuid().nullable().optional(),
         locked_test_manifest_sha256: z.string().nullable().optional(),
         created_at: z.iso.datetime({ offset: true }),
