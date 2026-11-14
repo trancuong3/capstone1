@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.repositories.viread_ocr_training_repository import VireadOcrTrainingRepository
 from app.schemas.viread_ocr_training import BenchmarkCreate, DatasetImport, ModelDecisionRequest, TrainingRunComplete, TrainingRunCreate
 from app.services.admin_ocr_service import AdminOcrService
-from app.services.storage_service import create_signed_image_url, download_object, upload_object
+from app.services.storage_service import create_signed_image_url, download_object, hash_storage_object, upload_object
 from app.services.viread_training_storage_quota import ensure_database_capacity, ensure_storage_capacity
 
 logger = logging.getLogger(__name__)
@@ -656,7 +656,44 @@ class VireadOcrTrainingService:
             raise
         return {"run_id": run_id, "chunk_index": chunk_index, "sha256": digest, "bytes": len(data), "idempotent": False}
 
-    async def complete_run(self, actor_id: UUID, run_id: UUID, payload: TrainingRunComplete) -> dict[str, Any]:
+    async def _lock_colab_job_for_finalize(self, actor_id: UUID, job_id: UUID, run_id: UUID, worker_id: str, profile: str) -> None:
+        job = await self.repo.one("""
+            SELECT id, target, status, worker_id, run_id, profile, created_by, lease_expires_at
+            FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
+        """, {"id": job_id})
+        if (not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING"
+                or job["worker_id"] != worker_id or str(job["run_id"]) != str(run_id)
+                or job["profile"] != profile or str(job["created_by"]) != str(actor_id)
+                or job["lease_expires_at"] is None or job["lease_expires_at"] <= datetime.now(timezone.utc)):
+            await self.repo.rollback()
+            raise HTTPException(status_code=409, detail="Training job lease is no longer owned by this worker")
+
+    async def _finalize_colab_job(self, actor_id: UUID, job_id: UUID, run_id: UUID, worker_id: str, profile: str) -> None:
+        await self._lock_colab_job_for_finalize(actor_id, job_id, run_id, worker_id, profile)
+        await self.repo.execute("""
+            UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
+            WHERE id=:run_id
+        """, {"run_id": run_id, "metadata": json.dumps({
+            "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
+        })})
+        await self.repo.execute("""
+            UPDATE public.viread_ocr_training_jobs
+            SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
+            WHERE id=:id
+        """, {"id": job_id})
+        await self.repo.commit()
+
+    async def complete_run(
+        self,
+        actor_id: UUID,
+        run_id: UUID,
+        payload: TrainingRunComplete,
+        *,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> dict[str, Any]:
+        if (job_id is None) != (worker_id is None):
+            raise ValueError("job_id and worker_id must be provided together")
         await self._admin(actor_id)
         run = await self.repo.one("SELECT * FROM public.viread_ocr_training_runs WHERE id=:id", {"id": run_id})
         if not run:
@@ -669,6 +706,8 @@ class VireadOcrTrainingService:
             raise HTTPException(status_code=422, detail="Completed checkpoint lineage does not match the registered training run")
         if (run["status"] == "CANDIDATE" and run["checkpoint_sha256"] == payload.checkpoint_sha256
                 and int(run["checkpoint_bytes"]) == payload.checkpoint_bytes and int(run["step"]) == payload.step):
+            if job_id is not None and worker_id is not None:
+                await self._finalize_colab_job(actor_id, job_id, run_id, worker_id, payload.profile)
             return {"run_id": run_id, "status": "CANDIDATE", "checkpoint_sha256": payload.checkpoint_sha256,
                     "checkpoint_bytes": int(run["checkpoint_bytes"]), "manifest_storage_path": run["checkpoint_storage_path"],
                     "idempotent": True}
@@ -677,14 +716,17 @@ class VireadOcrTrainingService:
         chunks = await self.repo.all("SELECT chunk_index, chunk_sha256, storage_path, byte_count FROM public.viread_ocr_checkpoint_chunks WHERE run_id=:run_id ORDER BY chunk_index", {"run_id": run_id})
         if not chunks or [int(chunk["chunk_index"]) for chunk in chunks] != list(range(len(chunks))):
             raise HTTPException(status_code=422, detail="Checkpoint shards are incomplete or out of order")
+        # Release the read transaction before touching Storage. On Render Free,
+        # the checkpoint can exceed 150 MiB and remote I/O must not hold a DB
+        # connection or the training-job row lock while heartbeats update it.
+        await self.repo.commit()
         digest = hashlib.sha256()
         total = 0
         for chunk in chunks:
-            data = await asyncio.to_thread(download_object, chunk["storage_path"])
-            if len(data) != int(chunk["byte_count"]) or hashlib.sha256(data).hexdigest() != chunk["chunk_sha256"]:
+            chunk_digest, chunk_bytes = await asyncio.to_thread(hash_storage_object, chunk["storage_path"], digest)
+            if chunk_bytes != int(chunk["byte_count"]) or chunk_digest != chunk["chunk_sha256"]:
                 raise HTTPException(status_code=422, detail="Stored checkpoint shard failed integrity verification")
-            digest.update(data)
-            total += len(data)
+            total += chunk_bytes
         if digest.hexdigest() != payload.checkpoint_sha256 or total != payload.checkpoint_bytes:
             raise HTTPException(status_code=422, detail="Reassembled candidate checkpoint does not match the registered hash or size")
         manifest = {"schema": "viread-checkpoint-shards-v1", "run_id": str(run_id),
@@ -694,17 +736,50 @@ class VireadOcrTrainingService:
         manifest_path = f"ocr-training/checkpoints/{run_id}/checkpoint.manifest.json"
         manifest_bytes = _canonical(manifest)
         await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
+        await self.repo.commit()
         await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
-        await self.repo.execute("""
-            UPDATE public.viread_ocr_training_runs SET status='CANDIDATE', checkpoint_sha256=:sha,
-                checkpoint_bytes=:bytes, checkpoint_storage_path=:path, step=:step,
-                metadata = metadata || CAST(:metadata AS jsonb), updated_at=now()
-            WHERE id=:run_id
-        """, {"sha": payload.checkpoint_sha256, "bytes": total, "path": manifest_path,
-              "step": payload.step, "metadata": json.dumps({"checkpoint_chunks": len(chunks)}), "run_id": run_id})
+        if job_id is not None and worker_id is not None:
+            await self._lock_colab_job_for_finalize(actor_id, job_id, run_id, worker_id, payload.profile)
+        latest = await self.repo.one("""
+            SELECT status, checkpoint_sha256, checkpoint_bytes, step, checkpoint_storage_path
+            FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE
+        """, {"run_id": run_id})
+        if not latest:
+            await self.repo.rollback()
+            raise HTTPException(status_code=409, detail="Training run cannot be completed")
+        already_completed = (
+            latest["status"] == "CANDIDATE"
+            and latest["checkpoint_sha256"] == payload.checkpoint_sha256
+            and int(latest["checkpoint_bytes"]) == payload.checkpoint_bytes
+            and int(latest["step"]) == payload.step
+        )
+        if not already_completed and latest["status"] not in {"CREATED", "RUNNING"}:
+            await self.repo.rollback()
+            raise HTTPException(status_code=409, detail="Training run cannot be completed")
+        if not already_completed:
+            await self.repo.execute("""
+                UPDATE public.viread_ocr_training_runs SET status='CANDIDATE', checkpoint_sha256=:sha,
+                    checkpoint_bytes=:bytes, checkpoint_storage_path=:path, step=:step,
+                    metadata = metadata || CAST(:metadata AS jsonb), updated_at=now()
+                WHERE id=:run_id
+            """, {"sha": payload.checkpoint_sha256, "bytes": total, "path": manifest_path,
+                  "step": payload.step, "metadata": json.dumps({"checkpoint_chunks": len(chunks)}), "run_id": run_id})
+        if job_id is not None and worker_id is not None:
+            await self.repo.execute("""
+                UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
+                WHERE id=:run_id
+            """, {"run_id": run_id, "metadata": json.dumps({
+                "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
+            })})
+            await self.repo.execute("""
+                UPDATE public.viread_ocr_training_jobs
+                SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
+                WHERE id=:id
+            """, {"id": job_id})
         await self.repo.commit()
         return {"run_id": run_id, "status": "CANDIDATE", "checkpoint_sha256": payload.checkpoint_sha256,
-                "checkpoint_bytes": total, "manifest_storage_path": manifest_path, "chunk_count": len(chunks)}
+                "checkpoint_bytes": total, "manifest_storage_path": manifest_path, "chunk_count": len(chunks),
+                "idempotent": already_completed}
 
     async def benchmark(self, actor_id: UUID, payload: BenchmarkCreate) -> dict[str, Any]:
         await self._admin(actor_id)

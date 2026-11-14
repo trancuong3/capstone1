@@ -543,21 +543,13 @@ async def complete_viread_colab_job_run(
     if str(job["run_id"]) != str(run_id) or payload.profile != job["profile"]:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Completed run is not attached to this job")
-    await service._admin(UUID(str(job["created_by"])))
-    result = await service.complete_run(UUID(str(job["created_by"])), run_id, payload)
-    await db.execute(text("""
-        UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
-        WHERE id=:run_id
-    """), {"run_id": run_id, "metadata": json.dumps({
-        "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
-    })})
-    await db.execute(text("""
-        UPDATE public.viread_ocr_training_jobs
-        SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
-        WHERE id=:id
-    """), {"id": job_id})
+    actor_id = UUID(str(job["created_by"]))
+    await service._admin(actor_id)
+    # The lease row was selected FOR UPDATE above. Release it before checkpoint
+    # verification, which performs multiple Storage downloads, then revalidate
+    # ownership under a short lock when the candidate is committed.
     await db.commit()
-    return result
+    return await service.complete_run(actor_id, run_id, payload, job_id=job_id, worker_id=worker_id)
 
 
 @router.post("/admin/viread-training/worker/jobs/{job_id}/benchmarks")
