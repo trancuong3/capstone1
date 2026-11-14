@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AdminLoading,
   AdminPageHeader,
+  AdminResultsPagination,
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -29,6 +30,8 @@ interface ActionNotice {
 
 export function AdminBooksScreen() {
   const { books } = useAdminServices();
+  const pageSize = 30;
+  const [pageNumber, setPageNumber] = useState(1);
   const [items, setItems] = useState<readonly AdminBookListItemUI[] | null>(
     null,
   );
@@ -49,6 +52,7 @@ export function AdminBooksScreen() {
 
   const load = useCallback(async (): Promise<boolean> => {
     const requestId = ++requestIdRef.current;
+    setPageNumber(1);
     setError(null);
     setItems(null);
     try {
@@ -79,7 +83,7 @@ export function AdminBooksScreen() {
   }, [load]);
 
   useEffect(() => {
-    const timeout = globalThis.setTimeout(() => void load(), 0);
+    const timeout = globalThis.setTimeout(() => void load(), 200);
     return () => {
       globalThis.clearTimeout(timeout);
       requestIdRef.current += 1;
@@ -144,6 +148,11 @@ export function AdminBooksScreen() {
       setLifecycleBusyBookId(null);
     }
   }
+
+  const visibleItems = items?.slice(
+    (pageNumber - 1) * pageSize,
+    pageNumber * pageSize,
+  );
 
   return (
     <>
@@ -251,7 +260,14 @@ export function AdminBooksScreen() {
         />
       ) : (
         <div className="grid gap-4">
-          {items.map((item) => {
+          <AdminResultsPagination
+            itemLabel="sách"
+            onPageChange={setPageNumber}
+            page={pageNumber}
+            pageSize={pageSize}
+            total={items.length}
+          />
+          {visibleItems?.map((item) => {
             const book = item.book;
             const missingTitle = !book.title.trim();
             const isBusy = lifecycleBusyBookId !== null;
@@ -289,15 +305,11 @@ export function AdminBooksScreen() {
                         · Khối {book.min_grade}–{book.max_grade}
                       </p>
                     </div>
-                    <dl className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
-                      <Metric label="Trang" value={item.page_count} />
-                      <Metric label="Xử lý" value={item.processing_count} />
-                      <Metric
-                        label="Cần duyệt"
-                        value={item.needs_review_count}
-                      />
-                      <Metric label="Đã duyệt" value={item.verified_count} />
-                    </dl>
+                    <p className="text-sm text-muted lg:max-w-72 lg:text-right">
+                      {item.page_count} trang · {item.needs_review_count} cần
+                      duyệt · {item.processing_count} đang xử lý ·{" "}
+                      {item.verified_count} đã duyệt
+                    </p>
                   </div>
 
                   <div className="flex flex-wrap gap-2 border-t border-border pt-4">
@@ -337,17 +349,15 @@ export function AdminBooksScreen() {
               </Card>
             );
           })}
+          <AdminResultsPagination
+            itemLabel="sách"
+            onPageChange={setPageNumber}
+            page={pageNumber}
+            pageSize={pageSize}
+            total={items.length}
+          />
         </div>
       )}
     </>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-control bg-canvas px-3 py-2">
-      <dt className="text-xs font-bold text-muted">{label}</dt>
-      <dd className="text-xl font-black">{value}</dd>
-    </div>
   );
 }

@@ -422,7 +422,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                  batch_size: int = 32, seed: int = 20261112, resume: bool = False,
                  freeze_epochs: int = 5, use_fp16: bool = True,
                  job_config_sha256: str | None = None,
-                 progress_callback: Callable[[int, int], None] | None = None) -> dict[str, Any]:
+                 progress_callback: Callable[[int, int], None] | None = None,
+                 progress_interval_steps: int = 100) -> dict[str, Any]:
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {sorted(PROFILES)}")
     manifest = Path(manifest_path).resolve()
@@ -444,6 +445,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         validate_flow1_sample_counts(dict(Counter(row.source_flow for row in rows)))
     if total_steps < 2 or freeze_epochs < 1:
         raise ValueError("training requires at least two steps and one VGG freeze epoch")
+    if progress_interval_steps < 1:
+        raise ValueError("progress_interval_steps must be positive")
     if any(row.split == "holdout" or row.split == "locked_test" for row in rows) and all(row.split != "train" for row in rows):
         raise ValueError("holdout or Locked Test samples cannot be used as training data")
     original_parent = parent_checkpoint.lower() in {"original", ORIGINAL_CHECKPOINT_SHA256}
@@ -651,7 +654,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
             torch.save(state, temporary)
             temporary.replace(checkpoint_path)
             _prune_stale_best_models(run_dir, best_model_path)
-        if progress_callback is not None and (step % 100 == 0 or validated or step == total_steps):
+        if (progress_callback is not None
+                and (step % progress_interval_steps == 0 or validated or step == total_steps)):
             progress_callback(step, total_steps)
     if (best_model_path is None or not best_model_path.is_file()
             or best_model_sha256 != sha256_file(best_model_path)):

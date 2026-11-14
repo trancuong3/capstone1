@@ -123,6 +123,12 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
   await expect(
     page.getByRole("heading", { name: "Trang 2", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Xem ảnh / thay ảnh trang 1", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Xem ảnh / thay ảnh trang 2", exact: true })
+    .click();
   const first = page.getByRole("img", { name: "Ảnh trang 1", exact: true });
   const second = page.getByRole("img", { name: "Ảnh trang 2", exact: true });
   await expect(first).toHaveAttribute("src", /admin-source-1/);

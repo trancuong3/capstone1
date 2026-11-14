@@ -80,7 +80,7 @@ class AdminOcrProofreadSuggestionInput(BaseModel):
 
 
 class AdminOcrProofreadAuditInput(BaseModel):
-    mode: Literal["AI_CHECKED", "MANUAL_FALLBACK"]
+    mode: Literal["AI_CHECKED", "AI_AUTO_VERIFIED", "MANUAL_FALLBACK"]
     checked_text: str = Field(min_length=1, max_length=500_000)
     suggestions: list[AdminOcrProofreadSuggestionInput] = Field(max_length=30_000)
     reason_code: Literal["AI_CHECK_UNAVAILABLE"] | None = None
@@ -95,8 +95,8 @@ class AdminOcrProofreadAuditInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode(self):
-        if self.mode == "AI_CHECKED" and self.reason_code is not None:
-            raise ValueError("AI_CHECKED must not include a manual fallback reason")
+        if self.mode in ("AI_CHECKED", "AI_AUTO_VERIFIED") and self.reason_code is not None:
+            raise ValueError("AI-checked modes must not include a manual fallback reason")
         if self.mode == "MANUAL_FALLBACK" and (
             self.reason_code != "AI_CHECK_UNAVAILABLE" or self.suggestions
         ):

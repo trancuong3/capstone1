@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
+import { Button } from "@/components/common/button";
 import { cn } from "@/lib/utils/cn";
 import type { OperationalHealthStatusUI } from "@/types/admin";
 import type { BookLifecycleStatus } from "@/types/book";
@@ -74,5 +76,61 @@ export function AdminLoading({
         <p className="font-bold text-muted">{label}</p>
       </div>
     </div>
+  );
+}
+
+export function AdminResultsPagination({
+  page,
+  pageSize,
+  total,
+  itemLabel,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = Math.ceil(total / pageSize);
+  if (pageCount < 2) return null;
+  const firstItem = (page - 1) * pageSize + 1;
+  const lastItem = Math.min(page * pageSize, total);
+
+  return (
+    <nav
+      aria-label={`Điều hướng danh sách ${itemLabel}`}
+      className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-white px-4 py-3"
+    >
+      <p className="text-sm text-muted">
+        Đang xem {firstItem}–{lastItem} / {total} {itemLabel}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          className="min-h-10 w-auto px-3 text-sm"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          type="button"
+          variant="secondary"
+        >
+          <ChevronLeft aria-hidden className="size-4" /> Trước
+        </Button>
+        <span
+          aria-current="page"
+          className="min-w-16 text-center text-sm font-bold"
+        >
+          {page} / {pageCount}
+        </span>
+        <Button
+          className="min-h-10 w-auto px-3 text-sm"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          type="button"
+          variant="secondary"
+        >
+          Tiếp <ChevronRight aria-hidden className="size-4" />
+        </Button>
+      </div>
+    </nav>
   );
 }

@@ -233,10 +233,9 @@ describe("admin components", () => {
       name: adminBookListItemFixture.book.title,
     });
     expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
-    expect(screen.getByText("Trang").nextElementSibling).toHaveTextContent("3");
-    for (const label of ["Xử lý", "Cần duyệt", "Đã duyệt"]) {
-      expect(screen.getByText(label).nextElementSibling).toHaveTextContent("1");
-    }
+    expect(
+      screen.getByText("3 trang · 1 cần duyệt · 1 đang xử lý · 1 đã duyệt"),
+    ).toBeInTheDocument();
     services.books.list.mockResolvedValueOnce([retired]);
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
     expect(await screen.findByText("Đã ngừng")).toBeInTheDocument();

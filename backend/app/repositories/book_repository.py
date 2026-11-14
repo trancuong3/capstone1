@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
@@ -109,6 +109,47 @@ class CatalogRepository:
         return result.scalars().all()
 
 class AdminCatalogRepository(CatalogRepository):
+    @staticmethod
+    def _latest_revision_subquery(*, book_id: UUID | None = None):
+        """Return one revision per active page, preserving numeric revision order.
+
+        RevisionNo is stored as text. Ordering by the length and lexical value of
+        its normalized ASCII digits gives integer ordering without unsafe casts.
+        Invalid/zero legacy values fall back to creation time and id.
+        """
+        normalized_number = func.regexp_replace(PageRevision.RevisionNo, r"^0+", "")
+        positive_number = and_(
+            PageRevision.RevisionNo.op("~")(r"^[0-9]+$"),
+            normalized_number != "",
+        )
+        numeric_value = case((positive_number, normalized_number), else_=None)
+        query = select(
+            PageRevision.Id.label("revision_id"),
+            PageRevision.PageId.label("page_id"),
+            PageRevision.RevisionNo.label("revision_no"),
+            PageRevision.VerificationStatus.label("verification_status"),
+            PageRevision.DraftText.label("draft_text"),
+            PageRevision.VerifiedText.label("verified_text"),
+            PageRevision.VerifiedAt.label("verified_at"),
+            func.row_number()
+            .over(
+                partition_by=PageRevision.PageId,
+                order_by=(
+                    case((positive_number, 1), else_=0).desc(),
+                    func.length(numeric_value).desc().nullslast(),
+                    numeric_value.desc().nullslast(),
+                    PageRevision.CreatedAt.desc(),
+                    PageRevision.Id.desc(),
+                ),
+            )
+            .label("revision_rank"),
+        ).join(BookPage, BookPage.Id == PageRevision.PageId).where(
+            BookPage.LifecycleStatus == "ACTIVE"
+        )
+        if book_id is not None:
+            query = query.where(BookPage.BookId == book_id)
+        return query.subquery()
+
     async def max_page_number(self, book_id: UUID) -> int | None:
         """Return the maximum page number among active pages and pending reservations."""
         value = await self.db.scalar(
@@ -128,6 +169,105 @@ class AdminCatalogRepository(CatalogRepository):
             query = query.where(Book.LifecycleStatus == lifecycle_status)
         result = await self.db.execute(query.order_by(Book.Title, Book.Id))
         return result.scalars().all()
+
+    async def catalog_rows(
+        self,
+        search: str | None,
+        lifecycle_status: str | None,
+        verification_status: str | None,
+    ):
+        """Fetch the admin catalog and all page-status counts in one query."""
+        latest = self._latest_revision_subquery()
+        page_statuses = (
+            select(
+                BookPage.BookId.label("book_id"),
+                BookPage.Id.label("page_id"),
+                latest.c.verification_status.label("verification_status"),
+            )
+            .outerjoin(
+                latest,
+                and_(latest.c.page_id == BookPage.Id, latest.c.revision_rank == 1),
+            )
+            .where(BookPage.LifecycleStatus == "ACTIVE")
+            .subquery()
+        )
+        stats = (
+            select(
+                page_statuses.c.book_id,
+                func.count(page_statuses.c.page_id).label("page_count"),
+                func.count(page_statuses.c.page_id)
+                .filter(page_statuses.c.verification_status == "PROCESSING")
+                .label("processing_count"),
+                func.count(page_statuses.c.page_id)
+                .filter(page_statuses.c.verification_status == "NEEDS_REVIEW")
+                .label("needs_review_count"),
+                func.count(page_statuses.c.page_id)
+                .filter(page_statuses.c.verification_status == "VERIFIED")
+                .label("verified_count"),
+                func.count(page_statuses.c.page_id)
+                .filter(
+                    page_statuses.c.verification_status.not_in(
+                        ("PROCESSING", "NEEDS_REVIEW", "VERIFIED")
+                    )
+                    & page_statuses.c.verification_status.is_not(None)
+                )
+                .label("unknown_status_count"),
+            )
+            .group_by(page_statuses.c.book_id)
+            .subquery()
+        )
+        query = (
+            select(
+                Book,
+                func.coalesce(stats.c.page_count, 0).label("page_count"),
+                func.coalesce(stats.c.processing_count, 0).label("processing_count"),
+                func.coalesce(stats.c.needs_review_count, 0).label("needs_review_count"),
+                func.coalesce(stats.c.verified_count, 0).label("verified_count"),
+                func.coalesce(stats.c.unknown_status_count, 0).label("unknown_status_count"),
+                case((self.eligible_book(), True), else_=False).label(
+                    "parent_catalog_eligible"
+                ),
+            )
+            .outerjoin(stats, stats.c.book_id == Book.Id)
+        )
+        if search and search.strip():
+            pattern = self.search_pattern(search)
+            query = query.where(
+                or_(
+                    Book.Name.ilike(pattern, escape="\\"),
+                    Book.Title.ilike(pattern, escape="\\"),
+                    Book.Author.ilike(pattern, escape="\\"),
+                )
+            )
+        if lifecycle_status is not None:
+            query = query.where(Book.LifecycleStatus == lifecycle_status)
+        result = await self.db.execute(query.order_by(Book.Title, Book.Id))
+        return result.all()
+
+    async def page_list_rows(self, book_id: UUID):
+        """Fetch active pages with their latest revision in one database query."""
+        latest = self._latest_revision_subquery(book_id=book_id)
+        result = await self.db.execute(
+            select(
+                BookPage,
+                latest.c.revision_id,
+                latest.c.revision_no,
+                latest.c.verification_status,
+                latest.c.draft_text,
+                latest.c.verified_text,
+                latest.c.verified_at,
+            )
+            .outerjoin(
+                latest,
+                and_(latest.c.page_id == BookPage.Id, latest.c.revision_rank == 1),
+            )
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return result.all()
 
     async def pages(self, book_id: UUID):
         # The Admin page list and catalog counts represent active OCR pages only.
