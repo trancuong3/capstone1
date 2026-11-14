@@ -385,6 +385,31 @@ export function AdminVireadTrainingScreen() {
                         </p>
                       </div>
                     ) : null}
+                    {job.status === "BLOCKED" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.target === "COLAB" &&
+                    job.attempts < 3 &&
+                    !job.colab_execution_id &&
+                    !job.colab_execution_resource_name &&
+                    !job.colab_operation_name &&
+                    ["HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"].includes(
+                      job.last_error_code ?? "",
+                    ) ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() => void retry(job.job_id)}
+                          variant="secondary"
+                        >
+                          Tiếp tục kiểm thử candidate
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Checkpoint đã có; dùng lại cùng Google Drive Colab để
+                          tiếp tục Locked Test và benchmark. Nếu tệp candidate
+                          chưa được lưu trên Drive, worker sẽ dừng an toàn.
+                        </p>
+                      </div>
+                    ) : null}
                     {job.run_id ? (
                       <p className="mt-1 break-all font-mono text-xs text-muted">
                         Run {job.run_id}

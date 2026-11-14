@@ -22,6 +22,7 @@ const overviewSchema = z.object({
         config_sha256: z.string(),
         parent_checkpoint_sha256: z.string(),
         run_id: z.uuid().nullable(),
+        run_status: z.string().nullable().optional(),
         attempts: z.number().int(),
         progress: z.record(z.string(), z.unknown()),
         last_error_code: z.string().nullable(),

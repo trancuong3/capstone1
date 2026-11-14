@@ -267,6 +267,8 @@ class ColabWorker:
                         json=run_payload)
         run_id = str(run["run_id"])
         if run["status"] in {"CANDIDATE", "BENCHMARKED"}:
+            if run.get("checkpoint_sha256") != candidate["checkpoint_sha256"]:
+                raise ValueError("REGISTERED_CANDIDATE_HASH_MISMATCH")
             return run_id, run["status"], stable_candidate
         chunks_root = run_dir / "upload-shards"
         manifest_path = chunks_root / "shards.manifest.json"
@@ -322,6 +324,8 @@ class ColabWorker:
             self.assert_runtime_capacity(run_dir)
             candidate_record = run_dir / "candidate.json"
             stable_candidate = run_dir / "candidate.pth"
+            if job.get("run_id") and not (candidate_record.is_file() and stable_candidate.is_file()):
+                raise ValueError("PERSISTED_CANDIDATE_REQUIRED_FOR_RUN_RECOVERY")
             if candidate_record.is_file() and stable_candidate.is_file():
                 candidate = json.loads(candidate_record.read_text(encoding="utf-8"))
                 if sha256_file(stable_candidate) != candidate.get("checkpoint_sha256"):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 import tempfile
 import types
@@ -92,6 +93,37 @@ class ColabWorkerTests(unittest.TestCase):
     def test_worker_allows_local_development_backend(self):
         worker = ColabWorker("http://127.0.0.1:8001", "x" * 48, tempfile.gettempdir())
         self.assertEqual(worker.api_base, "http://127.0.0.1:8001")
+        worker.session.close()
+
+    def test_candidate_recovery_refuses_checkpoint_hash_different_from_registered_candidate(self):
+        worker = ColabWorker("https://viread.example", "x" * 48, tempfile.gettempdir())
+        job_id = "a5fd82cb-490a-4e59-bad3-64e8a6f88d70"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            candidate_path = run_dir / "candidate.pth"
+            candidate_path.write_bytes(b"persisted candidate")
+            candidate_sha = sha256_file(candidate_path)
+            candidate = {
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "parent_checkpoint_sha256": "a" * 64,
+                "manifest_sha256": "b" * 64,
+                "config_sha256": "c" * 64,
+                "architecture_sha256": "d" * 64,
+                "vocabulary_sha256": "e" * 64,
+                "checkpoint_sha256": candidate_sha,
+                "candidate_path": str(candidate_path),
+                "steps": 5000,
+            }
+            (run_dir / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+            with patch.object(worker, "call", return_value={
+                "run_id": "run-1", "status": "CANDIDATE", "checkpoint_sha256": "f" * 64,
+            }) as call:
+                with self.assertRaisesRegex(ValueError, "REGISTERED_CANDIDATE_HASH_MISMATCH"):
+                    worker.upload_candidate({
+                        "id": job_id, "profile": candidate["profile"],
+                        "dataset_version_id": "dataset-1", "manifest_sha256": candidate["manifest_sha256"],
+                    }, candidate, run_dir)
+            call.assert_called_once()
         worker.session.close()
 
     def test_worker_does_not_claim_jobs_without_gpu_and_reports_waiting_state(self):

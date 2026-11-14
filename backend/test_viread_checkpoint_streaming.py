@@ -124,6 +124,80 @@ class CompleteRunRouteLockTests(unittest.TestCase):
         self.assertEqual(events, ["lease", "admin", "commit", "complete"])
 
 
+class LockedTestRouteTests(unittest.TestCase):
+    def test_locked_test_route_selects_and_uses_locked_dataset_fields(self):
+        actor_id = UUID("03db2619-ea6a-41ef-b7fd-02e5cc91cc53")
+        job_id = UUID("bb934c35-5ba2-45f8-b4c0-6159fd6b20cf")
+        locked_test_id = UUID("bb934c35-5ba2-45f8-b4c0-6159fd6b20cd")
+        selected_job_columns: list[str] = []
+
+        class FakeRepo:
+            async def one(self, sql, _params=None):
+                if "FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE" in sql:
+                    select_clause = sql.split("FROM", 1)[0]
+                    selected_job_columns.extend((
+                        "locked_test_version_id" if "locked_test_version_id" in select_clause else "",
+                        "locked_test_manifest_sha256" if "locked_test_manifest_sha256" in select_clause else "",
+                    ))
+                    job = {
+                        "id": job_id,
+                        "profile": "FLOW2_ADMIN_VERIFIED",
+                        "status": "COLAB_RUNNING",
+                        "target": "COLAB",
+                        "worker_id": "worker-test",
+                        "created_by": actor_id,
+                        "locked_test_version_id": locked_test_id,
+                        "locked_test_manifest_sha256": "a" * 64,
+                    }
+                    return {key: value for key, value in job.items() if key in select_clause}
+                if "FROM public.viread_ocr_dataset_versions" in sql:
+                    return {
+                        "id": locked_test_id,
+                        "source_flow": "LOCKED_TEST",
+                        "version_sha256": "a" * 64,
+                        "sample_count": 1,
+                        "is_locked_test": True,
+                        "manifest_storage_path": "ocr-training/locked-test/manifest.json",
+                    }
+                raise AssertionError(f"Unexpected query: {sql}")
+
+        class FakeService:
+            def __init__(self, _db):
+                self.repo = FakeRepo()
+
+            async def _admin(self, received_actor_id):
+                if received_actor_id != actor_id:
+                    raise AssertionError("Unexpected admin actor")
+
+            async def dataset_samples(self, received_actor_id, dataset_id, *, limit, offset):
+                return {"dataset": {"version_sha256": "a" * 64, "id": str(dataset_id)},
+                        "items": [{"label": "text"}], "next_offset": None}
+
+        class FakeDb:
+            async def commit(self):
+                return None
+
+            async def rollback(self):
+                return None
+
+            async def execute(self, *_args, **_kwargs):
+                return None
+
+        with patch.object(admin_viread_training, "VireadOcrTrainingService", FakeService):
+            result = asyncio.run(admin_viread_training.get_viread_colab_job_locked_test(
+                job_id=job_id,
+                worker_id="worker-test",
+                limit=200,
+                offset=0,
+                _worker=None,
+                db=FakeDb(),
+            ))
+
+        self.assertEqual(selected_job_columns, ["locked_test_version_id", "locked_test_manifest_sha256"])
+        self.assertEqual(result["dataset"]["id"], str(locked_test_id))
+        self.assertEqual(result["items"], [{"label": "text"}])
+
+
 class CompleteRunStreamingTests(unittest.TestCase):
     def test_verifies_checkpoint_shards_without_buffering_and_persists_candidate(self):
         actor_id = UUID("03db2619-ea6a-41ef-b7fd-02e5cc91cc53")
