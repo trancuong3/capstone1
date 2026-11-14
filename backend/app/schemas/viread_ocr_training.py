@@ -94,6 +94,8 @@ class DatasetSampleInput(BaseModel):
     label: str = Field(min_length=1, max_length=5000)
     verified: bool = False
     annotation_id: str | None = Field(default=None, max_length=160)
+    source_page_id: UUID | None = None
+    source_revision_id: UUID | None = None
     provenance: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("image_sha256")

@@ -136,6 +136,29 @@ export function AdminVireadTrainingScreen() {
     }
   }
 
+  async function closeUnbenchmarkedCandidate(jobId: string) {
+    if (!vireadTraining || busy) return;
+    const confirmed = globalThis.confirm(
+      "Đóng candidate chưa benchmark? Checkpoint và run được giữ để kiểm toán; model đang dùng không đổi. Job thay thế chỉ được xếp sau khi Locked Test đủ mẫu VERIFIED độc lập.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.closeUnbenchmarkedCandidate(jobId);
+      setMessage(
+        "Đã đóng candidate chưa benchmark; run và checkpoint được giữ nguyên. Hệ thống sẽ tự tạo Locked Test và job thay thế khi đủ holdout VERIFIED độc lập.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const totalSamples =
     data?.samples.reduce((sum, item) => sum + item.count, 0) ?? 0;
   const outboxPending =
@@ -158,6 +181,7 @@ export function AdminVireadTrainingScreen() {
   );
   const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
   const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
+  const lockedTestReady = data?.locked_test?.status === "READY";
 
   return (
     <>
@@ -259,7 +283,9 @@ export function AdminVireadTrainingScreen() {
                         !flow1Train ||
                         !flow1Validation
                       ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
-                      : "Đủ dữ liệu; hệ thống tự đăng ký job Flow 1 riêng sau khi snapshot hợp lệ"}
+                      : lockedTestReady
+                        ? "Đủ dữ liệu; hệ thống tự đăng ký job Flow 1 riêng sau khi snapshot hợp lệ"
+                        : "Train/Validation đủ; job chờ Locked Test độc lập từ holdout VERIFIED đạt ngưỡng"}
                 </p>
               </li>
               <li className="rounded-control border border-border p-4">
@@ -282,8 +308,10 @@ export function AdminVireadTrainingScreen() {
                   ghép thành một nhãn.
                 </p>
                 <p className="mt-2 text-sm font-bold text-muted">
-                  {flow2Train > 0 && flow2Validation > 0
-                    ? "Đủ Train và Validation; hệ thống tự tạo job Flow 2 riêng"
+                  {flow2Train > 0 && flow2Validation > 0 && lockedTestReady
+                    ? "Đủ Train, Validation và Locked Test; hệ thống tự tạo job Flow 2 riêng"
+                    : flow2Train > 0 && flow2Validation > 0
+                      ? "Train/Validation đủ; job chờ Locked Test độc lập từ holdout VERIFIED đạt ngưỡng"
                     : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
@@ -293,10 +321,38 @@ export function AdminVireadTrainingScreen() {
           <Card className="mb-6 bg-white">
             <h2 className="text-xl font-black">Hàng đợi huấn luyện tự động</h2>
             <p className="mt-2 text-sm text-muted">
-              Mỗi job giữ riêng dataset, profile và lineage. Colab Enterprise tự
-              chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin
-              duyệt.
+              Mỗi job được ghim vào một Locked Test bất biến. Hệ thống chỉ tự
+              tạo test từ holdout VERIFIED không trùng trang Train/Validation;
+              model chỉ đổi sau quality gate và Admin duyệt.
             </p>
+            {data.locked_test ? (
+              <div className="mt-4 rounded-control border border-border p-4">
+                <p className="font-extrabold">Locked Test tự động</p>
+                {data.locked_test.status === "READY" ? (
+                  <>
+                    <p className="mt-2 text-sm">
+                      Sẵn sàng · {data.locked_test.sample_count.toLocaleString("vi-VN")} mẫu ·{" "}
+                      {data.locked_test.group_count.toLocaleString("vi-VN")} trang/nhóm
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs text-muted">
+                      Manifest {data.locked_test.manifest_sha256
+                        ? hash(data.locked_test.manifest_sha256)
+                        : "—"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">
+                    Chưa đủ dữ liệu holdout VERIFIED độc lập: còn {(
+                      data.locked_test.missing_sample_count ??
+                      Math.max(0, data.locked_test.minimum_samples - data.locked_test.eligible_sample_count)
+                    ).toLocaleString("vi-VN")} cặp ảnh-nhãn và {(
+                      data.locked_test.missing_group_count ??
+                      Math.max(0, data.locked_test.minimum_groups - data.locked_test.eligible_group_count)
+                    ).toLocaleString("vi-VN")} trang/nhóm. Không dùng mẫu Train/Validation hoặc tự sinh nhãn để lấp phần thiếu.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <div className="mt-4 space-y-3">
               {data.jobs.map((job) => {
                 const stage = job.progress.stage;
@@ -391,6 +447,8 @@ export function AdminVireadTrainingScreen() {
                     job.target === "COLAB" &&
                     job.attempts < 3 &&
                     !job.run_id &&
+                    Boolean(job.locked_test_version_id) &&
+                    Boolean(job.locked_test_manifest_sha256) &&
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
                     !job.colab_operation_name ? (
@@ -412,6 +470,8 @@ export function AdminVireadTrainingScreen() {
                     job.run_status === "CANDIDATE" &&
                     job.target === "COLAB" &&
                     job.run_config_sha256 === job.config_sha256 &&
+                    Boolean(job.locked_test_version_id) &&
+                    Boolean(job.locked_test_manifest_sha256) &&
                     job.attempts < 3 &&
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
@@ -432,6 +492,25 @@ export function AdminVireadTrainingScreen() {
                           Checkpoint đã có; dùng lại cùng Google Drive Colab để
                           tiếp tục Locked Test và benchmark. Nếu tệp candidate
                           chưa được lưu trên Drive, worker sẽ dừng an toàn.
+                        </p>
+                      </div>
+                    ) : null}
+                    {job.status === "CANDIDATE" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.candidate_has_benchmark === false &&
+                    job.run_config_sha256 === job.config_sha256 &&
+                    job.worker_id === null &&
+                    (!job.lease_expires_at || new Date(job.lease_expires_at).getTime() <= Date.now()) ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() => void closeUnbenchmarkedCandidate(job.job_id)}
+                          variant="secondary"
+                        >
+                          Đóng candidate, chờ job thay thế
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Chỉ đóng candidate đã dừng và chưa benchmark. Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo khi Locked Test đạt tối thiểu {data.locked_test?.minimum_samples ?? 200} cặp và {data.locked_test?.minimum_groups ?? 30} trang độc lập.
                         </p>
                       </div>
                     ) : null}
