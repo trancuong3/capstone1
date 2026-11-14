@@ -228,10 +228,22 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
                         expected_key = f"image-{image_count:09d}".encode()
                         if cursor.key() != expected_key:
                             raise ValueError("VietOCR LMDB image keys are not contiguous")
+                        if (
+                            dataset.txn.get(f"label-{image_count:09d}".encode()) is None
+                            or dataset.txn.get(f"dim-{image_count:09d}".encode()) is None
+                        ):
+                            raise ValueError(
+                                f"VietOCR LMDB sample {image_count} is missing its label or dimensions"
+                            )
                         image_count += 1
                         cursor.next()
             finally:
                 cursor.close()
+            if image_count not in (dataset.nSamples, dataset.nSamples + 1):
+                raise ValueError(
+                    "VietOCR LMDB sample count mismatch: metadata reports "
+                    f"{dataset.nSamples}, but found {image_count} image entries"
+                )
             if image_count != dataset.nSamples:
                 previous_count = dataset.nSamples
                 dataset.nSamples = image_count
