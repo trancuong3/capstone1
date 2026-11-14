@@ -94,6 +94,25 @@ export function AdminVireadTrainingScreen() {
     }
   }
 
+  async function retry(jobId: string) {
+    if (!vireadTraining || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.retry(jobId);
+      setMessage(
+        "Đã đưa lại job lỗi vào hàng đợi. Colab sẽ nhận đúng snapshot dữ liệu khi bạn chạy worker.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể thử lại job này. Job có thể đã tạo run, model gốc đã đổi hoặc một job khác đang chạy.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const totalSamples =
     data?.samples.reduce((sum, item) => sum + item.count, 0) ?? 0;
   const outboxPending =
@@ -344,6 +363,27 @@ export function AdminVireadTrainingScreen() {
                       <p className="mt-1 text-sm text-danger">
                         Mã lỗi: {job.last_error_code}
                       </p>
+                    ) : null}
+                    {job.status === "FAILED" &&
+                    job.target === "COLAB" &&
+                    job.attempts < 3 &&
+                    !job.run_id &&
+                    !job.colab_execution_id &&
+                    !job.colab_execution_resource_name &&
+                    !job.colab_operation_name ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() => void retry(job.job_id)}
+                          variant="secondary"
+                        >
+                          Thử lại job này
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Chỉ dùng khi job lỗi trước khi tạo run; dữ liệu và
+                          lineage được giữ nguyên.
+                        </p>
+                      </div>
                     ) : null}
                     {job.run_id ? (
                       <p className="mt-1 break-all font-mono text-xs text-muted">
