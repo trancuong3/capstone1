@@ -158,36 +158,86 @@ def _restore_rng(torch, state: dict[str, Any]) -> None:
 
 
 def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
-    """Make VietOCR 0.3.12's LMDB image validator work with NumPy 2.x.
+    """Make VietOCR 0.3.12's LMDB image paths work with NumPy 2.x.
 
-    Upstream VietOCR decodes encoded image bytes with ``np.fromstring``. NumPy
-    2 removed that binary-input behavior, so use ``frombuffer`` at this single
-    call site instead of changing NumPy globally or modifying the installed
-    VietOCR package. The validator keeps VietOCR's ``(valid, height, width)``
-    return contract used by its LMDB dataset builder.
+    Upstream VietOCR uses ``np.fromstring`` both for encoded image bytes while
+    building LMDB and for the binary int32 dimensions while loading it. NumPy 2
+    removed that binary-input behavior, so adapt only those two VietOCR call
+    sites instead of changing NumPy globally or modifying the installed package.
+    Both replacements preserve VietOCR's existing contracts.
     """
     from vietocr.tool import create_dataset as vietocr_dataset
+    from vietocr.loader import dataloader as vietocr_dataloader
 
-    current = vietocr_dataset.checkImageIsValid
-    if getattr(current, "_viread_numpy_bytes_compatibility", False):
-        return
-
-    def check_image_is_valid(image_bytes):
-        height = width = None
-        try:
-            if image_bytes is None:
+    current_validator = vietocr_dataset.checkImageIsValid
+    if not getattr(current_validator, "_viread_numpy_bytes_compatibility", False):
+        def check_image_is_valid(image_bytes):
+            height = width = None
+            try:
+                if image_bytes is None:
+                    return False, height, width
+                encoded = np.frombuffer(image_bytes, dtype=np.uint8)
+                image = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+                if image is None:
+                    return False, height, width
+                height, width = (int(image.shape[0]), int(image.shape[1]))
+                return bool(height * width), height, width
+            except Exception:
                 return False, height, width
-            encoded = np.frombuffer(image_bytes, dtype=np.uint8)
-            image = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                return False, height, width
-            height, width = (int(image.shape[0]), int(image.shape[1]))
-            return bool(height * width), height, width
-        except Exception:
-            return False, height, width
 
-    check_image_is_valid._viread_numpy_bytes_compatibility = True
-    vietocr_dataset.checkImageIsValid = check_image_is_valid
+        check_image_is_valid._viread_numpy_bytes_compatibility = True
+        vietocr_dataset.checkImageIsValid = check_image_is_valid
+
+    current_get_bucket = vietocr_dataloader.OCRDataset.get_bucket
+    if not getattr(current_get_bucket, "_viread_numpy_bytes_compatibility", False):
+        def get_bucket(dataset, idx):
+            key = f"dim-{idx:09d}".encode()
+            dimension_bytes = dataset.txn.get(key)
+            if dimension_bytes is None:
+                raise ValueError(f"VietOCR LMDB is missing dimension metadata for sample {idx}")
+            dimensions = np.frombuffer(dimension_bytes, dtype=np.int32)
+            if dimensions.size != 2:
+                raise ValueError(f"VietOCR LMDB has invalid dimension metadata for sample {idx}")
+            image_height, image_width = dimensions
+            resized_width, _ = vietocr_dataloader.resize(
+                image_width,
+                image_height,
+                dataset.image_height,
+                dataset.image_min_width,
+                dataset.image_max_width,
+            )
+            return resized_width
+
+        get_bucket._viread_numpy_bytes_compatibility = True
+        vietocr_dataloader.OCRDataset.get_bucket = get_bucket
+
+    current_init = vietocr_dataloader.OCRDataset.__init__
+    if not getattr(current_init, "_viread_lmdb_sample_count_compatibility", False):
+        def initialize_dataset(dataset, *args, **kwargs):
+            current_init(dataset, *args, **kwargs)
+            cursor = dataset.txn.cursor()
+            image_count = 0
+            try:
+                if cursor.set_range(b"image-"):
+                    while cursor.key().startswith(b"image-"):
+                        expected_key = f"image-{image_count:09d}".encode()
+                        if cursor.key() != expected_key:
+                            raise ValueError("VietOCR LMDB image keys are not contiguous")
+                        image_count += 1
+                        cursor.next()
+            finally:
+                cursor.close()
+            if image_count != dataset.nSamples:
+                previous_count = dataset.nSamples
+                dataset.nSamples = image_count
+                dataset.build_cluster_indices()
+                print(
+                    "VietOCR LMDB sample count corrected from "
+                    f"{previous_count} to {image_count}; all stored image-label pairs are included."
+                )
+
+        initialize_dataset._viread_lmdb_sample_count_compatibility = True
+        vietocr_dataloader.OCRDataset.__init__ = initialize_dataset
 
 
 def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:

@@ -270,6 +270,7 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
     lmdb = pytest.importorskip("lmdb")
     pytest.importorskip("vietocr")
     import vietocr.tool.create_dataset as vietocr_dataset
+    from vietocr.loader import dataloader as vietocr_dataloader
 
     original_validator = vietocr_dataset.checkImageIsValid
     monkeypatch.setattr(vietocr_dataset, "checkImageIsValid", original_validator)
@@ -309,6 +310,22 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
             assert transaction.get(b"label-000000001") == b"verified label two"
     finally:
         environment.close()
+
+    dataset = vietocr_dataloader.OCRDataset(
+        lmdb_path=str(lmdb_path),
+        root_dir=str(tmp_path),
+        annotation_path="train.tsv",
+        vocab=types.SimpleNamespace(encode=lambda label: label),
+    )
+    try:
+        assert dataset.nSamples == 2
+        assert dataset.get_bucket(0) == 80
+        assert dataset.get_bucket(1) == 80
+        assert dataset.cluster_indices[80] == [0, 1]
+        assert dataset.read_buffer(0)[1:] == ("verified label one", "line-a.png")
+        assert dataset.read_buffer(1)[1:] == ("verified label two", "line-b.png")
+    finally:
+        dataset.env.close()
 
 
 def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):
