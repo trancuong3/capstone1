@@ -25,6 +25,7 @@ from ai.vietocr_v2.flow2_register import _locked_test_rows, _read_trdg_provenanc
 from ai.vietocr_v2.flow2_prepare import match_external_annotations
 from ai.vietocr_v2.train import (
     PROFILES,
+    _WidthBucketBatchSampler,
     _install_vietocr_numpy_bytes_compatibility,
     _should_resume,
     validate_flow1_sample_counts,
@@ -264,6 +265,32 @@ def test_t30_resume_refuses_best_weights_without_the_matching_training_state(tmp
         _should_resume(True, tmp_path / "latest.pt", tmp_path)
 
 
+def test_vietocr_width_bucket_sampler_keeps_partial_batches_without_mixing_widths():
+    dataset = types.SimpleNamespace(cluster_indices={
+        64: [0, 1, 2],
+        96: [3, 4],
+        128: [5, 6, 7, 8, 9, 10],
+    })
+    sampler = _WidthBucketBatchSampler(dataset, batch_size=8, shuffle=False)
+
+    batches = list(sampler)
+    assert len(sampler) == 3
+    assert [len(batch) for batch in batches] == [3, 2, 6]
+    assert sorted(index for batch in batches for index in batch) == list(range(11))
+    bucket_for_index = {
+        index: bucket
+        for bucket, indices in dataset.cluster_indices.items()
+        for index in indices
+    }
+    assert all(len({bucket_for_index[index] for index in batch}) == 1 for batch in batches)
+
+
+def test_vietocr_width_bucket_sampler_rejects_nonpositive_batch_size():
+    dataset = types.SimpleNamespace(cluster_indices={})
+    with pytest.raises(ValueError, match="batch size must be positive"):
+        _WidthBucketBatchSampler(dataset, batch_size=0)
+
+
 def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, monkeypatch):
     np = pytest.importorskip("numpy")
     cv2 = pytest.importorskip("cv2")
@@ -331,6 +358,25 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
         assert dataset[1]["word"] == "verified label two"
     finally:
         dataset.env.close()
+
+    from vietocr.model.trainer import Trainer
+
+    trainer = types.SimpleNamespace(
+        config={
+            "dataset": {"image_height": 32, "image_min_width": 32, "image_max_width": 512},
+            "dataloader": {"num_workers": 0},
+        },
+        vocab=types.SimpleNamespace(encode=lambda _label: np.array([1, 2], dtype=np.int32)),
+        batch_size=8,
+    )
+    train_generator = Trainer.data_gen(trainer, str(lmdb_path), str(tmp_path), "train.tsv")
+    try:
+        batches = list(train_generator)
+        assert len(batches) == 1
+        assert batches[0]["img"].shape[0] == 2
+        assert len(batches[0]["filenames"]) == 2
+    finally:
+        train_generator.dataset.env.close()
 
 
 def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):

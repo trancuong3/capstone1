@@ -157,6 +157,44 @@ def _restore_rng(torch, state: dict[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
+class _WidthBucketBatchSampler:
+    """Yield complete and partial batches without mixing image-width buckets.
+
+    VietOCR 0.3.12's ``ClusterRandomSampler`` discards every bucket tail shorter
+    than the configured batch size. With a small verified dataset, that can
+    leave the training DataLoader empty even when its reported length is nonzero.
+    Batches must stay within a single bucket because the collator stacks images
+    into one tensor and different resized widths cannot be stacked together.
+    """
+
+    def __init__(self, dataset, batch_size: int, shuffle: bool = True):
+        if batch_size < 1:
+            raise ValueError("VietOCR batch size must be positive")
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+    def __iter__(self):
+        batches = []
+        for indices in self.dataset.cluster_indices.values():
+            bucket = list(indices)
+            if self.shuffle:
+                random.shuffle(bucket)
+            batches.extend(
+                bucket[start : start + self.batch_size]
+                for start in range(0, len(bucket), self.batch_size)
+            )
+        if self.shuffle:
+            random.shuffle(batches)
+        yield from batches
+
+    def __len__(self) -> int:
+        return sum(
+            (len(indices) + self.batch_size - 1) // self.batch_size
+            for indices in self.dataset.cluster_indices.values()
+        )
+
+
 def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
     """Make VietOCR 0.3.12's LMDB image paths work with NumPy 2.x.
 
@@ -170,6 +208,7 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
     from PIL import Image
     from vietocr.tool import create_dataset as vietocr_dataset
     from vietocr.loader import dataloader as vietocr_dataloader
+    from vietocr.model import trainer as vietocr_trainer
 
     if not hasattr(Image, "ANTIALIAS"):
         Image.ANTIALIAS = Image.Resampling.LANCZOS
@@ -255,6 +294,31 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
 
         initialize_dataset._viread_lmdb_sample_count_compatibility = True
         vietocr_dataloader.OCRDataset.__init__ = initialize_dataset
+
+    current_data_gen = vietocr_trainer.Trainer.data_gen
+    if not getattr(current_data_gen, "_viread_partial_bucket_batches", False):
+        def data_gen(trainer, lmdb_path, data_root, annotation,
+                     masked_language_model=True, transform=None):
+            dataset = vietocr_dataloader.OCRDataset(
+                lmdb_path=lmdb_path,
+                root_dir=data_root,
+                annotation_path=annotation,
+                vocab=trainer.vocab,
+                transform=transform,
+                image_height=trainer.config["dataset"]["image_height"],
+                image_min_width=trainer.config["dataset"]["image_min_width"],
+                image_max_width=trainer.config["dataset"]["image_max_width"],
+            )
+            batch_sampler = _WidthBucketBatchSampler(dataset, trainer.batch_size, shuffle=True)
+            return vietocr_trainer.DataLoader(
+                dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=vietocr_dataloader.Collator(masked_language_model),
+                **trainer.config["dataloader"],
+            )
+
+        data_gen._viread_partial_bucket_batches = True
+        vietocr_trainer.Trainer.data_gen = data_gen
 
 
 def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:
@@ -429,7 +493,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         parent_state = parent_state["model_state"]
     trainer.model.load_state_dict(parent_state, strict=True)
     trainer.iter = 0
-    train_batches_per_epoch = max(1, len(trainer.train_gen))
+    train_batches_per_epoch = len(trainer.train_gen)
+    if train_batches_per_epoch < 1:
+        raise ValueError("VietOCR training dataset produced no width-compatible batches")
     freeze_steps = min(freeze_epochs * train_batches_per_epoch, total_steps - 1)
     cnn_parameters = list(trainer.model.cnn.parameters())
     cnn_ids = {id(parameter) for parameter in cnn_parameters}
