@@ -72,7 +72,8 @@ async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, wor
     job = await service.repo.one("""
         SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
                config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts,
-               colab_execution_id, colab_execution_resource_name, colab_operation_name
+               colab_execution_id, colab_execution_resource_name, colab_operation_name,
+               locked_test_version_id, locked_test_manifest_sha256
         FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
     """, {"id": job_id})
     if not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING" or job["worker_id"] != worker_id:
@@ -94,10 +95,11 @@ async def retry_failed_viread_colab_training_job(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Requeue only a terminal Colab job that failed before registering any run."""
+    """Retry a pre-run failure or resume a verified candidate at Locked Test."""
     await VireadOcrTrainingService(db)._admin(actor_id)
     result = await db.execute(text("""
-        SELECT id, target, status, attempts, run_id,
+        SELECT id, target, status, attempts, run_id, profile, dataset_version_id,
+               manifest_sha256, config_sha256, created_by,
                parent_checkpoint_sha256, colab_execution_id,
                colab_execution_resource_name, colab_operation_name, last_error_code
         FROM public.viread_ocr_training_jobs
@@ -108,15 +110,62 @@ async def retry_failed_viread_colab_training_job(
     if not row:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Training job was not found")
-    if (row["target"] != "COLAB" or row["status"] != "FAILED" or row["run_id"] is not None
+    if (row["target"] != "COLAB" or int(row["attempts"]) >= 3
             or row["colab_execution_id"] is not None
             or row["colab_execution_resource_name"] is not None
-            or row["colab_operation_name"] is not None or int(row["attempts"]) >= 3):
+            or row["colab_operation_name"] is not None):
         await db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Only a failed Colab job with no registered run or execution can be retried",
+            detail="This Colab job has no safe retry available",
         )
+
+    retry_candidate_for_benchmark = (
+        row["status"] == "BLOCKED"
+        and row["run_id"] is not None
+        and row["last_error_code"] in {"HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"}
+    )
+    retry_before_run = row["status"] == "FAILED" and row["run_id"] is None
+    if not retry_before_run and not retry_candidate_for_benchmark:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Only a pre-run failure or an unbenchmarked candidate with a recoverable Colab error can be retried",
+        )
+
+    if retry_candidate_for_benchmark:
+        run_result = await db.execute(text("""
+            SELECT id, status, profile, dataset_version_id, manifest_sha256,
+                   config_sha256, parent_checkpoint_sha256, created_by,
+                   checkpoint_sha256, checkpoint_bytes, checkpoint_storage_path
+            FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE
+        """), {"run_id": row["run_id"]})
+        run = run_result.mappings().first()
+        checkpoint_sha = run["checkpoint_sha256"] if run else None
+        valid_checkpoint_sha = (
+            isinstance(checkpoint_sha, str)
+            and len(checkpoint_sha) == 64
+            and all(character in "0123456789abcdef" for character in checkpoint_sha)
+        )
+        if (not run or run["status"] != "CANDIDATE" or not valid_checkpoint_sha
+                or int(run["checkpoint_bytes"] or 0) <= 0 or not run["checkpoint_storage_path"]
+                or run["profile"] != row["profile"]
+                or str(run["dataset_version_id"]) != str(row["dataset_version_id"])
+                or run["manifest_sha256"] != row["manifest_sha256"]
+                or run["config_sha256"] != row["config_sha256"]
+                or run["parent_checkpoint_sha256"] != row["parent_checkpoint_sha256"]
+                or str(run["created_by"]) != str(row["created_by"])):
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The registered candidate is incomplete or its lineage does not match this job",
+            )
+        benchmark = await db.execute(text("""
+            SELECT id FROM public.viread_ocr_benchmarks WHERE run_id=:run_id LIMIT 1
+        """), {"run_id": row["run_id"]})
+        if benchmark.scalar_one_or_none() is not None:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="This candidate already has a benchmark result")
 
     active = await db.execute(text("""
         SELECT checkpoint_sha256 FROM public.viread_ocr_active_model
@@ -146,18 +195,30 @@ async def retry_failed_viread_colab_training_job(
         UPDATE public.viread_ocr_training_jobs
         SET status='WAITING_FOR_COLAB_WORKER', target='COLAB', worker_id=NULL,
             lease_expires_at=NULL, available_at=now(),
-            progress='{"stage":"waiting_for_colab_worker","retry_requested":true}'::jsonb,
+            progress=CAST(:progress AS jsonb),
             last_error_code=NULL,
             metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
                 'retry_requested_by', CAST(:actor_id AS text),
                 'retry_requested_at', now(),
-                'retry_previous_error', :previous_error
+                'retry_previous_error', :previous_error,
+                'retry_mode', :retry_mode
             ),
             updated_at=now()
         WHERE id=:job_id
-    """), {"job_id": job_id, "actor_id": str(actor_id), "previous_error": row["last_error_code"]})
+    """), {
+        "job_id": job_id,
+        "actor_id": str(actor_id),
+        "previous_error": row["last_error_code"],
+        "retry_mode": "candidate_benchmark_recovery" if retry_candidate_for_benchmark else "pre_run_retry",
+        "progress": json.dumps({
+            "stage": "waiting_for_colab_worker",
+            "retry_requested": True,
+            "recovery_mode": "candidate_benchmark" if retry_candidate_for_benchmark else "pre_run",
+        }),
+    })
     await db.commit()
-    return {"job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER"}
+    return {"job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER",
+            "recovery_mode": "candidate_benchmark" if retry_candidate_for_benchmark else "pre_run"}
 
 
 @router.get("/admin/viread-training/datasets/flow1")
@@ -449,7 +510,8 @@ async def create_viread_colab_job_run(
     if job["run_id"]:
         run = await service.repo.one("""
             SELECT id AS run_id, status, profile, parent_checkpoint_sha256,
-                   manifest_sha256, config_sha256, architecture_sha256, vocabulary_sha256
+                   manifest_sha256, config_sha256, architecture_sha256, vocabulary_sha256,
+                   checkpoint_sha256
             FROM public.viread_ocr_training_runs WHERE id=:id
         """, {"id": job["run_id"]})
         if not run or any(run[key] != getattr(payload, key) for key in (

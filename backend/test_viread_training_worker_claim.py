@@ -140,6 +140,7 @@ class TrainingWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response, {
             "job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER",
+            "recovery_mode": "pre_run",
         })
         self.assertIn("FOR UPDATE", db.statement[0])
         self.assertIn("status='WAITING_FOR_COLAB_WORKER'", db.statement[3])
@@ -165,6 +166,78 @@ class TrainingWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.status_code, 409)
         self.assertTrue(db.rolled_back)
         self.assertFalse(db.committed)
+
+    async def test_retry_resumes_matching_candidate_for_locked_test_without_retraining(self):
+        job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        actor_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        run_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        parent_sha = "c" * 64
+        job = {
+            "target": "COLAB", "status": "BLOCKED", "run_id": run_id, "attempts": 2,
+            "profile": "FLOW2_ADMIN_VERIFIED", "dataset_version_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "manifest_sha256": "a" * 64, "config_sha256": "b" * 64,
+            "parent_checkpoint_sha256": parent_sha, "created_by": actor_id,
+            "colab_execution_id": None, "colab_execution_resource_name": None,
+            "colab_operation_name": None, "last_error_code": "HTTPERROR",
+        }
+        run = {
+            "id": run_id, "status": "CANDIDATE", "profile": job["profile"],
+            "dataset_version_id": job["dataset_version_id"], "manifest_sha256": job["manifest_sha256"],
+            "config_sha256": job["config_sha256"], "parent_checkpoint_sha256": parent_sha,
+            "created_by": actor_id, "checkpoint_sha256": "e" * 64,
+            "checkpoint_bytes": 1024, "checkpoint_storage_path": "ocr-training/checkpoints/candidate/manifest.json",
+        }
+        db = _RecordingSession([
+            _RowResult(job), _RowResult(run), _ScalarResult(None),
+            _ScalarResult(parent_sha), _ScalarResult(None), _EmptyResult(),
+        ])
+
+        with patch("app.api.routes.admin_viread_training.VireadOcrTrainingService._admin", new_callable=AsyncMock):
+            response = await retry_failed_viread_colab_training_job(
+                job_id=job_id, actor_id=actor_id, db=db,
+            )
+
+        self.assertEqual(response, {
+            "job_id": job_id,
+            "status": "WAITING_FOR_COLAB_WORKER",
+            "recovery_mode": "candidate_benchmark",
+        })
+        self.assertIn("viread_ocr_training_runs WHERE id=:run_id FOR UPDATE", db.statement[1])
+        self.assertIn("viread_ocr_benchmarks WHERE run_id=:run_id", db.statement[2])
+        self.assertIn("retry_mode", db.statement[-1])
+        self.assertEqual(db.params[-1]["retry_mode"], "candidate_benchmark_recovery")
+        self.assertEqual(db.params[-1]["previous_error"], "HTTPERROR")
+        self.assertTrue(db.committed)
+
+    async def test_retry_refuses_candidate_with_mismatched_job_lineage(self):
+        job = {
+            "target": "COLAB", "status": "BLOCKED", "run_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "attempts": 1, "profile": "FLOW2_ADMIN_VERIFIED", "dataset_version_id": "dataset-job",
+            "manifest_sha256": "a" * 64, "config_sha256": "b" * 64,
+            "parent_checkpoint_sha256": "c" * 64, "created_by": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "colab_execution_id": None, "colab_execution_resource_name": None,
+            "colab_operation_name": None, "last_error_code": "HTTPERROR",
+        }
+        run = {
+            "id": job["run_id"], "status": "CANDIDATE", "profile": job["profile"],
+            "dataset_version_id": "different-dataset", "manifest_sha256": job["manifest_sha256"],
+            "config_sha256": job["config_sha256"], "parent_checkpoint_sha256": job["parent_checkpoint_sha256"],
+            "created_by": job["created_by"], "checkpoint_sha256": "e" * 64,
+            "checkpoint_bytes": 1024, "checkpoint_storage_path": "ocr-training/checkpoints/candidate/manifest.json",
+        }
+        db = _RecordingSession([_RowResult(job), _RowResult(run)])
+
+        with patch("app.api.routes.admin_viread_training.VireadOcrTrainingService._admin", new_callable=AsyncMock):
+            with self.assertRaises(HTTPException) as error:
+                await retry_failed_viread_colab_training_job(
+                    job_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    actor_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", db=db,
+                )
+
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertTrue(db.rolled_back)
+        self.assertFalse(db.committed)
+        self.assertEqual(len(db.statement), 2)
 
 
 if __name__ == "__main__":

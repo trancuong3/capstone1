@@ -243,12 +243,14 @@ class VireadOcrTrainingService:
             FROM public.viread_ocr_training_runs ORDER BY created_at DESC LIMIT 20
         """)
         jobs = await self.repo.all("""
-            SELECT id AS job_id, profile, target, status, dataset_version_id,
-                   manifest_sha256, config_sha256, parent_checkpoint_sha256, run_id,
-                   attempts, progress, last_error_code, metadata, colab_execution_id,
-                   colab_execution_resource_name, colab_operation_name,
-                   colab_execution_number, created_at, updated_at
-            FROM public.viread_ocr_training_jobs ORDER BY created_at DESC LIMIT 30
+            SELECT job.id AS job_id, job.profile, job.target, job.status, job.dataset_version_id,
+                   job.manifest_sha256, job.config_sha256, job.parent_checkpoint_sha256, job.run_id,
+                   training_run.status AS run_status, job.attempts, job.progress, job.last_error_code,
+                   job.metadata, job.colab_execution_id, job.colab_execution_resource_name,
+                   job.colab_operation_name, job.colab_execution_number, job.created_at, job.updated_at
+            FROM public.viread_ocr_training_jobs AS job
+            LEFT JOIN public.viread_ocr_training_runs AS training_run ON training_run.id=job.run_id
+            ORDER BY job.created_at DESC LIMIT 30
         """)
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
