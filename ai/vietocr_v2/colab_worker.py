@@ -20,7 +20,7 @@ from typing import Any, Callable
 import requests
 
 from .artifact_store import assemble_shards, shard_file
-from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, sha256_file, write_jsonl
+from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, canonical_sha256, sha256_file, write_jsonl
 
 logger = logging.getLogger("viread.vietocr.colab_worker")
 API_PREFIX = "/books/admin/viread-training/worker"
@@ -321,6 +321,16 @@ class ColabWorker:
                             total_steps=int(job["metadata"]["training_config"]["steps"]))
             config = job["metadata"]["training_config"]
             verify_worker_source_lock(config)
+            if canonical_sha256(config) != job.get("config_sha256"):
+                raise ValueError("JOB_CONFIG_FINGERPRINT_MISMATCH")
+            if (config.get("profile") != job.get("profile")
+                    or int(config.get("steps", 0)) < 2
+                    or int(config.get("batch_size", 0)) < 1
+                    or int(config.get("freeze_epochs", 0)) < 1
+                    or config.get("optimizer") != "AdamW"
+                    or config.get("scheduler") != "CosineAnnealingLR"
+                    or config.get("preprocessing") != "opencv-line-v1"):
+                raise ValueError("JOB_TRAINING_PARAMETERS_MISMATCH")
             self.assert_runtime_capacity(run_dir)
             candidate_record = run_dir / "candidate.json"
             stable_candidate = run_dir / "candidate.pth"
@@ -345,6 +355,7 @@ class ColabWorker:
                     batch_size=int(config["batch_size"]), seed=int(config["seed"]),
                     resume=(run_dir / "latest.pt").is_file(), freeze_epochs=int(config["freeze_epochs"]),
                     use_fp16=bool(config["fp16"]),
+                    job_config_sha256=job["config_sha256"],
                     progress_callback=persist_training_progress,
                 )
                 temporary = stable_candidate.with_suffix(".tmp")
@@ -360,6 +371,8 @@ class ColabWorker:
                 manifest_temporary.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2),
                                               encoding="utf-8")
                 manifest_temporary.replace(stable_manifest)
+            if candidate.get("config_sha256") != job.get("config_sha256"):
+                raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
             if state_store is not None:
                 # Commit the finished candidate before registering its run in the database.
                 state_store.sync()

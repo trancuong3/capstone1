@@ -421,6 +421,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                  total_steps: int, dataset_receipt_path: str, dataset_version_sha256: str,
                  batch_size: int = 32, seed: int = 20261112, resume: bool = False,
                  freeze_epochs: int = 5, use_fp16: bool = True,
+                 job_config_sha256: str | None = None,
                  progress_callback: Callable[[int, int], None] | None = None) -> dict[str, Any]:
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {sorted(PROFILES)}")
@@ -428,6 +429,11 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     run_dir = Path(output_dir).resolve()
     if len(dataset_version_sha256) != 64 or any(c not in "0123456789abcdef" for c in dataset_version_sha256.lower()):
         raise ValueError("dataset_version_sha256 must be a 64-character SHA-256 digest")
+    if job_config_sha256 is not None and (
+        len(job_config_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in job_config_sha256.lower())
+    ):
+        raise ValueError("job_config_sha256 must be a 64-character SHA-256 digest")
     run_dir.mkdir(parents=True, exist_ok=True)
     rows = load_jsonl(manifest, verify_files=True)
     _validate_dataset_receipt(rows, dataset_receipt_path, dataset_version_sha256.lower())
@@ -469,7 +475,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     cfg = _profile_config(profile, config, run_dir / "dataset", train_tsv, valid_tsv, run_dir,
                           total_steps, batch_size, seed, dataset_version_sha256)
     amp_enabled = bool(use_fp16 and cfg["device"] == "cuda")
-    config_sha = canonical_sha256({"architecture_sha256": architecture_sha, "profile": profile,
+    effective_config_sha = canonical_sha256({"architecture_sha256": architecture_sha, "profile": profile,
                                   "optimizer": cfg["optimizer"], "trainer": {"steps": total_steps, "batch_size": batch_size},
                                   "freeze_epochs": freeze_epochs, "freeze_encoder_lr": 1e-5,
                                   "full_model_lr": 1e-5, "fp16": amp_enabled,
@@ -478,6 +484,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                                   "training_weight_decay": cfg["training_weight_decay"], "image_aug": cfg["aug"]["image_aug"],
                                   "dataset_version_sha256": dataset_version_sha256.lower(),
                                   "local_manifest_sha256": sha256_file(manifest)})
+    candidate_config_sha = job_config_sha256.lower() if job_config_sha256 else effective_config_sha
     random.seed(seed)
     __import__("numpy").random.seed(seed)
     torch.manual_seed(seed)
@@ -526,7 +533,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         saved = torch.load(checkpoint_path, map_location=cfg["device"], weights_only=False)
         if saved.get("model_family") != ORIGINAL_MODEL_FAMILY or saved.get("parent_checkpoint_sha256") != parent_hash:
             raise ValueError("resume checkpoint has a different lineage parent")
-        if saved.get("profile") != profile or saved.get("config_sha256") != config_sha or saved.get("manifest_sha256") != dataset_version_sha256.lower():
+        if (saved.get("profile") != profile
+                or saved.get("config_sha256") != effective_config_sha
+                or saved.get("manifest_sha256") != dataset_version_sha256.lower()):
             raise ValueError("resume checkpoint config, profile, or dataset manifest changed")
         trainer.model.load_state_dict(saved["model_state"], strict=True)
         trainer.iter = int(saved["step"])
@@ -630,7 +639,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                      "stage": stage,
                      "parent_checkpoint_sha256": parent_hash, "manifest_sha256": dataset_version_sha256.lower(),
                      "local_manifest_sha256": sha256_file(manifest),
-                     "config_sha256": config_sha, "architecture_sha256": architecture_sha,
+                     "config_sha256": effective_config_sha, "architecture_sha256": architecture_sha,
                      "vocabulary_sha256": ORIGINAL_VOCAB_SHA256, "validation_loss": validation_loss,
                      "best_validation_loss": best_validation_loss, "best_step": best_step,
                      "best_model_sha256": best_model_sha256,
@@ -651,7 +660,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     trainer.model.load_state_dict(best_model, strict=True)
     torch.save(trainer.model.state_dict(), candidate_path)
     result = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "parent_checkpoint_sha256": parent_hash,
-              "checkpoint_sha256": sha256_file(candidate_path), "config_sha256": config_sha,
+              "checkpoint_sha256": sha256_file(candidate_path), "config_sha256": candidate_config_sha,
+              "effective_config_sha256": effective_config_sha,
               "architecture_sha256": architecture_sha, "vocabulary_sha256": ORIGINAL_VOCAB_SHA256,
               "manifest_sha256": dataset_version_sha256.lower(), "local_manifest_sha256": sha256_file(manifest),
               "dataset_receipt_sha256": sha256_file(dataset_receipt_path), "steps": step, "candidate_path": str(candidate_path),

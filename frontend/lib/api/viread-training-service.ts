@@ -23,6 +23,7 @@ const overviewSchema = z.object({
         parent_checkpoint_sha256: z.string(),
         run_id: z.uuid().nullable(),
         run_status: z.string().nullable().optional(),
+        run_config_sha256: z.string().nullable().optional(),
         attempts: z.number().int(),
         progress: z.record(z.string(), z.unknown()),
         last_error_code: z.string().nullable(),
@@ -78,6 +79,13 @@ export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
   retry(jobId: string): Promise<{ job_id: string; status: string }>;
+  discardMismatchedCandidate(jobId: string): Promise<{
+    job_id: string;
+    status: string;
+    run_id: string;
+    checkpoint_retained: boolean;
+    candidate_promoted: boolean;
+  }>;
   decide(input: {
     action: "APPROVE" | "ROLLBACK";
     run_id?: string;
@@ -94,6 +102,19 @@ export function createVireadTrainingService(): VireadTrainingService {
       requestApi(
         `/books/admin/viread-training/jobs/${jobId}/retry`,
         z.object({ job_id: z.uuid(), status: z.string() }),
+        undefined,
+        { method: "POST" },
+      ),
+    discardMismatchedCandidate: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/discard-mismatched-candidate`,
+        z.object({
+          job_id: z.uuid(),
+          status: z.string(),
+          run_id: z.uuid(),
+          checkpoint_retained: z.boolean(),
+          candidate_promoted: z.boolean(),
+        }),
         undefined,
         { method: "POST" },
       ),
