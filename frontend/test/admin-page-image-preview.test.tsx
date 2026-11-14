@@ -48,6 +48,9 @@ describe("admin page image preview", () => {
         onReplaced={onReplaced}
       />,
     );
+    await user.click(
+      screen.getByRole("button", { name: "Xem ảnh / thay ảnh trang 1" }),
+    );
     await screen.findByText("Chưa tải được ảnh trang 1.");
     const file = new File(["synthetic test image"], "page.png", {
       type: "image/png",
@@ -71,6 +74,9 @@ describe("admin page image preview", () => {
         revisionId="revision-1"
         pageNumber={1}
       />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Xem ảnh / thay ảnh trang 1" }),
     );
     const first = await screen.findByRole("img", { name: "Ảnh trang 1" });
     expect(getImage).toHaveBeenCalledWith("page-1", "revision-1");
@@ -100,12 +106,16 @@ describe("admin page image preview", () => {
         page_revision_id: "revision-2",
         preview_url: "https://example.test/second.png",
       });
+    const user = userEvent.setup();
     const view = render(
       <AdminPageImagePreview
         pageId="page-1"
         revisionId="revision-1"
         pageNumber={1}
       />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Xem ảnh / thay ảnh trang 1" }),
     );
     view.rerender(
       <AdminPageImagePreview
