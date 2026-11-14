@@ -55,6 +55,8 @@ Sau khi notebook thay đổi này đã được merge vào `main`:
 5. Nếu notebook báo không có job, chưa có training run nào bắt đầu. Quay lại Admin và kiểm tra dataset readiness hoặc trạng thái job.
 6. Nếu runtime bị ngắt giữa chừng, lease của job có thể còn hiệu lực tối đa 15 phút. Kết nối runtime mới, mount lại cùng Google Drive, chờ lease hết hạn rồi chạy lại cell để tiếp tục cùng job. Không tạo job trùng hoặc xóa thư mục `MyDrive/ViRead/VietOCR-V2-worker` vì trong đó có state/checkpoint phục hồi.
 7. Muốn xử lý job kế tiếp, chạy lại cell một lần nữa. Notebook không tự poll nền.
+8. Nếu job chuyển `FAILED` trước khi tạo `run_id`, sau khi phiên bản mới của backend được deploy, bấm **Thử lại job này** ngay trong thẻ job ở Admin. Nút chỉ xuất hiện khi chưa đăng ký run/Colab execution, số lần claim còn trong giới hạn và checkpoint gốc chưa đổi. Sau khi trạng thái thành `WAITING_FOR_COLAB_WORKER`, chạy lại cell worker. Job giữ nguyên dataset snapshot và lineage.
+9. Nếu job có `run_id`, execution đã đăng ký, hoặc hiển thị `BLOCKED`, không dùng nút thử lại; hệ thống yêu cầu phục hồi run để tránh ghi đè checkpoint hoặc tạo kết quả trùng.
 
 ## 5. Xác nhận đã train thật
 

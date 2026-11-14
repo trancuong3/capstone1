@@ -88,6 +88,78 @@ async def get_viread_training_overview(
     return await VireadOcrTrainingService(db).overview(actor_id)
 
 
+@router.post("/admin/viread-training/jobs/{job_id}/retry")
+async def retry_failed_viread_colab_training_job(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Requeue only a terminal Colab job that failed before registering any run."""
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    result = await db.execute(text("""
+        SELECT id, target, status, attempts, run_id,
+               parent_checkpoint_sha256, colab_execution_id,
+               colab_execution_resource_name, colab_operation_name, last_error_code
+        FROM public.viread_ocr_training_jobs
+        WHERE id=:job_id
+        FOR UPDATE
+    """), {"job_id": job_id})
+    row = result.mappings().first()
+    if not row:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Training job was not found")
+    if (row["target"] != "COLAB" or row["status"] != "FAILED" or row["run_id"] is not None
+            or row["colab_execution_id"] is not None
+            or row["colab_execution_resource_name"] is not None
+            or row["colab_operation_name"] is not None or int(row["attempts"]) >= 3):
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Only a failed Colab job with no registered run or execution can be retried",
+        )
+
+    active = await db.execute(text("""
+        SELECT checkpoint_sha256 FROM public.viread_ocr_active_model
+        WHERE singleton=TRUE FOR SHARE
+    """))
+    if active.scalar_one_or_none() != row["parent_checkpoint_sha256"]:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The active model changed; create a fresh job from the current model lineage",
+        )
+
+    unresolved = await db.execute(text("""
+        SELECT id FROM public.viread_ocr_training_jobs
+        WHERE id<>:job_id
+          AND status IN ('QUEUED', 'LOCAL_RUNNING', 'FALLBACK_QUEUED_COLAB', 'COLAB_RUNNING',
+                         'WAITING_FOR_DATA', 'WAITING_FOR_COLAB_WORKER', 'COLAB_SUBMITTING',
+                         'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'BLOCKED_CONFIGURATION',
+                         'BLOCKED', 'CANDIDATE', 'BENCHMARKED')
+        ORDER BY created_at DESC LIMIT 1
+    """), {"job_id": job_id})
+    if unresolved.scalar_one_or_none() is not None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Another training job still needs attention")
+
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs
+        SET status='WAITING_FOR_COLAB_WORKER', target='COLAB', worker_id=NULL,
+            lease_expires_at=NULL, available_at=now(),
+            progress='{"stage":"waiting_for_colab_worker","retry_requested":true}'::jsonb,
+            last_error_code=NULL,
+            metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                'retry_requested_by', CAST(:actor_id AS text),
+                'retry_requested_at', now(),
+                'retry_previous_error', :previous_error
+            ),
+            updated_at=now()
+        WHERE id=:job_id
+    """), {"job_id": job_id, "actor_id": str(actor_id), "previous_error": row["last_error_code"]})
+    await db.commit()
+    return {"job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER"}
+
+
 @router.get("/admin/viread-training/datasets/flow1")
 @router.get("/admin/viread-training/datasets/flow2-admin-verified")
 async def get_admin_verified_training_manifest(

@@ -76,6 +76,7 @@ export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  retry(jobId: string): Promise<{ job_id: string; status: string }>;
   decide(input: {
     action: "APPROVE" | "ROLLBACK";
     run_id?: string;
@@ -88,6 +89,13 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    retry: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/retry`,
+        z.object({ job_id: z.uuid(), status: z.string() }),
+        undefined,
+        { method: "POST" },
+      ),
     decide: (input) =>
       requestApi(
         "/books/admin/viread-training/decisions",
