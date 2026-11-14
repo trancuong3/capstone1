@@ -132,6 +132,48 @@ async def _has_unresolved_training_job(db) -> bool:
     return bool(result.scalar_one())
 
 
+_CLOSED_UNBENCHMARKED_DISPOSITIONS = frozenset({
+    "closed_unbenchmarked_candidate",
+    "closed_config_lineage_mismatch",
+})
+
+
+def next_job_generation(latest_generation: int | None, disposition: str | None) -> int | None:
+    """Only an explicitly closed candidate may create a replacement generation."""
+    if latest_generation is None:
+        return 1
+    if disposition in _CLOSED_UNBENCHMARKED_DISPOSITIONS:
+        return int(latest_generation) + 1
+    return None
+
+
+async def _ensure_automatic_locked_test() -> dict[str, Any] | None:
+    """Create/use a sealed test only from real, verified holdout samples."""
+    async with AsyncSessionLocal() as db:
+        actor = await db.execute(text("""
+            SELECT actor_id FROM public.viread_ocr_outbox
+            WHERE status='DONE' AND actor_id IS NOT NULL
+            ORDER BY updated_at DESC LIMIT 1
+        """))
+        actor_id = actor.scalar_one_or_none()
+        if actor_id is None:
+            actor = await db.execute(text("""
+                SELECT created_by FROM public.viread_ocr_dataset_versions
+                WHERE source_flow IN ('FLOW2_EXTERNAL_TRDG','FLOW2_EXTERNAL','FLOW1_VERIFIED')
+                  AND created_by IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1
+            """))
+            actor_id = actor.scalar_one_or_none()
+        if actor_id is None:
+            await db.commit()
+            return None
+        readiness = await VireadOcrTrainingService(db).ensure_locked_test(UUID(str(actor_id)))
+        if (readiness.get("status") != "READY" or not readiness.get("version_id")
+                or not readiness.get("manifest_sha256")):
+            return None
+        return readiness
+
+
 def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str]:
     repo_root = repo_root.resolve()
     if str(repo_root) not in sys.path:
@@ -208,9 +250,12 @@ def dataset_snapshot_count_matches(declared_count: int, materialized_count: int 
     return materialized_count is not None and declared_count >= 0 and declared_count == materialized_count
 
 
-async def _schedule_ready_flow1() -> int:
+async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> int:
     """Enqueue an immutable Flow 1 job only when the registered real+TRDG version meets its contract."""
+    if not locked_test or locked_test.get("status") != "READY":
+        return 0
     async with AsyncSessionLocal() as db:
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):
             return 0
         result = await db.execute(text("""
@@ -257,29 +302,56 @@ async def _schedule_ready_flow1() -> int:
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
         repo_root = Path(__file__).resolve().parents[3]
         training_config, config_sha = _training_config("FLOW1_EXTERNAL_TRDG", repo_root)
+        prior = await db.execute(text("""
+            SELECT generation, metadata->>'candidate_disposition' AS disposition
+            FROM public.viread_ocr_training_jobs
+            WHERE profile='FLOW1_EXTERNAL_TRDG' AND dataset_version_id=:dataset_id
+              AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
+              AND parent_checkpoint_sha256=:parent_sha
+              AND locked_test_version_id=CAST(:locked_id AS uuid)
+            ORDER BY generation DESC LIMIT 1 FOR UPDATE
+        """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
+              "config_sha": config_sha, "parent_sha": parent_sha,
+              "locked_id": locked_test["version_id"]})
+        prior_row = prior.mappings().first()
+        generation = next_job_generation(
+            int(prior_row["generation"]) if prior_row else None,
+            prior_row["disposition"] if prior_row else None,
+        )
+        if generation is None:
+            await db.commit()
+            return 0
         inserted = await db.execute(text("""
             INSERT INTO public.viread_ocr_training_jobs
                 (profile, dataset_version_id, manifest_sha256, config_sha256, parent_checkpoint_sha256,
+                 locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW1_EXTERNAL_TRDG', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
+                    CAST(:locked_id AS uuid), :locked_sha, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
-            ON CONFLICT (profile, dataset_version_id, manifest_sha256, config_sha256, parent_checkpoint_sha256)
-            DO NOTHING
+            ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
               "config_sha": config_sha, "parent_sha": parent_sha, "target": target, "status": initial_status,
+              "locked_id": locked_test["version_id"], "locked_sha": locked_test["manifest_sha256"],
+              "generation": generation,
               "actor_id": selected["created_by"], "metadata": json.dumps({
                   "hardware": hardware, "train_count": counts["FLOW2_EXTERNAL_train"] + counts["FLOW2_TRDG_train"],
                   "validation_count": counts["FLOW2_EXTERNAL_validation"] + counts["FLOW2_TRDG_validation"],
                   "components": {key: value for key, value in counts.items() if not key.endswith(("_train", "_validation"))},
-                  "training_config": training_config})})
+                  "training_config": training_config,
+                  "locked_test_version_id": locked_test["version_id"],
+                  "locked_test_manifest_sha256": locked_test["manifest_sha256"]})})
         await db.commit()
         return 1 if inserted.scalar_one_or_none() else 0
 
 
-async def _schedule_ready_flow2() -> int:
+async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> int:
     """Snapshot committed VERIFIED samples and enqueue one immutable Flow 2 job when splits are ready."""
+    if not locked_test or locked_test.get("status") != "READY":
+        return 0
     async with AsyncSessionLocal() as db:
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):
             return 0
         actor = await db.execute(text("""
@@ -317,21 +389,45 @@ async def _schedule_ready_flow2() -> int:
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
         repo_root = Path(__file__).resolve().parents[3]
         training_config, config_sha = _training_config("FLOW2_ADMIN_VERIFIED", repo_root)
+        prior = await db.execute(text("""
+            SELECT generation, metadata->>'candidate_disposition' AS disposition
+            FROM public.viread_ocr_training_jobs
+            WHERE profile='FLOW2_ADMIN_VERIFIED' AND dataset_version_id=:dataset_id
+              AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
+              AND parent_checkpoint_sha256=:parent_sha
+              AND locked_test_version_id=CAST(:locked_id AS uuid)
+            ORDER BY generation DESC LIMIT 1 FOR UPDATE
+        """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha,
+              "config_sha": config_sha, "parent_sha": parent_sha,
+              "locked_id": locked_test["version_id"]})
+        prior_row = prior.mappings().first()
+        generation = next_job_generation(
+            int(prior_row["generation"]) if prior_row else None,
+            prior_row["disposition"] if prior_row else None,
+        )
+        if generation is None:
+            await db.commit()
+            return 0
         inserted = await db.execute(text("""
             INSERT INTO public.viread_ocr_training_jobs
                 (profile, dataset_version_id, manifest_sha256, config_sha256, parent_checkpoint_sha256,
+                 locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW2_ADMIN_VERIFIED', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
+                    CAST(:locked_id AS uuid), :locked_sha, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
-            ON CONFLICT (profile, dataset_version_id, manifest_sha256, config_sha256, parent_checkpoint_sha256)
-            DO NOTHING
+            ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha, "config_sha": config_sha,
               "parent_sha": parent_sha, "target": target, "status": initial_status,
+              "locked_id": locked_test["version_id"], "locked_sha": locked_test["manifest_sha256"],
+              "generation": generation,
               "actor_id": actor_id, "metadata": json.dumps({"hardware": hardware,
                                                                 "train_count": counts["train_count"],
                                                                 "validation_count": counts["validation_count"],
-                                                                "training_config": training_config})})
+                                                                "training_config": training_config,
+                                                                "locked_test_version_id": locked_test["version_id"],
+                                                                "locked_test_manifest_sha256": locked_test["manifest_sha256"]})})
         await db.commit()
         return 1 if inserted.scalar_one_or_none() else 0
 
@@ -422,6 +518,24 @@ async def _claim_local_job(worker_id: str) -> dict[str, Any] | None:
                     status='QUEUED' OR
                     (status='LOCAL_RUNNING' AND lease_expires_at < now())
                 ) AND attempts < :max_attempts
+                  AND locked_test_version_id IS NOT NULL
+                  AND locked_test_manifest_sha256 IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM public.viread_ocr_dataset_versions locked
+                    WHERE locked.id=viread_ocr_training_jobs.locked_test_version_id
+                      AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
+                      AND locked.version_sha256=viread_ocr_training_jobs.locked_test_manifest_sha256
+                      AND locked.sample_count >= 200
+                      AND (SELECT count(*) FROM public.viread_ocr_samples sample
+                           WHERE sample.dataset_version_id=locked.id
+                             AND sample.source_flow='LOCKED_TEST'
+                             AND sample.split='locked_test')=locked.sample_count
+                      AND (SELECT count(DISTINCT sample.source_group_id)
+                           FROM public.viread_ocr_samples sample
+                           WHERE sample.dataset_version_id=locked.id
+                             AND sample.source_flow='LOCKED_TEST'
+                             AND sample.split='locked_test') >= 30
+                  )
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_training_jobs running
                     WHERE running.status='LOCAL_RUNNING' AND running.lease_expires_at > now()
@@ -602,23 +716,18 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
     from ai.vietocr_v2.contracts import ORIGINAL_CHECKPOINT_SHA256
 
     actor_id = UUID(str(job["created_by"]))
+    if not job.get("locked_test_version_id") or not job.get("locked_test_manifest_sha256"):
+        raise ValueError("JOB_LOCKED_TEST_NOT_PINNED")
     async with AsyncSessionLocal() as db:
         result = await db.execute(text("""
             SELECT id, version_sha256, manifest_storage_path FROM public.viread_ocr_dataset_versions
             WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-              AND (:locked_id IS NULL OR id=:locked_id)
-            ORDER BY created_at DESC LIMIT 1
-        """), {"locked_id": job.get("locked_test_version_id")})
+              AND id=CAST(:locked_id AS uuid) AND version_sha256=:locked_sha
+        """), {"locked_id": job["locked_test_version_id"],
+              "locked_sha": job["locked_test_manifest_sha256"]})
         locked = result.mappings().first()
         if not locked:
-            return None
-        if job.get("locked_test_manifest_sha256") and locked["version_sha256"] != job["locked_test_manifest_sha256"]:
             raise ValueError("LOCKED_TEST_VERSION_CHANGED")
-        await db.execute(text("""
-            UPDATE public.viread_ocr_training_jobs SET locked_test_version_id=:test_id,
-                locked_test_manifest_sha256=:test_sha, updated_at=now() WHERE id=:job_id
-        """), {"test_id": locked["id"], "test_sha": locked["version_sha256"],
-              "job_id": UUID(str(job["id"]))})
         await db.commit()
         rows_result = await db.execute(text("""
             SELECT source_annotation_id AS sample_id, source_group_id AS group_id,
@@ -879,6 +988,24 @@ async def _dispatch_or_poll_colab_once() -> bool:
                 WHERE job.target='COLAB' AND job.available_at <= now()
                   AND job.status IN ('WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')
                   AND job.attempts < :max_attempts
+                  AND job.locked_test_version_id IS NOT NULL
+                  AND job.locked_test_manifest_sha256 IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM public.viread_ocr_dataset_versions locked
+                    WHERE locked.id=job.locked_test_version_id
+                      AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
+                      AND locked.version_sha256=job.locked_test_manifest_sha256
+                      AND locked.sample_count >= 200
+                      AND (SELECT count(*) FROM public.viread_ocr_samples sample
+                           WHERE sample.dataset_version_id=locked.id
+                             AND sample.source_flow='LOCKED_TEST'
+                             AND sample.split='locked_test')=locked.sample_count
+                      AND (SELECT count(DISTINCT sample.source_group_id)
+                           FROM public.viread_ocr_samples sample
+                           WHERE sample.dataset_version_id=locked.id
+                             AND sample.source_flow='LOCKED_TEST'
+                             AND sample.split='locked_test') >= 30
+                  )
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_training_jobs other
                     WHERE other.id <> job.id AND other.status IN (
@@ -1051,8 +1178,9 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
     while not stop.is_set():
         try:
             await _expire_exhausted_jobs()
-            await _schedule_ready_flow1()
-            await _schedule_ready_flow2()
+            locked_test = await _ensure_automatic_locked_test()
+            await _schedule_ready_flow1(locked_test)
+            await _schedule_ready_flow2(locked_test)
             did_work = await _dispatch_or_poll_colab_once()
         except asyncio.CancelledError:
             raise

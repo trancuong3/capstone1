@@ -100,7 +100,8 @@ async def retry_failed_viread_colab_training_job(
     result = await db.execute(text("""
         SELECT id, target, status, attempts, run_id, profile, dataset_version_id,
                manifest_sha256, config_sha256, created_by,
-               parent_checkpoint_sha256, colab_execution_id,
+               parent_checkpoint_sha256, locked_test_version_id,
+               locked_test_manifest_sha256, colab_execution_id,
                colab_execution_resource_name, colab_operation_name, last_error_code
         FROM public.viread_ocr_training_jobs
         WHERE id=:job_id
@@ -110,6 +111,9 @@ async def retry_failed_viread_colab_training_job(
     if not row:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Training job was not found")
+    if not row["locked_test_version_id"] or not row["locked_test_manifest_sha256"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="This job has no pinned Locked Test; the scheduler will create a replacement after verified holdout data meets the requirement")
     if (row["target"] != "COLAB" or int(row["attempts"]) >= 3
             or row["colab_execution_id"] is not None
             or row["colab_execution_resource_name"] is not None
@@ -119,6 +123,26 @@ async def retry_failed_viread_colab_training_job(
             status_code=409,
             detail="This Colab job has no safe retry available",
         )
+
+    locked_test = await db.execute(text("""
+        SELECT locked.id
+        FROM public.viread_ocr_dataset_versions locked
+        WHERE locked.id=CAST(:locked_test_id AS uuid)
+          AND locked.version_sha256=:locked_test_sha
+          AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
+          AND locked.sample_count >= 200
+          AND (SELECT count(*) FROM public.viread_ocr_samples sample
+               WHERE sample.dataset_version_id=locked.id
+                 AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test')=locked.sample_count
+          AND (SELECT count(DISTINCT sample.source_group_id)
+               FROM public.viread_ocr_samples sample
+               WHERE sample.dataset_version_id=locked.id
+                 AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test') >= 30
+    """), {"locked_test_id": row["locked_test_version_id"],
+          "locked_test_sha": row["locked_test_manifest_sha256"]})
+    if locked_test.scalar_one_or_none() is None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="The pinned Locked Test is missing or no longer meets its integrity requirements")
 
     retry_candidate_for_benchmark = (
         row["status"] == "BLOCKED"
@@ -326,6 +350,100 @@ async def discard_mismatched_viread_colab_candidate(
             "candidate_promoted": False}
 
 
+@router.post("/admin/viread-training/jobs/{job_id}/close-unbenchmarked-candidate")
+async def close_unbenchmarked_viread_candidate(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a finished, unbenchmarked candidate while preserving its audit artifacts."""
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    # Keep lock order consistent with model decisions and prevent the active
+    # lineage from changing while this candidate is being closed.
+    active = await db.execute(text("""
+        SELECT checkpoint_sha256 FROM public.viread_ocr_active_model
+        WHERE singleton=TRUE FOR SHARE
+    """))
+    active_checkpoint_sha256 = active.scalar_one_or_none()
+    job_result = await db.execute(text("""
+        SELECT id, target, status, worker_id, lease_expires_at, run_id,
+               profile, dataset_version_id, manifest_sha256, config_sha256,
+               parent_checkpoint_sha256, locked_test_version_id,
+               locked_test_manifest_sha256, created_by,
+               colab_execution_id, colab_execution_resource_name, colab_operation_name
+        FROM public.viread_ocr_training_jobs
+        WHERE id=:job_id FOR UPDATE
+    """), {"job_id": job_id})
+    job_row = job_result.mappings().first()
+    if not job_row:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Training job was not found")
+    job = dict(job_row)
+    # CANDIDATE is a terminal training state. Historical Colab execution IDs
+    # are retained for audit and do not mean that a worker is still running.
+    # BLOCKED is deliberately excluded because it can represent live work.
+    if (job["status"] != "CANDIDATE" or job["worker_id"] is not None
+            or job["lease_expires_at"] is not None and job["lease_expires_at"] > datetime.now(timezone.utc)
+            or job["run_id"] is None):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Only a finished candidate with no active worker lease can be closed")
+
+    run_result = await db.execute(text("""
+        SELECT id, status, profile, dataset_version_id, manifest_sha256,
+               config_sha256, parent_checkpoint_sha256, created_by,
+               checkpoint_sha256, checkpoint_bytes, checkpoint_storage_path
+        FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE
+    """), {"run_id": job["run_id"]})
+    run_row = run_result.mappings().first()
+    run = dict(run_row or {})
+
+    def valid_sha256(value: object) -> bool:
+        return (isinstance(value, str) and len(value) == 64
+                and all(character in "0123456789abcdef" for character in value))
+
+    if (not run or run["status"] != "CANDIDATE"
+            or run["profile"] != job["profile"]
+            or str(run["dataset_version_id"]) != str(job["dataset_version_id"])
+            or run["manifest_sha256"] != job["manifest_sha256"]
+            or run["config_sha256"] != job["config_sha256"]
+            or run["parent_checkpoint_sha256"] != job["parent_checkpoint_sha256"]
+            or str(run["created_by"]) != str(job["created_by"])
+            or not valid_sha256(run.get("checkpoint_sha256"))
+            or int(run.get("checkpoint_bytes") or 0) <= 0
+            or not run.get("checkpoint_storage_path")):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Candidate checkpoint or training lineage is incomplete")
+    benchmark = await db.execute(text(
+        "SELECT id FROM public.viread_ocr_benchmarks WHERE run_id=:run_id LIMIT 1"
+    ), {"run_id": job["run_id"]})
+    if benchmark.scalar_one_or_none() is not None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A benchmarked candidate cannot be closed as unbenchmarked")
+    if active_checkpoint_sha256 != job["parent_checkpoint_sha256"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="The active model changed; preserve this candidate for review")
+
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs
+        SET status='FAILED', worker_id=NULL, lease_expires_at=NULL,
+            last_error_code='CANDIDATE_CLOSED_UNBENCHMARKED',
+            progress=COALESCE(progress, '{}'::jsonb) || jsonb_build_object(
+                'stage', 'candidate_closed_unbenchmarked'
+            ),
+            metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                'candidate_disposition', 'closed_unbenchmarked_candidate',
+                'candidate_disposition_by', CAST(:actor_id AS text),
+                'candidate_disposition_at', now(),
+                'candidate_disposition_note', 'Run and checkpoint retained; candidate was not benchmarked or promoted.'
+            ),
+            updated_at=now()
+            WHERE id=:job_id AND status='CANDIDATE'
+    """), {"job_id": job_id, "actor_id": str(actor_id)})
+    await db.commit()
+    return {"job_id": str(job_id), "status": "FAILED", "run_id": str(job["run_id"]),
+            "checkpoint_retained": True, "candidate_promoted": False}
+
+
 @router.get("/admin/viread-training/datasets/flow1")
 @router.get("/admin/viread-training/datasets/flow2-admin-verified")
 async def get_admin_verified_training_manifest(
@@ -449,6 +567,24 @@ async def claim_viread_colab_training_job(
                 OR (status='COLAB_RUNNING' AND lease_expires_at < now()
                     AND (CAST(:requested_job_id AS uuid) IS NULL OR id=CAST(:requested_job_id AS uuid)))
             )
+              AND locked_test_version_id IS NOT NULL
+              AND locked_test_manifest_sha256 IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM public.viread_ocr_dataset_versions locked
+                WHERE locked.id=viread_ocr_training_jobs.locked_test_version_id
+                  AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
+                  AND locked.version_sha256=viread_ocr_training_jobs.locked_test_manifest_sha256
+                  AND locked.sample_count >= 200
+                  AND (SELECT count(*) FROM public.viread_ocr_samples sample
+                       WHERE sample.dataset_version_id=locked.id
+                         AND sample.source_flow='LOCKED_TEST'
+                         AND sample.split='locked_test')=locked.sample_count
+                  AND (SELECT count(DISTINCT sample.source_group_id)
+                       FROM public.viread_ocr_samples sample
+                       WHERE sample.dataset_version_id=locked.id
+                         AND sample.source_flow='LOCKED_TEST'
+                         AND sample.split='locked_test') >= 30
+              )
             ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
         )
         UPDATE public.viread_ocr_training_jobs AS job
@@ -472,9 +608,9 @@ async def claim_viread_colab_training_job(
     locked = await db.execute(text("""
         SELECT id, version_sha256 FROM public.viread_ocr_dataset_versions
         WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-          AND (CAST(:locked_id AS uuid) IS NULL OR id=CAST(:locked_id AS uuid))
-        ORDER BY created_at DESC LIMIT 1
-    """), {"locked_id": job["locked_test_version_id"]})
+          AND id=CAST(:locked_id AS uuid) AND version_sha256=:locked_sha
+    """), {"locked_id": job["locked_test_version_id"],
+          "locked_sha": job["locked_test_manifest_sha256"]})
     locked_row = locked.mappings().first()
     dataset = await db.execute(text("""
         SELECT source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
@@ -490,15 +626,9 @@ async def claim_viread_colab_training_job(
         raise HTTPException(status_code=409, detail="Training job no longer has an Admin owner")
     await service._admin(UUID(str(job["created_by"])))
     manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
-    if locked_row:
-        if job["locked_test_manifest_sha256"] and job["locked_test_manifest_sha256"] != locked_row["version_sha256"]:
-            await db.rollback()
-            raise HTTPException(status_code=409, detail="Job Locked Test manifest changed")
-        await db.execute(text("""
-            UPDATE public.viread_ocr_training_jobs SET locked_test_version_id=:test_id,
-                locked_test_manifest_sha256=:test_sha WHERE id=:job_id
-        """), {"test_id": locked_row["id"], "test_sha": locked_row["version_sha256"],
-              "job_id": job["id"]})
+    if not locked_row:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training job does not have its exact locked-test version pinned")
     active = await service.active_model_artifact(UUID(str(job["created_by"])))
     if active["checkpoint_sha256"] != job["parent_checkpoint_sha256"]:
         await db.execute(text("""
@@ -571,25 +701,19 @@ async def get_viread_colab_job_locked_test(
     service = VireadOcrTrainingService(db)
     job = await _leased_colab_job(service, job_id, worker_id)
     await service._admin(UUID(str(job["created_by"])))
+    if not job["locked_test_version_id"] or not job["locked_test_manifest_sha256"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training job was created without a pinned Locked Test")
     locked = await service.repo.one("""
         SELECT id, source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
         FROM public.viread_ocr_dataset_versions
-        WHERE id=COALESCE(:locked_id, (SELECT id FROM public.viread_ocr_dataset_versions
-                  WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-                  ORDER BY created_at DESC LIMIT 1))
+        WHERE id=CAST(:locked_id AS uuid) AND version_sha256=:locked_sha
           AND source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-    """, {"locked_id": job["locked_test_version_id"]})
+    """, {"locked_id": job["locked_test_version_id"],
+          "locked_sha": job["locked_test_manifest_sha256"]})
     if not locked:
-        await db.commit()
-        return {"dataset": None, "items": [], "next_offset": None}
-    if job["locked_test_manifest_sha256"] and job["locked_test_manifest_sha256"] != locked["version_sha256"]:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Job Locked Test manifest changed")
-    if not job["locked_test_version_id"]:
-        await db.execute(text("""
-            UPDATE public.viread_ocr_training_jobs SET locked_test_version_id=:test_id,
-                locked_test_manifest_sha256=:test_sha WHERE id=:job_id
-        """), {"test_id": locked["id"], "test_sha": locked["version_sha256"], "job_id": job_id})
+        raise HTTPException(status_code=409, detail="Pinned Locked Test is missing or its manifest hash changed")
     result = await service.dataset_samples(UUID(str(job["created_by"])), locked["id"],
                                            limit=limit, offset=offset)
     await db.commit()
