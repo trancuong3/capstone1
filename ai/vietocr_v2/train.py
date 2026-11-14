@@ -162,12 +162,17 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
 
     Upstream VietOCR uses ``np.fromstring`` both for encoded image bytes while
     building LMDB and for the binary int32 dimensions while loading it. NumPy 2
-    removed that binary-input behavior, so adapt only those two VietOCR call
-    sites instead of changing NumPy globally or modifying the installed package.
-    Both replacements preserve VietOCR's existing contracts.
+    removed that binary-input behavior. It also uses Pillow's removed
+    ``Image.ANTIALIAS`` alias while resizing samples. Adapt only these legacy
+    call sites instead of changing NumPy globally or modifying installed
+    packages; preserve the original VietOCR contracts.
     """
+    from PIL import Image
     from vietocr.tool import create_dataset as vietocr_dataset
     from vietocr.loader import dataloader as vietocr_dataloader
+
+    if not hasattr(Image, "ANTIALIAS"):
+        Image.ANTIALIAS = Image.Resampling.LANCZOS
 
     current_validator = vietocr_dataset.checkImageIsValid
     if not getattr(current_validator, "_viread_numpy_bytes_compatibility", False):
