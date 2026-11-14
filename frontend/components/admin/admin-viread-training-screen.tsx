@@ -128,7 +128,9 @@ export function AdminVireadTrainingScreen() {
       );
       await load();
     } catch {
-      setMessage("Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.");
+      setMessage(
+        "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
+      );
     } finally {
       setBusy(false);
     }
@@ -440,13 +442,17 @@ export function AdminVireadTrainingScreen() {
                       <div className="mt-3">
                         <Button
                           disabled={busy}
-                          onClick={() => void closeMismatchedCandidate(job.job_id)}
+                          onClick={() =>
+                            void closeMismatchedCandidate(job.job_id)
+                          }
                           variant="secondary"
                         >
                           Đóng candidate lệch cấu hình
                         </Button>
                         <p className="mt-1 text-xs text-muted">
-                          Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để cho phép tạo job mới. Candidate này không được benchmark hoặc kích hoạt.
+                          Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để
+                          cho phép tạo job mới. Candidate này không được
+                          benchmark hoặc kích hoạt.
                         </p>
                       </div>
                     ) : null}
