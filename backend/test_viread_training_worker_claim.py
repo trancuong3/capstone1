@@ -140,6 +140,7 @@ class TrainingWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response, {
             "job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER",
+            "recovery_mode": "pre_run",
         })
         self.assertIn("FOR UPDATE", db.statement[0])
         self.assertIn("status='WAITING_FOR_COLAB_WORKER'", db.statement[3])

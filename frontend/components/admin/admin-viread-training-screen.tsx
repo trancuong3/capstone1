@@ -392,9 +392,10 @@ export function AdminVireadTrainingScreen() {
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
                     !job.colab_operation_name &&
-                    ["HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"].includes(
-                      job.last_error_code ?? "",
-                    ) ? (
+                    [
+                      "HTTPERROR",
+                      "COLAB_FAILURE_REQUIRES_RUN_RECOVERY",
+                    ].includes(job.last_error_code ?? "") ? (
                       <div className="mt-3">
                         <Button
                           disabled={busy}
