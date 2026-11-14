@@ -221,6 +221,111 @@ async def retry_failed_viread_colab_training_job(
             "recovery_mode": "candidate_benchmark" if retry_candidate_for_benchmark else "pre_run"}
 
 
+@router.post("/admin/viread-training/jobs/{job_id}/discard-mismatched-candidate")
+async def discard_mismatched_viread_colab_candidate(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Close only a blocked candidate whose registered config fingerprint differs from its job.
+
+    The immutable checkpoint and run are retained for audit. The candidate remains unbenchmarked
+    and cannot be promoted; closing the queue row lets the scheduler create a correctly locked job.
+    """
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    job_result = await db.execute(text("""
+        SELECT id, target, status, run_id, profile, dataset_version_id,
+               manifest_sha256, config_sha256, parent_checkpoint_sha256, created_by,
+               last_error_code, colab_execution_id, colab_execution_resource_name,
+               colab_operation_name
+        FROM public.viread_ocr_training_jobs
+        WHERE id=:job_id FOR UPDATE
+    """), {"job_id": job_id})
+    job_row = job_result.mappings().first()
+    if not job_row:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Training job was not found")
+    row = dict(job_row)
+    run_result = await db.execute(text("""
+        SELECT status AS run_status, profile AS run_profile,
+               dataset_version_id AS run_dataset_version_id,
+               manifest_sha256 AS run_manifest_sha256, config_sha256 AS run_config_sha256,
+               parent_checkpoint_sha256 AS run_parent_checkpoint_sha256,
+               created_by AS run_created_by, checkpoint_sha256, checkpoint_bytes,
+               checkpoint_storage_path
+        FROM public.viread_ocr_training_runs
+        WHERE id=:run_id FOR UPDATE
+    """), {"run_id": row["run_id"]}) if row["run_id"] else None
+    run_row = run_result.mappings().first() if run_result else None
+    row.update(dict(run_row or {}))
+    recoverable_error = row["last_error_code"] in {
+        "HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY",
+    }
+    def valid_sha256(value):
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        )
+
+    valid_checkpoint_sha = (
+        valid_sha256(row.get("checkpoint_sha256"))
+    )
+    if (row["target"] != "COLAB" or row["status"] != "BLOCKED"
+            or not recoverable_error or row["run_id"] is None or not run_row
+            or any((row["colab_execution_id"], row["colab_execution_resource_name"],
+                    row["colab_operation_name"]))
+            or row["run_status"] != "CANDIDATE"
+            or row["run_profile"] != row["profile"]
+            or str(row["run_dataset_version_id"]) != str(row["dataset_version_id"])
+            or row["run_manifest_sha256"] != row["manifest_sha256"]
+            or row["run_parent_checkpoint_sha256"] != row["parent_checkpoint_sha256"]
+            or str(row["run_created_by"]) != str(row["created_by"])
+            or not valid_sha256(row["config_sha256"])
+            or not valid_sha256(row["run_config_sha256"])
+            or row["run_config_sha256"] == row["config_sha256"]
+            or not valid_checkpoint_sha or int(row["checkpoint_bytes"] or 0) <= 0
+            or not row["checkpoint_storage_path"]):
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Only a retained, unbenchmarked candidate with matching non-config lineage and a mismatched config fingerprint can be closed",
+        )
+    benchmark = await db.execute(text(
+        "SELECT id FROM public.viread_ocr_benchmarks WHERE run_id=:run_id LIMIT 1"
+    ), {"run_id": row["run_id"]})
+    if benchmark.scalar_one_or_none() is not None:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A benchmarked candidate cannot be closed by this recovery action")
+    active = await db.execute(text("""
+        SELECT checkpoint_sha256 FROM public.viread_ocr_active_model
+        WHERE singleton=TRUE FOR SHARE
+    """))
+    if active.scalar_one_or_none() != row["parent_checkpoint_sha256"]:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="The active model changed; preserve this job for review")
+    await db.execute(text("""
+        UPDATE public.viread_ocr_training_jobs
+        SET status='FAILED', worker_id=NULL, lease_expires_at=NULL,
+            last_error_code='CANDIDATE_CONFIG_LINEAGE_MISMATCH_DISCARDED',
+            progress=COALESCE(progress, '{}'::jsonb) || jsonb_build_object(
+                'stage', 'candidate_closed_config_mismatch'
+            ),
+            metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                'candidate_disposition', 'closed_config_lineage_mismatch',
+                'candidate_disposition_by', CAST(:actor_id AS text),
+                'candidate_disposition_at', now(),
+                'candidate_disposition_note', 'Run and checkpoint retained; candidate was not benchmarked or promoted.'
+            ),
+            updated_at=now()
+        WHERE id=:job_id AND status='BLOCKED'
+    """), {"job_id": job_id, "actor_id": str(actor_id)})
+    await db.commit()
+    return {"job_id": job_id, "status": "FAILED",
+            "run_id": str(row["run_id"]), "checkpoint_retained": True,
+            "candidate_promoted": False}
+
+
 @router.get("/admin/viread-training/datasets/flow1")
 @router.get("/admin/viread-training/datasets/flow2-admin-verified")
 async def get_admin_verified_training_manifest(

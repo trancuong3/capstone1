@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -132,7 +133,13 @@ async def _has_unresolved_training_job(db) -> bool:
 
 
 def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str]:
+    repo_root = repo_root.resolve()
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from ai.vietocr_v2.contracts import canonical_sha256
+
     config = {
+        "config_schema_version": "viread-training-job-config-v2",
         "profile": profile,
         "steps": int(os.getenv("VIETOCR_TRAINING_STEPS", "5000")),
         "batch_size": int(os.getenv("VIETOCR_TRAINING_BATCH_SIZE", "8")),
@@ -152,9 +159,7 @@ def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str
     config["colab_requirements_sha256"] = hashlib.sha256(
         (repo_root / "ai" / "vietocr_v2" / "requirements-colab.txt").read_bytes()
     ).hexdigest()
-    config_sha = hashlib.sha256(json.dumps(
-        config, sort_keys=True, separators=(",", ":")
-    ).encode()).hexdigest()
+    config_sha = canonical_sha256(config)
     return config, config_sha
 
 
@@ -707,6 +712,22 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
         if not isinstance(config, dict):
             raise ValueError("TRAINING_CONFIG_MISSING")
         repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from ai.vietocr_v2.contracts import canonical_sha256
+
+        if canonical_sha256(config) != job.get("config_sha256"):
+            raise ValueError("JOB_CONFIG_FINGERPRINT_MISMATCH")
+        if (config.get("profile") != job.get("profile")
+                or int(config.get("steps", 0)) < 2
+                or int(config.get("batch_size", 0)) < 1
+                or int(config.get("freeze_epochs", 0)) < 1
+                or config.get("optimizer") != "AdamW"
+                or config.get("scheduler") != "CosineAnnealingLR"
+                or config.get("preprocessing") != "opencv-line-v1"
+                or config.get("architecture_sha256") != ORIGINAL_ARCHITECTURE_SHA256
+                or config.get("vocabulary_sha256") != ORIGINAL_VOCAB_SHA256):
+            raise ValueError("JOB_TRAINING_PARAMETERS_MISMATCH")
         if (hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "train.py").read_bytes()).hexdigest()
                 != config.get("trainer_sha256")
                 or hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "requirements.txt").read_bytes()).hexdigest()
@@ -725,12 +746,15 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
             batch_size=int(config["batch_size"]), seed=int(config["seed"]),
             resume=(run_dir / "latest.pt").is_file(),
             freeze_epochs=int(config["freeze_epochs"]), use_fp16=bool(config["fp16"]),
+            job_config_sha256=job["config_sha256"],
             progress_callback=lambda completed, total: progress.update(
                 {"stage": "training", "completed_steps": completed, "total_steps": total}),
         )
         shutil.copyfile(candidate["candidate_path"], stable_candidate)
         candidate["candidate_path"] = str(stable_candidate)
         candidate_record.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    if candidate.get("config_sha256") != job.get("config_sha256"):
+        raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
     run_id = await _register_candidate(job, candidate)
     benchmark = await _benchmark_candidate(job, run_id, stable_candidate, run_dir)
     final_status = ("BENCHMARKED" if benchmark and benchmark.get("gate_status") == "V2_WIN"

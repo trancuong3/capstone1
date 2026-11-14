@@ -113,6 +113,29 @@ export function AdminVireadTrainingScreen() {
     }
   }
 
+  async function closeMismatchedCandidate(jobId: string) {
+    if (!vireadTraining || busy) return;
+    const confirmed = globalThis.confirm(
+      "Đóng job candidate bị lệch fingerprint cấu hình? Run và checkpoint sẽ được giữ để kiểm toán; candidate không được benchmark hay kích hoạt.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.discardMismatchedCandidate(jobId);
+      setMessage(
+        "Đã đóng job lỗi cấu hình. Run và checkpoint được giữ nguyên, candidate chưa được benchmark/duyệt; hệ thống có thể tạo job mới theo cấu hình đã khóa đúng.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const totalSamples =
     data?.samples.reduce((sum, item) => sum + item.count, 0) ?? 0;
   const outboxPending =
@@ -388,6 +411,7 @@ export function AdminVireadTrainingScreen() {
                     {job.status === "BLOCKED" &&
                     job.run_status === "CANDIDATE" &&
                     job.target === "COLAB" &&
+                    job.run_config_sha256 === job.config_sha256 &&
                     job.attempts < 3 &&
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
@@ -408,6 +432,27 @@ export function AdminVireadTrainingScreen() {
                           Checkpoint đã có; dùng lại cùng Google Drive Colab để
                           tiếp tục Locked Test và benchmark. Nếu tệp candidate
                           chưa được lưu trên Drive, worker sẽ dừng an toàn.
+                        </p>
+                      </div>
+                    ) : null}
+                    {job.status === "BLOCKED" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.run_config_sha256 &&
+                    job.run_config_sha256 !== job.config_sha256 ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() =>
+                            void closeMismatchedCandidate(job.job_id)
+                          }
+                          variant="secondary"
+                        >
+                          Đóng candidate lệch cấu hình
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để
+                          cho phép tạo job mới. Candidate này không được
+                          benchmark hoặc kích hoạt.
                         </p>
                       </div>
                     ) : null}

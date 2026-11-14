@@ -245,7 +245,8 @@ class VireadOcrTrainingService:
         jobs = await self.repo.all("""
             SELECT job.id AS job_id, job.profile, job.target, job.status, job.dataset_version_id,
                    job.manifest_sha256, job.config_sha256, job.parent_checkpoint_sha256, job.run_id,
-                   training_run.status AS run_status, job.attempts, job.progress, job.last_error_code,
+                   training_run.status AS run_status, training_run.config_sha256 AS run_config_sha256,
+                   job.attempts, job.progress, job.last_error_code,
                    job.metadata, job.colab_execution_id, job.colab_execution_resource_name,
                    job.colab_operation_name, job.colab_execution_number, job.created_at, job.updated_at
             FROM public.viread_ocr_training_jobs AS job
