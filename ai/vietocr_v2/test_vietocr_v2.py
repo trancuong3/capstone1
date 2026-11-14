@@ -268,8 +268,10 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
     np = pytest.importorskip("numpy")
     cv2 = pytest.importorskip("cv2")
     lmdb = pytest.importorskip("lmdb")
+    pillow_image = pytest.importorskip("PIL.Image")
     pytest.importorskip("vietocr")
     import vietocr.tool.create_dataset as vietocr_dataset
+    from vietocr.loader import dataloader as vietocr_dataloader
 
     original_validator = vietocr_dataset.checkImageIsValid
     monkeypatch.setattr(vietocr_dataset, "checkImageIsValid", original_validator)
@@ -282,7 +284,9 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
         return original_fromstring(value, *args, **kwargs)
 
     monkeypatch.setattr(np, "fromstring", numpy2_fromstring_behavior)
+    monkeypatch.delattr(pillow_image, "ANTIALIAS", raising=False)
     _install_vietocr_numpy_bytes_compatibility(np, cv2)
+    assert pillow_image.ANTIALIAS == pillow_image.Resampling.LANCZOS
 
     image = np.full((23, 57), 255, dtype=np.uint8)
     encoded_ok, encoded = cv2.imencode(".png", image)
@@ -309,6 +313,24 @@ def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, mo
             assert transaction.get(b"label-000000001") == b"verified label two"
     finally:
         environment.close()
+
+    dataset = vietocr_dataloader.OCRDataset(
+        lmdb_path=str(lmdb_path),
+        root_dir=str(tmp_path),
+        annotation_path="train.tsv",
+        vocab=types.SimpleNamespace(encode=lambda label: label),
+    )
+    try:
+        assert dataset.nSamples == 2
+        assert dataset.get_bucket(0) == 80
+        assert dataset.get_bucket(1) == 80
+        assert dataset.cluster_indices[80] == [0, 1]
+        assert dataset.read_buffer(0)[1:] == ("verified label one", "line-a.png")
+        assert dataset.read_buffer(1)[1:] == ("verified label two", "line-b.png")
+        assert dataset[0]["word"] == "verified label one"
+        assert dataset[1]["word"] == "verified label two"
+    finally:
+        dataset.env.close()
 
 
 def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):
