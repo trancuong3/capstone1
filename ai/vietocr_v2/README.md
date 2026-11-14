@@ -42,6 +42,12 @@ The trainer starts from the hash-locked Original or current approved VietOCR V2 
 
 Every candidate must pass the independent paired Locked Test benchmark and statistical quality gate. A passing result still requires Admin approval before the active-model pointer changes. Rejected candidates remain inactive; rollback uses the recorded previous pointer. No Colab run or benchmark is claimed until a real GPU execution and report exist.
 
+## Small Colab smoke run before Locked Test is ready
+
+Use `viread_vietocr_v2_smoke_test_colab.ipynb` to check the real Flow 2 training path while the official Locked Test is still accumulating samples. It downloads a small, deterministic subset from verified Train and Validation groups, loads the currently active parent checkpoint, and runs a short local training job. The subset and output are stored in a separate `VietOCR-V2-smoke` Drive folder. The Admin dataset endpoint may materialize an immutable snapshot of existing verified samples if one does not exist. The notebook does not alter source OCR pages, create a training job or run, upload/register a candidate, evaluate on Locked Test, or change the active model. If Locked Test is already READY, the independent production scheduler may still enqueue its normal full training job from the complete registered dataset; that job does not use the smoke subset or checkpoint. A successful smoke run confirms that dependency loading, sample downloads, preprocessing, dataloading, GPU training, validation, and local checkpoint writing worked for that subset; it does not establish model quality or replace the production Locked Test benchmark.
+
+In Colab, open this notebook from the repository's `main` branch, select a GPU runtime, and create the same `VIREAD_API_BASE` and `VIREAD_ADMIN_BEARER` Colab Secrets used by the manual runner. Run all cells. The summary reports the selected Train/Validation sample and group counts, step count, device, and validation loss. Keep the production requirement of at least 200 independent Locked Test samples across at least 30 page groups unchanged.
+
 ## Current limitations
 
 - This repository does not include real image datasets, a curated Vietnamese text corpus, reviewed font assets, Locked Test labels, or Colab credentials/GPU execution evidence.

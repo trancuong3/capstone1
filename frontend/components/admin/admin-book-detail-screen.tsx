@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AdminLoading,
   AdminPageHeader,
+  AdminResultsPagination,
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
@@ -15,11 +16,14 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import { AdminPageImagePreview } from "@/components/admin/admin-page-image-preview";
+import { AdminBookAiBatchReview } from "@/components/admin/admin-book-ai-batch-review";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const pageSize = 24;
+  const [pageNumber, setPageNumber] = useState(1);
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
@@ -37,6 +41,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const requestIdRef = useRef(0);
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
+    setPageNumber(1);
     setError(null);
     setBook(null);
     setItems(null);
@@ -72,6 +77,22 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setItems([]);
     }
   }, [bookId, books, pages]);
+  const refreshPages = useCallback(async () => {
+    try {
+      const nextPages = (await pages.list(bookId)).filter(
+        (item) => item.processing.lifecycle_status === "ACTIVE",
+      );
+      setItems(nextPages);
+      setPageNumber(1);
+    } catch {
+      setPageActionNotice({
+        tone: "error",
+        title: "Không thể làm mới trạng thái trang",
+        message:
+          "Thao tác đã gửi tới Backend; hãy bấm Tải lại để xác nhận trạng thái cuối cùng.",
+      });
+    }
+  }, [bookId, pages]);
   async function retirePendingPage() {
     const item = pendingRetire;
     const pageId = item?.processing.page_id;
@@ -152,6 +173,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       />
     );
   if (!book) return null;
+  const visibleItems = items?.slice(
+    (pageNumber - 1) * pageSize,
+    pageNumber * pageSize,
+  );
   return (
     <>
       <AdminPageHeader
@@ -176,11 +201,24 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         </Link>
       </div>
       <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
+      {items && items.length > 0 ? (
+        <section className="mt-6" aria-label="Rà soát OCR hàng loạt">
+          <AdminBookAiBatchReview
+            items={items}
+            onCompleted={() => void refreshPages()}
+          />
+        </section>
+      ) : null}
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-2xl font-black" id="pages-title">
-            Trang sách
-          </h2>
+          <div>
+            <h2 className="text-2xl font-black" id="pages-title">
+              Trang sách
+            </h2>
+            {items ? (
+              <p className="mt-1 text-sm text-muted">{items.length} trang</p>
+            ) : null}
+          </div>
           <Button
             className="sm:w-auto"
             disabled={items === null || retiringPageId !== null}
@@ -213,83 +251,102 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             description="Database chưa có trang nào cho sách này."
           />
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {items.map((item) => {
-              const active = item.processing.lifecycle_status === "ACTIVE";
-              return (
-                <Card className="h-full bg-white" key={item.processing.page_id}>
-                  <div className="flex h-full flex-col gap-4">
-                    <AdminPageImagePreview
-                      key={`${item.processing.page_id}:${item.processing.page_revision_id}`}
-                      pageId={item.processing.page_id}
-                      revisionId={item.processing.page_revision_id}
-                      pageNumber={item.page_number}
-                      onReplaced={() => {
-                        setPageActionNotice({
-                          tone: "info",
-                          title: "Ảnh mới đang chờ duyệt",
-                          message:
-                            "Bản mới cần được xác minh trước khi dùng cho lượt đọc. Ảnh và nội dung lịch sử vẫn được giữ nguyên.",
-                        });
-                        void load();
-                      }}
-                    />
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="grid size-12 shrink-0 place-items-center rounded-control bg-sky text-primary">
-                        <FileSearch aria-hidden />
-                      </div>
-                      <AdminStatusBadge
-                        status={
-                          active
-                            ? item.processing.verification_status
-                            : "RETIRED"
-                        }
+          <div className="grid gap-4">
+            <AdminResultsPagination
+              itemLabel="trang"
+              onPageChange={setPageNumber}
+              page={pageNumber}
+              pageSize={pageSize}
+              total={items.length}
+            />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {visibleItems?.map((item) => {
+                const active = item.processing.lifecycle_status === "ACTIVE";
+                return (
+                  <Card
+                    className="h-full bg-white"
+                    key={item.processing.page_id}
+                  >
+                    <div className="flex h-full flex-col gap-4">
+                      <AdminPageImagePreview
+                        key={`${item.processing.page_id}:${item.processing.page_revision_id}`}
+                        pageId={item.processing.page_id}
+                        revisionId={item.processing.page_revision_id}
+                        pageNumber={item.page_number}
+                        onReplaced={() => {
+                          setPageActionNotice({
+                            tone: "info",
+                            title: "Ảnh mới đang chờ duyệt",
+                            message:
+                              "Bản mới cần được xác minh trước khi dùng cho lượt đọc. Ảnh và nội dung lịch sử vẫn được giữ nguyên.",
+                          });
+                          void load();
+                        }}
                       />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black">
-                        Trang {item.page_number}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted">
-                        Revision R{item.processing.revision_no}
-                      </p>
-                      <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-ink">
-                        {item.text_preview?.trim()
-                          ? item.text_preview
-                          : "Chưa có văn bản OCR để xem trước."}
-                      </p>
-                    </div>
-                    <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-3">
-                      <Link
-                        className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                        href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
-                      >
-                        {active
-                          ? "Xem / Thay ảnh / Duyệt OCR"
-                          : "Xem lịch sử OCR"}
-                      </Link>
-                      {active ? (
-                        <Button
-                          className="sm:w-auto"
-                          disabled={retiringPageId !== null}
-                          onClick={() => {
-                            setPageActionNotice(null);
-                            setPendingRetire(item);
-                          }}
-                          variant="secondary"
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="grid size-12 shrink-0 place-items-center rounded-control bg-sky text-primary">
+                          <FileSearch aria-hidden />
+                        </div>
+                        <AdminStatusBadge
+                          status={
+                            active
+                              ? item.processing.verification_status
+                              : "RETIRED"
+                          }
+                        />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black">
+                          Trang {item.page_number}
+                        </h3>
+                        <p className="mt-1 text-sm text-muted">
+                          Revision R{item.processing.revision_no}
+                        </p>
+                        <p className="mt-3 line-clamp-2 break-words text-sm leading-6 text-ink">
+                          {item.text_preview?.trim()
+                            ? item.text_preview
+                            : "Chưa có văn bản OCR để xem trước."}
+                        </p>
+                      </div>
+                      <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-3">
+                        <Link
+                          className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                          href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                         >
-                          <Trash2 aria-hidden className="size-4" /> Xóa trang
-                        </Button>
-                      ) : (
-                        <span className="text-xs font-semibold text-muted">
-                          Đã ngừng sử dụng
-                        </span>
-                      )}
+                          {active
+                            ? "Xem / Thay ảnh / Duyệt OCR"
+                            : "Xem lịch sử OCR"}
+                        </Link>
+                        {active ? (
+                          <Button
+                            className="sm:w-auto"
+                            disabled={retiringPageId !== null}
+                            onClick={() => {
+                              setPageActionNotice(null);
+                              setPendingRetire(item);
+                            }}
+                            variant="secondary"
+                          >
+                            <Trash2 aria-hidden className="size-4" /> Xóa trang
+                          </Button>
+                        ) : (
+                          <span className="text-xs font-semibold text-muted">
+                            Đã ngừng sử dụng
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              );
-            })}
+                  </Card>
+                );
+              })}
+            </div>
+            <AdminResultsPagination
+              itemLabel="trang"
+              onPageChange={setPageNumber}
+              page={pageNumber}
+              pageSize={pageSize}
+              total={items.length}
+            />
           </div>
         )}
       </section>
