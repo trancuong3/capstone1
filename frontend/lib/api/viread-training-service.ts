@@ -104,7 +104,10 @@ export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
-  requestEvaluation(jobId: string, evaluationType: "PILOT" | "PRODUCTION"): Promise<{
+  requestEvaluation(
+    jobId: string,
+    evaluationType: "PILOT" | "PRODUCTION",
+  ): Promise<{
     job_id: string;
     run_id: string;
     status: string;
