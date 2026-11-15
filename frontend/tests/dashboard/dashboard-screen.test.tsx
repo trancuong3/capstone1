@@ -136,6 +136,8 @@ describe("DashboardScreen with real API adapters", () => {
     await user.click(screen.getByRole("button", { name: "Chọn sách" }));
     expect(routerPushMock).toHaveBeenNthCalledWith(1, "/book-scanner");
     expect(routerPushMock).toHaveBeenNthCalledWith(2, "/books");
+    await user.click(screen.getByRole("button", { name: "Hát vui" }));
+    expect(routerPushMock).toHaveBeenNthCalledWith(3, "/karaoke");
     expect(screen.getByRole("link", { name: "Tạo hồ sơ bé" })).toHaveAttribute(
       "href",
       "/children/new",
@@ -161,6 +163,8 @@ describe("DashboardScreen with real API adapters", () => {
     expect(routerPushMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Chọn sách" }));
+    expect(routerPushMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Hát vui" }));
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(
       screen.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."),
