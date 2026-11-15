@@ -1,7 +1,13 @@
 "use client";
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
@@ -39,7 +45,43 @@ type BatchProgress = {
 function pageErrorMessage(cause: unknown): string {
   if (isServiceError(cause)) return cause.message;
   if (cause instanceof Error) return cause.message;
-  return "Không thể rà soát trang này; bản nháp hiện tại được giữ nguyên.";
+  return "Lỗi khi rà soát trang; bản nháp hiện tại được giữ nguyên.";
+}
+
+function useSkippedPageIds(storageKey: string): ReadonlySet<string> {
+  const serialized = useSyncExternalStore(
+    (onStoreChange) => {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === storageKey) onStoreChange();
+      };
+      const onLocalChange = (event: Event) => {
+        if ((event as CustomEvent<string>).detail === storageKey)
+          onStoreChange();
+      };
+      window.addEventListener("storage", onStorage);
+      window.addEventListener("viread-ai-batch-skipped", onLocalChange);
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener("viread-ai-batch-skipped", onLocalChange);
+      };
+    },
+    () => window.localStorage.getItem(storageKey) ?? "[]",
+    () => "[]",
+  );
+
+  return useMemo(() => {
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      return new Set(
+        Array.isArray(parsed) &&
+          parsed.every((value): value is string => typeof value === "string")
+          ? parsed
+          : [],
+      );
+    } catch {
+      return new Set<string>();
+    }
+  }, [serialized]);
 }
 
 function preparePage(
@@ -118,9 +160,11 @@ function preparePage(
 }
 
 export function AdminBookAiBatchReview({
+  bookId,
   items,
   onCompleted,
 }: {
+  bookId: string;
   items: readonly AdminPageListItemUI[];
   onCompleted: () => void;
 }) {
@@ -142,11 +186,16 @@ export function AdminBookAiBatchReview({
     [],
   );
 
+  const skipStorageKey = `viread:ai-batch-skipped:${bookId}`;
+  const skippedPageIds = useSkippedPageIds(skipStorageKey);
+
   const waitingPages = items
     .filter(
       (item) =>
         item.processing.lifecycle_status === "ACTIVE" &&
-        item.processing.verification_status === "NEEDS_REVIEW",
+        item.processing.verification_status === "NEEDS_REVIEW" &&
+        !skippedPageIds.has(item.processing.page_id) &&
+        !skippedPageIds.has(item.processing.page_revision_id),
     )
     .slice()
     .sort((left, right) => left.page_number - right.page_number);
@@ -352,8 +401,25 @@ export function AdminBookAiBatchReview({
               revisionId,
               status: "failed",
               changes: 0,
-              message: pageErrorMessage(cause),
+              message: `${pageErrorMessage(cause)} Revision này đã được đánh dấu bỏ qua và sẽ không tự quét lại.`,
             };
+        if (!draftSaved) {
+          const updatedSkipped = new Set(skippedPageIds);
+          updatedSkipped.add(pageId);
+          try {
+            window.localStorage.setItem(
+              skipStorageKey,
+              JSON.stringify([...updatedSkipped]),
+            );
+            window.dispatchEvent(
+              new CustomEvent("viread-ai-batch-skipped", {
+                detail: skipStorageKey,
+              }),
+            );
+          } catch {
+            // The in-memory skip still prevents another attempt this session.
+          }
+        }
         const existingIndex = completed.findIndex(
           (result) => result.pageId === pageId,
         );
@@ -474,7 +540,7 @@ export function AdminBookAiBatchReview({
             <p className="text-sm font-bold text-ink">
               Kết quả: {verifiedResults.length} trang đã xác minh ·{" "}
               {savedResults.length} bản nháp đã lưu, chờ xác minh ·{" "}
-              {failedResults.length} trang cần thử lại
+              {failedResults.length} trang lỗi, đã bỏ qua
             </p>
             <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
               {results.map((result) => (
@@ -538,7 +604,9 @@ export function AdminBookAiBatchReview({
               <Sparkles aria-hidden className="size-4" />
               {waitingPages.length > 0
                 ? `${results.length ? "Tiếp tục rà soát" : "AI kiểm tra & xác minh"} ${waitingPages.length} trang`
-                : "Không có trang cần AI rà soát"}
+                : skippedPageIds.size > 0
+                  ? `Đã bỏ qua ${skippedPageIds.size} trang lỗi; không quét lại`
+                  : "Không có trang cần AI rà soát"}
             </Button>
           )}
         </div>
