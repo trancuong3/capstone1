@@ -1,7 +1,13 @@
 "use client";
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
@@ -40,6 +46,42 @@ function pageErrorMessage(cause: unknown): string {
   if (isServiceError(cause)) return cause.message;
   if (cause instanceof Error) return cause.message;
   return "Lỗi khi rà soát trang; bản nháp hiện tại được giữ nguyên.";
+}
+
+function useSkippedPageIds(storageKey: string): ReadonlySet<string> {
+  const serialized = useSyncExternalStore(
+    (onStoreChange) => {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === storageKey) onStoreChange();
+      };
+      const onLocalChange = (event: Event) => {
+        if ((event as CustomEvent<string>).detail === storageKey)
+          onStoreChange();
+      };
+      window.addEventListener("storage", onStorage);
+      window.addEventListener("viread-ai-batch-skipped", onLocalChange);
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener("viread-ai-batch-skipped", onLocalChange);
+      };
+    },
+    () => window.localStorage.getItem(storageKey) ?? "[]",
+    () => "[]",
+  );
+
+  return useMemo(() => {
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      return new Set(
+        Array.isArray(parsed) &&
+          parsed.every((value): value is string => typeof value === "string")
+          ? parsed
+          : [],
+      );
+    } catch {
+      return new Set<string>();
+    }
+  }, [serialized]);
 }
 
 function preparePage(
@@ -130,10 +172,6 @@ export function AdminBookAiBatchReview({
   const [results, setResults] = useState<readonly BatchPageResult[]>([]);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [skippedPageIds, setSkippedPageIds] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-  const [skipListLoaded, setSkipListLoaded] = useState(false);
   const [notice, setNotice] = useState<{
     readonly tone: "info" | "success" | "warning" | "error";
     readonly title: string;
@@ -149,23 +187,7 @@ export function AdminBookAiBatchReview({
   );
 
   const skipStorageKey = `viread:ai-batch-skipped:${bookId}`;
-  useEffect(() => {
-    try {
-      const parsed: unknown = JSON.parse(
-        window.localStorage.getItem(skipStorageKey) ?? "[]",
-      );
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((value): value is string => typeof value === "string")
-      ) {
-        setSkippedPageIds(new Set(parsed));
-      }
-    } catch {
-      setSkippedPageIds(new Set());
-    } finally {
-      setSkipListLoaded(true);
-    }
-  }, [skipStorageKey]);
+  const skippedPageIds = useSkippedPageIds(skipStorageKey);
 
   const waitingPages = items
     .filter(
@@ -384,11 +406,15 @@ export function AdminBookAiBatchReview({
         if (!draftSaved) {
           const updatedSkipped = new Set(skippedPageIds);
           updatedSkipped.add(pageId);
-          setSkippedPageIds(updatedSkipped);
           try {
             window.localStorage.setItem(
               skipStorageKey,
               JSON.stringify([...updatedSkipped]),
+            );
+            window.dispatchEvent(
+              new CustomEvent("viread-ai-batch-skipped", {
+                detail: skipStorageKey,
+              }),
             );
           } catch {
             // The in-memory skip still prevents another attempt this session.
@@ -572,7 +598,7 @@ export function AdminBookAiBatchReview({
           ) : (
             <Button
               className="sm:w-auto"
-              disabled={!skipListLoaded || waitingPages.length === 0}
+              disabled={waitingPages.length === 0}
               onClick={() => void reviewAllPages()}
             >
               <Sparkles aria-hidden className="size-4" />
