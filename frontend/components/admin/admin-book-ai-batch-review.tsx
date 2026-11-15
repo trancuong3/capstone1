@@ -1,17 +1,16 @@
 "use client";
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import Link from "next/link";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import {
+  markAiPageRevisionSkipped,
+  useSkippedAiPageIds,
+} from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   normalizeVietnameseWord,
@@ -31,6 +30,7 @@ type BatchPageResult = {
   readonly status: "saved" | "verified" | "failed";
   readonly changes: number;
   readonly message: string;
+  readonly adminReviewRequired?: boolean;
   readonly request?: AdminRevisionVerifyRequestDTO;
 };
 
@@ -42,46 +42,55 @@ type BatchProgress = {
   readonly totalChunks: number;
 };
 
+type BatchNotice = {
+  readonly tone: "info" | "success" | "warning" | "error";
+  readonly title: string;
+  readonly message: string;
+};
+
+interface BatchSession {
+  readonly results: readonly BatchPageResult[];
+  readonly progress: BatchProgress | null;
+  readonly processing: boolean;
+  readonly notice: BatchNotice | null;
+}
+
+const emptyBatchSession: BatchSession = {
+  results: [],
+  progress: null,
+  processing: false,
+  notice: null,
+};
+const batchSessions = new Map<string, BatchSession>();
+const batchListeners = new Map<string, Set<() => void>>();
+const batchControllers = new Map<string, AbortController>();
+
+function getBatchSession(bookId: string) {
+  return batchSessions.get(bookId) ?? emptyBatchSession;
+}
+
+function subscribeBatchSession(bookId: string, onChange: () => void) {
+  const listeners = batchListeners.get(bookId) ?? new Set<() => void>();
+  listeners.add(onChange);
+  batchListeners.set(bookId, listeners);
+  return () => {
+    listeners.delete(onChange);
+    if (listeners.size === 0) batchListeners.delete(bookId);
+  };
+}
+
+function updateBatchSession(
+  bookId: string,
+  update: (current: BatchSession) => BatchSession,
+) {
+  batchSessions.set(bookId, update(getBatchSession(bookId)));
+  batchListeners.get(bookId)?.forEach((listener) => listener());
+}
+
 function pageErrorMessage(cause: unknown): string {
   if (isServiceError(cause)) return cause.message;
   if (cause instanceof Error) return cause.message;
   return "Lỗi khi rà soát trang; bản nháp hiện tại được giữ nguyên.";
-}
-
-function useSkippedPageIds(storageKey: string): ReadonlySet<string> {
-  const serialized = useSyncExternalStore(
-    (onStoreChange) => {
-      const onStorage = (event: StorageEvent) => {
-        if (event.key === storageKey) onStoreChange();
-      };
-      const onLocalChange = (event: Event) => {
-        if ((event as CustomEvent<string>).detail === storageKey)
-          onStoreChange();
-      };
-      window.addEventListener("storage", onStorage);
-      window.addEventListener("viread-ai-batch-skipped", onLocalChange);
-      return () => {
-        window.removeEventListener("storage", onStorage);
-        window.removeEventListener("viread-ai-batch-skipped", onLocalChange);
-      };
-    },
-    () => window.localStorage.getItem(storageKey) ?? "[]",
-    () => "[]",
-  );
-
-  return useMemo(() => {
-    try {
-      const parsed: unknown = JSON.parse(serialized);
-      return new Set(
-        Array.isArray(parsed) &&
-          parsed.every((value): value is string => typeof value === "string")
-          ? parsed
-          : [],
-      );
-    } catch {
-      return new Set<string>();
-    }
-  }, [serialized]);
 }
 
 function preparePage(
@@ -159,6 +168,64 @@ function preparePage(
   };
 }
 
+function prepareSourceOcrFallback(
+  detail: AdminPageRevisionDetailDTO,
+  sourceText: string,
+): AdminRevisionVerifyRequestDTO {
+  const normalizedText = sourceText.normalize("NFC").trim();
+  const tokens = tokenizePageText(normalizedText);
+  if (
+    tokens.length === 0 ||
+    detail.words.length !== tokens.length ||
+    detail.words.some((word, index) => {
+      const [x, y, width, height] = word.bbox;
+      return (
+        word.word_index !== index ||
+        tokenizePageText(word.text).length !== 1 ||
+        normalizeVietnameseWord(word.text) !== word.normalized_text ||
+        normalizeVietnameseWord(tokens[index] ?? "") !== word.normalized_text ||
+        ![x, y, width, height].every(Number.isFinite) ||
+        x < 0 ||
+        y < 0 ||
+        width <= 0 ||
+        height <= 0 ||
+        x + width > 1 ||
+        y + height > 1
+      );
+    })
+  ) {
+    throw new Error(
+      "OCR gốc không khớp an toàn với từ và vùng ảnh; cần Admin xác minh thủ công.",
+    );
+  }
+  return {
+    page_revision_id: detail.page_revision_id,
+    corrected_text: normalizedText,
+    words: detail.words.map(
+      ({
+        word_index,
+        line_index,
+        text,
+        normalized_text,
+        bbox,
+        ocr_confidence,
+      }) => ({
+        word_index,
+        line_index,
+        text,
+        normalized_text,
+        bbox,
+        ocr_confidence,
+      }),
+    ),
+    proofread_audit: {
+      mode: "AI_AUTO_VERIFIED",
+      checked_text: normalizedText,
+      suggestions: [],
+    },
+  };
+}
+
 export function AdminBookAiBatchReview({
   bookId,
   items,
@@ -169,25 +236,22 @@ export function AdminBookAiBatchReview({
   onCompleted: () => void;
 }) {
   const { ocr, revisions } = useAdminServices();
-  const [results, setResults] = useState<readonly BatchPageResult[]>([]);
-  const [progress, setProgress] = useState<BatchProgress | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [notice, setNotice] = useState<{
-    readonly tone: "info" | "success" | "warning" | "error";
-    readonly title: string;
-    readonly message: string;
-  } | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(
-    () => () => {
-      abortRef.current?.abort();
-    },
-    [],
+  const session = useSyncExternalStore(
+    (onChange) => subscribeBatchSession(bookId, onChange),
+    () => getBatchSession(bookId),
+    () => emptyBatchSession,
   );
+  const { results, progress, processing, notice } = session;
+  const mountedRef = useRef(false);
 
-  const skipStorageKey = `viread:ai-batch-skipped:${bookId}`;
-  const skippedPageIds = useSkippedPageIds(skipStorageKey);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const skippedPageIds = useSkippedAiPageIds(bookId);
 
   const waitingPages = items
     .filter(
@@ -216,29 +280,41 @@ export function AdminBookAiBatchReview({
     : 0;
 
   async function reviewAllPages() {
-    if (processing || waitingPages.length === 0) return;
+    if (
+      getBatchSession(bookId).processing ||
+      waitingPages.length === 0 ||
+      batchControllers.has(bookId)
+    )
+      return;
     const controller = new AbortController();
-    abortRef.current = controller;
-    setProcessing(true);
-    setResults([]);
-    setNotice(null);
+    batchControllers.set(bookId, controller);
+    updateBatchSession(bookId, (current) => ({
+      ...current,
+      processing: true,
+      results: [],
+      notice: null,
+    }));
     let completed: BatchPageResult[] = [];
 
     for (const [index, item] of waitingPages.entries()) {
       const pageId = item.processing.page_id;
       const revisionId = item.processing.page_revision_id;
-      setProgress({
-        current: index + 1,
-        total: waitingPages.length,
-        pageNumber: item.page_number,
-        completedChunks: 0,
-        totalChunks: 0,
-      });
+      updateBatchSession(bookId, (current) => ({
+        ...current,
+        progress: {
+          current: index + 1,
+          total: waitingPages.length,
+          pageNumber: item.page_number,
+          completedChunks: 0,
+          totalChunks: 0,
+        },
+      }));
       if (controller.signal.aborted) break;
 
       let draftSaved = false;
+      let detail: AdminPageRevisionDetailDTO | null = null;
       try {
-        const detail = await ocr.getRevision(pageId, revisionId);
+        detail = await ocr.getRevision(pageId, revisionId);
         if (
           detail.page_id !== pageId ||
           detail.page_revision_id !== revisionId ||
@@ -253,24 +329,58 @@ export function AdminBookAiBatchReview({
         if (!originalText)
           throw new Error("Trang chưa có văn bản OCR để rà soát.");
 
-        const correctedText = (
-          await ocr.aiCorrectText(
+        let aiText: string;
+        try {
+          aiText = await ocr.aiCorrectText(
             pageId,
             originalText,
             detail.words,
             (chunk) => {
               if (controller.signal.aborted) return;
-              setProgress({
-                current: index + 1,
-                total: waitingPages.length,
-                pageNumber: item.page_number,
-                completedChunks: chunk.completed_chunks,
-                totalChunks: chunk.total_chunks,
-              });
+              updateBatchSession(bookId, (current) => ({
+                ...current,
+                progress: {
+                  current: index + 1,
+                  total: waitingPages.length,
+                  pageNumber: item.page_number,
+                  completedChunks: chunk.completed_chunks,
+                  totalChunks: chunk.total_chunks,
+                },
+              }));
             },
             controller.signal,
-          )
-        ).normalize("NFC");
+          );
+        } catch (aiCause) {
+          if (controller.signal.aborted) break;
+          const sourceOnly = prepareSourceOcrFallback(detail, originalText);
+          const verified = await revisions.verify(pageId, sourceOnly);
+          if (
+            verified.page_revision_id !== revisionId ||
+            verified.verification_status !== "VERIFIED"
+          ) {
+            throw new Error("Backend chưa xác nhận revision OCR gốc.");
+          }
+          markAiPageRevisionSkipped(bookId, revisionId);
+          completed = [
+            ...completed,
+            {
+              pageId,
+              pageNumber: item.page_number,
+              revisionId,
+              status: "verified",
+              changes: 0,
+              adminReviewRequired: true,
+              message: `AI không sửa được; đã tự VERIFIED bằng OCR gốc. Cần Admin rà soát: ${pageErrorMessage(aiCause)}`,
+            },
+          ];
+          updateBatchSession(bookId, (current) => ({
+            ...current,
+            results: [...completed],
+          }));
+          if (mountedRef.current) onCompleted();
+          continue;
+        }
+        const correctedText = aiText.normalize("NFC");
         if (controller.signal.aborted) break;
 
         const prepared = preparePage(detail, correctedText);
@@ -281,6 +391,10 @@ export function AdminBookAiBatchReview({
           prepared.request.words,
         );
         draftSaved = true;
+        // The OCR correction is now durable. If the user leaves before the
+        // verification step finishes, do not run the same revision through AI
+        // again when the book is reopened.
+        markAiPageRevisionSkipped(bookId, revisionId);
         if (
           saved.page_revision_id !== revisionId ||
           saved.verification_status !== "NEEDS_REVIEW"
@@ -298,7 +412,10 @@ export function AdminBookAiBatchReview({
           request: prepared.request,
         };
         completed = [...completed, savedResult];
-        setResults([...completed]);
+        updateBatchSession(bookId, (current) => ({
+          ...current,
+          results: [...completed],
+        }));
 
         // The draft is durable now. If the user stops, leave it NEEDS_REVIEW
         // rather than starting verification after the stop request.
@@ -311,7 +428,10 @@ export function AdminBookAiBatchReview({
                 }
               : result,
           );
-          setResults([...completed]);
+          updateBatchSession(bookId, (current) => ({
+            ...current,
+            results: [...completed],
+          }));
           break;
         }
 
@@ -333,6 +453,7 @@ export function AdminBookAiBatchReview({
             ? {
                 ...savedResult,
                 status: "verified" as const,
+                adminReviewRequired: true,
                 message:
                   prepared.changes > 0
                     ? `Đã tự lưu ${prepared.changes} sửa đổi và xác minh trang.`
@@ -340,8 +461,11 @@ export function AdminBookAiBatchReview({
               }
             : result,
         );
-        setResults([...completed]);
-        onCompleted();
+        updateBatchSession(bookId, (current) => ({
+          ...current,
+          results: [...completed],
+        }));
+        if (mountedRef.current) onCompleted();
       } catch (cause) {
         if (draftSaved) {
           try {
@@ -363,6 +487,7 @@ export function AdminBookAiBatchReview({
                 revisionId,
                 status: "verified",
                 changes: recovered?.changes ?? 0,
+                adminReviewRequired: true,
                 message:
                   "Backend đã xác nhận trang VERIFIED sau khi kết nối bị gián đoạn.",
               };
@@ -371,8 +496,11 @@ export function AdminBookAiBatchReview({
                     result.pageId === pageId ? recoveredResult : result,
                   )
                 : [...completed, recoveredResult];
-              setResults([...completed]);
-              onCompleted();
+              updateBatchSession(bookId, (current) => ({
+                ...current,
+                results: [...completed],
+              }));
+              if (mountedRef.current) onCompleted();
               continue;
             }
           } catch {
@@ -392,8 +520,9 @@ export function AdminBookAiBatchReview({
               status: "saved",
               changes: previousResult?.changes ?? 0,
               message:
-                "Bản sửa đã được lưu, nhưng xác minh tự động thất bại: " +
-                pageErrorMessage(cause),
+                "Bản sửa đã được lưu, nhưng chưa xác minh được. Cần Admin kiểm tra: " +
+                pageErrorMessage(cause) +
+                " AI sẽ bỏ qua revision này để không quét lại.",
             }
           : {
               pageId,
@@ -401,25 +530,9 @@ export function AdminBookAiBatchReview({
               revisionId,
               status: "failed",
               changes: 0,
-              message: `${pageErrorMessage(cause)} Revision này đã được đánh dấu bỏ qua và sẽ không tự quét lại.`,
+              message: `AI không xử lý được; nội dung OCR được giữ nguyên và chuyển sang Admin xác minh. ${pageErrorMessage(cause)} AI sẽ không quét lại revision này.`,
             };
-        if (!draftSaved) {
-          const updatedSkipped = new Set(skippedPageIds);
-          updatedSkipped.add(pageId);
-          try {
-            window.localStorage.setItem(
-              skipStorageKey,
-              JSON.stringify([...updatedSkipped]),
-            );
-            window.dispatchEvent(
-              new CustomEvent("viread-ai-batch-skipped", {
-                detail: skipStorageKey,
-              }),
-            );
-          } catch {
-            // The in-memory skip still prevents another attempt this session.
-          }
-        }
+        markAiPageRevisionSkipped(bookId, revisionId);
         const existingIndex = completed.findIndex(
           (result) => result.pageId === pageId,
         );
@@ -431,25 +544,38 @@ export function AdminBookAiBatchReview({
           completed = [...completed, failedResult];
         }
       }
-      setResults([...completed]);
+      updateBatchSession(bookId, (current) => ({
+        ...current,
+        results: [...completed],
+      }));
     }
 
-    abortRef.current = null;
-    setProgress(null);
-    setProcessing(false);
+    if (batchControllers.get(bookId) === controller)
+      batchControllers.delete(bookId);
+    updateBatchSession(bookId, (current) => ({
+      ...current,
+      progress: null,
+      processing: false,
+    }));
     if (controller.signal.aborted) {
-      setNotice({
-        tone: "warning",
-        title: "Đã dừng rà soát",
-        message: `${completed.filter((item) => item.status === "verified").length} trang đã được lưu và xác minh. Nếu trang đang làm đã lưu xong nhưng chưa xác minh, bản nháp vẫn được giữ ở trạng thái NEEDS_REVIEW.`,
-      });
+      updateBatchSession(bookId, (current) => ({
+        ...current,
+        notice: {
+          tone: "warning",
+          title: "Đã dừng rà soát",
+          message: `${completed.filter((item) => item.status === "verified").length} trang đã được lưu và xác minh. Nếu trang đang làm đã lưu xong nhưng chưa xác minh, bản nháp vẫn được giữ ở trạng thái NEEDS_REVIEW.`,
+        },
+      }));
     } else if (completed.length === 0) {
-      setNotice({
-        tone: "info",
-        title: "Không có trang cần rà soát",
-        message:
-          "Hãy tải lại danh sách hoặc chờ OCR các trang mới hoàn tất trước khi chạy AI.",
-      });
+      updateBatchSession(bookId, (current) => ({
+        ...current,
+        notice: {
+          tone: "info",
+          title: "Không có trang cần rà soát",
+          message:
+            "Hãy tải lại danh sách hoặc chờ OCR các trang mới hoàn tất trước khi chạy AI.",
+        },
+      }));
     } else {
       const verifiedCount = completed.filter(
         (item) => item.status === "verified",
@@ -460,17 +586,20 @@ export function AdminBookAiBatchReview({
       const failedCount = completed.filter(
         (item) => item.status === "failed",
       ).length;
-      setNotice({
-        tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
-        title: "Đã xử lý xong từng trang",
-        message: `${verifiedCount} trang đã tự lưu và xác minh; ${savedCount} trang có bản nháp đã lưu nhưng cần thử xác minh lại; ${failedCount} trang chưa xử lý được. Trang đã xác minh được giữ nguyên nếu trang sau gặp lỗi.`,
-      });
+      updateBatchSession(bookId, (current) => ({
+        ...current,
+        notice: {
+          tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
+          title: "Đã xử lý xong từng trang",
+          message: `${verifiedCount} trang đã tự lưu và xác minh; ${savedCount} trang có bản nháp đã lưu nhưng cần Admin xác minh; ${failedCount} trang được giữ nguyên và chuyển sang Admin xác minh. Các revision lỗi sẽ không bị AI quét lại.`,
+        },
+      }));
     }
-    onCompleted();
+    if (mountedRef.current) onCompleted();
   }
 
   function stopReview() {
-    abortRef.current?.abort();
+    batchControllers.get(bookId)?.abort();
   }
 
   return (
@@ -485,9 +614,13 @@ export function AdminBookAiBatchReview({
             AI xử lý lần lượt các trang NEEDS_REVIEW. Mỗi trang được lưu ngay
             sau khi kiểm tra, rồi tự xác minh trước khi chuyển sang trang kế
             tiếp; không cần xác nhận từng trang. Nếu ghép từ với vùng OCR không
-            chắc chắn hoặc xác minh lỗi, bản nháp được giữ lại và trang đó không
-            chuyển VERIFIED. Backend thử Ollama nếu nhà cung cấp AI bên ngoài
-            gặp lỗi.
+            chắc chắn hoặc AI gặp lỗi, nội dung OCR được giữ và tự VERIFIED với
+            nhãn đỏ cần Admin rà soát. Nếu OCR không khớp an toàn với vùng ảnh,
+            trang vẫn chờ Admin xác minh. Trang tự VERIFIED chỉ vào Train, không
+            vào Validation hoặc Locked Test trước khi Admin duyệt. AI không quét
+            lại revision đã xử lý. Backend thử Ollama khi nhà cung cấp AI bên
+            ngoài gặp lỗi. Bạn có thể chuyển màn hình; tiến trình và kết quả vẫn
+            được giữ khi quay lại trong cùng tab.
           </p>
         </div>
 
@@ -539,8 +672,8 @@ export function AdminBookAiBatchReview({
           <div className="grid gap-2" aria-label="Kết quả rà soát theo trang">
             <p className="text-sm font-bold text-ink">
               Kết quả: {verifiedResults.length} trang đã xác minh ·{" "}
-              {savedResults.length} bản nháp đã lưu, chờ xác minh ·{" "}
-              {failedResults.length} trang lỗi, đã bỏ qua
+              {savedResults.length} bản nháp đã lưu, cần Admin xác minh ·{" "}
+              {failedResults.length} trang cần Admin xác minh
             </p>
             <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
               {results.map((result) => (
@@ -552,16 +685,26 @@ export function AdminBookAiBatchReview({
                     <span className="font-bold">Trang {result.pageNumber}</span>
                     <span
                       className={
-                        result.status === "failed"
-                          ? "text-danger"
-                          : result.status === "verified"
-                            ? "text-success-ink"
-                            : "text-warning"
+                        result.adminReviewRequired
+                          ? "text-red-700"
+                          : result.status === "failed"
+                            ? "text-danger"
+                            : result.status === "verified"
+                              ? "text-success-ink"
+                              : "text-warning"
                       }
                     >
                       {result.message}
                     </span>
                   </div>
+                  {result.status !== "verified" ? (
+                    <Link
+                      className="w-fit font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                      href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
+                    >
+                      Mở trang để Admin xác minh
+                    </Link>
+                  ) : null}
                   {result.request?.proofread_audit.suggestions.length ? (
                     <details className="rounded-control bg-sky/30 p-3">
                       <summary className="cursor-pointer font-semibold text-primary">
@@ -605,7 +748,7 @@ export function AdminBookAiBatchReview({
               {waitingPages.length > 0
                 ? `${results.length ? "Tiếp tục rà soát" : "AI kiểm tra & xác minh"} ${waitingPages.length} trang`
                 : skippedPageIds.size > 0
-                  ? `Đã bỏ qua ${skippedPageIds.size} trang lỗi; không quét lại`
+                  ? `${skippedPageIds.size} revision đã xử lý; không quét lại`
                   : "Không có trang cần AI rà soát"}
             </Button>
           )}
