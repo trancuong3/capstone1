@@ -81,6 +81,7 @@ describe("shared header and footer", () => {
     ["/reports", "Tiến bộ"],
     ["/sessions", "Lịch sử"],
     ["/entertainment/sentence-shooter", "Giải trí"],
+    ["/entertainment/picture-description", "Giải trí"],
     ["/reports/difficult-words", "Từ cần luyện"],
   ])("keeps Parent navigation active on %s", (pathname, label) => {
     navigationMock.pathname = pathname;

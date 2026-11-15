@@ -10,6 +10,7 @@ import { createComprehensionService } from "@/lib/api/tutor-question-service";
 import type { DevicePermissionService } from "@/lib/api/device-permission-service";
 import type { DifficultWordService } from "@/lib/api/difficult-word-service";
 import type { PageMatchService } from "@/lib/api/page-match-service";
+import type { PictureDescriptionService } from "@/lib/api/picture-description-service";
 import type { ProfileService } from "@/lib/api/profile-service";
 import type { ReportService } from "@/lib/api/report-service";
 import type { ReadingService } from "@/lib/api/reading-service";
@@ -24,6 +25,7 @@ import { createBookService } from "@/lib/api/book-service";
 import { createBookContentReportService } from "@/lib/api/book-content-report-service";
 import { createSessionService } from "@/lib/api/session-service";
 import { createSentenceShooterService } from "@/lib/api/sentence-shooter-service";
+import { createPictureDescriptionService } from "@/lib/api/picture-description-service";
 import { createReportService } from "@/lib/api/report-service";
 import { createDifficultWordService } from "@/lib/api/difficult-word-service";
 import { createProfileService } from "@/lib/api/profile-service";
@@ -58,6 +60,7 @@ export interface AppServices {
   readingSocketAdapter: ReadingSocketAdapter;
   sessionService: SessionService;
   sentenceShooterService?: SentenceShooterService;
+  pictureDescriptionService?: PictureDescriptionService;
   tutorService: TutorService;
 }
 
@@ -108,6 +111,7 @@ export function AppServicesProvider({
       reportService: createReportService(),
       sessionService: createSessionService(),
       sentenceShooterService: createSentenceShooterService(),
+      pictureDescriptionService: createPictureDescriptionService(),
 
       comprehensionService: isReadingEnabled
         ? createComprehensionService()
