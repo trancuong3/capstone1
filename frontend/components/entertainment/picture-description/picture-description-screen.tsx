@@ -57,6 +57,7 @@ import type {
 } from "@/types/picture-description";
 
 type SourceTab = "SAMPLE" | "CUSTOM_UPLOAD" | "BOOK_PAGE";
+type PracticeTab = "PRACTICE" | "RESULT";
 type CatalogState =
   | { status: "loading" }
   | {
@@ -208,6 +209,7 @@ export function PictureDescriptionScreen() {
   });
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<SourceTab>("SAMPLE");
+  const [practiceTab, setPracticeTab] = useState<PracticeTab>("PRACTICE");
   const [session, setSession] = useState<PictureSessionDTO | null>(null);
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(null);
   const [showHints, setShowHints] = useState(false);
@@ -344,6 +346,7 @@ export function PictureDescriptionScreen() {
       isRecordingVoiceRef.current = false;
       setSession(loaded);
       setLatestAttempt(loaded.attempts[0] ?? null);
+      setPracticeTab("PRACTICE");
       setSelectedVocabWord(null);
       setShowHints(false);
       setShowSampleSentences(false);
@@ -637,6 +640,7 @@ export function PictureDescriptionScreen() {
       if (controller.signal.aborted) return;
       setSession(response.session);
       setLatestAttempt(response.latest_attempt);
+      setPracticeTab("RESULT");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -716,6 +720,7 @@ export function PictureDescriptionScreen() {
               setLiveTranscript("");
               setShowHints(false);
               setShowSampleSentences(false);
+              setPracticeTab("PRACTICE");
               setSession(null);
               setLatestAttempt(null);
               setActionError(null);
@@ -1074,7 +1079,67 @@ export function PictureDescriptionScreen() {
 
           {/* Interactive Recording + Optional Collapsed Hints + Evaluation Column */}
           <div className="flex flex-col gap-5">
-            {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
+            <div
+              aria-label="Chế độ làm bài và kết quả"
+              className="flex flex-wrap gap-2 rounded-card border border-border bg-white p-2 shadow-sm"
+              role="tablist"
+            >
+              <button
+                aria-selected={practiceTab === "PRACTICE"}
+                className={
+                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                  (practiceTab === "PRACTICE"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-sky/40 text-ink hover:bg-sky")
+                }
+                id="tab-picture-practice"
+                onClick={() => setPracticeTab("PRACTICE")}
+                role="tab"
+                type="button"
+              >
+                <Sparkles aria-hidden="true" className="size-4" />
+                Mô tả tranh
+              </button>
+              <button
+                aria-selected={practiceTab === "RESULT"}
+                className={
+                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 " +
+                  (practiceTab === "RESULT"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-sky/40 text-ink hover:bg-sky")
+                }
+                disabled={!activeAttempt}
+                id="tab-picture-result"
+                onClick={() => {
+                  if (!activeAttempt) return;
+                  if (isRecordingVoice) {
+                    void stopVoiceRecording();
+                  }
+                  setPracticeTab("RESULT");
+                }}
+                role="tab"
+                type="button"
+              >
+                <Star aria-hidden="true" className="size-4" />
+                Kết quả chấm điểm
+                {activeAttempt ? (
+                  <span
+                    className={
+                      "rounded-full px-2 py-0.5 text-xs font-extrabold " +
+                      (practiceTab === "RESULT"
+                        ? "bg-white/20 text-white"
+                        : "bg-success-surface text-success-ink")
+                    }
+                  >
+                    {activeAttempt.score_out_of_10}/10
+                  </span>
+                ) : null}
+              </button>
+            </div>
+
+            {practiceTab === "PRACTICE" ? (
+              <>
+                {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
             <section className="rounded-card border border-border bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-extrabold text-ink">
@@ -1380,12 +1445,16 @@ export function PictureDescriptionScreen() {
                 </div>
               ) : null}
             </section>
+              </>
+            ) : null}
 
-            {/* Gemini Feedback Card */}
-            {activeAttempt ? (
+            {/* Gemini Feedback Card (Dedicated Result Tab) */}
+            {practiceTab === "RESULT" && activeAttempt ? (
               <section
+                aria-labelledby="tab-picture-result"
                 aria-live="polite"
                 className="rounded-card border-2 border-primary/25 bg-white p-5 shadow-sm"
+                role="tabpanel"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
                   <div className="flex items-center gap-3">
@@ -1422,6 +1491,15 @@ export function PictureDescriptionScreen() {
                   </Button>
                 </div>
 
+                <div className="mt-4 rounded-control border border-border bg-sky/15 px-3.5 py-2.5">
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                    Lời bé đã kể (Lượt #{activeAttempt.attempt_number})
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-ink">
+                    “{activeAttempt.transcript_text}”
+                  </p>
+                </div>
+
                 <p className="mt-4 rounded-control bg-warning-surface/50 px-4 py-3 text-base font-extrabold text-ink">
                   {activeAttempt.feedback.praise_message}
                 </p>
@@ -1432,11 +1510,18 @@ export function PictureDescriptionScreen() {
                       <CheckCircle2 aria-hidden="true" className="size-4" />
                       Chi tiết bé kể đúng
                     </h3>
-                    <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
-                      {activeAttempt.feedback.matched_details.map((item) => (
-                        <li key={item}>• {item}</li>
-                      ))}
-                    </ul>
+                    {activeAttempt.feedback.matched_details.length > 0 ? (
+                      <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
+                        {activeAttempt.feedback.matched_details.map((item) => (
+                          <li key={item}>• {item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted">
+                        Chưa có chi tiết khớp trong lượt này — bé hãy quan sát
+                        kỹ tranh và thử lại nhé!
+                      </p>
+                    )}
                   </div>
 
                   <div className="rounded-control bg-sky/40 p-3.5">
@@ -1444,11 +1529,17 @@ export function PictureDescriptionScreen() {
                       <Lightbulb aria-hidden="true" className="size-4" />
                       Chi tiết bé có thể kể thêm
                     </h3>
-                    <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
-                      {activeAttempt.feedback.missed_details.map((item) => (
-                        <li key={item}>• {item}</li>
-                      ))}
-                    </ul>
+                    {activeAttempt.feedback.missed_details.length > 0 ? (
+                      <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
+                        {activeAttempt.feedback.missed_details.map((item) => (
+                          <li key={item}>• {item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted">
+                        Bé đã kể đầy đủ các chi tiết chính trong tranh rồi!
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1478,6 +1569,18 @@ export function PictureDescriptionScreen() {
                       </ul>
                     </div>
                   ) : null}
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    onClick={() => setPracticeTab("PRACTICE")}
+                    size="compact"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <RefreshCw aria-hidden="true" className="size-4" />
+                    Quay lại mô tả lượt mới
+                  </Button>
                 </div>
               </section>
             ) : null}

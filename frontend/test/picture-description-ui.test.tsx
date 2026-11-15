@@ -322,11 +322,28 @@ describe("PictureDescriptionScreen", () => {
     expect(
       await screen.findByText("Cô khen bé quan sát rất tinh mắt và viết câu trọn ý!"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: /Kết quả chấm điểm/i }),
+    ).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("9/10 điểm")).toBeInTheDocument();
     expect(screen.getByText("• Chú mèo màu cam ngủ trên ghế gỗ")).toBeInTheDocument();
+    // Evaluation result shows on its own tab without mixing with the input/hints panel
+    expect(
+      screen.queryByLabelText("Nội dung bé mô tả bức tranh"),
+    ).not.toBeInTheDocument();
+
+    // Switch back to the practice tab -> input & unlocked model sentences return, result card hides
+    await user.click(screen.getByRole("tab", { name: /Mô tả tranh/i }));
+    expect(
+      screen.getByRole("tab", { name: /Mô tả tranh/i }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByLabelText("Nội dung bé mô tả bức tranh"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Xem câu mẫu tham khảo/i }),
     ).toBeInTheDocument();
+    expect(screen.queryByText("9/10 điểm")).not.toBeInTheDocument();
   });
 
   it("supports custom upload tab validation and book page selection", async () => {
