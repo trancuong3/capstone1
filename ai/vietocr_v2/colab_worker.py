@@ -297,6 +297,114 @@ class ColabWorker:
                   })
         return run_id, "CANDIDATE", stable_candidate
 
+    def materialize_candidate_artifact(self, job_id: str, run_id: str, run_dir: Path) -> tuple[dict[str, Any], Path]:
+        artifact = self.call("GET", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/artifact",
+                             params={"worker_id": self.worker_id})
+        checkpoint_sha = str(artifact.get("checkpoint_sha256", ""))
+        checkpoint_bytes = int(artifact.get("checkpoint_bytes") or 0)
+        chunks = artifact.get("chunks")
+        if len(checkpoint_sha) != 64 or checkpoint_bytes <= 0 or not isinstance(chunks, list) or not chunks:
+            raise ValueError("CANDIDATE_ARTIFACT_MANIFEST_INVALID")
+        destination = run_dir / f"candidate-{checkpoint_sha}.pth"
+        if destination.is_file():
+            if destination.stat().st_size == checkpoint_bytes and sha256_file(destination) == checkpoint_sha:
+                return artifact, destination
+            raise ValueError("CACHED_CANDIDATE_ARTIFACT_HASH_MISMATCH")
+        shard_root = run_dir / f"candidate-shards-{checkpoint_sha}"
+        shard_root.mkdir(parents=True, exist_ok=True)
+        local_chunks = []
+        for index, chunk in enumerate(chunks):
+            if int(chunk.get("index", -1)) != index:
+                raise ValueError("CANDIDATE_ARTIFACT_CHUNK_ORDER_INVALID")
+            local = shard_root / f"part-{index:04d}.bin"
+            self.download(str(chunk["url"]), local, str(chunk["sha256"]))
+            if local.stat().st_size != int(chunk.get("bytes", -1)):
+                raise ValueError("CANDIDATE_ARTIFACT_CHUNK_SIZE_MISMATCH")
+            local_chunks.append({"index": index, "name": local.name,
+                                 "bytes": int(chunk["bytes"]), "sha256": chunk["sha256"]})
+        assemble_shards({"schema": "viread-checkpoint-shards-v1", "filename": destination.name,
+                         "bytes": checkpoint_bytes, "sha256": checkpoint_sha,
+                         "chunks": local_chunks}, shard_root, destination)
+        if destination.stat().st_size != checkpoint_bytes or sha256_file(destination) != checkpoint_sha:
+            destination.unlink(missing_ok=True)
+            raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
+        return artifact, destination
+
+    def process_benchmark_only_job(self, job: dict[str, Any], run_dir: Path,
+                                   progress: dict[str, Any]) -> None:
+        metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+        evaluation_type = metadata.get("evaluation_type")
+        if evaluation_type not in {"PILOT", "PRODUCTION"}:
+            raise ValueError("BENCHMARK_ONLY_EVALUATION_TYPE_INVALID")
+        run_id = str(job.get("run_id") or "")
+        if not run_id:
+            raise ValueError("BENCHMARK_ONLY_RUN_ID_MISSING")
+        artifact, candidate = self.materialize_candidate_artifact(str(job["id"]), run_id, run_dir)
+        if artifact.get("checkpoint_sha256") != metadata.get("candidate_checkpoint_sha256"):
+            raise ValueError("BENCHMARK_ONLY_CANDIDATE_LINEAGE_MISMATCH")
+        locked_data, locked_items = self.dataset(str(job["id"]), locked_test=True)
+        if (not locked_data or locked_data.get("version_sha256") != job.get("locked_test_manifest_sha256")
+                or str(locked_data.get("id")) != str(job.get("locked_test_version_id"))):
+            raise ValueError("BENCHMARK_ONLY_COHORT_LINEAGE_MISMATCH")
+        receipt, _, cache = self.materialize_dataset(str(job["id"]), locked_data, locked_items,
+                                                      run_dir, locked_test=True)
+        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        if not original.exists():
+            from vietocr.tool.utils import download_weights
+            downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
+            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            shutil.copyfile(downloaded, original)
+        if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
+            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+
+        parent = active = None
+        parent_hash = active_hash = None
+        if evaluation_type == "PRODUCTION":
+            parent = self.materialize_parent(job, run_dir)
+            active = parent
+            parent_hash = active_hash = str(job["parent_checkpoint_sha256"])
+            baseline_profile = str((job.get("active_model") or {}).get("profile") or "ORIGINAL")
+        else:
+            baseline_profile = "ORIGINAL"
+        report_path = run_dir / f"{evaluation_type.lower()}-{locked_data['version_sha256']}-benchmark.json"
+        if report_path.is_file():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        else:
+            from .benchmark import run_locked_benchmark
+            report = run_locked_benchmark(
+                manifest_path=str(receipt), expected_manifest_sha256=locked_data["version_sha256"],
+                original_checkpoint=str(original), candidate_checkpoint=str(candidate),
+                candidate_profile=job["profile"], output_path=str(report_path), image_cache_dir=str(cache),
+                parent_checkpoint=str(parent) if parent else None,
+                active_checkpoint=str(active) if active else None,
+                parent_profile=baseline_profile, active_profile=baseline_profile,
+            )
+        if (report.get("candidate_checkpoint_sha256") != artifact["checkpoint_sha256"]
+                or report.get("locked_manifest_sha256") != locked_data["version_sha256"]
+                or report.get("parent_checkpoint_sha256") != parent_hash
+                or report.get("active_checkpoint_sha256") != active_hash):
+            raise ValueError("BENCHMARK_ONLY_REPORT_LINEAGE_MISMATCH")
+        progress.update({"stage": "registering_benchmark", "completed_steps": len(report["outputs"]),
+                         "total_steps": len(report["outputs"])})
+        self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/benchmarks",
+                  params={"worker_id": self.worker_id}, json={
+                      "run_id": run_id,
+                      "locked_test_version_id": job["locked_test_version_id"],
+                      "locked_test_manifest_sha256": job["locked_test_manifest_sha256"],
+                      "parent_checkpoint_sha256": parent_hash,
+                      "active_checkpoint_sha256": active_hash,
+                      "outputs": [{key: row[key] for key in (
+                          "sample_id", "group_id", "original", "candidate", "parent", "active"
+                      ) if row.get(key) is not None} for row in report["outputs"]],
+                  })
+        self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/finish", json={
+            "worker_id": self.worker_id, "run_id": run_id,
+            "status": "BENCHMARKED" if report.get("quality_gate", {}).get("status") == "V2_WIN"
+                      and evaluation_type == "PRODUCTION" else "QUALITY_GATE_REJECTED",
+            "runtime": self.runtime_data,
+        })
+
     def process_job(self, job: dict[str, Any]) -> None:
         job_id = str(job["id"])
         run_dir = self.work_root / job_id
@@ -311,6 +419,11 @@ class ColabWorker:
         try:
             runtime = self.assert_runtime_capacity(run_dir)
             self.runtime_data = runtime
+            metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+            if metadata.get("operation") == "BENCHMARK_ONLY":
+                progress.update(stage="downloading_candidate_artifact", runtime=runtime)
+                self.process_benchmark_only_job(job, run_dir, progress)
+                return
             progress.update(stage="downloading_dataset", runtime=runtime)
             dataset, items = self.dataset(job_id)
             if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
@@ -390,6 +503,15 @@ class ColabWorker:
                 })
                 return
 
+            # Training is complete once the immutable candidate is registered.
+            # A missing evaluation cohort must not turn the run into a failure.
+            if not job.get("locked_test_version_id") or not job.get("locked_test_manifest_sha256"):
+                self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": run_id, "status": "CANDIDATE",
+                    "runtime": self.runtime_data,
+                })
+                return
+
             test_job = dict(job)
             test_job["locked_test_version_id"] = job.get("locked_test_version_id")
             test_job["locked_test_manifest_sha256"] = job.get("locked_test_manifest_sha256")
@@ -417,7 +539,7 @@ class ColabWorker:
                 shutil.copyfile(downloaded, original)
             if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
                 raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-            report_path = run_dir / "locked-test-report.json"
+            report_path = run_dir / f"production-{test_job['locked_test_manifest_sha256']}-{job['parent_checkpoint_sha256']}.json"
             if report_path.exists():
                 report = json.loads(report_path.read_text(encoding="utf-8"))
             else:
@@ -427,6 +549,9 @@ class ColabWorker:
                     expected_manifest_sha256=test_job["locked_test_manifest_sha256"],
                     original_checkpoint=str(original), candidate_checkpoint=str(stable_candidate),
                     candidate_profile=job["profile"], output_path=str(report_path), image_cache_dir=str(cache),
+                    parent_checkpoint=str(parent), active_checkpoint=str(parent),
+                    parent_profile=str((job.get("active_model") or {}).get("profile") or "ORIGINAL"),
+                    active_profile=str((job.get("active_model") or {}).get("profile") or "ORIGINAL"),
                 )
             if (report["candidate_checkpoint_sha256"] != candidate["checkpoint_sha256"]
                     or report["locked_manifest_sha256"] != test_job["locked_test_manifest_sha256"]):
@@ -438,7 +563,11 @@ class ColabWorker:
                           "run_id": run_id,
                           "locked_test_version_id": test_job["locked_test_version_id"],
                           "locked_test_manifest_sha256": test_job["locked_test_manifest_sha256"],
-                          "outputs": [{key: row[key] for key in ("sample_id", "group_id", "original", "candidate")}
+                          "parent_checkpoint_sha256": job["parent_checkpoint_sha256"],
+                          "active_checkpoint_sha256": job["parent_checkpoint_sha256"],
+                          "outputs": [{key: row[key] for key in (
+                              "sample_id", "group_id", "original", "candidate", "parent", "active"
+                          ) if row.get(key) is not None}
                                       for row in report["outputs"]],
                       })
             self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={

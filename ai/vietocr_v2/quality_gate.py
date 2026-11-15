@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -23,25 +24,49 @@ def evaluate_gate(metrics: dict[str, Any], *, paired_manifest_hash: str, expecte
     try:
         count, groups = int(metrics["sample_count"]), int(metrics["group_count"])
         cer, wer = metrics["cer"], metrics["wer"]
-        for result in (cer, wer):
-            if not 0 <= float(result["original_rate"]) <= 1 or not 0 <= float(result["candidate_rate"]) <= 1:
-                raise ValueError("rate outside [0, 1]")
-            if len(result["paired_cluster_bootstrap_95ci"]) != 2:
-                raise ValueError("missing confidence interval")
+        comparisons = {"original": [cer, wer]}
+        for baseline in ("parent", "active"):
+            cer_key, wer_key = f"{baseline}_cer", f"{baseline}_wer"
+            if cer_key in metrics or wer_key in metrics:
+                if cer_key not in metrics or wer_key not in metrics:
+                    raise ValueError("incomplete baseline comparison")
+                comparisons[baseline] = [metrics[cer_key], metrics[wer_key]]
+        intervals: dict[str, list[list[float]]] = {}
+        for baseline, results in comparisons.items():
+            intervals[baseline] = []
+            for result in results:
+                if not 0 <= float(result[f"{baseline}_rate"]) <= 1 or not 0 <= float(result["candidate_rate"]) <= 1:
+                    raise ValueError("rate outside [0, 1]")
+                interval_key = f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"
+                interval = result.get(interval_key, result.get("paired_cluster_bootstrap_95ci"))
+                if (not isinstance(interval, list) or len(interval) != 2
+                        or any(not math.isfinite(float(value)) or not -1 <= float(value) <= 1 for value in interval)
+                        or not math.isfinite(float(result[f"delta_candidate_minus_{baseline}"]))):
+                    raise ValueError("missing confidence interval")
+                intervals[baseline].append([float(interval[0]), float(interval[1])])
         if count < policy.min_pairs or groups < policy.min_groups:
             return {"status": "INSUFFICIENT_EVIDENCE", "reason": "minimum_locked_test_size_not_met", "promotion_allowed": False,
                     "sample_count": count, "group_count": groups}
+        deltas = {
+            baseline: [float(item[f"delta_candidate_minus_{baseline}"]) for item in results]
+            for baseline, results in comparisons.items()
+        }
+        upper = {
+            baseline: [interval[1] for interval in values]
+            for baseline, values in intervals.items()
+        }
+        lower = {
+            baseline: [interval[0] for interval in values]
+            for baseline, values in intervals.items()
+        }
     except (KeyError, TypeError, ValueError, OverflowError):
         return {"status": "EVALUATION_FAILED", "reason": "malformed_metrics", "promotion_allowed": False}
-
-    results = [cer, wer]
-    deltas = [float(item["delta_candidate_minus_original"]) for item in results]
-    upper = [float(item["paired_cluster_bootstrap_95ci"][1]) for item in results]
-    lower = [float(item["paired_cluster_bootstrap_95ci"][0]) for item in results]
-    if any(delta > policy.max_absolute_regression for delta in deltas):
+    if any(not math.isfinite(delta) for baseline_deltas in deltas.values() for delta in baseline_deltas):
+        return {"status": "EVALUATION_FAILED", "reason": "non_finite_metric", "promotion_allowed": False}
+    if any(delta > policy.max_absolute_regression for baseline_deltas in deltas.values() for delta in baseline_deltas):
         return {"status": "ORIGINAL_WIN", "reason": "non_regression_limit_exceeded", "promotion_allowed": False}
-    v2_win = all(bound < 0 for bound in upper) if policy.require_both_cer_and_wer_win else any(bound < 0 for bound in upper)
-    original_win = any(bound > 0 for bound in lower)
+    v2_win = all(bound < 0 for baseline_bounds in upper.values() for bound in baseline_bounds) if policy.require_both_cer_and_wer_win else all(any(bound < 0 for bound in baseline_bounds) for baseline_bounds in upper.values())
+    original_win = any(bound > 0 for baseline_bounds in lower.values() for bound in baseline_bounds)
     if v2_win:
         status: GateStatus = "V2_WIN"
         reason = "paired_cluster_confidence_intervals_favor_v2"

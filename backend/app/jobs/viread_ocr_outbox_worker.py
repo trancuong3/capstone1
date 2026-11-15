@@ -90,7 +90,7 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
 async def _process(event: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(text("""
-            SELECT p.imagepath, p.width, p.height, r.verificationstatus, r.verifiedtext,
+            SELECT p.imagepath, p.bookid, p.width, p.height, r.verificationstatus, r.verifiedtext,
                    r.contenthash, r.processingmeta, w.wordindex, w.lineindex, w.text, w.boundingbox
             FROM public.bookpages AS p
             JOIN public.pagerevisions AS r ON r.pageid = p.id
@@ -135,8 +135,9 @@ async def _process(event: dict[str, Any]) -> None:
                         :page_id, :revision_id, CAST(:provenance AS jsonb))
                 ON CONFLICT DO NOTHING
             """), {
-                "group_id": str(event["page_id"]),
-                "split": "train" if ai_review_required else _stable_split(str(event["page_id"])),
+                # Group and split at book/document level, never at an individual page.
+                "group_id": str(rows[0]["bookid"] or event["page_id"]),
+                "split": "train" if ai_review_required else _stable_split(str(rows[0]["bookid"] or event["page_id"])),
                 "path": object_path,
                 "image_sha": image_hash,
                 "label": label,

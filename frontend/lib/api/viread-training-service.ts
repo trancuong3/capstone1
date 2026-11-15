@@ -27,6 +27,7 @@ const overviewSchema = z.object({
         generation: z.number().int().optional(),
         candidate_has_benchmark: z.boolean().optional(),
         attempts: z.number().int(),
+        evaluation_attempts: z.number().int().optional(),
         progress: z.record(z.string(), z.unknown()),
         last_error_code: z.string().nullable(),
         metadata: z.record(z.string(), z.unknown()),
@@ -69,6 +70,7 @@ const overviewSchema = z.object({
       candidate_checkpoint_sha256: z.string(),
       locked_test_manifest_sha256: z.string(),
       created_at: z.iso.datetime({ offset: true }),
+      evaluation_type: z.string().optional(),
     }),
   ),
   active_model: z
@@ -102,6 +104,17 @@ export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  requestEvaluation(jobId: string, evaluationType: "PILOT" | "PRODUCTION"): Promise<{
+    job_id: string;
+    run_id: string;
+    status: string;
+    operation: string;
+    evaluation_type: string;
+    cohort_id: string;
+    sample_count: number;
+    group_count: number;
+    trainer_will_run: boolean;
+  }>;
   retry(jobId: string): Promise<{ job_id: string; status: string }>;
   discardMismatchedCandidate(jobId: string): Promise<{
     job_id: string;
@@ -129,6 +142,23 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    requestEvaluation: (jobId, evaluationType) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/evaluate`,
+        z.object({
+          job_id: z.uuid(),
+          run_id: z.uuid(),
+          status: z.string(),
+          operation: z.string(),
+          evaluation_type: z.string(),
+          cohort_id: z.uuid(),
+          sample_count: z.number().int(),
+          group_count: z.number().int(),
+          trainer_will_run: z.boolean(),
+        }),
+        undefined,
+        { method: "POST", body: { evaluation_type: evaluationType } },
+      ),
     retry: (jobId) =>
       requestApi(
         `/books/admin/viread-training/jobs/${jobId}/retry`,

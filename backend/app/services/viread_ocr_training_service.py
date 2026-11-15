@@ -31,6 +31,10 @@ ORIGINAL_ARCHITECTURE_SHA256 = "a26f0adfc33ffe32cdf73c7daa04c39a86a36a8ac0dcc604
 MAX_SHARD_BYTES = 40 * 1024 * 1024
 MIN_LOCKED_PAIRS = 200
 MIN_LOCKED_GROUPS = 30
+MIN_PILOT_PAIRS = 20
+MIN_PILOT_GROUPS = 5
+MAX_PILOT_PAIRS = 40
+MAX_PILOT_PER_GROUP = 8
 TRAINING_PROFILES = {
     "FLOW1_EXTERNAL_TRDG": {
         "dataset_flows": {"FLOW2_EXTERNAL_TRDG"},
@@ -136,6 +140,14 @@ def _canonicalize_legacy_verified_snapshot(
     return True, manifest, canonical_rows
 
 
+def _verified_training_split(group_id: str) -> str:
+    """Assign one deterministic Train/Validation split to a whole source document."""
+    value = int(hashlib.sha256(
+        f"viread-vietocr-v2-document-split-v1\0{group_id}".encode()
+    ).hexdigest()[:8], 16) / 0xFFFFFFFF
+    return "train" if value < 0.8 else "validation"
+
+
 def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Map exactly the canonical source rows to immutable version-owned rows."""
     return [{
@@ -179,11 +191,12 @@ def _metric_counts(lines: list[dict[str, str]], field: str, metric: str) -> tupl
     return errors, units
 
 
-def _paired_metric(lines: list[dict[str, str]], metric: str, *, replicates: int = 5000, seed: int = 20261112) -> dict[str, Any]:
+def _paired_metric(lines: list[dict[str, str]], metric: str, *, baseline: str = "original",
+                   replicates: int = 5000, seed: int = 20261112) -> dict[str, Any]:
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for line in lines:
         groups[line["group_id"]].append(line)
-    original_errors, units = _metric_counts(lines, "original", metric)
+    original_errors, units = _metric_counts(lines, baseline, metric)
     candidate_errors, _ = _metric_counts(lines, "candidate", metric)
     if units <= 0:
         raise ValueError("benchmark reference units are empty")
@@ -193,32 +206,70 @@ def _paired_metric(lines: list[dict[str, str]], metric: str, *, replicates: int 
     for _ in range(replicates):
         selected = [name for _ in names for name in (names[rng.randrange(len(names))],)]
         sampled = [line for name in selected for line in groups[name]]
-        base_n, base_units = _metric_counts(sampled, "original", metric)
+        base_n, base_units = _metric_counts(sampled, baseline, metric)
         candidate_n, _ = _metric_counts(sampled, "candidate", metric)
         deltas.append(candidate_n / base_units - base_n / base_units)
     deltas.sort()
-    return {"metric": metric, "original_error_count": original_errors,
+    return {"metric": metric, f"{baseline}_error_count": original_errors,
             "candidate_error_count": candidate_errors, "reference_unit_count": units,
-            "original_rate": original_errors / units, "candidate_rate": candidate_errors / units,
-            "delta_candidate_minus_original": candidate_errors / units - original_errors / units,
-            "paired_cluster_bootstrap_95ci": [deltas[math.floor(0.025 * (len(deltas) - 1))],
-                                               deltas[math.ceil(0.975 * (len(deltas) - 1))]],
-            "bootstrap_replicates": replicates, "cluster_count": len(names), "seed": seed}
+            f"{baseline}_rate": original_errors / units, "candidate_rate": candidate_errors / units,
+            f"delta_candidate_minus_{baseline}": candidate_errors / units - original_errors / units,
+            f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}": [
+                deltas[math.floor(0.025 * (len(deltas) - 1))],
+                deltas[math.ceil(0.975 * (len(deltas) - 1))]],
+            "bootstrap_replicates": replicates, "cluster_count": len(names), "seed": seed,
+            **({"delta_candidate_minus_original": candidate_errors / units - original_errors / units,
+               "paired_cluster_bootstrap_95ci": [deltas[math.floor(0.025 * (len(deltas) - 1))],
+                                                  deltas[math.ceil(0.975 * (len(deltas) - 1))]]}
+               if baseline == "original" else {})}
 
 
-def _gate(metrics: dict[str, Any], *, manifest_sha: str) -> dict[str, Any]:
-    if len(metrics.get("outputs", [])) < MIN_LOCKED_PAIRS or len({item["group_id"] for item in metrics.get("outputs", [])}) < MIN_LOCKED_GROUPS:
+def _gate(metrics: dict[str, Any], *, manifest_sha: str, evaluation_type: str = "PRODUCTION",
+          require_model_baselines: bool = False) -> dict[str, Any]:
+    sample_count = len(metrics.get("outputs", []))
+    group_count = len({item["group_id"] for item in metrics.get("outputs", [])})
+    if evaluation_type == "PILOT":
+        return {"status": "INSUFFICIENT_EVIDENCE", "promotion_allowed": False,
+                "reason": "pilot_is_advisory_and_never_promotable",
+                "sample_count": sample_count, "group_count": group_count,
+                "locked_test_manifest_sha256": manifest_sha}
+    if sample_count < MIN_LOCKED_PAIRS or group_count < MIN_LOCKED_GROUPS:
         return {"status": "INSUFFICIENT_EVIDENCE", "promotion_allowed": False,
                 "reason": "minimum_locked_test_size_not_met"}
-    for metric in (metrics["cer"], metrics["wer"]):
-        if not math.isfinite(float(metric["candidate_rate"])) or not math.isfinite(float(metric["original_rate"])):
-            return {"status": "EVALUATION_FAILED", "promotion_allowed": False, "reason": "non_finite_metric"}
-        if metric["delta_candidate_minus_original"] > 0.005:
-            return {"status": "ORIGINAL_WIN", "promotion_allowed": False, "reason": "non_regression_limit_exceeded"}
-    if all(float(metrics[name]["paired_cluster_bootstrap_95ci"][1]) < 0 for name in ("cer", "wer")):
+    baselines = ["original"]
+    for baseline in ("parent", "active"):
+        if f"{baseline}_cer" in metrics or f"{baseline}_wer" in metrics:
+            baselines.append(baseline)
+    if require_model_baselines and not {"parent", "active"}.issubset(baselines):
+        return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
+                "reason": "parent_and_active_baselines_required"}
+    if any((f"{baseline}_cer" in metrics) != (f"{baseline}_wer" in metrics)
+           for baseline in ("parent", "active")):
+        return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
+                "reason": "incomplete_model_baseline_metrics"}
+    comparisons = [(baseline, metrics["cer"] if baseline == "original" else metrics[f"{baseline}_cer"],
+                    metrics["wer"] if baseline == "original" else metrics[f"{baseline}_wer"])
+                   for baseline in baselines]
+    for baseline, cer, wer in comparisons:
+        for result in (cer, wer):
+            rate_key = f"{baseline}_rate"
+            if not math.isfinite(float(result["candidate_rate"])) or not math.isfinite(float(result[rate_key])):
+                return {"status": "EVALUATION_FAILED", "promotion_allowed": False, "reason": "non_finite_metric"}
+            interval = result.get(f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}")
+            if (not isinstance(interval, list) or len(interval) != 2
+                    or any(not math.isfinite(float(value)) or not -1 <= float(value) <= 1 for value in interval)
+                    or not math.isfinite(float(result[f"delta_candidate_minus_{baseline}"]))):
+                return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
+                        "reason": "invalid_paired_confidence_interval"}
+            if float(result[f"delta_candidate_minus_{baseline}"]) > 0.005:
+                return {"status": "ORIGINAL_WIN", "promotion_allowed": False, "reason": "non_regression_limit_exceeded"}
+    if all(float(result[f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"][1]) < 0
+           for baseline, cer, wer in comparisons for result in (cer, wer)):
         return {"status": "V2_WIN", "promotion_allowed": True, "requires_human_approval": True,
-                "reason": "paired_cluster_confidence_intervals_favor_v2", "locked_test_manifest_sha256": manifest_sha}
-    if any(float(metrics[name]["paired_cluster_bootstrap_95ci"][0]) > 0 for name in ("cer", "wer")):
+                "reason": "paired_cluster_confidence_intervals_favor_candidate_against_all_baselines",
+                "locked_test_manifest_sha256": manifest_sha}
+    if any(float(result[f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"][0]) > 0
+           for baseline, cer, wer in comparisons for result in (cer, wer)):
         return {"status": "ORIGINAL_WIN", "promotion_allowed": False,
                 "reason": "paired_cluster_confidence_interval_favors_original"}
     return {"status": "NO_SIGNIFICANT_DIFFERENCE", "promotion_allowed": False,
@@ -249,7 +300,7 @@ class VireadOcrTrainingService:
                    job.generation,
                    EXISTS (SELECT 1 FROM public.viread_ocr_benchmarks benchmark WHERE benchmark.run_id=job.run_id)
                        AS candidate_has_benchmark,
-                   job.attempts, job.progress, job.last_error_code,
+                   job.attempts, job.evaluation_attempts, job.progress, job.last_error_code,
                    job.metadata, job.colab_execution_id, job.colab_execution_resource_name,
                    job.colab_operation_name, job.colab_execution_number,
                    job.worker_id, job.lease_expires_at,
@@ -261,7 +312,7 @@ class VireadOcrTrainingService:
         """)
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
-                   candidate_checkpoint_sha256, locked_test_manifest_sha256, created_at
+                   candidate_checkpoint_sha256, locked_test_manifest_sha256, evaluation_type, created_at
             FROM public.viread_ocr_benchmarks ORDER BY created_at DESC LIMIT 20
         """)
         active = await self.repo.one("SELECT model_family, checkpoint_sha256, storage_path, profile, decision_id, updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE")
@@ -383,12 +434,15 @@ class VireadOcrTrainingService:
             WITH locked_versions AS (
                 SELECT version.id, version.version_sha256, version.sample_count,
                        version.created_at, count(sample.id)::integer AS materialized_count,
+                       count(DISTINCT sample.source_annotation_id)::integer AS unique_annotation_count,
                        count(DISTINCT sample.image_sha256)::integer AS unique_image_count,
-                       count(DISTINCT sample.source_group_id)::integer AS group_count,
+                       count(DISTINCT COALESCE(page.bookid::text, sample.source_group_id))::integer AS group_count,
                        bool_and(sample.provenance->>'verified'='true'
-                                AND sample.source_annotation_id IS NOT NULL) AS all_samples_verified
+                                AND sample.source_annotation_id IS NOT NULL
+                                AND sample.provenance->>'annotation_id'=sample.source_annotation_id) AS all_samples_verified
                 FROM public.viread_ocr_dataset_versions version
                 JOIN public.viread_ocr_samples sample ON sample.dataset_version_id=version.id
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE version.source_flow='LOCKED_TEST' AND version.is_locked_test=TRUE
                   AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test'
                 GROUP BY version.id, version.version_sha256, version.sample_count, version.created_at
@@ -397,18 +451,26 @@ class VireadOcrTrainingService:
                    locked.materialized_count AS sample_count, locked.group_count
             FROM locked_versions locked
             WHERE locked.materialized_count=locked.sample_count
+              AND locked.unique_annotation_count=locked.sample_count
               AND locked.unique_image_count=locked.sample_count
               AND locked.all_samples_verified IS TRUE
               AND locked.materialized_count >= :minimum_samples
               AND locked.group_count >= :minimum_groups
               AND NOT EXISTS (
+                  SELECT 1 FROM public.viread_ocr_benchmarks consumed
+                  WHERE consumed.locked_test_version_id=locked.id
+              )
+              AND NOT EXISTS (
                   SELECT 1
                   FROM public.viread_ocr_samples test_sample
-                  JOIN public.viread_ocr_samples used
-                    ON used.split IN ('train','validation')
-                   AND (used.image_sha256=test_sample.image_sha256
-                        OR used.source_group_id=test_sample.source_group_id)
+                  LEFT JOIN public.bookpages test_page ON test_page.id=test_sample.source_page_id
+                  JOIN public.viread_ocr_samples used ON used.split IN ('train','validation')
+                  LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                   WHERE test_sample.dataset_version_id=locked.id
+                    AND used.id IS NOT NULL
+                    AND (used.image_sha256=test_sample.image_sha256
+                         OR COALESCE(used_page.bookid::text, used.source_group_id)
+                            = COALESCE(test_page.bookid::text, test_sample.source_group_id))
               )
             ORDER BY locked.created_at, locked.id LIMIT 1
         """, {"minimum_samples": MIN_LOCKED_PAIRS, "minimum_groups": MIN_LOCKED_GROUPS})
@@ -424,8 +486,10 @@ class VireadOcrTrainingService:
         eligible = await self.repo.one("""
             WITH verified_holdout AS (
                 SELECT sample.id::text AS sample_id, sample.source_flow,
-                       sample.source_group_id AS group_id, sample.image_sha256, sample.label
+                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                       sample.image_sha256, sample.label
                 FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW1_VERIFIED'
                   AND sample.dataset_version_id IS NULL
@@ -440,8 +504,10 @@ class VireadOcrTrainingService:
                   )
                 UNION ALL
                 SELECT sample.id::text, sample.source_flow,
-                       sample.source_group_id, sample.image_sha256, sample.label
+                       COALESCE(page.bookid::text, sample.source_group_id),
+                       sample.image_sha256, sample.label
                 FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW2_EXTERNAL'
                   AND sample.dataset_version_id IS NOT NULL
@@ -453,15 +519,17 @@ class VireadOcrTrainingService:
                 FROM verified_holdout holdout
                 WHERE NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_samples used
+                    LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                     WHERE used.split IN ('train','validation')
                       AND (used.image_sha256=holdout.image_sha256
-                           OR used.source_group_id=holdout.group_id)
+                           OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
                 )
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_samples locked
+                    LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
                     WHERE locked.source_flow='LOCKED_TEST'
                       AND (locked.image_sha256=holdout.image_sha256
-                           OR locked.source_group_id=holdout.group_id)
+                           OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
                 )
                 ORDER BY holdout.image_sha256, holdout.group_id
             )
@@ -481,12 +549,200 @@ class VireadOcrTrainingService:
                 "missing_group_count": max(0, MIN_LOCKED_GROUPS - eligible_groups),
                 "minimum_samples": MIN_LOCKED_PAIRS, "minimum_groups": MIN_LOCKED_GROUPS}
 
+    async def _record_evaluation_cohort(
+        self, dataset_version_id: UUID, manifest_sha256: str, evaluation_type: str,
+        seed: str, sample_count: int, group_count: int, actor_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        existing = await self.repo.one("""
+            SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id
+        """, {"dataset_id": dataset_version_id})
+        if existing:
+            if existing["manifest_sha256"] != manifest_sha256 or existing["evaluation_type"] != evaluation_type:
+                raise HTTPException(status_code=409, detail="Evaluation cohort lineage conflicts with its immutable dataset")
+            return existing
+        cohort = await self.repo.one("""
+            INSERT INTO public.viread_ocr_evaluation_cohorts
+                (evaluation_type, dataset_version_id, manifest_sha256, seed,
+                 sampling_policy, sample_count, group_count, created_by)
+            VALUES (:evaluation_type, :dataset_id, :manifest_sha, :seed,
+                    :policy, :sample_count, :group_count, :actor_id)
+            ON CONFLICT (dataset_version_id) DO NOTHING
+            RETURNING id, evaluation_type, manifest_sha256, sample_count, group_count
+        """, {"evaluation_type": evaluation_type, "dataset_id": dataset_version_id,
+              "manifest_sha": manifest_sha256, "seed": seed,
+              "policy": ("seeded balanced sample from verified holdout; max 8 lines/document; single-use"
+                         if evaluation_type == "PILOT" else
+                         "all eligible verified holdout; minimum 200 samples and 30 document groups; single-use"),
+              "sample_count": sample_count, "group_count": group_count, "actor_id": actor_id})
+        if cohort:
+            return cohort
+        existing = await self.repo.one("""
+            SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id
+        """, {"dataset_id": dataset_version_id})
+        if not existing or existing["manifest_sha256"] != manifest_sha256:
+            raise HTTPException(status_code=409, detail="Evaluation cohort was concurrently created with different lineage")
+        return existing
+
+    async def ensure_pilot_test(self, actor_id: UUID) -> dict[str, Any]:
+        """Create one small, balanced, immutable Pilot cohort from untouched human VERIFIED holdout."""
+        await self._admin(actor_id)
+        await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_pilot_test_autocreate'))")
+        existing = await self.repo.one("""
+            SELECT cohort.id AS cohort_id, cohort.dataset_version_id AS version_id,
+                   cohort.manifest_sha256, cohort.sample_count, cohort.group_count, cohort.seed
+            FROM public.viread_ocr_evaluation_cohorts cohort
+            WHERE cohort.evaluation_type='PILOT'
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.viread_ocr_benchmarks benchmark
+                  WHERE benchmark.evaluation_cohort_id=cohort.id
+              )
+            ORDER BY cohort.created_at, cohort.id LIMIT 1
+        """)
+        if existing:
+            await self.repo.commit()
+            return {"status": "READY", **existing, "evaluation_type": "PILOT",
+                    "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
+
+        rows = await self.repo.all("""
+            WITH verified_holdout AS (
+                SELECT sample.id::text AS sample_id, sample.source_flow,
+                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                       sample.image_storage_path, sample.image_sha256, sample.label,
+                       sample.source_page_id, sample.source_revision_id, sample.provenance
+                FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+                WHERE sample.split='holdout' AND sample.source_flow='FLOW1_VERIFIED'
+                  AND sample.dataset_version_id IS NULL AND sample.source_page_id IS NOT NULL
+                  AND sample.source_revision_id IS NOT NULL
+                  AND sample.provenance->>'verified_by_admin'='true'
+                  AND EXISTS (
+                      SELECT 1 FROM public.viread_ocr_outbox outbox
+                      WHERE outbox.page_id=sample.source_page_id
+                        AND outbox.revision_id=sample.source_revision_id AND outbox.status='DONE'
+                  )
+                UNION ALL
+                SELECT sample.id::text, sample.source_flow,
+                       COALESCE(page.bookid::text, sample.source_group_id),
+                       sample.image_storage_path, sample.image_sha256, sample.label,
+                       sample.source_page_id, sample.source_revision_id, sample.provenance
+                FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+                WHERE sample.split='holdout' AND sample.source_flow='FLOW2_EXTERNAL'
+                  AND sample.dataset_version_id IS NOT NULL
+                  AND sample.provenance->>'verified'='true'
+                  AND sample.provenance->>'annotation_id' IS NOT NULL
+            )
+            SELECT holdout.* FROM verified_holdout holdout
+            WHERE NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples used
+                LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
+                WHERE used.split IN ('train','validation')
+                  AND (used.image_sha256=holdout.image_sha256
+                       OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples locked
+                LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
+                WHERE locked.source_flow='LOCKED_TEST'
+                  AND (locked.image_sha256=holdout.image_sha256
+                       OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
+            )
+            ORDER BY holdout.group_id, holdout.image_sha256, holdout.sample_id
+        """)
+        by_hash: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            digest = str(row["image_sha256"]).lower()
+            previous = by_hash.get(digest)
+            if previous and unicodedata.normalize("NFC", previous["label"]) != unicodedata.normalize("NFC", row["label"]):
+                await self.repo.rollback()
+                raise HTTPException(status_code=409, detail="Verified holdout image has conflicting labels")
+            by_hash.setdefault(digest, row)
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in by_hash.values():
+            groups[str(row["group_id"])].append(row)
+        seed = "viread-pilot-admin-verified-v1"
+        ordered_groups = sorted(groups, key=lambda group: hashlib.sha256(f"{seed}\0{group}".encode()).hexdigest())
+        selected: list[dict[str, Any]] = []
+        depth = 0
+        while len(selected) < MAX_PILOT_PAIRS:
+            progressed = False
+            for group in ordered_groups:
+                group_rows = sorted(groups[group], key=lambda row: hashlib.sha256(
+                    f"{seed}\0{group}\0{row['image_sha256']}".encode()
+                ).hexdigest())
+                if depth < min(MAX_PILOT_PER_GROUP, len(group_rows)) and len(selected) < MAX_PILOT_PAIRS:
+                    selected.append(group_rows[depth])
+                    progressed = True
+            if not progressed:
+                break
+            depth += 1
+        group_count = len({str(row["group_id"]) for row in selected})
+        if len(selected) < MIN_PILOT_PAIRS or group_count < MIN_PILOT_GROUPS:
+            await self.repo.commit()
+            return {"status": "NEEDS_DATA", "version_id": None, "manifest_sha256": None,
+                    "eligible_sample_count": len(by_hash), "eligible_group_count": len(groups),
+                    "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
+
+        from io import BytesIO
+        pilot_samples: list[DatasetSampleInput] = []
+        for row in selected:
+            image_bytes = await asyncio.to_thread(download_object, row["image_storage_path"])
+            digest = str(row["image_sha256"]).lower()
+            if hashlib.sha256(image_bytes).hexdigest() != digest:
+                await self.repo.rollback()
+                raise HTTPException(status_code=409, detail="Verified holdout image hash changed")
+            try:
+                with Image.open(BytesIO(image_bytes)) as image:
+                    image.verify()
+                    image_format = (image.format or "PNG").upper()
+            except (UnidentifiedImageError, OSError) as exc:
+                await self.repo.rollback()
+                raise HTTPException(status_code=422, detail="Verified Pilot holdout contains an invalid image") from exc
+            extension, content_type = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
+                                       "WEBP": ("webp", "image/webp")}.get(image_format, (None, None))
+            if not extension:
+                await self.repo.rollback()
+                raise HTTPException(status_code=422, detail="Verified Pilot holdout image format is unsupported")
+            object_path = f"ocr-training/locked-test/pilot/{digest[:2]}/{digest}.{extension}"
+            await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
+            await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
+            pilot_samples.append(DatasetSampleInput(
+                source_flow="LOCKED_TEST", sample_id=str(row["sample_id"]),
+                group_id=str(row["group_id"]), split="locked_test", image_storage_path=object_path,
+                image_sha256=digest, label=unicodedata.normalize("NFC", str(row["label"])),
+                verified=True, annotation_id=str(row["sample_id"]),
+                source_page_id=row.get("source_page_id"), source_revision_id=row.get("source_revision_id"),
+                provenance={"evaluation_type": "PILOT", "source_flow": row["source_flow"],
+                            "source_sample_id": str(row["sample_id"]), "source_group_id": str(row["group_id"]),
+                            "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
+            ))
+        imported = await self.register_dataset(actor_id, DatasetImport(
+            source_flow="LOCKED_TEST", samples=pilot_samples, split_seed=seed,
+            provenance={"auto_created": True, "evaluation_type": "PILOT", "seed": seed,
+                        "sampling_policy": "seeded balanced verified holdout; max 8 samples per document; single-use",
+                        "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS},
+        ))
+        await self._record_evaluation_cohort(UUID(str(imported["id"])), imported["version_sha256"],
+                                             "PILOT", seed, len(pilot_samples), group_count, actor_id)
+        await self.repo.commit()
+        return {"status": "READY", "version_id": str(imported["id"]),
+                "manifest_sha256": imported["version_sha256"], "sample_count": len(pilot_samples),
+                "group_count": group_count, "evaluation_type": "PILOT",
+                "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
+
     async def ensure_locked_test(self, actor_id: UUID) -> dict[str, Any]:
         """Create the first immutable Locked Test from clean verified holdout data once thresholds are met."""
         await self._admin(actor_id)
         await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_locked_test_autocreate'))")
         readiness = await self._locked_test_readiness()
         if readiness["status"] == "READY":
+            await self._record_evaluation_cohort(
+                UUID(readiness["version_id"]), readiness["manifest_sha256"],
+                "PRODUCTION", "viread-locked-test-admin-verified-v1",
+                readiness["sample_count"], readiness["group_count"], actor_id,
+            )
             await self.repo.commit()
             return readiness
         if readiness["status"] != "READY_TO_CREATE":
@@ -496,10 +752,12 @@ class VireadOcrTrainingService:
         rows = await self.repo.all("""
             WITH verified_holdout AS (
                 SELECT sample.id::text AS sample_id, sample.source_flow,
-                       sample.source_group_id AS group_id, sample.image_storage_path,
+                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                       sample.image_storage_path,
                        sample.image_sha256, sample.label, sample.source_page_id,
                        sample.source_revision_id, sample.provenance
                 FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW1_VERIFIED'
                   AND sample.dataset_version_id IS NULL
@@ -514,10 +772,11 @@ class VireadOcrTrainingService:
                   )
                 UNION ALL
                 SELECT sample.id::text, sample.source_flow,
-                       sample.source_group_id, sample.image_storage_path,
+                       COALESCE(page.bookid::text, sample.source_group_id), sample.image_storage_path,
                        sample.image_sha256, sample.label, sample.source_page_id,
                        sample.source_revision_id, sample.provenance
                 FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW2_EXTERNAL'
                   AND sample.dataset_version_id IS NOT NULL
@@ -528,15 +787,17 @@ class VireadOcrTrainingService:
             FROM verified_holdout holdout
             WHERE NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples used
+                LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                 WHERE used.split IN ('train','validation')
                   AND (used.image_sha256=holdout.image_sha256
-                       OR used.source_group_id=holdout.group_id)
+                       OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
             )
               AND NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples locked
+                LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
                 WHERE locked.source_flow='LOCKED_TEST'
                   AND (locked.image_sha256=holdout.image_sha256
-                       OR locked.source_group_id=holdout.group_id)
+                       OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
               )
             ORDER BY holdout.source_flow, holdout.group_id, holdout.image_sha256, holdout.sample_id
         """)
@@ -608,6 +869,11 @@ class VireadOcrTrainingService:
         ))
         # register_dataset commits new versions; an idempotent hit may return before committing.
         await self.repo.commit()
+        await self._record_evaluation_cohort(
+            UUID(str(imported["id"])), imported["version_sha256"], "PRODUCTION",
+            "viread-locked-test-admin-verified-v1", len(locked_samples), group_count, actor_id,
+        )
+        await self.repo.commit()
         return {"status": "READY", "version_id": str(imported["id"]),
                 "manifest_sha256": imported["version_sha256"],
                 "sample_count": len(locked_samples), "group_count": group_count,
@@ -619,12 +885,28 @@ class VireadOcrTrainingService:
         await self._admin(actor_id)
         await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_flow1_snapshot'))")
         source_rows = await self.repo.all("""
-            SELECT id::text AS sample_id, source_group_id AS group_id, split, image_storage_path,
-                   image_sha256, label, source_page_id, source_revision_id, provenance
-            FROM public.viread_ocr_samples
-            WHERE source_flow='FLOW1_VERIFIED' AND split IN ('train','validation') AND dataset_version_id IS NULL
-            ORDER BY created_at, id
+            SELECT sample.id::text AS sample_id,
+                   COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                   sample.split, sample.image_storage_path, sample.image_sha256, sample.label,
+                   sample.source_page_id, sample.source_revision_id, sample.provenance
+            FROM public.viread_ocr_samples sample
+            LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+            WHERE sample.source_flow='FLOW1_VERIFIED'
+              AND sample.split IN ('train','validation') AND sample.dataset_version_id IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.viread_ocr_samples held
+                  LEFT JOIN public.bookpages held_page ON held_page.id=held.source_page_id
+                  WHERE held.source_flow='FLOW1_VERIFIED' AND held.split='holdout'
+                    AND held.dataset_version_id IS NULL
+                    AND COALESCE(held_page.bookid::text, held.source_group_id)
+                        = COALESCE(page.bookid::text, sample.source_group_id)
+              )
+            ORDER BY group_id, sample.created_at, sample.id
         """)
+        # Historical rows were split by page. The new immutable snapshot reassigns
+        # only clean non-holdout documents as a whole; source rows stay untouched.
+        for sample in source_rows:
+            sample["split"] = _verified_training_split(str(sample["group_id"]))
         manifest, source_rows = _verified_snapshot(source_rows)
         version_sha = hashlib.sha256(_canonical(manifest)).hexdigest()
         if source_rows:
@@ -770,10 +1052,17 @@ class VireadOcrTrainingService:
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset version not found")
         items = await self.repo.all("""
-            SELECT COALESCE(source_annotation_id, id::text) AS sample_id, source_annotation_id,
-                   source_flow, source_group_id AS group_id, split, image_storage_path, image_sha256, label
-            FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
-            ORDER BY source_group_id, source_annotation_id, id LIMIT :limit OFFSET :offset
+            SELECT COALESCE(sample.source_annotation_id, sample.id::text) AS sample_id,
+                   sample.source_annotation_id, sample.source_flow,
+                   CASE WHEN dataset.source_flow='LOCKED_TEST'
+                        THEN COALESCE(page.bookid::text, sample.source_group_id)
+                        ELSE sample.source_group_id END AS group_id,
+                   sample.split, sample.image_storage_path, sample.image_sha256, sample.label
+            FROM public.viread_ocr_samples sample
+            JOIN public.viread_ocr_dataset_versions dataset ON dataset.id=sample.dataset_version_id
+            LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+            WHERE sample.dataset_version_id=:dataset_id
+            ORDER BY group_id, sample.source_annotation_id, sample.id LIMIT :limit OFFSET :offset
         """, {"dataset_id": dataset_id, "limit": limit, "offset": offset})
         dataset["manifest_url"] = create_signed_image_url(dataset["manifest_storage_path"])
         for item in items:
@@ -813,6 +1102,28 @@ class VireadOcrTrainingService:
         profile_contract = TRAINING_PROFILES[payload.profile]
         if dataset["source_flow"] not in profile_contract["dataset_flows"]:
             raise HTTPException(status_code=422, detail="Training profile does not match its independent data flow")
+        leakage = await self.repo.one("""
+            SELECT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples sample
+                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+                WHERE sample.dataset_version_id=:dataset_id
+                  AND sample.split IN ('train','validation')
+                GROUP BY COALESCE(page.bookid::text, sample.source_group_id)
+                HAVING count(DISTINCT sample.split) > 1
+            ) AS document_group_leak,
+            EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples sample
+                WHERE sample.dataset_version_id=:dataset_id
+                GROUP BY sample.image_sha256
+                HAVING count(DISTINCT sample.split) > 1
+            ) AS image_hash_leak
+        """, {"dataset_id": dataset["id"]})
+        if leakage and (leakage["document_group_leak"] or leakage["image_hash_leak"]):
+            raise HTTPException(status_code=422, detail={
+                "message": "Training dataset leaks a document group or image across Train/Validation",
+                "document_group_leak": bool(leakage["document_group_leak"]),
+                "image_hash_leak": bool(leakage["image_hash_leak"]),
+            })
         split_counts = await self.repo.one("""
             SELECT count(*) FILTER (WHERE split='train')::integer AS train_count,
                    count(*) FILTER (WHERE split='validation')::integer AS validation_count
@@ -1037,36 +1348,133 @@ class VireadOcrTrainingService:
 
     async def benchmark(self, actor_id: UUID, payload: BenchmarkCreate) -> dict[str, Any]:
         await self._admin(actor_id)
-        run = await self.repo.one("SELECT id, status, checkpoint_sha256 FROM public.viread_ocr_training_runs WHERE id=:id", {"id": payload.run_id})
-        locked = await self.repo.one("SELECT id, source_flow, version_sha256, is_locked_test, sample_count FROM public.viread_ocr_dataset_versions WHERE id=:id", {"id": payload.locked_test_version_id})
-        if not run or run["status"] != "CANDIDATE" or not run["checkpoint_sha256"]:
+        run = await self.repo.one("""
+            SELECT id, status, profile, parent_checkpoint_sha256, checkpoint_sha256
+            FROM public.viread_ocr_training_runs WHERE id=:id
+        """, {"id": payload.run_id})
+        locked = await self.repo.one("SELECT id, source_flow, version_sha256, is_locked_test, sample_count FROM public.viread_ocr_dataset_versions WHERE id=:id FOR UPDATE", {"id": payload.locked_test_version_id})
+        if not run or run["status"] not in {"CANDIDATE", "BENCHMARKED"} or not run["checkpoint_sha256"]:
             raise HTTPException(status_code=409, detail="Benchmark requires a completed candidate run")
         if not locked or locked["source_flow"] != "LOCKED_TEST" or not locked["is_locked_test"] or locked["version_sha256"] != payload.locked_test_manifest_sha256:
             raise HTTPException(status_code=422, detail="Locked Test version/hash is invalid")
+        integrity = await self.repo.one("""
+            SELECT count(sample.id)::integer AS sample_count,
+                   count(DISTINCT sample.source_annotation_id)::integer AS unique_annotation_count,
+                   count(DISTINCT sample.image_sha256)::integer AS unique_image_count,
+                   count(DISTINCT COALESCE(page.bookid::text, sample.source_group_id))::integer AS group_count,
+                   count(*) FILTER (WHERE sample.provenance->>'verified'='true'
+                                    AND sample.source_annotation_id IS NOT NULL
+                                    AND sample.provenance->>'annotation_id'=sample.source_annotation_id)::integer AS verified_count
+            FROM public.viread_ocr_samples sample
+            LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+            WHERE sample.dataset_version_id=:dataset_id
+              AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test'
+        """, {"dataset_id": payload.locked_test_version_id})
+        if (not integrity or int(integrity["sample_count"] or 0) != int(locked["sample_count"])
+                or int(integrity["unique_annotation_count"] or 0) != int(locked["sample_count"])
+                or int(integrity["unique_image_count"] or 0) != int(locked["sample_count"])
+                or int(integrity["verified_count"] or 0) != int(locked["sample_count"])):
+            raise HTTPException(status_code=409, detail="Locked Test snapshot has missing, duplicate, or unverified human-annotation rows")
+        cohort = await self.repo.one("""
+            SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id FOR UPDATE
+        """, {"dataset_id": payload.locked_test_version_id})
+        if cohort and cohort["manifest_sha256"] != locked["version_sha256"]:
+            raise HTTPException(status_code=409, detail="Evaluation cohort manifest hash changed")
+        evaluation_type = cohort["evaluation_type"] if cohort else "PRODUCTION"
+        minimum_samples, minimum_groups = ((MIN_PILOT_PAIRS, MIN_PILOT_GROUPS)
+                                           if evaluation_type == "PILOT"
+                                           else (MIN_LOCKED_PAIRS, MIN_LOCKED_GROUPS))
+        if int(integrity["sample_count"]) < minimum_samples or int(integrity["group_count"] or 0) < minimum_groups:
+            raise HTTPException(status_code=409, detail="Locked Test cohort does not meet its independent sample and document-group minimums")
+        if cohort and (int(cohort["sample_count"]) != int(integrity["sample_count"])
+                       or int(cohort["group_count"]) != int(integrity["group_count"])):
+            raise HTTPException(status_code=409, detail="Evaluation cohort counts do not match its sealed dataset")
+        prior_benchmark = None
+        if cohort:
+            prior_cohort_benchmark = await self.repo.one("""
+                SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
+                FROM public.viread_ocr_benchmarks WHERE evaluation_cohort_id=:cohort_id LIMIT 1
+            """, {"cohort_id": cohort["id"]})
+            if prior_cohort_benchmark:
+                prior_benchmark = prior_cohort_benchmark
+        else:
+            prior_locked_benchmark = await self.repo.one("""
+                SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
+                FROM public.viread_ocr_benchmarks WHERE locked_test_version_id=:dataset_id LIMIT 1
+            """, {"dataset_id": payload.locked_test_version_id})
+            if prior_locked_benchmark:
+                prior_benchmark = prior_locked_benchmark
         expected = await self.repo.all("""
-            SELECT source_annotation_id AS sample_id, source_group_id AS group_id, label AS reference
-            FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id AND source_flow='LOCKED_TEST'
+            SELECT sample.source_annotation_id AS sample_id,
+                   COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                   sample.label AS reference
+            FROM public.viread_ocr_samples sample
+            LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+            WHERE sample.dataset_version_id=:dataset_id
+              AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test'
         """, {"dataset_id": payload.locked_test_version_id})
         by_id = {item["sample_id"]: item for item in expected}
         outputs = [item.model_dump() for item in payload.outputs]
         if len(outputs) != len(by_id) or {item["sample_id"] for item in outputs} != set(by_id):
             raise HTTPException(status_code=422, detail="Benchmark outputs must cover every Locked Test sample exactly once")
+        active = await self.repo.one("SELECT checkpoint_sha256 FROM public.viread_ocr_active_model WHERE singleton=TRUE")
+        active_sha = active["checkpoint_sha256"] if active else None
+        require_baselines = evaluation_type == "PRODUCTION"
+        if require_baselines:
+            if active_sha != run["parent_checkpoint_sha256"]:
+                raise HTTPException(status_code=409, detail="Candidate parent is no longer active; preserve the candidate and evaluate a new lineage")
+            if (payload.parent_checkpoint_sha256 != run["parent_checkpoint_sha256"]
+                    or payload.active_checkpoint_sha256 != active_sha
+                    or any(item.get("parent") is None or item.get("active") is None for item in outputs)):
+                raise HTTPException(status_code=422, detail="Production benchmark must include parent and active model predictions with matching lineage hashes")
+        if cohort and evaluation_type == "PILOT" and (payload.parent_checkpoint_sha256 or payload.active_checkpoint_sha256):
+            if payload.parent_checkpoint_sha256 != run["parent_checkpoint_sha256"]:
+                raise HTTPException(status_code=422, detail="Pilot parent checkpoint hash does not match the candidate lineage")
         paired = []
         for output in outputs:
             reference = by_id[output["sample_id"]]
             if output["group_id"] != reference["group_id"]:
                 raise HTTPException(status_code=422, detail="Benchmark group ID does not match the sealed dataset")
-            paired.append({"sample_id": output["sample_id"], "group_id": output["group_id"],
-                           "reference": unicodedata.normalize("NFC", reference["reference"]),
-                           "original": unicodedata.normalize("NFC", output["original"]),
-                           "candidate": unicodedata.normalize("NFC", output["candidate"])})
+            row = {"sample_id": output["sample_id"], "group_id": output["group_id"],
+                   "reference": unicodedata.normalize("NFC", reference["reference"]),
+                   "original": unicodedata.normalize("NFC", output["original"]),
+                   "candidate": unicodedata.normalize("NFC", output["candidate"])}
+            if output.get("parent") is not None:
+                row["parent"] = unicodedata.normalize("NFC", output["parent"])
+            if output.get("active") is not None:
+                row["active"] = unicodedata.normalize("NFC", output["active"])
+            paired.append(row)
         metrics = {"sample_count": len(paired), "group_count": len({item["group_id"] for item in paired}),
                    "cer": _paired_metric(paired, "cer"), "wer": _paired_metric(paired, "wer", seed=20261113),
                    "outputs": paired, "original_checkpoint_sha256": ORIGINAL_SHA256,
                    "candidate_checkpoint_sha256": run["checkpoint_sha256"],
-                   "locked_test_manifest_sha256": locked["version_sha256"]}
-        gate = _gate(metrics, manifest_sha=locked["version_sha256"])
+                   "parent_checkpoint_sha256": payload.parent_checkpoint_sha256 or run["parent_checkpoint_sha256"],
+                   "active_checkpoint_sha256": payload.active_checkpoint_sha256 or active_sha,
+                   "locked_test_manifest_sha256": locked["version_sha256"],
+                   "evaluation_type": evaluation_type}
+        if all("parent" in item for item in paired):
+            metrics["parent_cer"] = _paired_metric(paired, "cer", baseline="parent")
+            metrics["parent_wer"] = _paired_metric(paired, "wer", baseline="parent", seed=20261113)
+        if all("active" in item for item in paired):
+            metrics["active_cer"] = _paired_metric(paired, "cer", baseline="active")
+            metrics["active_wer"] = _paired_metric(paired, "wer", baseline="active", seed=20261113)
+        gate = _gate(metrics, manifest_sha=locked["version_sha256"], evaluation_type=evaluation_type,
+                     require_model_baselines=require_baselines)
         report_hash = hashlib.sha256(_canonical(paired)).hexdigest()
+        if prior_benchmark:
+            if prior_benchmark["run_id"] != payload.run_id or prior_benchmark["report_sha256"] != report_hash:
+                raise HTTPException(status_code=409, detail="This sealed evaluation cohort has already been consumed")
+            stored_metrics = prior_benchmark.get("metrics") or {}
+            return {"benchmark_id": prior_benchmark["id"], "run_id": payload.run_id,
+                    "gate_status": prior_benchmark["gate_status"],
+                    "promotion_allowed": prior_benchmark["gate_status"] == "V2_WIN",
+                    "sample_count": prior_benchmark["sample_count"],
+                    "group_count": prior_benchmark["group_count"], "report_sha256": report_hash,
+                    "evaluation_type": evaluation_type,
+                    "metrics": {key: value for key, value in stored_metrics.items()
+                                if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
+                    "quality_gate": stored_metrics.get("quality_gate", gate), "idempotent": True}
         await ensure_database_capacity(self.db, len(_canonical({**metrics, "quality_gate": gate})) + 4096)
         benchmark_id = uuid4()
         try:
@@ -1074,14 +1482,19 @@ class VireadOcrTrainingService:
                 INSERT INTO public.viread_ocr_benchmarks
                     (id, run_id, baseline_checkpoint_sha256, candidate_checkpoint_sha256,
                      locked_test_version_id, locked_test_manifest_sha256, report_sha256,
-                     gate_status, sample_count, group_count, metrics, created_by)
+                     gate_status, sample_count, group_count, metrics, created_by,
+                     evaluation_cohort_id, evaluation_type, parent_checkpoint_sha256, active_checkpoint_sha256)
                 VALUES (:id, :run_id, :baseline_sha, :candidate_sha, :test_id, :test_sha,
-                        :report_sha, :gate, :samples, :groups, CAST(:metrics AS jsonb), :actor_id)
+                        :report_sha, :gate, :samples, :groups, CAST(:metrics AS jsonb), :actor_id,
+                        :cohort_id, :evaluation_type, :parent_sha, :active_sha)
             """, {"id": benchmark_id, "run_id": payload.run_id, "baseline_sha": ORIGINAL_SHA256,
                   "candidate_sha": run["checkpoint_sha256"], "test_id": payload.locked_test_version_id,
                   "test_sha": locked["version_sha256"], "report_sha": report_hash, "gate": gate["status"],
                   "samples": len(paired), "groups": len({item["group_id"] for item in paired}),
-                  "metrics": json.dumps({**metrics, "quality_gate": gate}, ensure_ascii=False), "actor_id": actor_id})
+                  "metrics": json.dumps({**metrics, "quality_gate": gate}, ensure_ascii=False), "actor_id": actor_id,
+                  "cohort_id": cohort["id"] if cohort else None, "evaluation_type": evaluation_type,
+                  "parent_sha": payload.parent_checkpoint_sha256 or run["parent_checkpoint_sha256"],
+                  "active_sha": payload.active_checkpoint_sha256 or active_sha})
             await self.repo.execute("UPDATE public.viread_ocr_training_runs SET status='BENCHMARKED', updated_at=now() WHERE id=:id", {"id": payload.run_id})
             await self.repo.commit()
         except Exception:
@@ -1090,7 +1503,110 @@ class VireadOcrTrainingService:
         return {"benchmark_id": benchmark_id, "run_id": payload.run_id, "gate_status": gate["status"],
                 "promotion_allowed": gate["promotion_allowed"], "sample_count": len(paired),
                 "group_count": len({item["group_id"] for item in paired}), "report_sha256": report_hash,
-                "metrics": {"cer": metrics["cer"], "wer": metrics["wer"]}, "quality_gate": gate}
+                "evaluation_type": evaluation_type,
+                "metrics": {key: value for key, value in metrics.items()
+                            if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
+                "quality_gate": gate}
+
+    async def request_candidate_evaluation(
+        self, actor_id: UUID, job_id: UUID, evaluation_type: str,
+    ) -> dict[str, Any]:
+        """Queue evaluation of a retained candidate without invoking the trainer."""
+        await self._admin(actor_id)
+        job = await self.repo.one("""
+            SELECT id, profile, status, target, dataset_version_id, manifest_sha256,
+                   config_sha256, parent_checkpoint_sha256, run_id, created_by, metadata
+            FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
+        """, {"id": job_id})
+        if evaluation_type not in {"PILOT", "PRODUCTION"}:
+            raise HTTPException(status_code=422, detail="Evaluation type must be PILOT or PRODUCTION")
+        if not job or not job["run_id"] or job["created_by"] is None:
+            raise HTTPException(status_code=409, detail="Training job does not contain a retained candidate")
+        run = await self.repo.one("""
+            SELECT id, profile, status, checkpoint_sha256, parent_checkpoint_sha256,
+                   manifest_sha256, config_sha256
+            FROM public.viread_ocr_training_runs WHERE id=:run_id FOR SHARE
+        """, {"run_id": job["run_id"]})
+        if (job["status"] not in {"CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED"}
+                or not run or run["profile"] != job["profile"]
+                or run["checkpoint_sha256"] is None
+                or run["manifest_sha256"] != job["manifest_sha256"]
+                or run["config_sha256"] != job["config_sha256"]
+                or run["parent_checkpoint_sha256"] != job["parent_checkpoint_sha256"]):
+            raise HTTPException(status_code=409, detail="Candidate checkpoint or lineage is unavailable")
+
+        if evaluation_type == "PILOT":
+            readiness = await self.ensure_pilot_test(actor_id)
+        else:
+            readiness = await self.ensure_locked_test(actor_id)
+        if readiness.get("status") != "READY":
+            raise HTTPException(status_code=409, detail={
+                "message": "No eligible independent evaluation cohort is ready",
+                "evaluation_type": evaluation_type, "readiness": readiness,
+            })
+        cohort = await self.repo.one("""
+            SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id
+        """, {"dataset_id": readiness["version_id"]})
+        if not cohort or cohort["evaluation_type"] != evaluation_type or cohort["manifest_sha256"] != readiness["manifest_sha256"]:
+            raise HTTPException(status_code=409, detail="Evaluation snapshot is missing its immutable cohort record")
+        used = await self.repo.one("""
+            SELECT id FROM public.viread_ocr_benchmarks
+            WHERE evaluation_cohort_id=:cohort_id LIMIT 1
+        """, {"cohort_id": cohort["id"]})
+        if used:
+            raise HTTPException(status_code=409, detail="This evaluation cohort was already consumed; a fresh independent cohort is required")
+        active = await self.repo.one("SELECT checkpoint_sha256 FROM public.viread_ocr_active_model WHERE singleton=TRUE")
+        if evaluation_type == "PRODUCTION" and (not active or active["checkpoint_sha256"] != run["parent_checkpoint_sha256"]):
+            raise HTTPException(status_code=409, detail="Production evaluation requires the candidate parent to remain active; candidate checkpoint was retained")
+        metadata = dict(job.get("metadata") or {})
+        metadata.update({"operation": "BENCHMARK_ONLY", "evaluation_type": evaluation_type,
+                         "evaluation_cohort_id": str(cohort["id"]),
+                         "evaluation_status": "QUEUED", "candidate_checkpoint_sha256": run["checkpoint_sha256"]})
+        await self.repo.execute("""
+            UPDATE public.viread_ocr_training_jobs
+            SET target='COLAB', status='WAITING_FOR_COLAB_WORKER',
+                locked_test_version_id=:dataset_id, locked_test_manifest_sha256=:manifest_sha,
+                evaluation_attempts=0, worker_id=NULL, lease_expires_at=NULL,
+                available_at=now(), last_error_code=NULL,
+                progress=CAST(:progress AS jsonb), metadata=CAST(:metadata AS jsonb), updated_at=now()
+            WHERE id=:id
+        """, {"dataset_id": readiness["version_id"], "manifest_sha": readiness["manifest_sha256"],
+              "progress": json.dumps({"stage": "evaluation_queued", "evaluation_type": evaluation_type}),
+              "metadata": json.dumps(metadata), "id": job_id})
+        await self.repo.commit()
+        return {"job_id": job_id, "run_id": run["id"], "status": "WAITING_FOR_COLAB_WORKER",
+                "operation": "BENCHMARK_ONLY", "evaluation_type": evaluation_type,
+                "cohort_id": cohort["id"], "sample_count": cohort["sample_count"],
+                "group_count": cohort["group_count"], "trainer_will_run": False}
+
+    async def candidate_artifact(self, actor_id: UUID, run_id: UUID) -> dict[str, Any]:
+        """Return a hash-checked checkpoint shard manifest with short-lived private URLs."""
+        await self._admin(actor_id)
+        run = await self.repo.one("""
+            SELECT id, profile, status, checkpoint_sha256, checkpoint_bytes, checkpoint_storage_path,
+                   parent_checkpoint_sha256, manifest_sha256, config_sha256
+            FROM public.viread_ocr_training_runs WHERE id=:run_id
+        """, {"run_id": run_id})
+        if not run or run["status"] not in {"CANDIDATE", "BENCHMARKED"} or not run["checkpoint_storage_path"]:
+            raise HTTPException(status_code=404, detail="Retained candidate checkpoint is unavailable")
+        raw = await asyncio.to_thread(download_object, run["checkpoint_storage_path"])
+        try:
+            manifest = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=503, detail="Candidate checkpoint manifest is invalid") from exc
+        if (manifest.get("schema") != "viread-checkpoint-shards-v1"
+                or manifest.get("run_id") != str(run_id)
+                or manifest.get("checkpoint_sha256") != run["checkpoint_sha256"]
+                or int(manifest.get("checkpoint_bytes", -1)) != int(run["checkpoint_bytes"] or 0)
+                or not isinstance(manifest.get("chunks"), list) or not manifest["chunks"]):
+            raise HTTPException(status_code=503, detail="Candidate checkpoint manifest does not match its registered lineage")
+        chunks = []
+        for index, item in enumerate(manifest["chunks"]):
+            if int(item.get("index", -1)) != index or not _sha(str(item.get("sha256", ""))):
+                raise HTTPException(status_code=503, detail="Candidate checkpoint shard manifest is malformed")
+            chunks.append({**item, "url": create_signed_image_url(item["path"])})
+        return {**run, "manifest_sha256": hashlib.sha256(raw).hexdigest(), "chunks": chunks}
 
     async def decide(self, actor_id: UUID, payload: ModelDecisionRequest) -> dict[str, Any]:
         await self._admin(actor_id)
@@ -1100,10 +1616,26 @@ class VireadOcrTrainingService:
         if payload.action == "APPROVE":
             if payload.run_id is None or payload.benchmark_id is None:
                 raise HTTPException(status_code=422, detail="Approval requires both a candidate run and its Locked Test benchmark")
-            run = await self.repo.one("SELECT id, profile, status, checkpoint_sha256, checkpoint_storage_path FROM public.viread_ocr_training_runs WHERE id=:id FOR UPDATE", {"id": payload.run_id})
-            benchmark = await self.repo.one("SELECT id, run_id, candidate_checkpoint_sha256, gate_status FROM public.viread_ocr_benchmarks WHERE id=:id", {"id": payload.benchmark_id})
-            if not run or not benchmark or run["status"] != "BENCHMARKED" or benchmark["run_id"] != run["id"] or benchmark["candidate_checkpoint_sha256"] != run["checkpoint_sha256"] or benchmark["gate_status"] != "V2_WIN":
-                raise HTTPException(status_code=409, detail="Candidate has no passing paired Locked Test gate")
+            run = await self.repo.one("""
+                SELECT id, profile, status, checkpoint_sha256, checkpoint_storage_path,
+                       parent_checkpoint_sha256
+                FROM public.viread_ocr_training_runs WHERE id=:id FOR UPDATE
+            """, {"id": payload.run_id})
+            benchmark = await self.repo.one("""
+                SELECT id, run_id, candidate_checkpoint_sha256, gate_status, evaluation_type,
+                       parent_checkpoint_sha256, active_checkpoint_sha256
+                FROM public.viread_ocr_benchmarks WHERE id=:id
+            """, {"id": payload.benchmark_id})
+            if (not run or not benchmark or run["status"] != "BENCHMARKED"
+                    or benchmark["run_id"] != run["id"]
+                    or benchmark["candidate_checkpoint_sha256"] != run["checkpoint_sha256"]
+                    or benchmark["gate_status"] != "V2_WIN"
+                    or benchmark["evaluation_type"] != "PRODUCTION"):
+                raise HTTPException(status_code=409, detail="Candidate has no passing Production quality gate")
+            if (active["checkpoint_sha256"] != run["parent_checkpoint_sha256"]
+                    or benchmark["parent_checkpoint_sha256"] != run["parent_checkpoint_sha256"]
+                    or benchmark["active_checkpoint_sha256"] != active["checkpoint_sha256"]):
+                raise HTTPException(status_code=409, detail="Candidate parent/active lineage changed after evaluation")
             if active["checkpoint_sha256"] == run["checkpoint_sha256"]:
                 raise HTTPException(status_code=409, detail="Candidate is already the active model")
             next_sha, next_path, next_profile = run["checkpoint_sha256"], run["checkpoint_storage_path"], run["profile"]

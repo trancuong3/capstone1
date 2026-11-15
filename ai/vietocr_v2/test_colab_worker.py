@@ -7,7 +7,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from .colab_worker import ColabWorker, verify_worker_source_lock
 from .contracts import sha256_file
@@ -199,6 +199,23 @@ class ColabWorkerTests(unittest.TestCase):
         claim.assert_called_once_with(job_id)
         report_status.assert_called_once_with("READY")
         process_job.assert_called_once_with(job)
+        worker.session.close()
+
+    def test_benchmark_only_job_never_enters_the_training_function(self):
+        worker = ColabWorker("https://viread.example", "x" * 48, tempfile.gettempdir())
+        job = {"id": "a5fd82cb-490a-4e59-bad3-64e8a6f88d70",
+               "metadata": {"operation": "BENCHMARK_ONLY", "evaluation_type": "PILOT"}}
+        trainer = Mock(side_effect=AssertionError("benchmark-only work must not train"))
+        training_module = types.SimpleNamespace(run_training=trainer)
+        with (
+            patch.object(ColabWorker, "assert_runtime_capacity", return_value={"device": "Test GPU"}),
+            patch.object(worker, "heartbeat_loop"),
+            patch.object(worker, "process_benchmark_only_job") as benchmark,
+            patch.dict(sys.modules, {"ai.vietocr_v2.train": training_module}),
+        ):
+            worker.process_job(job)
+        benchmark.assert_called_once()
+        trainer.assert_not_called()
         worker.session.close()
 
 

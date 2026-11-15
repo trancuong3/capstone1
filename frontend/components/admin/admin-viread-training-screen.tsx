@@ -113,6 +113,27 @@ export function AdminVireadTrainingScreen() {
     }
   }
 
+  async function evaluateCandidate(jobId: string, evaluationType: "PILOT" | "PRODUCTION") {
+    if (!vireadTraining || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await vireadTraining.requestEvaluation(jobId, evaluationType);
+      setMessage(
+        `${evaluationType === "PILOT" ? "Pilot" : "Production"} đã vào hàng đợi: ${result.sample_count} mẫu, ${result.group_count} nhóm. Worker chỉ benchmark checkpoint có sẵn; không train lại.`,
+      );
+      await load();
+    } catch {
+      setMessage(
+        evaluationType === "PRODUCTION" && data?.locked_test?.status !== "READY"
+          ? "Chưa đủ Locked Test Production độc lập. Candidate được giữ nguyên; có thể dùng Pilot để kiểm tra nhanh pipeline."
+          : "Không thể xếp đánh giá. Candidate hoặc cohort có thể đã đổi trạng thái; hãy tải lại trang.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function closeMismatchedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
     const confirmed = globalThis.confirm(
@@ -181,8 +202,6 @@ export function AdminVireadTrainingScreen() {
   );
   const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
   const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
-  const lockedTestReady = data?.locked_test?.status === "READY";
-
   return (
     <>
       <AdminPageHeader
@@ -254,7 +273,7 @@ export function AdminVireadTrainingScreen() {
           </div>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Nguồn dữ liệu</h2>
+            <h2 className="text-xl font-black">Training Readiness · nguồn dữ liệu</h2>
             <p className="mt-2 text-sm text-muted">
               Hai luồng dùng dataset và run riêng, cùng fine-tune VietOCR V2.
             </p>
@@ -283,9 +302,7 @@ export function AdminVireadTrainingScreen() {
                         !flow1Train ||
                         !flow1Validation
                       ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
-                      : lockedTestReady
-                        ? "Đủ dữ liệu; hệ thống tự đăng ký job Flow 1 riêng sau khi snapshot hợp lệ"
-                        : "Train/Validation đủ; job chờ Locked Test độc lập từ holdout VERIFIED đạt ngưỡng"}
+                      : "Train/Validation đủ; training có thể bắt đầu. Candidate được lưu riêng và chờ Pilot hoặc Locked Test Production để đánh giá."}
                 </p>
               </li>
               <li className="rounded-control border border-border p-4">
@@ -308,10 +325,8 @@ export function AdminVireadTrainingScreen() {
                   ghép thành một nhãn.
                 </p>
                 <p className="mt-2 text-sm font-bold text-muted">
-                  {flow2Train > 0 && flow2Validation > 0 && lockedTestReady
-                    ? "Đủ Train, Validation và Locked Test; hệ thống tự tạo job Flow 2 riêng"
-                    : flow2Train > 0 && flow2Validation > 0
-                      ? "Train/Validation đủ; job chờ Locked Test độc lập từ holdout VERIFIED đạt ngưỡng"
+                  {flow2Train > 0 && flow2Validation > 0
+                    ? "Đủ Train/Validation; training bắt đầu độc lập với Locked Test. Candidate được giữ để đánh giá sau."
                       : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
@@ -319,11 +334,11 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Hàng đợi huấn luyện tự động</h2>
+            <h2 className="text-xl font-black">Candidate Management · hàng đợi huấn luyện</h2>
             <p className="mt-2 text-sm text-muted">
-              Mỗi job được ghim vào một Locked Test bất biến. Hệ thống chỉ tự
-              tạo test từ holdout VERIFIED không trùng trang Train/Validation;
-              model chỉ đổi sau quality gate và Admin duyệt.
+              Training chạy ngay khi Train/Validation sẵn sàng. Candidate được
+              giữ nguyên; Pilot nhỏ chỉ kiểm tra sơ bộ, còn model chỉ đổi sau
+              Production Locked Test độc lập, thắng baseline và Admin duyệt.
             </p>
             {data.locked_test ? (
               <div className="mt-4 rounded-control border border-border p-4">
@@ -389,7 +404,9 @@ export function AdminVireadTrainingScreen() {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="font-extrabold">
-                        {trainingProfileName(job.profile)} · {job.status}
+                        {job.metadata.operation === "BENCHMARK_ONLY"
+                          ? `${String(job.metadata.evaluation_type ?? "Evaluation")} benchmark-only · ${job.status}`
+                          : `${trainingProfileName(job.profile)} · ${job.status}`}
                       </h3>
                       <span className="text-sm text-muted">
                         {job.target} · lần thử {job.attempts}
@@ -559,9 +576,40 @@ export function AdminVireadTrainingScreen() {
                       </div>
                     ) : null}
                     {job.run_id ? (
-                      <p className="mt-1 break-all font-mono text-xs text-muted">
-                        Run {job.run_id}
-                      </p>
+                      <>
+                        <p className="mt-1 break-all font-mono text-xs text-muted">
+                          Run {job.run_id}
+                        </p>
+                        {job.run_status === "CANDIDATE" || job.run_status === "BENCHMARKED" ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <section className="rounded-control border border-border p-3">
+                              <h4 className="font-bold">Pilot Evaluation</h4>
+                              <p className="mt-1 text-xs text-muted">
+                                Tối đa 40 holdout VERIFIED, ít nhất 5 nhóm. Chỉ xem CER/WER và khoảng tin cậy; không thể promotion.
+                              </p>
+                              <Button className="mt-2 h-11 w-auto" disabled={busy} onClick={() => void evaluateCandidate(job.job_id, "PILOT")} variant="secondary">
+                                Chạy Pilot trên candidate đã lưu
+                              </Button>
+                            </section>
+                            <section className="rounded-control border border-border p-3">
+                              <h4 className="font-bold">Production Evaluation</h4>
+                              <p className="mt-1 text-xs text-muted">
+                                Dùng cohort độc lập, tối thiểu 200 mẫu và 30 nhóm; so CER/WER với Original, parent và active.
+                              </p>
+                              <Button className="mt-2 h-11 w-auto" disabled={busy || data.locked_test?.status !== "READY"} onClick={() => void evaluateCandidate(job.job_id, "PRODUCTION")}>
+                                Chạy Production Locked Test
+                              </Button>
+                            </section>
+                          </div>
+                        ) : null}
+                        {typeof job.metadata.evaluation_status === "string" ? (
+                          <p className="mt-2 text-sm text-muted">
+                            Đánh giá {String(job.metadata.evaluation_type ?? "")} · {String(job.metadata.evaluation_status)}
+                            {typeof job.metadata.evaluation_gate_status === "string"
+                              ? ` · ${String(job.metadata.evaluation_gate_status)}` : ""}
+                          </p>
+                        ) : null}
+                      </>
                     ) : null}
                   </article>
                 );
@@ -575,7 +623,7 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Các lần huấn luyện</h2>
+            <h2 className="text-xl font-black">Quality Gate · kết quả benchmark</h2>
             <p className="mt-2 text-sm text-muted">
               {latestPassing.length} checkpoint đạt quality gate và đủ điều kiện
               xét duyệt.
@@ -643,7 +691,7 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="bg-white">
-            <h2 className="text-xl font-black">Quản lý quyết định</h2>
+            <h2 className="text-xl font-black">Admin Approval · quản lý quyết định</h2>
             <label
               className="mt-4 block font-bold"
               htmlFor="viread-decision-reason"
