@@ -218,11 +218,20 @@ class AdminCatalogService:
             raise HTTPException(status_code=501, detail="Page has no revision yet")
         # Only numeric version numbers can be mapped to the current UI contract.
         revision = revisions[0]
+        revision_metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+        ai_audit = revision_metadata.get("ai_proofread_audit")
+        ai_review_required = (
+            isinstance(ai_audit, dict)
+            and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
+        )
         try:
             return AdminPageProcessingRead(
                 page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
                 verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                ocr_preview_metadata={}, verified_at=revision.VerifiedAt,
+                ocr_preview_metadata={
+                    "ai_review_required": ai_review_required,
+                    "ai_review_mode": "AI_AUTO_VERIFIED" if ai_review_required else None,
+                }, verified_at=revision.VerifiedAt,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
             )
         except ValidationError:
@@ -257,6 +266,7 @@ class AdminCatalogService:
                     draft_text,
                     verified_text,
                     verified_at,
+                    processing_meta,
                 ) in rows:
                     if revision_id is None or revision_no is None or verification_status is None:
                         raise HTTPException(status_code=501, detail="Page has no revision yet")
@@ -265,6 +275,16 @@ class AdminCatalogService:
                     if isinstance(text_value, str) and text_value.strip():
                         compact = " ".join(text_value.split())
                         text_preview = compact[:120] + ("…" if len(compact) > 120 else "")
+                    revision_metadata = (
+                        dict(processing_meta)
+                        if isinstance(processing_meta, dict)
+                        else {}
+                    )
+                    ai_audit = revision_metadata.get("ai_proofread_audit")
+                    ai_review_required = (
+                        isinstance(ai_audit, dict)
+                        and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
+                    )
                     output.append(
                         AdminPageListRead(
                             book_id=page.BookId,
@@ -275,7 +295,14 @@ class AdminCatalogService:
                                 revision_no=self.revision_number_value(revision_no),
                                 verification_status=verification_status,
                                 lifecycle_status=page.LifecycleStatus,
-                                ocr_preview_metadata={},
+                                ocr_preview_metadata={
+                                    "ai_review_required": ai_review_required,
+                                    "ai_review_mode": (
+                                        "AI_AUTO_VERIFIED"
+                                        if ai_review_required
+                                        else None
+                                    ),
+                                },
                                 verified_at=verified_at,
                                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
                             ),

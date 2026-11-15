@@ -131,6 +131,7 @@ class AdminCatalogRepository(CatalogRepository):
             PageRevision.DraftText.label("draft_text"),
             PageRevision.VerifiedText.label("verified_text"),
             PageRevision.VerifiedAt.label("verified_at"),
+            PageRevision.ProcessingMeta.label("processing_meta"),
             func.row_number()
             .over(
                 partition_by=PageRevision.PageId,
@@ -256,6 +257,7 @@ class AdminCatalogRepository(CatalogRepository):
                 latest.c.draft_text,
                 latest.c.verified_text,
                 latest.c.verified_at,
+                latest.c.processing_meta,
             )
             .outerjoin(
                 latest,
