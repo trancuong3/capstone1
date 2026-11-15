@@ -17,3 +17,4 @@ from app.models.book_content_quality import (
 )
 
 from .game_session import GameAttempt, GameRound, GameSession
+from .picture_description import PictureDescriptionAttempt, PictureDescriptionSession
