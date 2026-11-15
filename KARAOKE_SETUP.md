@@ -49,6 +49,25 @@ Hai bảng có RLS, bucket private; kiểm tra trong transaction cho thấy số
 profiles/childprofiles/readingsessions/readingevents/progressreports không đổi.
 Không chạy lại migration này trên project đó.
 
+### Sửa trùng mã migration sau PR #110 — 2026-11-15
+
+Hai migration karaoke và index từ Sentence Shooter đã dùng chung mã
+`20261114130000`, khiến Supabase không ghi được lịch sử triển khai sau merge.
+Giữ nguyên `20261114130000_add_karaoke.sql`; chỉ đổi tên file index thành
+`20261115103616_pagerevisionwords_revision_order_idx.sql`, không đổi SQL bên trong.
+
+Đã kiểm tra readonly trên đúng project: mã cũ thuộc `add_karaoke`, hai bảng
+karaoke có RLS và index `ix_pagerevisionwords_revision_line_word_id` đã tồn tại.
+Sau khi xác minh index hợp lệ và khớp đủ bốn cột theo đúng thứ tự, đã bổ sung
+duy nhất bản ghi lịch sử `20261115103616` với nội dung migration index trong một
+transaction. Không chạy lại CREATE TABLE/CREATE INDEX, không sửa bản ghi lịch sử
+karaoke, dữ liệu đọc sách, bài hát, Storage hoặc quyền tài khoản.
+
+Cần triển khai cả bản sửa tên file trong Git để không còn hai file trùng mã;
+chỉ chạy lại check trên commit cũ không giải quyết lỗi này. Test
+`backend/test_migration_versions.py` kiểm tra tên/mã thời gian hợp lệ và chặn
+trùng mã qua bộ backend test hiện có, không cần đổi workflow.
+
 Đã có bài thử **Ngôi sao nhỏ**, ID `0374bb5e-426e-4375-8c1f-2f11c529e786`,
 được upload và xuất bản qua UI, phù hợp lớp 1–5. Tìm trong **Admin → Bài hát**
 hoặc chọn hồ sơ bé rồi mở **Hát vui**. Có thể ẩn qua UI nếu không muốn dùng demo.
