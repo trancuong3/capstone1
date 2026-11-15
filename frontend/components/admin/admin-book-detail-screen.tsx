@@ -204,6 +204,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       {items && items.length > 0 ? (
         <section className="mt-6" aria-label="Rà soát OCR hàng loạt">
           <AdminBookAiBatchReview
+            bookId={book.id}
             items={items}
             onCompleted={() => void refreshPages()}
           />

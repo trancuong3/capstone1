@@ -39,7 +39,7 @@ type BatchProgress = {
 function pageErrorMessage(cause: unknown): string {
   if (isServiceError(cause)) return cause.message;
   if (cause instanceof Error) return cause.message;
-  return "Không thể rà soát trang này; bản nháp hiện tại được giữ nguyên.";
+  return "Lỗi khi rà soát trang; bản nháp hiện tại được giữ nguyên.";
 }
 
 function preparePage(
@@ -118,9 +118,11 @@ function preparePage(
 }
 
 export function AdminBookAiBatchReview({
+  bookId,
   items,
   onCompleted,
 }: {
+  bookId: string;
   items: readonly AdminPageListItemUI[];
   onCompleted: () => void;
 }) {
@@ -128,6 +130,10 @@ export function AdminBookAiBatchReview({
   const [results, setResults] = useState<readonly BatchPageResult[]>([]);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [skippedPageIds, setSkippedPageIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [skipListLoaded, setSkipListLoaded] = useState(false);
   const [notice, setNotice] = useState<{
     readonly tone: "info" | "success" | "warning" | "error";
     readonly title: string;
@@ -142,11 +148,32 @@ export function AdminBookAiBatchReview({
     [],
   );
 
+  const skipStorageKey = `viread:ai-batch-skipped:${bookId}`;
+  useEffect(() => {
+    try {
+      const parsed: unknown = JSON.parse(
+        window.localStorage.getItem(skipStorageKey) ?? "[]",
+      );
+      if (
+        Array.isArray(parsed) &&
+        parsed.every((value): value is string => typeof value === "string")
+      ) {
+        setSkippedPageIds(new Set(parsed));
+      }
+    } catch {
+      setSkippedPageIds(new Set());
+    } finally {
+      setSkipListLoaded(true);
+    }
+  }, [skipStorageKey]);
+
   const waitingPages = items
     .filter(
       (item) =>
         item.processing.lifecycle_status === "ACTIVE" &&
-        item.processing.verification_status === "NEEDS_REVIEW",
+        item.processing.verification_status === "NEEDS_REVIEW" &&
+        !skippedPageIds.has(item.processing.page_id) &&
+        !skippedPageIds.has(item.processing.page_revision_id),
     )
     .slice()
     .sort((left, right) => left.page_number - right.page_number);
@@ -352,8 +379,21 @@ export function AdminBookAiBatchReview({
               revisionId,
               status: "failed",
               changes: 0,
-              message: pageErrorMessage(cause),
+              message: `${pageErrorMessage(cause)} Revision này đã được đánh dấu bỏ qua và sẽ không tự quét lại.`,
             };
+        if (!draftSaved) {
+          const updatedSkipped = new Set(skippedPageIds);
+          updatedSkipped.add(pageId);
+          setSkippedPageIds(updatedSkipped);
+          try {
+            window.localStorage.setItem(
+              skipStorageKey,
+              JSON.stringify([...updatedSkipped]),
+            );
+          } catch {
+            // The in-memory skip still prevents another attempt this session.
+          }
+        }
         const existingIndex = completed.findIndex(
           (result) => result.pageId === pageId,
         );
@@ -474,7 +514,7 @@ export function AdminBookAiBatchReview({
             <p className="text-sm font-bold text-ink">
               Kết quả: {verifiedResults.length} trang đã xác minh ·{" "}
               {savedResults.length} bản nháp đã lưu, chờ xác minh ·{" "}
-              {failedResults.length} trang cần thử lại
+              {failedResults.length} trang lỗi, đã bỏ qua
             </p>
             <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
               {results.map((result) => (
@@ -532,13 +572,15 @@ export function AdminBookAiBatchReview({
           ) : (
             <Button
               className="sm:w-auto"
-              disabled={waitingPages.length === 0}
+              disabled={!skipListLoaded || waitingPages.length === 0}
               onClick={() => void reviewAllPages()}
             >
               <Sparkles aria-hidden className="size-4" />
               {waitingPages.length > 0
                 ? `${results.length ? "Tiếp tục rà soát" : "AI kiểm tra & xác minh"} ${waitingPages.length} trang`
-                : "Không có trang cần AI rà soát"}
+                : skippedPageIds.size > 0
+                  ? `Đã bỏ qua ${skippedPageIds.size} trang lỗi; không quét lại`
+                  : "Không có trang cần AI rà soát"}
             </Button>
           )}
         </div>
