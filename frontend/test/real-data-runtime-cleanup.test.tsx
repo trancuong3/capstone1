@@ -145,6 +145,9 @@ describe("Phase 5 real-data runtime cleanup", () => {
       /books\.create\(/,
     );
     expect(source("components/admin/admin-page-uploader.tsx")).toMatch(
+      /runAdminBookUpload\(/,
+    );
+    expect(source("lib/admin/admin-book-upload-session.ts")).toMatch(
       /pages\.upload\(/,
     );
   });

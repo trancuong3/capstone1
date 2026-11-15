@@ -228,10 +228,14 @@ class AdminCatalogService:
             return AdminPageProcessingRead(
                 page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
                 verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                ocr_preview_metadata={
-                    "ai_review_required": ai_review_required,
-                    "ai_review_mode": "AI_AUTO_VERIFIED" if ai_review_required else None,
-                }, verified_at=revision.VerifiedAt,
+                ocr_preview_metadata=(
+                    {
+                        "ai_review_required": True,
+                        "ai_review_mode": "AI_AUTO_VERIFIED",
+                    }
+                    if ai_review_required
+                    else {}
+                ), verified_at=revision.VerifiedAt,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
             )
         except ValidationError:
@@ -295,14 +299,14 @@ class AdminCatalogService:
                                 revision_no=self.revision_number_value(revision_no),
                                 verification_status=verification_status,
                                 lifecycle_status=page.LifecycleStatus,
-                                ocr_preview_metadata={
-                                    "ai_review_required": ai_review_required,
-                                    "ai_review_mode": (
-                                        "AI_AUTO_VERIFIED"
-                                        if ai_review_required
-                                        else None
-                                    ),
-                                },
+                                ocr_preview_metadata=(
+                                    {
+                                        "ai_review_required": True,
+                                        "ai_review_mode": "AI_AUTO_VERIFIED",
+                                    }
+                                    if ai_review_required
+                                    else {}
+                                ),
                                 verified_at=verified_at,
                                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
                             ),
