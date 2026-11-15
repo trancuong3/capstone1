@@ -13,6 +13,7 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
+import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import { AdminPageImagePreview } from "@/components/admin/admin-page-image-preview";
@@ -22,6 +23,7 @@ import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const skippedAiPageIds = useSkippedAiPageIds(bookId);
   const pageSize = 24;
   const [pageNumber, setPageNumber] = useState(1);
   const [book, setBook] = useState<AdminBookDTO | null>(null);
@@ -296,6 +298,22 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           }
                         />
                       </div>
+                      {item.processing.verification_status === "VERIFIED" &&
+                      item.processing.ocr_preview_metadata
+                        .ai_review_required === true ? (
+                        <span className="inline-flex w-fit rounded-full bg-red-100 px-3 py-1 text-sm font-extrabold text-red-700">
+                          AI tự VERIFIED · Admin cần rà soát
+                        </span>
+                      ) : null}
+                      {item.processing.verification_status === "NEEDS_REVIEW" &&
+                      (skippedAiPageIds.has(item.processing.page_id) ||
+                        skippedAiPageIds.has(
+                          item.processing.page_revision_id,
+                        )) ? (
+                        <span className="inline-flex w-fit rounded-full bg-red-100 px-3 py-1 text-sm font-extrabold text-red-700">
+                          Cần Admin xác minh để dùng train
+                        </span>
+                      ) : null}
                       <div>
                         <h3 className="text-xl font-black">
                           Trang {item.page_number}

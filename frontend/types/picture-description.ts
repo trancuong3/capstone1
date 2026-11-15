@@ -1,0 +1,100 @@
+export type PictureSourceType = "BOOK_PAGE" | "CUSTOM_UPLOAD" | "SAMPLE";
+export type PictureSessionStatus = "ACTIVE" | "COMPLETED";
+export type PictureInputMode = "VOICE" | "TEXT";
+
+export interface PictureVocabItemDTO {
+  readonly word: string;
+  readonly hint: string;
+}
+
+export interface PictureSampleItemDTO {
+  readonly sample_key: string;
+  readonly title: string;
+  readonly theme: string;
+  readonly description: string;
+  readonly image_url: string;
+}
+
+export interface PictureBookPageItemDTO {
+  readonly book_id: string;
+  readonly book_title: string;
+  readonly page_id: string;
+  readonly page_number: number;
+  readonly image_url: string;
+}
+
+export interface PictureCatalogDTO {
+  readonly samples: readonly PictureSampleItemDTO[];
+  readonly book_pages: readonly PictureBookPageItemDTO[];
+}
+
+export interface PictureGuideDTO {
+  readonly is_child_safe: boolean;
+  readonly scene_title: string;
+  readonly scene_summary: string;
+  readonly guiding_questions: readonly string[];
+  readonly suggested_vocabulary: readonly PictureVocabItemDTO[];
+  readonly model_sample_sentences: readonly string[];
+}
+
+export interface PictureEvaluationFeedbackDTO {
+  readonly is_relevant: boolean;
+  readonly score_out_of_10: number;
+  readonly stars: number;
+  readonly matched_details: readonly string[];
+  readonly missed_details: readonly string[];
+  readonly praise_message: string;
+  readonly improvement_tip: string;
+  readonly upgraded_sentences: readonly string[];
+  readonly vocabulary_highlights: readonly string[];
+}
+
+export interface PictureAttemptDTO {
+  readonly attempt_id: string;
+  readonly attempt_number: number;
+  readonly input_mode: PictureInputMode;
+  readonly transcript_text: string;
+  readonly score_out_of_10: number;
+  readonly stars: number;
+  readonly feedback: PictureEvaluationFeedbackDTO;
+  readonly created_at: string;
+}
+
+export interface PictureSessionDTO {
+  readonly session_id: string;
+  readonly child_id: string;
+  readonly child_grade: number;
+  readonly source_type: PictureSourceType;
+  readonly sample_key: string | null;
+  readonly book_id: string | null;
+  readonly book_page_id: string | null;
+  readonly image_url: string;
+  readonly scene_title: string;
+  readonly status: PictureSessionStatus;
+  readonly best_stars: number;
+  readonly best_score: number;
+  readonly attempts_count: number;
+  readonly guide: PictureGuideDTO;
+  readonly attempts: readonly PictureAttemptDTO[];
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface PictureSessionSummaryDTO {
+  readonly session_id: string;
+  readonly child_id: string;
+  readonly source_type: PictureSourceType;
+  readonly scene_title: string;
+  readonly image_url: string;
+  readonly status: PictureSessionStatus;
+  readonly best_stars: number;
+  readonly best_score: number;
+  readonly attempts_count: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface PictureEvaluateResponseDTO {
+  readonly session: PictureSessionDTO;
+  readonly latest_attempt: PictureAttemptDTO;
+}
