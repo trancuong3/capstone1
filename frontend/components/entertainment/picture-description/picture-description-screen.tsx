@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Eye,
   EyeOff,
   History,
@@ -43,7 +45,6 @@ import { createSpeechService, type SpeechService } from "@/lib/api/speech-servic
 import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
-  resolveTranscriptForSegment,
 } from "@/lib/reading/browser-transcript-collector";
 import type {
   PictureAttemptDTO,
@@ -83,6 +84,76 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const defaultGameError =
   "Chưa kết nối được góc Kể chuyện qua tranh. Ba mẹ và bé hãy thử lại nhé.";
+
+function normalizeSpeechUnit(value: string): string {
+  return value
+    .trim()
+    .replace(/[.!?,;:…]+$/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function collapseDuplicateSpeech(text: string): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+
+  const sentences = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const dedupedSentences: string[] = [];
+  for (const sentence of sentences) {
+    const prev = dedupedSentences[dedupedSentences.length - 1];
+    if (prev && normalizeSpeechUnit(prev) === normalizeSpeechUnit(sentence)) {
+      continue;
+    }
+    dedupedSentences.push(sentence);
+  }
+
+  const tokens = dedupedSentences.join(" ").split(" ").filter(Boolean);
+  const resultTokens: string[] = [];
+  let index = 0;
+  while (index < tokens.length) {
+    let matchedRepeat = false;
+    const maxWindow = Math.min(6, resultTokens.length, tokens.length - index);
+    for (let windowSize = maxWindow; windowSize >= 2; windowSize -= 1) {
+      const previousSlice = resultTokens
+        .slice(-windowSize)
+        .map(normalizeSpeechUnit)
+        .join(" ");
+      const nextSlice = tokens
+        .slice(index, index + windowSize)
+        .map(normalizeSpeechUnit)
+        .join(" ");
+      if (previousSlice && previousSlice === nextSlice) {
+        index += windowSize;
+        matchedRepeat = true;
+        break;
+      }
+    }
+    if (!matchedRepeat) {
+      resultTokens.push(tokens[index]);
+      index += 1;
+    }
+  }
+
+  return resultTokens.join(" ").trim();
+}
+
+function collectLiveTranscript(
+  collector: BrowserTranscriptCollector,
+  event: BrowserRecognitionEventLike,
+): string {
+  const finalized = collector.getTranscript();
+  const interimParts: string[] = [];
+  for (let index = 0; index < event.results.length; index += 1) {
+    const result = event.results[index];
+    if (result && !result.isFinal) {
+      const piece = result[0]?.transcript?.trim();
+      if (piece) interimParts.push(piece);
+    }
+  }
+  return collapseDuplicateSpeech(
+    [finalized, ...interimParts].filter(Boolean).join(" "),
+  );
+}
 
 function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
   if (typeof window === "undefined") return null;
@@ -139,6 +210,7 @@ export function PictureDescriptionScreen() {
   const [activeTab, setActiveTab] = useState<SourceTab>("SAMPLE");
   const [session, setSession] = useState<PictureSessionDTO | null>(null);
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(null);
+  const [showHints, setShowHints] = useState(false);
   const [showSampleSentences, setShowSampleSentences] = useState(false);
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -151,6 +223,7 @@ export function PictureDescriptionScreen() {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [playingSpeechKey, setPlayingSpeechKey] = useState<string | null>(null);
 
   const [descriptionText, setDescriptionText] = useState("");
@@ -159,6 +232,7 @@ export function PictureDescriptionScreen() {
     null,
   );
 
+  const isRecordingVoiceRef = useRef(false);
   const browserRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(null);
   const collectorRef = useRef<BrowserTranscriptCollector>(
     new BrowserTranscriptCollector(),
@@ -188,6 +262,7 @@ export function PictureDescriptionScreen() {
 
   useEffect(() => {
     return () => {
+      isRecordingVoiceRef.current = false;
       requestControllerRef.current?.abort();
       browserRecognitionRef.current?.abort();
       unmountActionsRef.current.stopSpeech();
@@ -266,11 +341,14 @@ export function PictureDescriptionScreen() {
   const openSession = useCallback(
     (loaded: PictureSessionDTO) => {
       stopSpeechPlayback();
+      isRecordingVoiceRef.current = false;
       setSession(loaded);
       setLatestAttempt(loaded.attempts[0] ?? null);
       setSelectedVocabWord(null);
-      setShowSampleSentences((loaded.best_stars ?? 0) >= 1);
+      setShowHints(false);
+      setShowSampleSentences(false);
       setDescriptionText("");
+      setLiveTranscript("");
       setInputMode("TEXT");
       setActionError(null);
       setVoiceMessage(null);
@@ -414,23 +492,52 @@ export function PictureDescriptionScreen() {
     stopSpeechPlayback();
     setVoiceMessage(null);
     setActionError(null);
+    setLiveTranscript("");
     collectorRef.current.reset();
+
+    try {
+      await recorder.start();
+    } catch {
+      isRecordingVoiceRef.current = false;
+      setIsRecordingVoice(false);
+      setVoiceMessage(
+        "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
+      );
+      return;
+    }
+
+    isRecordingVoiceRef.current = true;
+    setIsRecordingVoice(true);
+    setVoiceMessage("Đang lắng nghe bé nói mô tả bức tranh...");
 
     const SpeechRecognition = getSpeechRecognitionCtor();
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition();
+        let recognitionFailed = false;
         recognition.lang = "vi-VN";
         recognition.continuous = true;
-        recognition.interimResults = false;
+        recognition.interimResults = true;
         recognition.onresult = (event) => {
           collectorRef.current.addResults(event);
+          setLiveTranscript(collectLiveTranscript(collectorRef.current, event));
         };
         recognition.onend = () => {
           collectorRef.current.completeRecognitionCycle();
+          if (
+            isRecordingVoiceRef.current &&
+            !recognitionFailed &&
+            browserRecognitionRef.current === recognition
+          ) {
+            try {
+              recognition.start();
+            } catch {
+              browserRecognitionRef.current = null;
+            }
+          }
         };
         recognition.onerror = () => {
-          // Server STT handles audio transcription even if Web Speech fails.
+          recognitionFailed = true;
         };
         browserRecognitionRef.current = recognition;
         recognition.start();
@@ -438,27 +545,16 @@ export function PictureDescriptionScreen() {
         browserRecognitionRef.current = null;
       }
     }
-
-    try {
-      await recorder.start();
-      setIsRecordingVoice(true);
-      setVoiceMessage("Đang lắng nghe bé nói mô tả bức tranh...");
-    } catch {
-      browserRecognitionRef.current?.abort();
-      browserRecognitionRef.current = null;
-      setIsRecordingVoice(false);
-      setVoiceMessage(
-        "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
-      );
-    }
   };
 
   const stopVoiceRecording = async () => {
     if (!isRecordingVoice) return;
+    isRecordingVoiceRef.current = false;
     setIsRecordingVoice(false);
     setIsTranscribing(true);
-    setVoiceMessage("Đang chuyển giọng nói của bé thành chữ...");
+    setVoiceMessage("Đang chuyển giọng nói của bé bằng ElevenLabs...");
 
+    const liveSnapshot = liveTranscript;
     try {
       browserRecognitionRef.current?.stop();
     } catch {
@@ -467,8 +563,10 @@ export function PictureDescriptionScreen() {
 
     try {
       const audioBlob = await recorder.stop();
-      const browserText = collectorRef.current.getTranscript();
-      let providerText: string | null = null;
+      const browserFallback = collapseDuplicateSpeech(
+        collectorRef.current.getTranscript() || liveSnapshot,
+      );
+      let elevenLabsText: string | null = null;
 
       if (audioBlob && audioBlob.size > 0) {
         const keyterms = session
@@ -481,16 +579,13 @@ export function PictureDescriptionScreen() {
             languageCode: "vi",
             keyterms,
           });
-          providerText = sttResult.text;
+          elevenLabsText = sttResult.text?.trim() || null;
         } catch {
-          providerText = null;
+          elevenLabsText = null;
         }
       }
 
-      const finalTranscript = resolveTranscriptForSegment(
-        providerText,
-        browserText,
-      );
+      const finalTranscript = elevenLabsText || browserFallback || null;
       if (!finalTranscript) {
         setVoiceMessage(
           "Cô chưa nghe rõ tiếng bé nói. Bé hãy bấm micro nói lại hoặc gõ chữ nhé!",
@@ -504,10 +599,13 @@ export function PictureDescriptionScreen() {
       });
       setInputMode("VOICE");
       setVoiceMessage(
-        "Đã ghi lại lời kể của bé! Bé có thể đọc lại hoặc sửa trước khi gửi chấm bài nhé.",
+        elevenLabsText
+          ? "Đã chuyển giọng nói bằng ElevenLabs! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé."
+          : "Đã ghi lại lời kể của bé! Bé có thể đọc lại hoặc sửa trước khi gửi chấm bài nhé.",
       );
     } finally {
       setIsTranscribing(false);
+      setLiveTranscript("");
       browserRecognitionRef.current = null;
     }
   };
@@ -539,7 +637,6 @@ export function PictureDescriptionScreen() {
       if (controller.signal.aborted) return;
       setSession(response.session);
       setLatestAttempt(response.latest_attempt);
-      setShowSampleSentences(true);
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -580,6 +677,9 @@ export function PictureDescriptionScreen() {
 
   const selectedChild = childState.child;
   const activeAttempt = latestAttempt ?? session?.attempts[0] ?? null;
+  const hasSubmittedAttempt = Boolean(
+    session && (session.attempts_count >= 1 || activeAttempt),
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
@@ -608,6 +708,14 @@ export function PictureDescriptionScreen() {
           <Button
             onClick={() => {
               stopSpeechPlayback();
+              isRecordingVoiceRef.current = false;
+              browserRecognitionRef.current?.abort();
+              browserRecognitionRef.current = null;
+              recorder.cancel();
+              setIsRecordingVoice(false);
+              setLiveTranscript("");
+              setShowHints(false);
+              setShowSampleSentences(false);
               setSession(null);
               setLatestAttempt(null);
               setActionError(null);
@@ -746,7 +854,7 @@ export function PictureDescriptionScreen() {
                               {sample.title}
                             </h2>
                             <p className="mt-1 text-sm text-muted">
-                              {sample.description}
+                              Quan sát tranh và kể lại theo cách nghĩ của bé.
                             </p>
                           </div>
                           <Button
@@ -959,141 +1067,44 @@ export function PictureDescriptionScreen() {
             </div>
 
             <p className="rounded-control bg-sky/30 px-4 py-3 text-sm font-semibold text-ink">
-              {session.guide.scene_summary}
+              Bé hãy tự quan sát từng chi tiết trong tranh và kể lại theo cách hiểu
+              của riêng mình nhé.
             </p>
           </div>
 
-          {/* Interactive Guiding + Recording + Evaluation Column */}
+          {/* Interactive Recording + Optional Collapsed Hints + Evaluation Column */}
           <div className="flex flex-col gap-5">
-            {/* Guiding Questions & Vocabulary */}
-            <section className="rounded-card border border-border bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-lg font-extrabold text-ink">
-                  <Lightbulb
-                    aria-hidden="true"
-                    className="size-5 text-[#E5A913]"
-                  />
-                  Gợi ý quan sát cho bé
-                </h2>
-                <Button
-                  onClick={() =>
-                    void speakVietnamese(
-                      `${session.scene_title}. ${session.guide.guiding_questions.join(" ")}`,
-                      "guide",
-                    )
-                  }
-                  size="compact"
-                  type="button"
-                  variant="secondary"
-                >
-                  {playingSpeechKey === "guide" ? (
-                    <>
-                      <VolumeX aria-hidden="true" className="size-4" />
-                      Dừng đọc
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 aria-hidden="true" className="size-4" />
-                      Nghe gợi ý
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              <ol className="mt-3 flex flex-col gap-2">
-                {session.guide.guiding_questions.map((question, index) => (
-                  <li
-                    className="flex items-start gap-2 rounded-control bg-sky/30 px-3 py-2 text-sm font-bold text-ink"
-                    key={question}
-                  >
-                    <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-extrabold text-white">
-                      {index + 1}
-                    </span>
-                    <span>{question}</span>
-                  </li>
-                ))}
-              </ol>
-
-              <div className="mt-4">
-                <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                  Từ vựng gợi ý (nhấn vào từ để nghe)
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {session.guide.suggested_vocabulary.map((item) => {
-                    const active = selectedVocabWord === item.word;
-                    return (
-                      <button
-                        className={
-                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
-                          (active
-                            ? "border-primary bg-primary text-white"
-                            : "border-border bg-white text-ink hover:border-primary hover:bg-sky/30")
-                        }
-                        key={item.word}
-                        onClick={() => {
-                          setSelectedVocabWord(item.word);
-                          void speakVietnamese(item.word, `vocab:${item.word}`);
-                        }}
-                        type="button"
-                      >
-                        <Volume2 aria-hidden="true" className="size-3.5" />
-                        {item.word}
-                      </button>
-                    );
-                  })}
-                </div>
-                {selectedVocabWord ? (
-                  <p className="mt-2 rounded-control bg-warning-surface/60 px-3 py-2 text-sm font-semibold text-ink">
-                    <strong>{selectedVocabWord}:</strong>{" "}
-                    {
-                      session.guide.suggested_vocabulary.find(
-                        (item) => item.word === selectedVocabWord,
-                      )?.hint
-                    }
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="mt-4 border-t border-border pt-3">
-                <button
-                  className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
-                  onClick={() => setShowSampleSentences((value) => !value)}
-                  type="button"
-                >
-                  {showSampleSentences ? (
-                    <>
-                      <EyeOff aria-hidden="true" className="size-4" />
-                      Ẩn câu mẫu tham khảo
-                    </>
-                  ) : (
-                    <>
-                      <Eye aria-hidden="true" className="size-4" />
-                      Xem câu mẫu tham khảo
-                    </>
-                  )}
-                </button>
-                {showSampleSentences ? (
-                  <ul className="mt-2 flex flex-col gap-2">
-                    {session.guide.model_sample_sentences.map((sentence) => (
-                      <li
-                        className="rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
-                        key={sentence}
-                      >
-                        “{sentence}”
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            </section>
-
-            {/* Child Input Area (Mic OR Text) */}
+            {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
             <section className="rounded-card border border-border bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-extrabold text-ink">
                   Phần mô tả của bé
                 </h2>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {descriptionText.trim() ? (
+                    <Button
+                      disabled={isRecordingVoice || isTranscribing}
+                      onClick={() =>
+                        void speakVietnamese(descriptionText, "draft-description")
+                      }
+                      size="compact"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {playingSpeechKey === "draft-description" ? (
+                        <>
+                          <VolumeX aria-hidden="true" className="size-4" />
+                          Dừng nghe
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 aria-hidden="true" className="size-4" />
+                          Nghe lại
+                        </>
+                      )}
+                    </Button>
+                  ) : null}
+
                   {!isRecordingVoice ? (
                     <Button
                       disabled={isTranscribing || isEvaluating}
@@ -1119,13 +1130,53 @@ export function PictureDescriptionScreen() {
                 </div>
               </div>
 
-              {voiceMessage ? (
-                <div className="mt-3">
-                  <StatusMessage
-                    tone={isRecordingVoice ? "warning" : "info"}
+              {isRecordingVoice ? (
+                <div
+                  aria-live="polite"
+                  className="mt-3 flex items-center gap-3 rounded-control border border-primary/35 bg-sky/25 px-4 py-3 shadow-sm"
+                >
+                  <div className="flex shrink-0 items-center gap-2">
+                    {recorder.isSpeaking ? (
+                      <span
+                        aria-hidden="true"
+                        className="flex items-center gap-1"
+                      >
+                        <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-500" />
+                        <span className="h-6 w-1 animate-pulse rounded-full bg-emerald-500 delay-75" />
+                        <span className="h-3 w-1 animate-pulse rounded-full bg-emerald-500 delay-150" />
+                      </span>
+                    ) : (
+                      <span className="relative flex size-3.5">
+                        <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                        <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
+                      </span>
+                    )}
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-primary">
+                      Bé đang nói:
+                    </span>
+                  </div>
+                  <p
+                    className="min-w-0 flex-1 text-base font-extrabold text-ink"
+                    data-testid="live-voice-transcript"
                   >
-                    {voiceMessage}
-                  </StatusMessage>
+                    {liveTranscript ? (
+                      <span className="text-primary underline decoration-2 underline-offset-4">
+                        &ldquo;{liveTranscript}&rdquo;
+                      </span>
+                    ) : recorder.isSpeaking ? (
+                      <span className="animate-pulse font-bold text-emerald-700">
+                        Đang nhận diện giọng bé… (bé kể tiếp đi nào)
+                      </span>
+                    ) : (
+                      <span className="text-sm font-medium italic text-muted">
+                        Đang lắng nghe bé kể… (bé hãy nói vào mic)
+                      </span>
+                    )}
+                  </p>
+                </div>
+              ) : voiceMessage ? (
+                <div className="mt-3">
+                  <StatusMessage tone="info">{voiceMessage}</StatusMessage>
                 </div>
               ) : null}
 
@@ -1139,7 +1190,7 @@ export function PictureDescriptionScreen() {
                     setDescriptionText(event.target.value);
                     if (inputMode !== "VOICE") setInputMode("TEXT");
                   }}
-                  placeholder="Bé hãy nói qua Micro hoặc viết 1–3 câu kể lại những gì bé nhìn thấy trong bức tranh nhé..."
+                  placeholder="Bé hãy nói qua Micro hoặc viết 1–3 câu tự kể những gì bé nhìn thấy trong tranh nhé..."
                   value={descriptionText}
                 />
               </label>
@@ -1150,7 +1201,10 @@ export function PictureDescriptionScreen() {
                 </span>
                 <Button
                   disabled={
-                    isEvaluating || isRecordingVoice || isTranscribing || !descriptionText.trim()
+                    isEvaluating ||
+                    isRecordingVoice ||
+                    isTranscribing ||
+                    !descriptionText.trim()
                   }
                   onClick={() => void handleEvaluate()}
                   type="button"
@@ -1161,6 +1215,170 @@ export function PictureDescriptionScreen() {
                     : "Gửi cô giáo AI chấm bài"}
                 </Button>
               </div>
+            </section>
+
+            {/* Optional Guiding Questions & Vocabulary (Collapsed by default so child thinks independently) */}
+            <section className="rounded-card border border-border bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
+                  <Lightbulb
+                    aria-hidden="true"
+                    className="size-5 text-[#E5A913]"
+                  />
+                  Gợi ý thêm (khi bé cần)
+                </h2>
+                <Button
+                  aria-expanded={showHints}
+                  onClick={() => setShowHints((value) => !value)}
+                  size="compact"
+                  type="button"
+                  variant="secondary"
+                >
+                  {showHints ? (
+                    <>
+                      <ChevronUp aria-hidden="true" className="size-4" />
+                      Thu gọn gợi ý
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown aria-hidden="true" className="size-4" />
+                      Mở gợi ý câu hỏi
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {showHints ? (
+                <div className="mt-4 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                      Câu hỏi gợi mở quan sát
+                    </p>
+                    <Button
+                      onClick={() =>
+                        void speakVietnamese(
+                          session.guide.guiding_questions.join(" "),
+                          "guide",
+                        )
+                      }
+                      size="compact"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {playingSpeechKey === "guide" ? (
+                        <>
+                          <VolumeX aria-hidden="true" className="size-4" />
+                          Dừng đọc
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 aria-hidden="true" className="size-4" />
+                          Nghe gợi ý
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  <ol className="mt-3 flex flex-col gap-2">
+                    {session.guide.guiding_questions.map((question, index) => (
+                      <li
+                        className="flex items-start gap-2 rounded-control bg-sky/30 px-3 py-2 text-sm font-bold text-ink"
+                        key={question}
+                      >
+                        <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-extrabold text-white">
+                          {index + 1}
+                        </span>
+                        <span>{question}</span>
+                      </li>
+                    ))}
+                  </ol>
+
+                  <div className="mt-4">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                      Từ vựng gợi ý (nhấn vào từ để nghe)
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {session.guide.suggested_vocabulary.map((item) => {
+                        const active = selectedVocabWord === item.word;
+                        return (
+                          <button
+                            className={
+                              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                              (active
+                                ? "border-primary bg-primary text-white"
+                                : "border-border bg-white text-ink hover:border-primary hover:bg-sky/30")
+                            }
+                            key={item.word}
+                            onClick={() => {
+                              setSelectedVocabWord(item.word);
+                              void speakVietnamese(item.word, `vocab:${item.word}`);
+                            }}
+                            type="button"
+                          >
+                            <Volume2 aria-hidden="true" className="size-3.5" />
+                            {item.word}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedVocabWord ? (
+                      <p className="mt-2 rounded-control bg-warning-surface/60 px-3 py-2 text-sm font-semibold text-ink">
+                        <strong>{selectedVocabWord}:</strong>{" "}
+                        {
+                          session.guide.suggested_vocabulary.find(
+                            (item) => item.word === selectedVocabWord,
+                          )?.hint
+                        }
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 border-t border-border pt-3">
+                    {!hasSubmittedAttempt ? (
+                      <p className="text-sm font-semibold text-muted">
+                        Câu mẫu tham khảo sẽ mở sau khi bé tự kể và gửi lượt đầu
+                        tiên nhé!
+                      </p>
+                    ) : (
+                      <>
+                        <button
+                          className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+                          onClick={() =>
+                            setShowSampleSentences((value) => !value)
+                          }
+                          type="button"
+                        >
+                          {showSampleSentences ? (
+                            <>
+                              <EyeOff aria-hidden="true" className="size-4" />
+                              Ẩn câu mẫu tham khảo
+                            </>
+                          ) : (
+                            <>
+                              <Eye aria-hidden="true" className="size-4" />
+                              Xem câu mẫu tham khảo
+                            </>
+                          )}
+                        </button>
+                        {showSampleSentences ? (
+                          <ul className="mt-2 flex flex-col gap-2">
+                            {session.guide.model_sample_sentences.map(
+                              (sentence) => (
+                                <li
+                                  className="rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
+                                  key={sentence}
+                                >
+                                  “{sentence}”
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </section>
 
             {/* Gemini Feedback Card */}

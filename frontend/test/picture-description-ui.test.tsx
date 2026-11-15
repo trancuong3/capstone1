@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,22 @@ import {
 import { WithSelectedChild } from "@/test/fixtures/selected-child-test-provider";
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }));
+const recorderMock = vi.hoisted(() => ({
+  isRecording: false,
+  isSpeaking: false,
+  audioLevel: 0,
+  prepare: vi.fn(async () => {}),
+  start: vi.fn(async () => {}),
+  stop: vi.fn(async () => new Blob(["fake-audio"], { type: "audio/webm" })),
+  cancel: vi.fn(),
+  getStream: vi.fn(() => null),
+  getIsSpeaking: vi.fn(() => false),
+  getQuality: vi.fn(() => null),
+  getSettings: vi.fn(() => ({})),
+}));
+vi.mock("@/hooks/use-speech-recorder", () => ({
+  useSpeechRecorder: () => recorderMock,
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => navigation,
 }));
@@ -110,6 +126,9 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   navigation.replace.mockReset();
   navigation.push.mockReset();
+  recorderMock.start.mockClear();
+  recorderMock.stop.mockClear();
+  recorderMock.cancel.mockClear();
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   if (typeof URL.createObjectURL !== "function") {
@@ -132,6 +151,9 @@ afterEach(() => {
 
 function setupDefaultResponses() {
   let completed = false;
+  const ttsTexts: string[] = [];
+  let sttCallCount = 0;
+
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const reqUrl = new URL(url);
     const path = reqUrl.pathname;
@@ -139,7 +161,24 @@ function setupDefaultResponses() {
       return Response.json(childFixture);
     }
     if (path === "/voice/text-to-speech") {
+      if (init?.body) {
+        try {
+          const parsed = JSON.parse(String(init.body)) as { text?: string };
+          if (parsed.text) ttsTexts.push(parsed.text);
+        } catch {
+          // Ignore invalid JSON body in test.
+        }
+      }
       return new Response(null, { status: 503 });
+    }
+    if (path === "/voice/speech-to-text") {
+      sttCallCount += 1;
+      return Response.json({
+        text: "Cô giáo đang đọc sách cùng học sinh.",
+        language_code: "vie",
+        language_probability: 0.99,
+        words: [],
+      });
     }
     if (path === "/games/picture-description/catalog") {
       return Response.json(catalogPayload);
@@ -207,6 +246,10 @@ function setupDefaultResponses() {
     }
     throw new Error(`Unexpected test route ${path}`);
   });
+  return {
+    ttsTexts,
+    getSttCallCount: () => sttCallCount,
+  };
 }
 
 function renderScreen() {
@@ -220,7 +263,7 @@ function renderScreen() {
 }
 
 describe("PictureDescriptionScreen", () => {
-  it("loads catalog samples, starts a sample session, and evaluates child's description", async () => {
+  it("loads catalog samples without spoilers, hides hints initially, and evaluates child's description", async () => {
     setupDefaultResponses();
     const user = userEvent.setup();
     renderScreen();
@@ -230,15 +273,35 @@ describe("PictureDescriptionScreen", () => {
     ).toBeInTheDocument();
 
     expect(await screen.findByText("Khu vườn đầy nắng")).toBeInTheDocument();
+    expect(
+      screen.queryByText(catalogPayload.samples[0].description),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Khám phá tranh này" }));
 
     expect(
       await screen.findByText("Chú mèo ngủ trưa trong vườn nắng"),
     ).toBeInTheDocument();
+    // Scene summary spoiler and guiding questions stay hidden until the child opens hints
     expect(
-      screen.getByText("Bé thấy con vật nào đang nằm ngủ trên ghế gỗ?"),
+      screen.queryByText(baseSession.guide.scene_summary),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Bé thấy con vật nào đang nằm ngủ trên ghế gỗ?"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Mở gợi ý câu hỏi/i }));
+    expect(
+      await screen.findByText("Bé thấy con vật nào đang nằm ngủ trên ghế gỗ?"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Câu mẫu tham khảo sẽ mở sau khi bé tự kể và gửi lượt đầu tiên nhé!",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Xem câu mẫu tham khảo/i }),
+    ).not.toBeInTheDocument();
 
     // Tap suggested vocab chip to view definition hint
     await user.click(screen.getByRole("button", { name: /nằm cuộn tròn/i }));
@@ -261,6 +324,9 @@ describe("PictureDescriptionScreen", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("9/10 điểm")).toBeInTheDocument();
     expect(screen.getByText("• Chú mèo màu cam ngủ trên ghế gỗ")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Xem câu mẫu tham khảo/i }),
+    ).toBeInTheDocument();
   });
 
   it("supports custom upload tab validation and book page selection", async () => {
@@ -322,5 +388,131 @@ describe("PictureDescriptionScreen", () => {
     expect(
       await screen.findByText(/Bức tranh này chưa phù hợp cho trẻ tiểu học/i),
     ).toBeInTheDocument();
+  });
+
+  it("displays realtime spoken words while recording and prefers ElevenLabs STT & TTS", async () => {
+    const { ttsTexts, getSttCallCount } = setupDefaultResponses();
+    const recognitionState = {
+      createdCount: 0,
+      lang: "",
+      continuous: false,
+      interimResults: false,
+      onresult: null as ((event: unknown) => void) | null,
+      onend: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      start: vi.fn(),
+      stop: vi.fn(),
+      abort: vi.fn(),
+    };
+
+    class MockSpeechRecognition {
+      constructor() {
+        recognitionState.createdCount += 1;
+      }
+
+      get lang() {
+        return recognitionState.lang;
+      }
+
+      set lang(value: string) {
+        recognitionState.lang = value;
+      }
+
+      get continuous() {
+        return recognitionState.continuous;
+      }
+
+      set continuous(value: boolean) {
+        recognitionState.continuous = value;
+      }
+
+      get interimResults() {
+        return recognitionState.interimResults;
+      }
+
+      set interimResults(value: boolean) {
+        recognitionState.interimResults = value;
+      }
+
+      get onresult() {
+        return recognitionState.onresult;
+      }
+
+      set onresult(fn: ((event: unknown) => void) | null) {
+        recognitionState.onresult = fn;
+      }
+
+      get onend() {
+        return recognitionState.onend;
+      }
+
+      set onend(fn: (() => void) | null) {
+        recognitionState.onend = fn;
+      }
+
+      get onerror() {
+        return recognitionState.onerror;
+      }
+
+      set onerror(fn: (() => void) | null) {
+        recognitionState.onerror = fn;
+      }
+
+      start = recognitionState.start;
+      stop = recognitionState.stop;
+      abort = recognitionState.abort;
+    }
+
+    vi.stubGlobal("SpeechRecognition", MockSpeechRecognition);
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByText("Khu vườn đầy nắng");
+    await user.click(screen.getByRole("button", { name: "Khám phá tranh này" }));
+    await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
+
+    await user.click(screen.getByRole("button", { name: /Nói bằng Micro/i }));
+
+    expect(recorderMock.start).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(recognitionState.createdCount).toBe(1);
+    });
+    expect(recognitionState.lang).toBe("vi-VN");
+    expect(recognitionState.interimResults).toBe(true);
+    expect(screen.getByText("Bé đang nói:")).toBeInTheDocument();
+
+    // Emit duplicate Chrome final phrases + interim words -> realtime preview deduplicates them
+    act(() => {
+      recognitionState.onresult?.({
+        resultIndex: 0,
+        results: [
+          { isFinal: true, 0: { transcript: "Cô giáo.", confidence: 0.92 } },
+          { isFinal: true, 0: { transcript: "Cô giáo.", confidence: 0.91 } },
+          { isFinal: false, 0: { transcript: "đang đọc sách", confidence: 0.7 } },
+        ],
+      });
+    });
+
+    expect(screen.getByTestId("live-voice-transcript")).toHaveTextContent(
+      /Cô giáo\. đang đọc sách/,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/i }));
+
+    await waitFor(() => {
+      expect(getSttCallCount()).toBe(1);
+    });
+    const textarea = screen.getByLabelText(
+      "Nội dung bé mô tả bức tranh",
+    ) as HTMLTextAreaElement;
+    // ElevenLabs scribe_v2 response takes precedence over noisy browser recognition
+    expect(textarea.value).toBe("Cô giáo đang đọc sách cùng học sinh.");
+
+    // ElevenLabs TTS replay button appears for the drafted child story
+    await user.click(screen.getByRole("button", { name: /Nghe lại/i }));
+    await waitFor(() => {
+      expect(ttsTexts).toContain("Cô giáo đang đọc sách cùng học sinh.");
+    });
   });
 });
