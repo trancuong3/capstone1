@@ -88,7 +88,8 @@ const baseSession = {
   guide: {
     is_child_safe: true,
     scene_title: "Chú mèo ngủ trưa trong vườn nắng",
-    scene_summary: "Chú mèo cam đang nằm ngủ trên ghế gỗ giữa khu vườn đầy nắng.",
+    scene_summary:
+      "Chú mèo cam đang nằm ngủ trên ghế gỗ giữa khu vườn đầy nắng.",
     guiding_questions: [
       "Bé thấy con vật nào đang nằm ngủ trên ghế gỗ?",
       "Xung quanh ghế có những bông hoa gì?",
@@ -183,7 +184,10 @@ function setupDefaultResponses() {
     if (path === "/games/picture-description/catalog") {
       return Response.json(catalogPayload);
     }
-    if (path === "/games/picture-description/sessions" && (!init?.method || init.method === "GET")) {
+    if (
+      path === "/games/picture-description/sessions" &&
+      (!init?.method || init.method === "GET")
+    ) {
       return Response.json(
         completed
           ? [
@@ -204,7 +208,10 @@ function setupDefaultResponses() {
           : [],
       );
     }
-    if (path === "/games/picture-description/sessions" && init?.method === "POST") {
+    if (
+      path === "/games/picture-description/sessions" &&
+      init?.method === "POST"
+    ) {
       expect(init.body).toBeInstanceOf(FormData);
       const form = init.body as FormData;
       const sourceType = form.get("source_type");
@@ -216,7 +223,9 @@ function setupDefaultResponses() {
         { status: 201 },
       );
     }
-    if (path === `/games/picture-description/sessions/${TEST_SESSION_ID}/evaluate`) {
+    if (
+      path === `/games/picture-description/sessions/${TEST_SESSION_ID}/evaluate`
+    ) {
       completed = true;
       const body = JSON.parse(String(init?.body)) as {
         transcript_text: string;
@@ -277,7 +286,9 @@ describe("PictureDescriptionScreen", () => {
       screen.queryByText(catalogPayload.samples[0].description),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Khám phá tranh này" }));
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
 
     expect(
       await screen.findByText("Chú mèo ngủ trưa trong vườn nắng"),
@@ -320,13 +331,17 @@ describe("PictureDescriptionScreen", () => {
     );
 
     expect(
-      await screen.findByText("Cô khen bé quan sát rất tinh mắt và viết câu trọn ý!"),
+      await screen.findByText(
+        "Cô khen bé quan sát rất tinh mắt và viết câu trọn ý!",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: /Kết quả chấm điểm/i }),
     ).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("9/10 điểm")).toBeInTheDocument();
-    expect(screen.getByText("• Chú mèo màu cam ngủ trên ghế gỗ")).toBeInTheDocument();
+    expect(
+      screen.getByText("• Chú mèo màu cam ngủ trên ghế gỗ"),
+    ).toBeInTheDocument();
     // Evaluation result shows on its own tab without mixing with the input/hints panel
     expect(
       screen.queryByLabelText("Nội dung bé mô tả bức tranh"),
@@ -334,9 +349,10 @@ describe("PictureDescriptionScreen", () => {
 
     // Switch back to the practice tab -> input & unlocked model sentences return, result card hides
     await user.click(screen.getByRole("tab", { name: /Mô tả tranh/i }));
-    expect(
-      screen.getByRole("tab", { name: /Mô tả tranh/i }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /Mô tả tranh/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(
       screen.getByLabelText("Nội dung bé mô tả bức tranh"),
     ).toBeInTheDocument();
@@ -354,7 +370,9 @@ describe("PictureDescriptionScreen", () => {
     await screen.findByText("Khu vườn đầy nắng");
 
     // Switch to Book Page tab
-    await user.click(screen.getByRole("tab", { name: /Tranh từ sách ViRead/i }));
+    await user.click(
+      screen.getByRole("tab", { name: /Tranh từ sách ViRead/i }),
+    );
     expect(await screen.findByText("Khu vườn buổi sáng")).toBeInTheDocument();
 
     // Switch to Custom Upload tab and upload a valid PNG file
@@ -387,10 +405,16 @@ describe("PictureDescriptionScreen", () => {
       if (path === "/games/picture-description/catalog") {
         return Response.json(catalogPayload);
       }
-      if (path === "/games/picture-description/sessions" && (!init?.method || init.method === "GET")) {
+      if (
+        path === "/games/picture-description/sessions" &&
+        (!init?.method || init.method === "GET")
+      ) {
         return Response.json([]);
       }
-      if (path === "/games/picture-description/sessions" && init?.method === "POST") {
+      if (
+        path === "/games/picture-description/sessions" &&
+        init?.method === "POST"
+      ) {
         return Response.json({ detail: "UNSAFE_PICTURE" }, { status: 422 });
       }
       throw new Error(`Unexpected test route ${path}`);
@@ -400,7 +424,9 @@ describe("PictureDescriptionScreen", () => {
     renderScreen();
     await screen.findByText("Khu vườn đầy nắng");
 
-    await user.click(screen.getByRole("button", { name: "Khám phá tranh này" }));
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
 
     expect(
       await screen.findByText(/Bức tranh này chưa phù hợp cho trẻ tiểu học/i),
@@ -486,7 +512,9 @@ describe("PictureDescriptionScreen", () => {
     renderScreen();
 
     await screen.findByText("Khu vườn đầy nắng");
-    await user.click(screen.getByRole("button", { name: "Khám phá tranh này" }));
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
     await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
 
     await user.click(screen.getByRole("button", { name: /Nói bằng Micro/i }));
@@ -506,7 +534,10 @@ describe("PictureDescriptionScreen", () => {
         results: [
           { isFinal: true, 0: { transcript: "Cô giáo.", confidence: 0.92 } },
           { isFinal: true, 0: { transcript: "Cô giáo.", confidence: 0.91 } },
-          { isFinal: false, 0: { transcript: "đang đọc sách", confidence: 0.7 } },
+          {
+            isFinal: false,
+            0: { transcript: "đang đọc sách", confidence: 0.7 },
+          },
         ],
       });
     });

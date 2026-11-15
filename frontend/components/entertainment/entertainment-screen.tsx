@@ -1,4 +1,11 @@
-import { ArrowRight, BookOpenText, Camera, Mic, Sparkles, Star } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpenText,
+  Camera,
+  Mic,
+  Sparkles,
+  Star,
+} from "lucide-react";
 import Link from "next/link";
 
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
@@ -115,8 +122,9 @@ export function EntertainmentScreen() {
                 Kể chuyện qua tranh
               </h2>
               <p className="mt-3 max-w-xl text-body leading-relaxed text-muted">
-                Quan sát tranh minh họa trong sách hoặc ảnh ba mẹ tải lên, kể lại
-                bằng giọng nói hoặc câu văn để cô giáo AI gợi ý từ vựng và chấm sao nhé!
+                Quan sát tranh minh họa trong sách hoặc ảnh ba mẹ tải lên, kể
+                lại bằng giọng nói hoặc câu văn để cô giáo AI gợi ý từ vựng và
+                chấm sao nhé!
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3 text-sm font-bold text-primary">

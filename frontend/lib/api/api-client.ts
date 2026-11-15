@@ -31,8 +31,7 @@ const safeBackendMessages: Record<string, string> = {
     "Hãy chọn một trang sách có tranh minh họa trước khi bắt đầu nhé.",
   UNSAFE_PICTURE:
     "Bức tranh này chưa phù hợp cho trẻ tiểu học. Ba mẹ hãy chọn một bức tranh thân thiện khác nhé.",
-  AI_NOT_CONFIGURED:
-    "Hệ thống chưa cấu hình kết nối AI mô tả tranh ở máy chủ.",
+  AI_NOT_CONFIGURED: "Hệ thống chưa cấu hình kết nối AI mô tả tranh ở máy chủ.",
   AI_AUTH_FAILED:
     "Khóa kết nối AI ở máy chủ chưa hợp lệ. Hãy kiểm tra lại GEMINI_API_KEY.",
   AI_RATE_LIMITED:
@@ -41,8 +40,7 @@ const safeBackendMessages: Record<string, string> = {
     "Trợ lý AI suy nghĩ hơi lâu một chút. Ba mẹ hãy nhấn thử lại nhé.",
   AI_UNAVAILABLE:
     "Chưa kết nối được trợ lý AI mô tả tranh lúc này. Hãy thử lại sau ít phút nhé.",
-  SAMPLE_IMAGE_UNAVAILABLE:
-    "Chưa tải được ảnh tranh mẫu từ máy chủ.",
+  SAMPLE_IMAGE_UNAVAILABLE: "Chưa tải được ảnh tranh mẫu từ máy chủ.",
   "Supabase Storage is not configured":
     "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
   "Server-side Supabase Storage credentials are not configured":

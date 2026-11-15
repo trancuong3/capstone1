@@ -184,7 +184,11 @@ export function createPictureDescriptionService(): PictureDescriptionService {
         form.append("book_page_id", input.book_page_id);
       }
       if (input.image_file) {
-        form.append("image", input.image_file, input.image_file.name || "picture.jpg");
+        form.append(
+          "image",
+          input.image_file,
+          input.image_file.name || "picture.jpg",
+        );
       }
       return requestApi(
         "/games/picture-description/sessions",
