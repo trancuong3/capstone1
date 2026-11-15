@@ -202,7 +202,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           Chỉnh sửa metadata / vòng đời
         </Link>
       </div>
-      <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
+      <AdminPageUploader
+        bookId={book.id}
+        onUploaded={refreshPages}
+      />
       {items && items.length > 0 ? (
         <section className="mt-6" aria-label="Rà soát OCR hàng loạt">
           <AdminBookAiBatchReview
