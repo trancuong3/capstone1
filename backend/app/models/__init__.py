@@ -14,3 +14,5 @@ from app.models.book_content_quality import (
     BookQualityReportFinding,
     BookQualityScanRun,
 )
+
+from .game_session import GameAttempt, GameRound, GameSession
