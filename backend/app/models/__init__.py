@@ -1,4 +1,5 @@
 from .profile import Profile, ChildProfile
+from .karaoke import KaraokeSong, KaraokeSongVersion
 from .book import Book, BookPage, PageRevision, PageRevisionWord
 from .reading import ReadingSession, ReadingSessionPage, ReadingEvent, FluencyAssessment
 from .comprehension import ComprehensionQuestion, ComprehensionAnswer

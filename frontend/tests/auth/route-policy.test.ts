@@ -12,6 +12,8 @@ describe("protected route policy", () => {
     ["/books/book-id", "parent"],
     ["/reading/session-id", "parent"],
     ["/reports/difficult-words", "parent"],
+    ["/karaoke", "parent"],
+    ["/karaoke/song-id", "parent"],
     ["/admin", "admin"],
     ["/admin/books/book-id", "admin"],
   ] as const)("classifies %s as %s", (pathname, area) => {
@@ -28,10 +30,16 @@ describe("protected route policy", () => {
   it("uses exact route boundaries", () => {
     expect(getProtectedRouteArea("/dashboard-preview")).toBeNull();
     expect(getProtectedRouteArea("/administrator")).toBeNull();
+    expect(getProtectedRouteArea("/karaoke-preview")).toBeNull();
   });
 
   it("redirects guests and cross-role users to fixed safe destinations", () => {
     expect(getProtectedRouteRedirect("/dashboard", null)).toBe("/login");
+    expect(getProtectedRouteRedirect("/karaoke", null)).toBe("/login");
+    expect(getProtectedRouteRedirect("/karaoke/song-id", "admin")).toBe(
+      "/admin/books",
+    );
+    expect(getProtectedRouteRedirect("/karaoke/song-id", "parent")).toBeNull();
     expect(getProtectedRouteRedirect("/admin/books", null)).toBe(
       "/admin/login",
     );
