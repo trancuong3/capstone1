@@ -367,6 +367,75 @@ test("Admin book creation requires separate name and title and sends normalized 
   expect(api.unexpected).toEqual([]);
 });
 
+test("Parent header keeps navigation and account menu reachable around the tablet breakpoint with fallback fonts", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "Covers its own viewport matrix.",
+  );
+  const api = await installApiFixture(page);
+  // The header must fit even before/without the optional web font loading.
+  await page.route(/\.woff2?(?:\?|$)/, (route) => route.abort());
+  await page.setViewportSize({ width: 768, height: 1000 });
+  await page.goto("/dashboard");
+  await expect(page.locator("h1").first()).toBeVisible();
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const navigation = page.getByRole("navigation", {
+    name: "Điều hướng dành cho ba mẹ",
+  });
+  const account = navigation.getByRole("button", { name: /menu tài khoản/ });
+
+  for (const width of [767, 768, 769, 800, 1024]) {
+    await test.step(`Header and account menu at ${width}px`, async () => {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const name of [
+        "Tổng quan",
+        "Tiến bộ",
+        "Quản lý đọc",
+        "Lịch sử",
+        "Từ cần luyện",
+      ]) {
+        await expect(
+          navigation.getByRole("link", { name, exact: true }),
+        ).toBeVisible();
+      }
+      // Keep room for the account when navigation items or font metrics change.
+      const links = navigation
+        .getByRole("link", { name: "Tổng quan", exact: true })
+        .locator("..");
+      expect(
+        await links.evaluate((element) =>
+          Number(getComputedStyle(element).flexShrink),
+        ),
+      ).toBeGreaterThan(0);
+      await assertLayout(page);
+      const box = await account.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      await account.focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("menuitem", { name: "Hồ sơ ba mẹ" }),
+      ).toBeFocused();
+      await assertLayout(page);
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("menu", { name: "Menu tài khoản" }),
+      ).toBeHidden();
+      await expect(account).toBeFocused();
+      if (width === 768)
+        await page.screenshot({
+          path: testInfo.outputPath("parent-header-768.png"),
+          caret: "initial",
+        });
+    });
+  }
+  expect(api.unexpected).toEqual([]);
+});
+
 for (const width of [320, 375, 430, 768, 1366, 1920]) {
   test(`read-route matrix, headings, console and overflow at ${width}px`, async ({
     page,

@@ -258,7 +258,7 @@ export function AppShell({ children }: AppShellProps) {
 
           <div className="flex w-full min-w-0 items-start gap-2 sm:w-auto sm:items-center sm:gap-3">
             {!isChildOnboarding ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-none sm:justify-end sm:gap-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:justify-end sm:gap-2">
                 {navigationItems.map(({ href, icon: Icon, label }) => {
                   const isActive = routeIsActive(pathname, href);
 
