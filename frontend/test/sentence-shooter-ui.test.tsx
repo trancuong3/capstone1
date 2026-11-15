@@ -133,7 +133,72 @@ function renderScreen() {
   );
 }
 
+function renderScreenWithBook(bookId: string) {
+  return render(
+    <AppServicesProvider>
+      <WithSelectedChild childId={TEST_CHILD_ID}>
+        <SentenceShooterScreen
+          initialBookId={bookId}
+          readingSessionId={TEST_SESSION_ID}
+        />
+      </WithSelectedChild>
+    </AppServicesProvider>,
+  );
+}
+
 describe("Sentence Shooter", () => {
+  it("preselects a reading-flow book and still waits for the child to start", async () => {
+    const user = userEvent.setup();
+    renderScreenWithBook(TEST_BOOK_ID);
+
+    const bookButton = await screen.findByRole("button", {
+      name: /Sách xạ thủ/,
+    });
+    await waitFor(() =>
+      expect(bookButton).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(screen.getByText(/Đã chọn sách bé vừa đọc/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Quay lại: Kết quả đọc/ }),
+    ).toHaveAttribute("href", `/reading/${TEST_SESSION_ID}`);
+    expect(screen.getByRole("button", { name: /Bắt đầu chơi/ })).toBeEnabled();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) =>
+          new URL(String(url)).pathname === "/games/sentence-shooter/sessions",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+    await screen.findByRole("button", { name: "sách." });
+    const createRequest = fetchMock.mock.calls.find(
+      ([url]) =>
+        new URL(String(url)).pathname === "/games/sentence-shooter/sessions",
+    );
+    expect(createRequest).toBeDefined();
+    expect(JSON.parse(String(createRequest?.[1]?.body))).toMatchObject({
+      book_id: TEST_BOOK_ID,
+      child_id: TEST_CHILD_ID,
+      difficulty: "easy",
+      total_rounds: 3,
+    });
+  });
+
+  it("does not start a session when the requested book is unavailable", async () => {
+    renderScreenWithBook("unknown-book-id");
+
+    expect(
+      await screen.findByText(/Cuốn sách bé vừa đọc chưa có đủ câu phù hợp/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Bắt đầu chơi/ })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) =>
+          new URL(String(url)).pathname === "/games/sentence-shooter/sessions",
+      ),
+    ).toHaveLength(0);
+  });
+
   it("loads real game books, starts a server session, and only places server-confirmed words", async () => {
     const user = userEvent.setup();
     renderScreen();

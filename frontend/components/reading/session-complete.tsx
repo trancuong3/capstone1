@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Clock3,
   FileText,
+  Gamepad2,
   Home,
   Mic,
   Star,
@@ -29,6 +30,7 @@ import type { ReadingCompletionSummaryUI } from "@/types/reading";
 
 interface SessionCompleteProps {
   booksHref: string;
+  bookId: string;
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
@@ -39,6 +41,7 @@ interface SessionCompleteProps {
 
 export function SessionComplete({
   booksHref,
+  bookId,
   child,
   sessionId,
   summary,
@@ -67,6 +70,11 @@ export function SessionComplete({
     hasWordAssessment && scoredWordCount > 0
       ? Math.round((correctWords.length / scoredWordCount) * 100)
       : (summary.score ?? null);
+  const gameHref = `/entertainment/sentence-shooter?${new URLSearchParams({
+    book_id: bookId,
+    source: "reading-completion",
+    reading_session_id: sessionId,
+  }).toString()}`;
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
@@ -401,6 +409,16 @@ export function SessionComplete({
           Đọc cuốn khác
           <ArrowRight aria-hidden="true" className="size-5" />
         </ButtonLink>
+        {!rangeWasPartial ? (
+          <ButtonLink
+            className="mx-auto max-w-[360px]"
+            href={gameHref}
+            variant="secondary"
+          >
+            <Gamepad2 aria-hidden="true" className="size-5" />
+            Chơi game
+          </ButtonLink>
+        ) : null}
         <ButtonLink
           className="mx-auto max-w-[360px]"
           href="/dashboard"

@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   Check,
+  Gamepad2,
   Lightbulb,
   Pause,
   Play,
@@ -57,6 +58,11 @@ const difficulties: ReadonlyArray<{
 ];
 
 const gameError = "Chưa kết nối được trò chơi. Ba mẹ và bé hãy thử lại nhé.";
+
+interface SentenceShooterScreenProps {
+  initialBookId?: string;
+  readingSessionId?: string;
+}
 
 function toBookCover(book: SentenceShooterBookDTO): BookListItemDTO {
   return {
@@ -116,7 +122,10 @@ function playSound(kind: "shot" | "correct" | "wrong" | "celebrate") {
   }
 }
 
-export function SentenceShooterScreen() {
+export function SentenceShooterScreen({
+  initialBookId,
+  readingSessionId,
+}: SentenceShooterScreenProps = {}) {
   const router = useRouter();
   const shooterService = useSentenceShooterService();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
@@ -129,6 +138,7 @@ export function SentenceShooterScreen() {
     status: "loading",
   });
   const [selectedBookId, setSelectedBookId] = useState("");
+  const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
   const [session, setSession] = useState<SentenceShooterSessionDTO | null>(
@@ -161,6 +171,9 @@ export function SentenceShooterScreen() {
   const cannonRef = useRef<HTMLDivElement>(null);
   const tokenButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const shotIdRef = useRef(0);
+  const readingCompletionHref = readingSessionId
+    ? `/reading/${encodeURIComponent(readingSessionId)}`
+    : "/entertainment";
 
   useEffect(() => {
     if (!childId) return;
@@ -191,12 +204,21 @@ export function SentenceShooterScreen() {
     };
   }, [childId, difficulty, reloadKey, shooterService, totalRounds]);
 
+  const effectiveSelectedBookId =
+    !hasManuallySelectedBook &&
+    initialBookId &&
+    bookState.status === "ready" &&
+    bookState.books.some((book) => book.id === initialBookId)
+      ? initialBookId
+      : selectedBookId;
   const selectedBook = useMemo(
     () =>
       bookState.status === "ready"
-        ? (bookState.books.find((book) => book.id === selectedBookId) ?? null)
+        ? (bookState.books.find(
+            (book) => book.id === effectiveSelectedBookId,
+          ) ?? null)
         : null,
-    [bookState, selectedBookId],
+    [bookState, effectiveSelectedBookId],
   );
   const placedTokenIds = useMemo(
     () => new Set(placedTokens.map((token) => token.id)),
@@ -483,9 +505,9 @@ export function SentenceShooterScreen() {
     return (
       <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
         <BookChildHeader
-          backHref="/entertainment"
+          backHref={readingCompletionHref}
           child={child}
-          mobileLabel="Khu vui học"
+          mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
         />
         <div className="relative overflow-hidden rounded-card border border-border bg-gradient-to-br from-[#FFF8D9] via-white to-[#E2F7F7] p-6 text-center shadow-sm sm:p-10">
           <div
@@ -549,10 +571,10 @@ export function SentenceShooterScreen() {
         </div>
         <Link
           className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
-          href="/entertainment"
+          href={readingCompletionHref}
         >
-          <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" /> Về khu
-          Giải trí
+          <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" />
+          {readingSessionId ? "Quay lại kết quả đọc" : "Về khu Giải trí"}
         </Link>
       </section>
     );
@@ -844,9 +866,9 @@ export function SentenceShooterScreen() {
   return (
     <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7">
       <BookChildHeader
-        backHref="/entertainment"
+        backHref={readingCompletionHref}
         child={child}
-        mobileLabel="Khu vui học"
+        mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
       />
       <header className="flex flex-col gap-2">
         <p className="font-extrabold text-primary">Xạ thủ ghép câu</p>
@@ -859,6 +881,16 @@ export function SentenceShooterScreen() {
       </header>
 
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
+
+      {initialBookId &&
+      bookState.status === "ready" &&
+      !hasManuallySelectedBook &&
+      !bookState.books.some((book) => book.id === initialBookId) ? (
+        <StatusMessage title="Cuốn sách chưa sẵn sàng" tone="warning">
+          Cuốn sách bé vừa đọc chưa có đủ câu phù hợp với độ khó và số câu hiện
+          tại. Bé có thể đổi lựa chọn hoặc chọn sách khác bên dưới.
+        </StatusMessage>
+      ) : null}
 
       <fieldset>
         <legend className="mb-3 text-lg font-extrabold text-ink">
@@ -925,6 +957,12 @@ export function SentenceShooterScreen() {
             · {totalRounds} câu
           </span>
         </div>
+        {initialBookId && selectedBook?.id === initialBookId ? (
+          <p className="mb-3 rounded-control bg-success-surface px-4 py-3 text-sm font-semibold text-success-ink">
+            <Gamepad2 aria-hidden="true" className="mr-2 inline size-4" />
+            Đã chọn sách bé vừa đọc: <strong>{selectedBook.title}</strong>
+          </p>
+        ) : null}
         {bookState.status === "loading" ? (
           <div
             aria-busy="true"
@@ -966,7 +1004,7 @@ export function SentenceShooterScreen() {
         {bookState.status === "ready" && bookState.books.length > 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {bookState.books.map((book) => {
-              const selected = selectedBookId === book.id;
+              const selected = effectiveSelectedBookId === book.id;
               return (
                 <button
                   aria-pressed={selected}
@@ -977,7 +1015,10 @@ export function SentenceShooterScreen() {
                       : "border-border hover:border-primary/60",
                   ].join(" ")}
                   key={book.id}
-                  onClick={() => setSelectedBookId(book.id)}
+                  onClick={() => {
+                    setHasManuallySelectedBook(true);
+                    setSelectedBookId(book.id);
+                  }}
                   type="button"
                 >
                   <BookCover
