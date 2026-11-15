@@ -4,6 +4,7 @@ import {
   BarChart3,
   CalendarClock,
   CircleHelp,
+  Gamepad2,
   History,
   LayoutDashboard,
   LogOut,
@@ -58,6 +59,11 @@ const navigationItems = [
     href: "/sessions",
     icon: History,
     label: "Lịch sử",
+  },
+  {
+    href: "/entertainment",
+    icon: Gamepad2,
+    label: "Giải trí",
   },
   {
     href: "/reports/difficult-words",

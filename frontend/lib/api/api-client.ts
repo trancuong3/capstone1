@@ -11,6 +11,16 @@ const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
 // messages may contain SQL, tokens, file paths, or other private diagnostic data.
 const safeBackendMessages: Record<string, string> = {
   ...readingManagementMessages,
+  INSUFFICIENT_CONTENT:
+    "Cuốn sách này chưa có đủ câu đã xác minh cho lượt chơi. Bé có thể chọn sách hoặc độ khó khác nhé.",
+  SESSION_NOT_ACTIVE:
+    "Lượt chơi này đã kết thúc. Hãy bắt đầu một lượt mới nhé.",
+  ROUND_NOT_ACTIVE:
+    "Câu này đã được hoàn thành. Hãy tiếp tục với câu kế tiếp nhé.",
+  ROUND_NOT_COMPLETE: "Hãy ghép xong câu hiện tại trước khi chuyển tiếp nhé.",
+  TOKEN_ALREADY_USED: "Từ này đã được ghép rồi. Bé hãy chọn một từ khác nhé.",
+  TOKEN_NOT_IN_SESSION:
+    "Từ này không thuộc câu hiện tại. Hãy tải lại câu và thử lại nhé.",
   "Supabase Storage is not configured":
     "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
   "Server-side Supabase Storage credentials are not configured":
