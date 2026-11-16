@@ -1105,10 +1105,9 @@ class VireadOcrTrainingService:
         leakage = await self.repo.one("""
             SELECT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.dataset_version_id=:dataset_id
                   AND sample.split IN ('train','validation')
-                GROUP BY COALESCE(page.bookid::text, sample.source_group_id)
+                GROUP BY sample.source_group_id
                 HAVING count(DISTINCT sample.split) > 1
             ) AS document_group_leak,
             EXISTS (
@@ -1120,7 +1119,7 @@ class VireadOcrTrainingService:
         """, {"dataset_id": dataset["id"]})
         if leakage and (leakage["document_group_leak"] or leakage["image_hash_leak"]):
             raise HTTPException(status_code=422, detail={
-                "message": "Training dataset leaks a document group or image across Train/Validation",
+                "message": "Training dataset leaks a source page group or image across Train/Validation",
                 "document_group_leak": bool(leakage["document_group_leak"]),
                 "image_hash_leak": bool(leakage["image_hash_leak"]),
             })
