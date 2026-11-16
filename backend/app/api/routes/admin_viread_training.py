@@ -228,7 +228,7 @@ async def retry_failed_viread_colab_training_job(
             metadata=COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
                 'retry_requested_by', CAST(:actor_id AS text),
                 'retry_requested_at', now(),
-                'retry_previous_error', :previous_error,
+                'retry_previous_error', CAST(:previous_error AS text),
                 'retry_mode', :retry_mode
             ),
             updated_at=now()
