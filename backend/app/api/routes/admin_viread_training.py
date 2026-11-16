@@ -90,6 +90,39 @@ async def get_viread_training_overview(
     return await VireadOcrTrainingService(db).overview(actor_id)
 
 
+@router.delete("/admin/viread-training/jobs/{job_id}")
+async def delete_viread_training_job(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a terminal queue entry while retaining its dataset and run artifacts."""
+    service = VireadOcrTrainingService(db)
+    await service._admin(actor_id)
+    result = await db.execute(text("""
+        DELETE FROM public.viread_ocr_training_jobs
+        WHERE id=:job_id
+          AND status NOT IN (
+            'QUEUED', 'LOCAL_RUNNING', 'FALLBACK_QUEUED_COLAB',
+            'COLAB_RUNNING', 'WAITING_FOR_DATA', 'WAITING_FOR_COLAB_WORKER',
+            'COLAB_SUBMITTING', 'COLAB_SUBMITTED', 'COLAB_EXECUTING'
+          )
+        RETURNING id
+    """), {"job_id": job_id})
+    deleted_id = result.scalar_one_or_none()
+    if deleted_id is None:
+        exists = await db.execute(text(
+            "SELECT status FROM public.viread_ocr_training_jobs WHERE id=:job_id"
+        ), {"job_id": job_id})
+        current_status = exists.scalar_one_or_none()
+        await db.rollback()
+        if current_status is None:
+            raise HTTPException(status_code=404, detail="Training job was not found")
+        raise HTTPException(status_code=409, detail="A queued or running training job cannot be deleted")
+    await db.commit()
+    return {"job_id": deleted_id, "deleted": True}
+
+
 @router.post("/admin/viread-training/jobs/{job_id}/retry")
 async def retry_failed_viread_colab_training_job(
     job_id: UUID,

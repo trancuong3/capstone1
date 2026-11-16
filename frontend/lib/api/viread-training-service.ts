@@ -104,6 +104,7 @@ export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  deleteJob(jobId: string): Promise<unknown>;
   requestEvaluation(
     jobId: string,
     evaluationType: "PILOT" | "PRODUCTION",
@@ -145,6 +146,13 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    deleteJob: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}`,
+        z.unknown(),
+        undefined,
+        { method: "DELETE" },
+      ),
     requestEvaluation: (jobId, evaluationType) =>
       requestApi(
         `/books/admin/viread-training/jobs/${jobId}/evaluate`,
