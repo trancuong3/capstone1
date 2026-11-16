@@ -119,6 +119,39 @@ class TrainingWorkerClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("id=CAST(:requested_job_id AS uuid)", db.statement[0])
         self.assertTrue(db.committed)
 
+    async def test_training_job_claim_does_not_require_a_locked_test(self):
+        job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        actor_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        parent_sha = "c" * 64
+        job = {
+            "id": job_id, "profile": "FLOW2_ADMIN_VERIFIED", "dataset_version_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "manifest_sha256": "a" * 64, "config_sha256": "b" * 64,
+            "parent_checkpoint_sha256": parent_sha, "created_by": actor_id,
+            "attempts": 1, "run_id": None, "metadata": {"operation": "TRAIN"},
+            "locked_test_version_id": None, "locked_test_manifest_sha256": None,
+        }
+        dataset = {"source_flow": "FLOW1_VERIFIED", "version_sha256": job["manifest_sha256"],
+                   "sample_count": 32, "is_locked_test": False,
+                   "manifest_storage_path": "ocr-training/manifests/flow2_admin_verified/manifest.json"}
+        active = {"checkpoint_sha256": parent_sha, "storage_path": None, "profile": "ORIGINAL"}
+        db = _RecordingSession([_RowResult(job), _RowResult(dataset), _RowResult(active)])
+
+        with (
+            patch("app.api.routes.admin_viread_training.VireadOcrTrainingService._admin", new_callable=AsyncMock),
+            patch("app.api.routes.admin_viread_training.create_signed_image_url", return_value="https://storage.example/manifest"),
+        ):
+            response = await claim_viread_colab_training_job(
+                payload=TrainingWorkerClaim(worker_id="colab-test-worker"),
+                _worker=None,
+                db=db,
+            )
+
+        self.assertEqual(response["job"]["locked_test_version_id"], None)
+        self.assertEqual(response["job"]["locked_test_manifest_sha256"], None)
+        self.assertEqual(len(db.statement), 3)
+        self.assertFalse(any("source_flow='LOCKED_TEST'" in statement for statement in db.statement))
+        self.assertTrue(db.committed)
+
     async def test_retry_requeues_failed_colab_job_without_a_run(self):
         job_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         actor_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"

@@ -50,6 +50,21 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const url = new URL(route.request().url());
+    if (
+      url.pathname === `/books/admin/catalog/${ids.book}` &&
+      route.request().method() === "GET"
+    ) {
+      return respond(route, {
+        id: ids.book,
+        name: "Sách kiểm thử",
+        title: "Sách kiểm thử",
+        author: null,
+        min_grade: 1,
+        max_grade: 1,
+        lifecycle_status: "ACTIVE",
+        next_page_number: 1,
+      });
+    }
     if (url.pathname === `/books/admin/catalog/${ids.book}/pages`) {
       if (route.request().method() === "POST") {
         uploads.push(route.request().postData() ?? "");

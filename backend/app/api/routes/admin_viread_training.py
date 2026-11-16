@@ -14,6 +14,7 @@ from sqlalchemy import text
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas.viread_ocr_training import (
     BenchmarkCreate,
+    CandidateEvaluationRequest,
     DatasetImport,
     ModelDecisionRequest,
     TrainingRunComplete,
@@ -73,7 +74,7 @@ async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, wor
         SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
                config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts,
                colab_execution_id, colab_execution_resource_name, colab_operation_name,
-               locked_test_version_id, locked_test_manifest_sha256
+               locked_test_version_id, locked_test_manifest_sha256, metadata
         FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
     """, {"id": job_id})
     if not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING" or job["worker_id"] != worker_id:
@@ -550,6 +551,18 @@ async def decide_viread_model(
     return await VireadOcrTrainingService(db).decide(actor_id, payload)
 
 
+@router.post("/admin/viread-training/jobs/{job_id}/evaluate")
+async def request_viread_candidate_evaluation(
+    job_id: UUID,
+    payload: CandidateEvaluationRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await VireadOcrTrainingService(db).request_candidate_evaluation(
+        actor_id, job_id, payload.evaluation_type
+    )
+
+
 @router.post("/admin/viread-training/worker/claim")
 async def claim_viread_colab_training_job(
     payload: TrainingWorkerClaim,
@@ -560,36 +573,24 @@ async def claim_viread_colab_training_job(
     result = await db.execute(text("""
         WITH next_job AS (
             SELECT id FROM public.viread_ocr_training_jobs
-            WHERE target='COLAB' AND available_at <= now() AND attempts < 3 AND (
+            WHERE target='COLAB' AND available_at <= now() AND (
+                (metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts < 3)
+                OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts < 3)
+            ) AND (
                 (CAST(:requested_job_id AS uuid) IS NULL AND status IN ('WAITING_FOR_COLAB_WORKER', 'FALLBACK_QUEUED_COLAB'))
                 OR (CAST(:requested_job_id AS uuid) IS NOT NULL AND id=CAST(:requested_job_id AS uuid)
                     AND status IN ('COLAB_SUBMITTING', 'COLAB_SUBMITTED', 'COLAB_EXECUTING'))
                 OR (status='COLAB_RUNNING' AND lease_expires_at < now()
                     AND (CAST(:requested_job_id AS uuid) IS NULL OR id=CAST(:requested_job_id AS uuid)))
             )
-              AND locked_test_version_id IS NOT NULL
-              AND locked_test_manifest_sha256 IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM public.viread_ocr_dataset_versions locked
-                WHERE locked.id=viread_ocr_training_jobs.locked_test_version_id
-                  AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
-                  AND locked.version_sha256=viread_ocr_training_jobs.locked_test_manifest_sha256
-                  AND locked.sample_count >= 200
-                  AND (SELECT count(*) FROM public.viread_ocr_samples sample
-                       WHERE sample.dataset_version_id=locked.id
-                         AND sample.source_flow='LOCKED_TEST'
-                         AND sample.split='locked_test')=locked.sample_count
-                  AND (SELECT count(DISTINCT sample.source_group_id)
-                       FROM public.viread_ocr_samples sample
-                       WHERE sample.dataset_version_id=locked.id
-                         AND sample.source_flow='LOCKED_TEST'
-                         AND sample.split='locked_test') >= 30
-              )
             ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
         )
         UPDATE public.viread_ocr_training_jobs AS job
         SET status='COLAB_RUNNING', worker_id=:worker_id,
-            lease_expires_at=now() + interval '15 minutes', attempts=job.attempts+1,
+            lease_expires_at=now() + interval '15 minutes',
+            attempts=CASE WHEN job.metadata->>'operation'='BENCHMARK_ONLY' THEN job.attempts ELSE job.attempts+1 END,
+            evaluation_attempts=CASE WHEN job.metadata->>'operation'='BENCHMARK_ONLY'
+                                     THEN job.evaluation_attempts+1 ELSE job.evaluation_attempts END,
             progress=CAST(:progress AS jsonb),
             metadata=job.metadata || CAST(:metadata AS jsonb), updated_at=now()
         FROM next_job WHERE job.id=next_job.id
@@ -605,13 +606,15 @@ async def claim_viread_colab_training_job(
     if not job:
         await db.commit()
         return {"job": None}
-    locked = await db.execute(text("""
-        SELECT id, version_sha256 FROM public.viread_ocr_dataset_versions
-        WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
-          AND id=CAST(:locked_id AS uuid) AND version_sha256=:locked_sha
-    """), {"locked_id": job["locked_test_version_id"],
-          "locked_sha": job["locked_test_manifest_sha256"]})
-    locked_row = locked.mappings().first()
+    locked_row = None
+    if job["locked_test_version_id"] and job["locked_test_manifest_sha256"]:
+        locked = await db.execute(text("""
+            SELECT id, version_sha256 FROM public.viread_ocr_dataset_versions
+            WHERE source_flow='LOCKED_TEST' AND is_locked_test=TRUE
+              AND id=CAST(:locked_id AS uuid) AND version_sha256=:locked_sha
+        """), {"locked_id": job["locked_test_version_id"],
+              "locked_sha": job["locked_test_manifest_sha256"]})
+        locked_row = locked.mappings().first()
     dataset = await db.execute(text("""
         SELECT source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
         FROM public.viread_ocr_dataset_versions WHERE id=:id
@@ -626,11 +629,14 @@ async def claim_viread_colab_training_job(
         raise HTTPException(status_code=409, detail="Training job no longer has an Admin owner")
     await service._admin(UUID(str(job["created_by"])))
     manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
-    if not locked_row:
+    if (job["locked_test_version_id"] or job["locked_test_manifest_sha256"]) and not locked_row:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Training job does not have its exact locked-test version pinned")
+        raise HTTPException(status_code=409, detail="Pinned evaluation dataset is missing or its hash changed")
     active = await service.active_model_artifact(UUID(str(job["created_by"])))
-    if active["checkpoint_sha256"] != job["parent_checkpoint_sha256"]:
+    metadata = job.get("metadata") or {}
+    benchmark_only_pilot = (metadata.get("operation") == "BENCHMARK_ONLY"
+                            and metadata.get("evaluation_type") == "PILOT")
+    if not benchmark_only_pilot and active["checkpoint_sha256"] != job["parent_checkpoint_sha256"]:
         await db.execute(text("""
             UPDATE public.viread_ocr_training_jobs SET status='BLOCKED', worker_id=NULL,
                 lease_expires_at=NULL, last_error_code='ACTIVE_PARENT_CHANGED', updated_at=now()
@@ -796,6 +802,24 @@ async def get_viread_colab_job_run_result(
             "job_status": "CANDIDATE" if run["status"] == "CANDIDATE" else run["status"]}
 
 
+@router.get("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/artifact")
+async def get_viread_colab_candidate_artifact(
+    job_id: UUID,
+    run_id: UUID,
+    worker_id: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VireadOcrTrainingService(db)
+    job = await _leased_colab_job(service, job_id, worker_id)
+    if str(job["run_id"]) != str(run_id):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Candidate run is not attached to this evaluation job")
+    artifact = await service.candidate_artifact(UUID(str(job["created_by"])), run_id)
+    await db.commit()
+    return artifact
+
+
 @router.post("/admin/viread-training/worker/jobs/{job_id}/runs/{run_id}/chunks")
 async def upload_viread_colab_job_chunk(
     job_id: UUID,
@@ -861,8 +885,11 @@ async def benchmark_viread_colab_job(
     result = await service.benchmark(UUID(str(job["created_by"])), payload)
     await db.execute(text("""
         UPDATE public.viread_ocr_training_jobs SET progress=CAST(:progress AS jsonb),
-            updated_at=now() WHERE id=:id
-    """), {"id": job_id, "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]})})
+            metadata=metadata || CAST(:metadata AS jsonb), updated_at=now() WHERE id=:id
+    """), {"id": job_id, "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]}),
+          "metadata": json.dumps({"evaluation_status": "COMPLETED",
+                                  "evaluation_gate_status": result["gate_status"],
+                                  "evaluation_type": result["evaluation_type"]})})
     await db.commit()
     return result
 
@@ -935,6 +962,9 @@ async def finish_viread_colab_training_job(
         # execution identity and must not remain in COLAB_EXECUTING forever.
         new_status, default_error_code = _colab_worker_failure_state(job, payload.run_id)
         error_code = payload.error_code or default_error_code
+        if (job.get("metadata") or {}).get("operation") == "BENCHMARK_ONLY":
+            # Evaluation failures leave the immutable candidate available for retry.
+            new_status = "CANDIDATE"
     runtime = _safe_runtime(payload.runtime)
     await service.repo.execute("""
         UPDATE public.viread_ocr_training_jobs SET status=:status, run_id=:run_id,
@@ -946,7 +976,9 @@ async def finish_viread_colab_training_job(
     """, {"id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"],
           "error_code": error_code, "retry_delay": retry_delay,
           "progress": json.dumps({"stage": new_status.lower()}),
-          "metadata": json.dumps({"runtime": runtime})})
+          "metadata": json.dumps({"runtime": runtime,
+                                  **({"evaluation_status": "FAILED"} if payload.status == "FAILED"
+                                     and (job.get("metadata") or {}).get("operation") == "BENCHMARK_ONLY" else {})})})
     if payload.run_id and runtime:
         await service.repo.execute("""
             UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)

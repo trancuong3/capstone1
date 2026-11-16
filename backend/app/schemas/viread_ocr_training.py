@@ -70,18 +70,26 @@ class BenchmarkOutput(BaseModel):
     group_id: str = Field(min_length=1, max_length=160)
     original: str = Field(max_length=5000)
     candidate: str = Field(max_length=5000)
+    parent: str | None = Field(default=None, max_length=5000)
+    active: str | None = Field(default=None, max_length=5000)
 
 
 class BenchmarkCreate(BaseModel):
     run_id: UUID
     locked_test_version_id: UUID
     locked_test_manifest_sha256: HexSha256
+    parent_checkpoint_sha256: HexSha256 | None = None
+    active_checkpoint_sha256: HexSha256 | None = None
     outputs: list[BenchmarkOutput] = Field(min_length=1, max_length=10000)
 
-    @field_validator("locked_test_manifest_sha256")
+    @field_validator("locked_test_manifest_sha256", "parent_checkpoint_sha256", "active_checkpoint_sha256")
     @classmethod
     def locked_hash_valid(cls, value: str) -> str:
         return _valid_sha(value)
+
+
+class CandidateEvaluationRequest(BaseModel):
+    evaluation_type: Literal["PILOT", "PRODUCTION"]
 
 
 class DatasetSampleInput(BaseModel):
