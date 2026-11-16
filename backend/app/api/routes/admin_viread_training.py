@@ -112,9 +112,10 @@ async def retry_failed_viread_colab_training_job(
     if not row:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Training job was not found")
-    if not row["locked_test_version_id"] or not row["locked_test_manifest_sha256"]:
+    has_locked_test = bool(row["locked_test_version_id"] and row["locked_test_manifest_sha256"])
+    if bool(row["locked_test_version_id"]) != bool(row["locked_test_manifest_sha256"]):
         await db.rollback()
-        raise HTTPException(status_code=409, detail="This job has no pinned Locked Test; the scheduler will create a replacement after verified holdout data meets the requirement")
+        raise HTTPException(status_code=409, detail="The pinned Locked Test lineage is incomplete")
     if (row["target"] != "COLAB" or int(row["attempts"]) >= 3
             or row["colab_execution_id"] is not None
             or row["colab_execution_resource_name"] is not None
@@ -125,7 +126,8 @@ async def retry_failed_viread_colab_training_job(
             detail="This Colab job has no safe retry available",
         )
 
-    locked_test = await db.execute(text("""
+    if has_locked_test:
+        locked_test = await db.execute(text("""
         SELECT locked.id
         FROM public.viread_ocr_dataset_versions locked
         WHERE locked.id=CAST(:locked_test_id AS uuid)
@@ -139,14 +141,15 @@ async def retry_failed_viread_colab_training_job(
                FROM public.viread_ocr_samples sample
                WHERE sample.dataset_version_id=locked.id
                  AND sample.source_flow='LOCKED_TEST' AND sample.split='locked_test') >= 30
-    """), {"locked_test_id": row["locked_test_version_id"],
-          "locked_test_sha": row["locked_test_manifest_sha256"]})
-    if locked_test.scalar_one_or_none() is None:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="The pinned Locked Test is missing or no longer meets its integrity requirements")
+        """), {"locked_test_id": row["locked_test_version_id"],
+              "locked_test_sha": row["locked_test_manifest_sha256"]})
+        if locked_test.scalar_one_or_none() is None:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="The pinned Locked Test is missing or no longer meets its integrity requirements")
 
     retry_candidate_for_benchmark = (
         row["status"] == "BLOCKED"
+        and has_locked_test
         and row["run_id"] is not None
         and row["last_error_code"] in {"HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"}
     )

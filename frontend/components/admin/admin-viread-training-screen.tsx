@@ -491,8 +491,6 @@ export function AdminVireadTrainingScreen() {
                     job.target === "COLAB" &&
                     job.attempts < 3 &&
                     !job.run_id &&
-                    Boolean(job.locked_test_version_id) &&
-                    Boolean(job.locked_test_manifest_sha256) &&
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
                     !job.colab_operation_name ? (
@@ -505,8 +503,8 @@ export function AdminVireadTrainingScreen() {
                           Thử lại job này
                         </Button>
                         <p className="mt-1 text-xs text-muted">
-                          Chỉ dùng khi job lỗi trước khi tạo run; dữ liệu và
-                          lineage được giữ nguyên.
+                          Thử lại job lỗi trước khi tạo run; giữ nguyên dataset
+                          và lineage. Locked Test không bắt buộc để train.
                         </p>
                       </div>
                     ) : null}
