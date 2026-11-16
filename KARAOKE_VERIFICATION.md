@@ -1,4 +1,129 @@
-# Karaoke — Kiểm chứng Phase 2
+# Karaoke — Kiểm chứng triển khai
+
+## Nâng cấp Phase 4–6 — 2026-11-16
+
+Nhánh `feature/linh-karaoke-upgrade`, đã fast-forward main mới `6a18a07`.
+Các file training/OCR từ main giữ nguyên, không nằm trong phần sửa karaoke.
+Không đổi dependency, migration, model DB, auth, role/password hoặc dữ liệu đọc.
+
+### Bằng chứng kỹ thuật đã quan sát
+
+- Backend full discovery: **970 test, 0 failure/error, 37 conditional skips**;
+  có **8 karaoke integration PostgreSQL** trên DB disposable loopback 55447.
+  Test mới upload đúng MP3 2.480.796 byte, save/publish v2, đọc lại JSONB qua
+  session mới, đối chiếu đủ 126 tiếng, audio hash/binding và public DTO.
+  Storage trong integration vẫn là double, không phải Supabase Storage thật.
+- Full frontend cuối trên main `6a18a07`: **1.869/1.869 test đạt, 113 file**,
+  dùng `--maxWorkers=2`, bao gồm regression MP3 kết thúc lệch metadata vài ms.
+  Lượt đầu chạy không giới hạn worker có 6 lỗi ở 4 file ngoài karaoke
+  (timeout/DOM timing); không sửa các file đó. Hai lượt 2 worker chạy đủ lại đạt
+  (1.868 trước regression cuối và 1.869 sau regression).
+- Typecheck và production build đạt. Lint toàn frontend: **0 error, 13 warning**
+  có sẵn ở module sách/OCR/reading ngoài phạm vi. Format tất cả file karaoke
+  thay đổi và `git diff --check` đạt; không sửa dependency/workflow để né check.
+- Browser karaoke: **30/30 ca Chromium desktop/mobile, 0 skip/flaky/failure**,
+  gồm 28 ca v1/v2/admin trước đó và hai ca màn hát mới. Kiểm tra count-in/hủy,
+  pause/resume, lặp câu giữ đúng đầu câu sau resume, tốc độ 0.75×, chọn câu,
+  expanded/fullscreen, cuối bài/replay, credits thu gọn và không tràn ngang.
+  Đã xem screenshot desktop/mobile. Đây là viewport mobile Chromium, chưa phải
+  chứng nhận Safari/iOS hoặc thử với trẻ thật; có nhánh retry khi browser chặn phát.
+- Bundle thật mới: `ngoi-sao-nho-v2.json`, `ngoi-sao-nho-v2.txt`, `song-v2.json`,
+  manifest `ngoi-sao-nho-v2-timing.json`. 18 câu × 7 tiếng, MP3 gốc giữ nguyên;
+  hash `47ebba49be8b7bc776db49c7918b88f0dedfd52f8ccb21e35f6a16e7cb9cbfd6`.
+  Mốc dựa trên score + attack phổ đúng cao độ + tinh chỉnh RMS 5 ms.
+  Không chia đều theo ký tự; kết thúc lời 99.706 ms, giữ khoảng nhạc cuối.
+
+### Nghiệm thu Supabase thật trước release
+
+Project đã được người dùng xác nhận: `hgkklatgepyzbkkmwfvp`. Dùng admin đã
+chỉ định và một parent hiện có hồ sơ theo quyền tạo phiên tạm trước đó; không
+gửi email/tạo user/đổi quyền hay mật khẩu. Backend local tắt worker ngoài phạm vi
+bằng biến môi trường tiến trình, frontend không bật fixture Auth/API/audio.
+
+`scripts/verify_karaoke_upgrade_live.mjs` đã đạt các checkpoint:
+
+1. Auth thật: anonymous 401, parent vào API admin 403, admin 200.
+2. Playback parent thuộc hồ sơ thật, DTO không lộ private fields, signed MP3
+   thật phản hồi **206** đúng 1.024 byte và `audio/mpeg`.
+3. Admin tạo nháp **v1** từ publication, tải preview thật rồi nhập v2 **chỉ trong
+   bộ nhớ**; 18 lần seek kiểm tra tiếng active theo native audio.currentTime.
+   Screenshot desktop/mobile không tràn ngang, không có PUT/save/publish v2.
+4. Màn bé dùng publication v1 thật: không autoplay, chuẩn bị, phát, luyện câu,
+   0.75×, ghi công, tua cuối/replay và điều hướng hủy nguồn audio; không pageerror.
+5. Sau thử nghiệm: publication vẫn `6a5f30ca-3c87-4792-aee3-37ea3ffe8c99`,
+   format **1**, hash MP3 nguyên vẹn. Revision từ **10 → 11** chỉ vì tạo nháp v1;
+   giữ **1 nháp v1** để tiếp tục, không thay publication.
+6. Hai phiên tạm đã logout riêng bằng scope local, file token đã xóa. Không
+   commit `.cache`, signed URL, screenshot chứa dữ liệu thật hoặc credential.
+
+Báo cáo cục bộ: `.cache/karaoke-upgrade-{unit.json,backend.log,live-report.json}`;
+browser JSON/screenshot: `frontend/test-results/real-data*` (đều ignored).
+
+### Cổng còn lại, không coi là đã hoàn tất
+
+- Manifest vẫn ghi `human_listening=requires_reviewer`: kiểm tra tín hiệu và
+  browser không chứng minh người đã nghe duyệt. Cần nghe đủ ba lượt 1× và chấp
+  thuận lời/nhịp trước khi đưa cho trẻ.
+- Chưa lưu/xuất bản v2 trên Supabase dùng chung: phải triển khai backend/frontend
+  tương thích trước. Không tự merge hoặc đổi dữ liệu v2 để làm checklist xanh.
+- Phase 6 bàn giao bằng PR; merge/release cần người dùng quyết định. Build,
+  typecheck/lint/format local đã đạt; kết quả CI cuối theo commit/PR bàn giao.
+
+Backend/frontend local đã dừng sau nghiệm thu; không còn listener 3000/8000/3106.
+Container `viread-karaoke-v2-tests` có nhãn riêng đã dừng và tự xóa theo `--rm`;
+chỉ dữ liệu PostgreSQL test disposable bị dọn, có thể dựng lại từ fixture.
+
+## Nâng cấp từng tiếng — Phase 1–3 (2026-11-15)
+
+Nhánh `feature/linh-karaoke-upgrade`, base main `3d7e01e`. Chỉ nâng module
+karaoke. Không sửa migration/model DB, dữ liệu Supabase, credential, quyền tài
+khoản hoặc module đọc/OCR. Thiết kế/phạm vi ở đầu `KARAOKE_PLAN.md`; hướng dẫn
+căn và JSON v2 ở `KARAOKE_SETUP.md`.
+
+Đã kiểm tra:
+
+- Backend full discovery trên mã cuối: **965 test, 0 failure/error, 37 conditional skips**.
+  Có 7 integration karaoke chạy thật trên PostgreSQL 16 disposable tại
+  `127.0.0.1:55447/karaoke_phase2_test`; không dùng DATABASE_URL của ứng dụng.
+- Schema/API/service v1/v2: nested serializer giữ nguyên shape v1; nháp v2 thiếu
+  mốc được lưu/nghe, publish bị chặn; v2 đầy đủ qua HTTP lưu→preview→validate→
+  publish→parent playback giữ nguyên ID/text/timing. Private notes không lộ.
+- PostgreSQL JSONB đọc lại bằng session mới; sửa nháp không thay published;
+  stale writer 409, publish thiếu mốc bị chặn; các test RLS/transaction cũ đạt.
+- Thay MP3 giữ version/text/ID và xóa mọi mốc tiếng/câu; ảnh không xóa timing.
+- Full unit frontend lượt hồi quy cuối **1.857 test đạt, 112 file, không fail**.
+  Bộ karaoke hiện tại **110/110 test đạt** (6 file), bao gồm regression cuối
+  cho tiến độ không báo hợp lệ khi câu thiếu đầu/cuối. Bổ sung test NFC/dấu câu, gap/ngân,
+  progress half-open, copy offset/new IDs, capture/undo/nudge, nhập v1/v2,
+  text edit invalidate, error focus ngoài trang, pause/seek/buffer/rate/loop.
+- Typecheck toàn frontend đạt. Lint toàn frontend 0 errors, 13 warning có sẵn
+  ở các file admin sách/OCR/reading ngoài phạm vi; không sửa các warning này.
+- Browser karaoke: **28/28 ca desktop/mobile đạt**, gồm v1 cũ và v2 mới:
+  căn→undo/nudge→lặp/chậm→lưu→reload→nghe→publish; export/reimport JSON;
+  lỗi nhảy tới tiếng ở dòng 30; seek/gap/ngân/reduced motion; 300 dòng CPU 4×,
+  upload bị ngắt, revision conflict và quyền admin/parent.
+  Fixture audio nay phục vụ HTTP Range 206 để browser tua thật như private
+  Storage; không bỏ assert mốc hay thay bằng đồng hồ giả.
+- Đã xem ảnh nghiệm thu admin desktop/mobile. Bản production build đạt, gồm
+  TypeScript và 38 trang được generate; CSS module chữ chạy compile thành công.
+- Format các file thay đổi và `git diff --check` đạt. Không thêm dependency,
+  sửa workflow, route/auth chung, database model hoặc migration.
+
+Giới hạn bằng chứng: browser dùng API/Auth/audio tổng hợp cô lập. PostgreSQL
+chạy migration/JSONB/giao dịch thật trên DB tạm, còn Storage/Auth là test doubles.
+110 unit karaoke xác minh thêm nhánh lỗi mốc câu sau lượt browser. Không coi
+những kết quả trên là nghiệm thu dữ liệu bài thật hoặc Phase 4–6.
+
+Container `viread-karaoke-v2-tests`/volume DB tạm đã tự dọn sau khi dừng; dữ liệu
+test có thể dựng lại từ fixture. Các cổng ứng dụng/kiểm thử được kiểm tra khi
+bàn giao; không giữ server Playwright hoặc backend/frontend chạy cho người dùng.
+
+Màn bé trong Phase 1–3 dùng renderer tiếng mới trên bố cục hiện có. Chưa có
+count-in/màn hát tập trung/luyện câu cho bé của Phase 4. Bộ file “Ngôi sao nhỏ”
+trong `docs/karaoke-demo` vẫn là v1. Phase 1–3 không đổi bài đã xuất bản trên
+Supabase; việc nghe/căn và xuất bản nội dung v2 thuộc Phase 5.
+
+## Lịch sử: kiểm chứng bản đầu Phase 2
 
 Ngày: 2026-11-14. Nhánh: `feature/linh-karaoke`, base `3f4651e`.
 

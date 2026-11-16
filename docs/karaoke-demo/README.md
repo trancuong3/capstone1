@@ -4,6 +4,34 @@
 được ứng dụng tự chèn khi database/API trống. Các bài khác vẫn thêm qua cùng
 giao diện, không phải sửa source hoặc chạy SQL theo từng bài.
 
+## Bản nâng cấp từng tiếng v2
+
+Chỉ dùng sau khi backend/frontend đọc được v1 và v2. MP3 không đổi. Bộ v1 bên
+dưới vẫn được giữ; không thay nó bằng v2 trên server chỉ hiểu v1.
+
+- `ngoi-sao-nho-v2.json`: 18 câu, 126 tiếng với mốc đầu/cuối riêng.
+- `ngoi-sao-nho-v2.txt`: lời Việt mới 7 tiếng/câu, không mang mốc khi nhập TXT.
+- `song-v2.json`: metadata và ghi công; dùng thay `song.json` khi nhập bộ v2.
+- `ngoi-sao-nho-v2-timing.json`: fingerprint và các attack đo trên MP3, cách căn,
+  trạng thái nghe duyệt. File này là báo cáo đối chiếu, **không phải file nhập lời**.
+
+Lời v2 khớp bảy nốt mỗi câu của giai điệu:
+
+```text
+Ngôi sao nhỏ sáng ở trên trời
+Lung linh soi sáng khắp muôn nơi
+Em ngước mắt nhìn ánh sao xa
+Mỉm cười bé hát tiếng ngân nga
+Ngôi sao nhỏ sáng ở trên trời
+Lung linh soi sáng khắp muôn nơi
+```
+
+Lặp ba lượt trong MP3. Mốc tiếng được đo theo score và attack phổ/năng lượng
+của nốt giai điệu trên đúng file MP3; không chia đều thời lượng theo số chữ.
+Phân tích tín hiệu/test không thay cho nghe bằng tai. Người duyệt cần nghe
+preview đủ ba lượt ở 1×, kiểm tra âm đầu, nốt ngân, vào câu, đoạn cuối; chỉnh
+bằng editor nếu cần, lưu, tải lại đúng revision, kiểm tra rồi mới xuất bản.
+
 ## Nhạc và quyền sử dụng
 
 - Tên bản nhạc gốc: **Twinkle Twinkle Little Star Song**.

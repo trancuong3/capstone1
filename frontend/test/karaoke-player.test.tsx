@@ -8,7 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useKaraokePlayer } from "@/hooks/use-karaoke-player";
 import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
-import { previewDetail } from "@/test/karaoke-fixtures";
+import { previewDetail, syllableLyrics } from "@/test/karaoke-fixtures";
 
 const instances: TestAudio[] = [];
 class TestAudio extends EventTarget {
@@ -58,6 +58,57 @@ function loaded(audio = instances[0]) {
 }
 
 describe("karaoke single native-audio clock", () => {
+  it("loops exactly a requested segment, slows audio and follows the media clock", async () => {
+    const { result, unmount } = renderHook(() =>
+      useKaraokePlayer(url, 20000, expiry),
+    );
+    loaded();
+    act(() => result.current.setRate(0.75));
+    expect((instances[0] as unknown as HTMLAudioElement).playbackRate).toBe(
+      0.75,
+    );
+    await act(() => result.current.play(1000, 4000, true));
+    act(() => {
+      instances[0].currentTime = 4.1;
+      instances[0].dispatchEvent(new Event("timeupdate"));
+    });
+    expect(instances[0].currentTime).toBe(1);
+    expect(result.current.currentMs).toBe(1000);
+    expect(instances[0].paused).toBe(false);
+    act(() => result.current.pause());
+    act(() => result.current.seek(8000));
+    await act(() => result.current.play());
+    act(() => {
+      instances[0].currentTime = 9;
+      instances[0].dispatchEvent(new Event("timeupdate"));
+    });
+    expect(result.current.currentMs).toBe(9000);
+    unmount();
+    expect(frames.size).toBe(0);
+  });
+  it("keeps v2 fill still while paused/buffering and recomputes after seeking", async () => {
+    const source = { ...previewDetail(), lyrics: syllableLyrics() };
+    const { container } = render(<KaraokePlayer source={source} />);
+    loaded();
+    const seek = screen.getByRole("slider", { name: "Vị trí phát" });
+    fireEvent.change(seek, { target: { value: "1250" } });
+    expect(container.querySelector("[data-state=active]")).toHaveStyle({
+      "--karaoke-fill": "50%",
+    });
+    act(() => instances[0].dispatchEvent(new Event("waiting")));
+    act(() => {
+      [...frames.values()].forEach((cb) => cb(999999));
+    });
+    expect(container.querySelector("[data-state=active]")).toHaveStyle({
+      "--karaoke-fill": "50%",
+    });
+    fireEvent.change(seek, { target: { value: "1600" } });
+    expect(container.querySelector("[data-state=active]")).toBeNull();
+    fireEvent.change(seek, { target: { value: "3300" } });
+    expect(container.querySelector("[data-state=active]")).toHaveStyle({
+      "--karaoke-fill": "50%",
+    });
+  });
   it("never autoplays, uses moderate volume and releases audio on unmount", () => {
     const { unmount } = renderHook(() => useKaraokePlayer(url, 20000, expiry));
     const audio = instances[0];

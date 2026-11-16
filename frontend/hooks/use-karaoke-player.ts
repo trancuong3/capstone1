@@ -18,6 +18,7 @@ export function useKaraokePlayer(
   const notifyStarted = useEffectEvent(() => onPlayed?.());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const segmentEnd = useRef<number | null>(null);
+  const segmentLoop = useRef<number | null>(null);
   const operation = useRef(0);
   const invalidate = useCallback(() => {
     operation.current++;
@@ -26,10 +27,12 @@ export function useKaraokePlayer(
   const playPending = useRef(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [ended, setEnded] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [volume, setVolumeState] = useState(0.6);
+  const [rate, setRateState] = useState(1);
 
   useEffect(() => {
     const audio = new Audio();
@@ -42,10 +45,16 @@ export function useKaraokePlayer(
       if (disposed) return;
       const time = Math.round(audio.currentTime * 1000);
       if (segmentEnd.current !== null && time >= segmentEnd.current) {
-        audio.pause();
-        segmentEnd.current = null;
+        if (segmentLoop.current !== null)
+          audio.currentTime = segmentLoop.current / 1000;
+        else {
+          audio.pause();
+          segmentEnd.current = null;
+        }
       }
-      setCurrentMs(Math.min(durationMs, Math.max(0, time)));
+      setCurrentMs(
+        Math.min(durationMs, Math.max(0, Math.round(audio.currentTime * 1000))),
+      );
     }
     function tick() {
       sync();
@@ -69,6 +78,27 @@ export function useKaraokePlayer(
     function onWaiting() {
       setWaiting(true);
       sync();
+    }
+    function onEnded() {
+      const start = segmentLoop.current;
+      if (start === null || blocked.current) {
+        setEnded(true);
+        onPause();
+        return;
+      }
+      audio.currentTime = start / 1000;
+      const ticket = operation.current;
+      void audio
+        .play()
+        .then(() => {
+          if (disposed || ticket !== operation.current) audio.pause();
+        })
+        .catch(() => {
+          if (!disposed && ticket === operation.current) {
+            onPause();
+            setError("Chưa phát lặp được. Hãy bấm nghe câu để thử lại.");
+          }
+        });
     }
     function onLoaded() {
       if (Number.isNaN(audio.duration)) return;
@@ -103,7 +133,7 @@ export function useKaraokePlayer(
       ["durationchange", onLoaded],
       ["playing", onPlaying],
       ["pause", onPause],
-      ["ended", onPause],
+      ["ended", onEnded],
       ["waiting", onWaiting],
       ["stalled", onWaiting],
       ["timeupdate", sync],
@@ -133,6 +163,7 @@ export function useKaraokePlayer(
   const pause = useCallback(() => {
     operation.current++;
     segmentEnd.current = null;
+    segmentLoop.current = null;
     audioRef.current?.pause();
     setPlaying(false);
     setWaiting(false);
@@ -141,6 +172,8 @@ export function useKaraokePlayer(
     (ms: number) => {
       if (!Number.isFinite(ms) || !audioRef.current) return;
       segmentEnd.current = null;
+      segmentLoop.current = null;
+      setEnded(false);
       audioRef.current.currentTime =
         Math.max(0, Math.min(durationMs, ms)) / 1000;
       setCurrentMs(Math.round(audioRef.current.currentTime * 1000));
@@ -148,7 +181,12 @@ export function useKaraokePlayer(
     [durationMs],
   );
   const play = useCallback(
-    async (start?: number, end?: number) => {
+    async (
+      start?: number,
+      end?: number,
+      repeat = false,
+      repeatFrom = start,
+    ) => {
       const audio = audioRef.current;
       if (!audio || !ready || blocked.current || playPending.current) return;
       if (Date.parse(expiresAt) <= Date.now()) {
@@ -159,7 +197,15 @@ export function useKaraokePlayer(
       if (start !== undefined) seek(start);
       else if (audio.ended || audio.currentTime * 1000 >= durationMs) seek(0);
       segmentEnd.current = end ?? null;
+      segmentLoop.current =
+        repeat &&
+        repeatFrom !== undefined &&
+        end !== undefined &&
+        end > repeatFrom
+          ? repeatFrom
+          : null;
       const ticket = ++operation.current;
+      setEnded(false);
       playPending.current = true;
       setError("");
       try {
@@ -186,6 +232,14 @@ export function useKaraokePlayer(
     if (audioRef.current) audioRef.current.volume = next;
     setVolumeState(next);
   }, []);
+  const setRate = useCallback((value: number) => {
+    if (![0.75, 1].includes(value)) return;
+    if (audioRef.current) {
+      audioRef.current.playbackRate = value;
+      audioRef.current.preservesPitch = true;
+    }
+    setRateState(value);
+  }, []);
   const getCurrentMs = useCallback(() => {
     const value = Math.round((audioRef.current?.currentTime ?? 0) * 1000);
     return Number.isFinite(value)
@@ -195,14 +249,17 @@ export function useKaraokePlayer(
   return {
     currentMs,
     playing,
+    ended,
     waiting,
     ready,
     error,
     volume,
+    rate,
     play,
     pause,
     seek,
     setVolume,
+    setRate,
     getCurrentMs,
   };
 }

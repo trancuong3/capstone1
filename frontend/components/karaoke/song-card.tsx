@@ -28,7 +28,14 @@ export function SongCard({ song }: { song: KaraokeSongCard }) {
         </div>
       )}
       <h2 className="break-words text-2xl font-extrabold">{song.title}</h2>
-      {song.author && <p className="break-words text-muted">{song.author}</p>}
+      {song.author && (
+        <details className="min-w-0 text-sm text-muted">
+          <summary className="min-h-11 cursor-pointer content-center">
+            Thông tin bài hát
+          </summary>
+          <p className="mt-2 break-words">{song.author}</p>
+        </details>
+      )}
       <p className="text-sm text-muted">
         Lớp {song.min_grade}–{song.max_grade} ·{" "}
         {formatKaraokeTime(song.duration_ms)}

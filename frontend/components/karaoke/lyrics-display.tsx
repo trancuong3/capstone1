@@ -1,5 +1,6 @@
 import { activeLyricIndex } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokeLine } from "@/types/karaoke";
+import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
 
 export function LyricsDisplay({
   lines,
@@ -26,15 +27,21 @@ export function LyricsDisplay({
         className="break-words text-2xl font-extrabold text-primary-hover"
         data-testid="karaoke-active-line"
       >
-        {ended
-          ? "Đã hết bài hát · Bé có thể bấm Hát lại"
-          : active >= 0
-            ? lines[active].text
-            : next
-              ? "Đoạn nhạc · Chờ câu tiếp theo"
-              : lines.length
-                ? "Đoạn nhạc · Cùng nghe nhạc nhé"
-                : "Chưa có câu hát tại vị trí này"}
+        {ended ? (
+          "Đã hết bài hát · Bé có thể bấm Hát lại"
+        ) : active >= 0 ? (
+          lines[active].syllables?.length ? (
+            <SyllableLyrics line={lines[active]} currentMs={currentMs} />
+          ) : (
+            lines[active].text
+          )
+        ) : next ? (
+          "Đoạn nhạc · Chờ câu tiếp theo"
+        ) : lines.length ? (
+          "Đoạn nhạc · Cùng nghe nhạc nhé"
+        ) : (
+          "Chưa có câu hát tại vị trí này"
+        )}
       </p>
       {next && (
         <p className="mt-3 break-words text-muted">Tiếp theo: {next.text}</p>

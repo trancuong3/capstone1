@@ -3,25 +3,36 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
-import type { KaraokePlayerController } from "@/hooks/use-karaoke-player";
-import { importLyrics, MAX_LYRICS_BYTES } from "@/lib/karaoke/lyrics-import";
+import {
+  importLyrics,
+  MAX_LYRICS_BYTES,
+  MAX_LYRICS_JSON_BYTES,
+} from "@/lib/karaoke/lyrics-import";
 import {
   formatLyricTimestamp,
   timingIssues,
 } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokeLyrics, KaraokeLine } from "@/types/karaoke";
 import { karaokeInputClass } from "@/components/admin/karaoke/song-metadata-form";
+import {
+  SyllableTimingEditor,
+  type TimingControls,
+  type TimingFocus,
+} from "./syllable-timing-editor";
+import {
+  splitSyllables,
+  syllableIssues,
+  upgradeLyrics,
+} from "@/lib/karaoke/syllable-timing";
 
-type TimingControls = Pick<
-  KaraokePlayerController,
-  "ready" | "play" | "getCurrentMs"
->;
 type TimingEditorProps = {
   lyrics: KaraokeLyrics;
   duration: number | null;
   disabled: boolean;
   player?: TimingControls;
   onChange: (lyrics: KaraokeLyrics) => void;
+  onSave?: () => void;
+  focusTarget?: TimingFocus;
 };
 const LINES_PER_PAGE = 25;
 
@@ -30,13 +41,17 @@ export function LyricTimingEditor(props: TimingEditorProps) {
   const ready = player?.ready;
   const play = player?.play;
   const getCurrentMs = player?.getCurrentMs;
+  const pause = player?.pause,
+    setRate = player?.setRate,
+    rate = player?.rate,
+    playing = player?.playing;
   // Audio time updates every animation frame; the form only needs these controls.
   const controls = useMemo(
     () =>
       ready !== undefined && play && getCurrentMs
-        ? { ready, play, getCurrentMs }
+        ? { ready, play, getCurrentMs, pause, setRate, rate, playing }
         : undefined,
-    [ready, play, getCurrentMs],
+    [ready, play, getCurrentMs, pause, setRate, rate, playing],
   );
   return <TimingEditorForm {...props} player={controls} />;
 }
@@ -47,12 +62,18 @@ const TimingEditorForm = memo(function TimingEditorForm({
   disabled,
   player,
   onChange,
+  onSave,
+  focusTarget,
 }: TimingEditorProps) {
   const [page, setPage] = useState(0);
   const [paste, setPaste] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reading, setReading] = useState(false);
+  const [selection, setSelection] = useState<{
+    id: string | null;
+    request?: number;
+  }>({ id: null });
   const generation = useRef(0);
   const fileRequest = useRef(0);
   const mounted = useRef(false);
@@ -96,10 +117,11 @@ const TimingEditorForm = memo(function TimingEditorForm({
     if (!file || disabled) return;
     const extension = file.name.split(".").pop()?.toLowerCase();
     if (
-      file.size > MAX_LYRICS_BYTES ||
+      file.size >
+        (extension === "json" ? MAX_LYRICS_JSON_BYTES : MAX_LYRICS_BYTES) ||
       !["txt", "lrc", "json"].includes(extension ?? "")
     ) {
-      setError("Chọn TXT/LRC/JSON UTF-8 tối đa 256 KiB.");
+      setError("Chọn TXT/LRC UTF-8 tối đa 256 KiB hoặc JSON tối đa 2 MiB.");
       return;
     }
     setReading(true);
@@ -120,7 +142,17 @@ const TimingEditorForm = memo(function TimingEditorForm({
   function update(id: string, patch: Partial<KaraokeLine>) {
     onChange({
       ...lyrics,
-      lines: lyrics.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+      lines: lyrics.lines.map((l) =>
+        l.id === id
+          ? {
+              ...l,
+              ...patch,
+              ...(patch.text !== undefined && lyrics.format_version === 2
+                ? { syllables: splitSyllables(patch.text) }
+                : {}),
+            }
+          : l,
+      ),
     });
   }
   const issues = timingIssues(lyrics.lines, duration);
@@ -128,8 +160,24 @@ const TimingEditorForm = memo(function TimingEditorForm({
     1,
     Math.ceil(lyrics.lines.length / LINES_PER_PAGE),
   );
-  const currentPage = Math.min(page, pageCount - 1);
+  const selectedId =
+    focusTarget && focusTarget.request !== selection.request
+      ? focusTarget.lineId
+      : selection.id;
+  const selectedIndex = lyrics.lines.findIndex((l) => l.id === selectedId);
+  const currentPage =
+    selectedIndex >= 0
+      ? Math.floor(selectedIndex / LINES_PER_PAGE)
+      : Math.min(page, pageCount - 1);
   const firstLine = currentPage * LINES_PER_PAGE;
+  const unitIssues =
+    lyrics.format_version === 2 ? syllableIssues(lyrics.lines, duration) : [];
+  useEffect(() => {
+    if (!focusTarget || lyrics.format_version === 2) return;
+    const target = document.getElementById(`lyric-line-${focusTarget.lineId}`);
+    target?.focus();
+    target?.scrollIntoView({ block: "center" });
+  }, [focusTarget, lyrics.format_version, currentPage]);
   return (
     <div className="grid gap-5">
       <fieldset disabled={disabled || reading} className="grid min-w-0 gap-4">
@@ -176,6 +224,31 @@ const TimingEditorForm = memo(function TimingEditorForm({
         Thời gian dùng mili giây (1 giây = 1000 ms). Để trống khi chưa căn. Bật
         nghe thử để đánh dấu theo vị trí âm thanh thật.
       </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm" role="status">
+          {lyrics.format_version === 2
+            ? `Chạy từng tiếng · ${lyrics.lines.filter((l) => l.syllables?.length && !unitIssues.some((e) => e.lineId === l.id)).length}/${lyrics.lines.length} câu đã căn tiếng`
+            : "Lời theo câu · Chọn Căn từng tiếng để nâng cấp bản nháp"}
+        </p>
+        <Button
+          className="sm:w-auto"
+          variant="secondary"
+          disabled={!lyrics.lines.length}
+          onClick={() => {
+            const blob = new Blob([JSON.stringify(lyrics, null, 2)], {
+              type: "application/json;charset=utf-8",
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "karaoke-lyrics.json";
+            link.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
+          Xuất lời và mốc JSON
+        </Button>
+      </div>
       <fieldset disabled={disabled || reading} className="grid min-w-0 gap-4">
         <legend className="sr-only">Chỉnh lời và thời gian</legend>
         {pageCount > 1 && (
@@ -185,7 +258,11 @@ const TimingEditorForm = memo(function TimingEditorForm({
               aria-label="Trang chỉnh lời"
               className={karaokeInputClass}
               value={currentPage}
-              onChange={(event) => setPage(Number(event.target.value))}
+              onChange={(event) => {
+                player?.pause?.();
+                setSelection({ id: null, request: focusTarget?.request });
+                setPage(Number(event.target.value));
+              }}
             >
               {Array.from({ length: pageCount }, (_, index) => (
                 <option key={index} value={index}>
@@ -207,6 +284,8 @@ const TimingEditorForm = memo(function TimingEditorForm({
             return (
               <div
                 key={item.id}
+                id={`lyric-line-${item.id}`}
+                tabIndex={-1}
                 className="grid min-w-0 gap-3 rounded-control border border-border p-4"
               >
                 <label className="grid gap-2 font-bold">
@@ -253,6 +332,21 @@ const TimingEditorForm = memo(function TimingEditorForm({
                   → {formatLyricTimestamp(item.end_ms)}
                 </p>
                 <div className="flex flex-wrap gap-2">
+                  <Button
+                    className="sm:w-auto"
+                    variant="secondary"
+                    onClick={() => {
+                      player?.pause?.();
+                      if (lyrics.format_version === 1)
+                        onChange(upgradeLyrics(lyrics));
+                      setSelection({
+                        id: item.id,
+                        request: focusTarget?.request,
+                      });
+                    }}
+                  >
+                    Căn từng tiếng dòng {i + 1}
+                  </Button>
                   <Button
                     className="sm:w-auto"
                     variant="secondary"
@@ -304,6 +398,27 @@ const TimingEditorForm = memo(function TimingEditorForm({
                     Xóa dòng {i + 1}
                   </Button>
                 </div>
+                {lyrics.format_version === 2 && selectedId === item.id && (
+                  <SyllableTimingEditor
+                    key={`${item.id}:${item.text}`}
+                    line={item}
+                    lineNumber={i + 1}
+                    lines={lyrics.lines}
+                    duration={duration}
+                    disabled={disabled || reading}
+                    player={player}
+                    focusTarget={focusTarget}
+                    onSave={onSave}
+                    onChange={(line) =>
+                      onChange({
+                        ...lyrics,
+                        lines: lyrics.lines.map((l) =>
+                          l.id === line.id ? line : l,
+                        ),
+                      })
+                    }
+                  />
+                )}
               </div>
             );
           })}
@@ -321,10 +436,12 @@ const TimingEditorForm = memo(function TimingEditorForm({
                   text: "",
                   start_ms: null,
                   end_ms: null,
+                  ...(lyrics.format_version === 2 ? { syllables: [] } : {}),
                 },
               ],
             });
             setPage(Math.floor(lyrics.lines.length / LINES_PER_PAGE));
+            setSelection({ id: null, request: focusTarget?.request });
           }}
         >
           Thêm dòng lời
@@ -341,6 +458,39 @@ const TimingEditorForm = memo(function TimingEditorForm({
             ))}
           </ul>
           {issues.length > 8 && <p>Và {issues.length - 8} mục khác.</p>}
+        </StatusMessage>
+      )}
+      {unitIssues.length > 0 && (
+        <StatusMessage
+          tone="warning"
+          title={`Cần kiểm tra ${unitIssues.length} mục tiếng`}
+        >
+          <ul>
+            {unitIssues.slice(0, 12).map((issue, i) => (
+              <li key={i}>
+                <button
+                  type="button"
+                  className="min-h-11 text-left underline"
+                  onClick={() => {
+                    player?.pause?.();
+                    setSelection({
+                      id: issue.lineId,
+                      request: focusTarget?.request,
+                    });
+                    requestAnimationFrame(() =>
+                      document
+                        .getElementById(`lyric-line-${issue.lineId}`)
+                        ?.scrollIntoView({ block: "start" }),
+                    );
+                  }}
+                >
+                  Dòng{" "}
+                  {lyrics.lines.findIndex((l) => l.id === issue.lineId) + 1}:{" "}
+                  {issue.message}
+                </button>
+              </li>
+            ))}
+          </ul>
         </StatusMessage>
       )}
     </div>

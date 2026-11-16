@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_serializer, model_validator
 
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 MAX_COVER_BYTES = 2 * 1024 * 1024
@@ -37,14 +37,26 @@ class LyricLine(Contract):
         return value
 
 
+class Syllable(LyricLine):
+    """A sung unit, including punctuation; never a server-guessed beat."""
+
+
+class SyllableLine(LyricLine):
+    syllables: list[Syllable] | None = Field(default=None, max_length=150)
+
+
+def canonical_lyric_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFC", value).split())
+
+
 class Lyrics(Contract):
-    format_version: Literal[1] = 1
-    lines: list[LyricLine] = Field(default_factory=list, max_length=300)
+    format_version: Literal[1, 2] = 1
+    lines: list[SyllableLine] = Field(default_factory=list, max_length=300)
 
     @field_validator("format_version", mode="before")
     @classmethod
     def exact_version(cls, value):
-        if type(value) is not int or value != 1:
+        if type(value) is not int or value not in (1, 2):
             raise ValueError("Unsupported lyric format version")
         return value
 
@@ -54,7 +66,34 @@ class Lyrics(Contract):
             raise ValueError("Duplicate lyric line ID")
         if sum(len(line.text) for line in self.lines) > 50_000:
             raise ValueError("Lyrics are too long")
+        ids = {line.id for line in self.lines}
+        count = 0
+        syllable_characters = 0
+        for line in self.lines:
+            if self.format_version == 1 and "syllables" in line.model_fields_set:
+                raise ValueError("Version 1 does not support syllables")
+            if self.format_version == 2 and line.syllables is None:
+                raise ValueError("Version 2 requires a syllable list per line")
+            for syllable in line.syllables or []:
+                if syllable.id in ids:
+                    raise ValueError("Duplicate lyric ID")
+                ids.add(syllable.id)
+                count += 1
+                syllable_characters += len(syllable.text)
+        if count > 10_000:
+            raise ValueError("Too many syllables")
+        if syllable_characters > 50_000:
+            raise ValueError("Syllable text is too long")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_version(self, handler):
+        # Do not add a v2 field to existing v1 JSON when saving a draft.
+        result = handler(self)
+        if self.format_version == 1:
+            for line in result.get("lines", []):
+                line.pop("syllables", None)
+        return result
 
 
 class Metadata(Contract):
@@ -149,7 +188,7 @@ IssueCode = Literal[
     "TITLE_REQUIRED", "SOURCE_REQUIRED", "USAGE_REQUIRED", "AUDIO_REQUIRED",
     "LYRICS_REQUIRED", "TIMING_REQUIRED", "TIMING_INVALID", "TIMING_OVERLAP",
     "TIMING_OUT_OF_RANGE", "TIMING_AUDIO_MISMATCH", "MEDIA_UNAVAILABLE",
-    "CONTENT_INVALID",
+    "CONTENT_INVALID", "SYLLABLES_REQUIRED", "SYLLABLE_TEXT_MISMATCH",
 ]
 
 
@@ -157,6 +196,7 @@ class ValidationIssue(Contract):
     code: IssueCode
     field: str
     line_id: UUID | None = None
+    syllable_id: UUID | None = None
 
 
 class ValidationRead(Contract):
@@ -197,7 +237,7 @@ class DraftPreview(Contract):
     lyrics: Lyrics
 
 
-class TimedLine(LyricLine):
+class TimedLine(SyllableLine):
     start_ms: StrictInt = Field(ge=0, le=MAX_DURATION_MS)
     end_ms: StrictInt = Field(ge=0, le=MAX_DURATION_MS)
 

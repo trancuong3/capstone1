@@ -6,7 +6,6 @@ import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
 import { useKaraokeService } from "@/components/karaoke/karaoke-services-provider";
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import {
   karaokeParentErrorMessage,
@@ -125,32 +124,12 @@ function Playback({
     );
   const source = state.data;
   return (
-    <Card>
-      <div>
-        <p className="font-bold text-primary">HÁT VUI</p>
-        <h1 className="mt-2 break-words text-heading font-extrabold">
-          {source.title}
-        </h1>
-        {source.author && (
-          <p className="mt-2 break-words text-muted">{source.author}</p>
-        )}
-        <p className="mt-3 text-muted">
-          {child.alias} cùng hát theo dòng chữ nổi bật nhé! Không thu âm hoặc
-          chấm điểm giọng hát.
-        </p>
-      </div>
-      <KaraokePlayer source={source} label="Hát cùng bé" />
-      <Button
-        variant="quiet"
-        className="sm:w-auto"
-        onClick={() => onRefresh(source.version_id)}
-      >
-        Tải lại nhạc
-      </Button>
-      <p className="text-sm text-muted">
-        Tải lại nhạc sẽ dừng bài đang phát. Nhạc chỉ phát tiếp khi bé bấm Phát;
-        nếu nội dung đổi, ứng dụng sẽ yêu cầu tải phiên bản mới.
-      </p>
-    </Card>
+    <KaraokePlayer
+      source={source}
+      label="Hát cùng bé"
+      presentation="child"
+      childAlias={child.alias}
+      onReload={() => onRefresh(source.version_id)}
+    />
   );
 }
