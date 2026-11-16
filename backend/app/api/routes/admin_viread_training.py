@@ -232,8 +232,7 @@ async def retry_failed_viread_colab_training_job(
         WHERE id<>:job_id
           AND status IN ('QUEUED', 'LOCAL_RUNNING', 'FALLBACK_QUEUED_COLAB', 'COLAB_RUNNING',
                          'WAITING_FOR_DATA', 'WAITING_FOR_COLAB_WORKER', 'COLAB_SUBMITTING',
-                         'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'BLOCKED_CONFIGURATION',
-                         'BLOCKED', 'CANDIDATE', 'BENCHMARKED')
+                         'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'BLOCKED_CONFIGURATION')
         ORDER BY created_at DESC LIMIT 1
     """), {"job_id": job_id})
     if unresolved.scalar_one_or_none() is not None:
