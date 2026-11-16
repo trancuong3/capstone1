@@ -80,7 +80,7 @@ class AdminOcrProofreadSuggestionInput(BaseModel):
 
 
 class AdminOcrProofreadAuditInput(BaseModel):
-    mode: Literal["AI_CHECKED", "AI_AUTO_VERIFIED", "MANUAL_FALLBACK"]
+    mode: Literal["AI_CHECKED", "AI_AUTO_VERIFIED", "MANUAL_FALLBACK", "ADMIN_EDITED"]
     checked_text: str = Field(min_length=1, max_length=500_000)
     suggestions: list[AdminOcrProofreadSuggestionInput] = Field(max_length=30_000)
     reason_code: Literal["AI_CHECK_UNAVAILABLE"] | None = None
@@ -95,8 +95,10 @@ class AdminOcrProofreadAuditInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode(self):
-        if self.mode in ("AI_CHECKED", "AI_AUTO_VERIFIED") and self.reason_code is not None:
+        if self.mode in ("AI_CHECKED", "AI_AUTO_VERIFIED", "ADMIN_EDITED") and self.reason_code is not None:
             raise ValueError("AI-checked modes must not include a manual fallback reason")
+        if self.mode == "ADMIN_EDITED" and self.suggestions:
+            raise ValueError("admin-edited audit must not claim AI suggestion decisions")
         if self.mode == "MANUAL_FALLBACK" and (
             self.reason_code != "AI_CHECK_UNAVAILABLE" or self.suggestions
         ):
@@ -106,6 +108,7 @@ class AdminOcrProofreadAuditInput(BaseModel):
 
 class AdminOcrVerifyRequest(BaseModel):
     page_revision_id: UUID
+    workflow_id: UUID | None = None
     corrected_text: str = Field(min_length=1, max_length=500_000)
     words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
     proofread_audit: AdminOcrProofreadAuditInput

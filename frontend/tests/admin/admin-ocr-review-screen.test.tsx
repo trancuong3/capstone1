@@ -9,7 +9,10 @@ import {
   getWordReviewLabel,
   getWordReviewStatus,
 } from "@/components/admin/admin-ocr-review-screen";
-import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
+import {
+  adminRevisionDetailSchema,
+  type AdminAiWorkflowDTO,
+} from "@/lib/api/ocr-review-service";
 import type { AdminPageRevisionDetailDTO } from "@/types/admin";
 import {
   ADMIN_BOOK_ID,
@@ -77,6 +80,44 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         bbox: [0.1 + index * 0.15, 0.1, 0.1, 0.04] as const,
         ocr_confidence: 0.7 + index * 0.05,
       })),
+    };
+  }
+
+  function makeReadyWorkflow(proofreadText: string): AdminAiWorkflowDTO {
+    const hash = "c".repeat(64);
+    return {
+      workflow_id: "85000000-0000-4000-8000-000000000001",
+      page_id: ADMIN_PAGE_ID,
+      book_id: ADMIN_BOOK_ID,
+      page_revision_id: ADMIN_R2_ID,
+      status: "READY_FOR_ADMIN_REVIEW",
+      stage: "READY_FOR_ADMIN_REVIEW",
+      progress: { completed_chunks: 1, total_chunks: 1 },
+      error_code: null,
+      original_ocr_hash: "a".repeat(64),
+      admin_input_hash: "b".repeat(64),
+      proofread_text: proofreadText,
+      proofread_output_hash: hash,
+      corrections: [],
+      uncertain_word_indices: [],
+      proofread_metadata: {},
+      safety_metadata: {},
+      candidate_history: [],
+      safety_history: [],
+      review_history: [],
+      candidate_text: proofreadText,
+      candidate_hash: hash,
+      candidate_version: 1,
+      safety_input_hash: hash,
+      hash_match: true,
+      suitability: "SUITABLE",
+      safety_status: "PROVISIONAL",
+      findings: [],
+      provider_events: [],
+      ocr_approved_at: null,
+      final_approved_text_hash: null,
+      created_at: "2026-10-01T00:00:00Z",
+      updated_at: "2026-10-01T00:00:00Z",
     };
   }
 
@@ -1201,7 +1242,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     ).toBeDisabled();
 
     await user.clear(pageText);
@@ -1271,11 +1312,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     }
   });
 
-  it("previews local AI changes and applies them only after confirmation", async () => {
+  it("previews combined-workflow proofreading and applies selected changes only after confirmation", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
-    services.ocr.aiCorrectText.mockResolvedValue("Nội dung mới đã sửa");
+    services.ocr.runCombinedWorkflow.mockResolvedValue(
+      makeReadyWorkflow("Nội dung mới đã sửa"),
+    );
     const user = userEvent.setup();
     render(
       withAdminFixture(
@@ -1298,7 +1341,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
     );
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
 
     const textarea = screen.getByLabelText("Nội dung trang");
@@ -1381,7 +1424,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       })),
     };
     services.ocr.getRevision.mockResolvedValue(pending);
-    services.ocr.aiCorrectText.mockResolvedValue(pending.draft_text ?? "");
+    services.ocr.runCombinedWorkflow.mockResolvedValue(
+      makeReadyWorkflow(pending.draft_text ?? ""),
+    );
     services.revisions.verify.mockResolvedValue(verified);
     const user = userEvent.setup();
     render(
@@ -1402,14 +1447,14 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
     expect(
-      await screen.findByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+      await screen.findByText(/AI chưa phát hiện lỗi chính tả cần chỉnh sửa/),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", {
-        name: /Xác nhận nội dung và hoàn tất VERIFIED/,
+        name: /XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG/,
       }),
     );
 
@@ -1432,6 +1477,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
         checked_text: pending.draft_text,
         suggestions: [],
       },
+      workflow_id: "85000000-0000-4000-8000-000000000001",
     });
     expect(services.revisions.list).toHaveBeenCalledWith(ADMIN_PAGE_ID);
     expect(services.pages.getImage).toHaveBeenCalledWith(
@@ -1440,11 +1486,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
   });
 
-  it("rejects an AI suggestion without changing the draft or source image", async () => {
+  it("rejects a proofreading suggestion without changing the draft or source image", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
-    services.ocr.aiCorrectText.mockResolvedValue("Nội dung AI đề xuất");
+    services.ocr.runCombinedWorkflow.mockResolvedValue(
+      makeReadyWorkflow("Nội dung AI đề xuất"),
+    );
     const user = userEvent.setup();
     render(
       withAdminFixture(
@@ -1458,7 +1506,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
     );
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
     await screen.findByRole("heading", { name: "Rà soát đề xuất AI" });
     expect(textarea).toHaveValue(source.draft_text);
@@ -1471,11 +1519,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(services.pages.replaceImageAndReprocess).not.toHaveBeenCalled();
   });
 
-  it("keeps the original text and words when local AI returns a token-count mismatch", async () => {
+  it("keeps the original text and words when proofreading cannot align to OCR boxes", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
-    services.ocr.aiCorrectText.mockResolvedValue("Nội dung mới đã sửa quá");
+    services.ocr.runCombinedWorkflow.mockResolvedValue(
+      makeReadyWorkflow("Nội dung mới đã sửa quá"),
+    );
     const user = userEvent.setup();
     render(
       withAdminFixture(
@@ -1486,7 +1536,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     const textarea = await screen.findByLabelText("Nội dung trang");
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
 
     expect(
@@ -1505,16 +1555,21 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("locks draft edits while local AI correction is in progress", async () => {
+  it("locks draft edits while the durable combined workflow is running", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
-    let resolveCorrection: ((value: string) => void) | undefined;
-    services.ocr.aiCorrectText.mockImplementation(
-      () =>
-        new Promise<string>((resolve) => {
-          resolveCorrection = resolve;
-        }),
+    let resolveWorkflow: ((value: AdminAiWorkflowDTO) => void) | undefined;
+    services.ocr.runCombinedWorkflow.mockImplementation(
+      (_pageId, _revisionId, _draftText, _words, onProgress) => {
+        onProgress?.({
+          status: "PROOFREADING",
+          progress: { completed_chunks: 1, total_chunks: 3 },
+        });
+        return new Promise<AdminAiWorkflowDTO>((resolve) => {
+          resolveWorkflow = resolve;
+        });
+      },
     );
     const user = userEvent.setup();
     render(
@@ -1526,14 +1581,16 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     const textarea = await screen.findByLabelText("Nội dung trang");
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
-    await waitFor(() => expect(services.ocr.aiCorrectText).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(services.ocr.runCombinedWorkflow).toHaveBeenCalled(),
+    );
     expect(textarea).toBeDisabled();
     expect(
       screen.getAllByLabelText(/^Chỉnh từ OCR - Từ \d+$/)[0],
     ).toBeDisabled();
-    resolveCorrection?.("Nội dung AI đã sửa");
+    resolveWorkflow?.(makeReadyWorkflow("Nội dung mới đã sửa"));
 
     await waitFor(() =>
       expect(
@@ -1545,21 +1602,20 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
     );
-    await waitFor(() => expect(textarea).toHaveValue("Nội dung AI đã sửa"));
+    await waitFor(() => expect(textarea).toHaveValue("Nội dung mới đã sửa"));
   });
 
-  it("cancels a running local AI job while preserving the current draft", async () => {
+  it("stops tracking the durable workflow while preserving the current draft", async () => {
     const services = createAdminServiceFixture();
     const source = makeEditableDetail();
     services.ocr.getRevision.mockResolvedValue(source);
-    services.ocr.aiCorrectText.mockImplementation(
-      (_pageId, _draftText, _words, onProgress, signal) => {
+    services.ocr.runCombinedWorkflow.mockImplementation(
+      (_pageId, _revisionId, _draftText, _words, onProgress, signal) => {
         onProgress?.({
-          status: "RUNNING",
-          completed_chunks: 1,
-          total_chunks: 3,
+          status: "PROOFREADING",
+          progress: { completed_chunks: 1, total_chunks: 3 },
         });
-        return new Promise<string>((_resolve, reject) => {
+        return new Promise<AdminAiWorkflowDTO>((_resolve, reject) => {
           signal?.addEventListener(
             "abort",
             () => reject(new Error("AI_OCR_CANCELLED")),
@@ -1578,14 +1634,16 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
 
     const textarea = await screen.findByLabelText("Nội dung trang");
     await user.click(
-      screen.getByRole("button", { name: /AI kiểm tra trước khi xác minh/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     );
     expect(
-      await screen.findByText(/đang xử lý đoạn 1\/3/i),
+      await screen.findByText(/Proofreading · đoạn 1\/3/i),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Hủy xử lý/ }));
+    await user.click(screen.getByRole("button", { name: /Dừng theo dõi/ }));
 
-    expect(await screen.findByText(/Đã hủy tác vụ AI OCR/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Workflow bền vững tiếp tục ở Backend/),
+    ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
   });

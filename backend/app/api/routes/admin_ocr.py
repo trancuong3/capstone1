@@ -16,6 +16,12 @@ from app.schemas.admin_ocr import (
     AdminOcrVerifyRequest,
     AdminOcrWordInput,
 )
+from app.schemas.admin_ai_workflow import (
+    AdminAiCandidateUpdate,
+    AdminAiSafetyDecision,
+    AdminAiWorkflowCreate,
+    AdminAiWorkflowRead,
+)
 from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.services.admin_book_service import AdminBookService
@@ -25,6 +31,7 @@ from app.services.admin_ocr_jobs import (
     OcrCorrectionQueueFull,
     admin_ocr_correction_jobs,
 )
+from app.services.admin_ai_workflow_service import AdminAiWorkflowService
 
 router = APIRouter()
 
@@ -247,3 +254,89 @@ async def cancel_ai_correct_page_job(
     if job is None:
         raise HTTPException(status_code=404, detail="AI OCR job not found")
     return _job_read(job)
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows",
+    response_model=AdminAiWorkflowRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_admin_ai_workflow(
+    page_id: UUID,
+    payload: AdminAiWorkflowCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist one idempotent workflow request; workers perform inference later."""
+    return await AdminAiWorkflowService(db).start(actor_id, page_id, payload)
+
+
+@router.get(
+    "/admin/pages/{page_id}/revisions/{revision_id}/ai-workflows/latest",
+    response_model=AdminAiWorkflowRead | None,
+)
+async def get_latest_admin_ai_workflow(
+    page_id: UUID,
+    revision_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).get_latest(actor_id, page_id, revision_id)
+
+
+@router.get(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}",
+    response_model=AdminAiWorkflowRead,
+)
+async def get_admin_ai_workflow(
+    page_id: UUID,
+    workflow_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).get(actor_id, page_id, workflow_id)
+
+
+@router.patch(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/candidate",
+    response_model=AdminAiWorkflowRead,
+)
+async def update_admin_ai_candidate(
+    page_id: UUID,
+    workflow_id: UUID,
+    payload: AdminAiCandidateUpdate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).update_candidate(
+        actor_id, page_id, workflow_id, payload
+    )
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/retry",
+    response_model=AdminAiWorkflowRead,
+)
+async def retry_admin_ai_workflow(
+    page_id: UUID,
+    workflow_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).retry(actor_id, page_id, workflow_id)
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/safety-decision",
+    response_model=AdminAiWorkflowRead,
+)
+async def decide_admin_ai_safety(
+    page_id: UUID,
+    workflow_id: UUID,
+    payload: AdminAiSafetyDecision,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).decide_safety(
+        actor_id, page_id, workflow_id, payload
+    )

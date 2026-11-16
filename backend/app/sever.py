@@ -37,6 +37,7 @@ from app.request_context import request_id_context
 from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
+from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
 
@@ -74,10 +75,20 @@ async def lifespan(_app: FastAPI):
     book_quality_task = None
     viread_outbox_task = None
     viread_training_task = None
+    stop_admin_ai_workflow = asyncio.Event()
+    admin_ai_workflow_task = None
     if APP_ENVIRONMENT != "test" and not worker_disabled:
         book_quality_task = asyncio.create_task(
             run_book_quality_worker(stop_book_quality_worker),
             name="book_quality_scan_worker",
+        )
+    workflow_worker_enabled = os.getenv(
+        "ADMIN_AI_WORKFLOW_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if APP_ENVIRONMENT != "test" and workflow_worker_enabled:
+        admin_ai_workflow_task = asyncio.create_task(
+            run_admin_ai_workflow_worker(stop_admin_ai_workflow),
+            name="admin_ai_workflow_worker",
         )
     ocr_outbox_enabled = os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
@@ -148,6 +159,13 @@ async def lifespan(_app: FastAPI):
                 # page is resumed from its durable per-page state on the next poll.
                 book_quality_task.cancel()
                 await asyncio.gather(book_quality_task, return_exceptions=True)
+        if admin_ai_workflow_task is not None:
+            stop_admin_ai_workflow.set()
+            try:
+                await asyncio.wait_for(admin_ai_workflow_task, timeout=10)
+            except TimeoutError:
+                admin_ai_workflow_task.cancel()
+                await asyncio.gather(admin_ai_workflow_task, return_exceptions=True)
         await admin_ocr_correction_jobs.shutdown()
         await engine.dispose()
 

@@ -35,7 +35,8 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   AiCorrectionCancelledError,
-  type AiCorrectionProgress,
+  type AdminAiWorkflowDTO,
+  type AdminAiWorkflowProgress,
 } from "@/lib/api/ocr-review-service";
 import {
   normalizeVietnameseWord,
@@ -856,11 +857,13 @@ export function AdminOcrReviewScreen({
     () => new Set(),
   );
   const [aiDiffPage, setAiDiffPage] = useState(0);
-  const [aiProgress, setAiProgress] = useState<AiCorrectionProgress | null>(
+  const [aiProgress, setAiProgress] = useState<AdminAiWorkflowProgress | null>(
     null,
   );
+  const [aiWorkflow, setAiWorkflow] = useState<AdminAiWorkflowDTO | null>(null);
+  const [candidateEditPending, setCandidateEditPending] = useState(false);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | null
+    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | "workflow" | null
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
@@ -870,10 +873,13 @@ export function AdminOcrReviewScreen({
   const wordRefs = useRef(new Map<number, HTMLElement>());
   const autoScrolledRevisionRef = useRef<string | null>(null);
   const aiCorrectionAbortRef = useRef<AbortController | null>(null);
+  const candidateSyncRequestRef = useRef(0);
 
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     draftEditVersionRef.current += 1;
     setDetail(next);
+    setAiWorkflow(null);
+    setCandidateEditPending(false);
     setDraftText(next.draft_text ?? "");
     setWordSyncError(null);
     setAiSuggestion(null);
@@ -892,6 +898,35 @@ export function AdminOcrReviewScreen({
     );
     setSelectedWord(null);
   }, []);
+
+  const restoreWorkflowReview = useCallback(
+    (workflow: AdminAiWorkflowDTO | null, revision: AdminPageRevisionDetailDTO) => {
+      if (!workflow?.candidate_text || !workflow.proofread_text) return;
+      const savedDraft = revision.draft_text ?? "";
+      if (workflow.candidate_version <= 1) {
+        if (workflow.candidate_text !== savedDraft) {
+          setAiSuggestion(workflow.candidate_text);
+        } else {
+          setProofreadAudit({
+            mode: "AI_CHECKED",
+            checked_text: savedDraft,
+            suggestions: [],
+          });
+        }
+        return;
+      }
+      const synchronized = syncPageTextToWords(workflow.candidate_text, revision.words);
+      if (
+        synchronized.status === "synchronized" &&
+        synchronized.tokens.length === revision.words.length
+      ) {
+        setDraftText(workflow.candidate_text);
+        setWords([...synchronized.words]);
+        setCandidateEditPending(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -936,15 +971,20 @@ export function AdminOcrReviewScreen({
           )
         : undefined;
       const selectedRevision = preferredRevision ?? active;
-      const [nextDetail, nextImage] = await Promise.all([
+      const [nextDetail, nextImage, nextWorkflow] = await Promise.all([
         ocr.getRevision(pageId, selectedRevision.page_revision_id),
         pages.getImage(pageId, selectedRevision.page_revision_id),
+        ocr.getLatestWorkflow(pageId, selectedRevision.page_revision_id).catch(
+          () => null,
+        ),
       ]);
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);
       setHistory(nextHistory);
       applyDetail(nextDetail);
+      setAiWorkflow(nextWorkflow);
+      restoreWorkflowReview(nextWorkflow, nextDetail);
       if (preferredRevisionId && !preferredRevision) {
         setNotice(
           "Revision trong báo cáo không còn trong lịch sử trang. Đang hiển thị revision mới nhất.",
@@ -969,6 +1009,7 @@ export function AdminOcrReviewScreen({
     pages,
     preferredRevisionId,
     revisions,
+    restoreWorkflowReview,
   ]);
 
   useEffect(() => {
@@ -978,6 +1019,103 @@ export function AdminOcrReviewScreen({
       requestIdRef.current += 1;
     };
   }, [load]);
+
+  useEffect(() => {
+    if (
+      !candidateEditPending ||
+      !aiWorkflow ||
+      !detail ||
+      detail.page_revision_id !== aiWorkflow.page_revision_id ||
+      !draftText.trim()
+    ) {
+      return;
+    }
+    const requestId = ++candidateSyncRequestRef.current;
+    const requestedRevision = detail.page_revision_id;
+    const timer = globalThis.setTimeout(() => {
+      void ocr
+        .updateWorkflowCandidate(
+          pageId,
+          aiWorkflow.workflow_id,
+          aiWorkflow.candidate_version,
+          draftText,
+        )
+        .then((updated) => {
+          if (
+            !mountedRef.current ||
+            candidateSyncRequestRef.current !== requestId ||
+            detail?.page_revision_id !== requestedRevision
+          ) {
+            return;
+          }
+          setAiWorkflow(updated);
+          setCandidateEditPending(false);
+        })
+        .catch(async (cause: unknown) => {
+          if (
+            !mountedRef.current ||
+            candidateSyncRequestRef.current !== requestId ||
+            detail?.page_revision_id !== requestedRevision
+          ) {
+            return;
+          }
+          try {
+            const latest = await ocr.getLatestWorkflow(pageId, requestedRevision);
+            if (latest) setAiWorkflow(latest);
+          } catch {
+            setNotice(
+              isServiceError(cause)
+                ? "Không thể lưu Candidate cho Safety rescan: " + cause.message
+                : "Không thể lưu Candidate cho Safety rescan.",
+            );
+          }
+        });
+    }, 600);
+    return () => {
+      globalThis.clearTimeout(timer);
+      candidateSyncRequestRef.current += 1;
+    };
+  }, [
+    aiWorkflow,
+    candidateEditPending,
+    detail,
+    draftText,
+    ocr,
+    pageId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !aiWorkflow ||
+      !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+        aiWorkflow.status,
+      )
+    ) {
+      return;
+    }
+    let disposed = false;
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const poll = async () => {
+      if (disposed) return;
+      try {
+        const latest = await ocr.getLatestWorkflow(
+          pageId,
+          aiWorkflow.page_revision_id,
+        );
+        if (!disposed && latest?.workflow_id === aiWorkflow.workflow_id) {
+          setAiWorkflow(latest);
+        }
+      } catch {
+        // The page remains usable while this durable workflow is temporarily unavailable.
+      }
+      if (!disposed) timer = globalThis.setTimeout(() => void poll(), 1800);
+    };
+    timer = globalThis.setTimeout(() => void poll(), 1800);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+    };
+  }, [aiWorkflow, ocr, pageId]);
 
   useEffect(() => {
     if (!detail || words.length === 0) return;
@@ -1005,9 +1143,10 @@ export function AdminOcrReviewScreen({
   async function chooseRevision(revisionId: string) {
     const requestId = ++revisionChoiceRequestIdRef.current;
     try {
-      const [selected, selectedImage] = await Promise.all([
+      const [selected, selectedImage, selectedWorkflow] = await Promise.all([
         ocr.getRevision(pageId, revisionId),
         pages.getImage(pageId, revisionId),
+        ocr.getLatestWorkflow(pageId, revisionId).catch(() => null),
       ]);
       if (
         !mountedRef.current ||
@@ -1015,6 +1154,8 @@ export function AdminOcrReviewScreen({
       )
         return;
       applyDetail(selected);
+      setAiWorkflow(selectedWorkflow);
+      restoreWorkflowReview(selectedWorkflow, selected);
       setImage(selectedImage);
       setNotice(null);
     } catch {
@@ -1083,6 +1224,7 @@ export function AdminOcrReviewScreen({
     setAiDiffPage(0);
     const normalizedText = value.normalize("NFC");
     setDraftText(normalizedText);
+    setCandidateEditPending(true);
     const result = syncPageTextToWords(normalizedText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
@@ -1133,6 +1275,7 @@ export function AdminOcrReviewScreen({
     const result = syncWordsToPageText(draftText, nextWords);
     if (result.status === "synchronized") {
       setDraftText(result.text.normalize("NFC"));
+      setCandidateEditPending(true);
       setWordSyncError(null);
     } else {
       setWordSyncError(
@@ -1169,6 +1312,7 @@ export function AdminOcrReviewScreen({
       .join(" ")
       .normalize("NFC");
     setDraftText(nextText);
+    setCandidateEditPending(true);
     const result = syncPageTextToWords(nextText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
@@ -1202,6 +1346,13 @@ export function AdminOcrReviewScreen({
 
   async function correctWithAi() {
     if (
+      aiWorkflow?.status === "FAILED" &&
+      aiWorkflow.proofread_text === null
+    ) {
+      await retryWorkflow();
+      return;
+    }
+    if (
       !draftText.trim() ||
       busy !== null ||
       detail?.lifecycle_status !== "ACTIVE" ||
@@ -1216,6 +1367,8 @@ export function AdminOcrReviewScreen({
     const expectedTokenCount = requestedTokens.length;
     const controller = new AbortController();
     aiCorrectionAbortRef.current = controller;
+    setAiWorkflow(null);
+    setCandidateEditPending(false);
     setBusy("ai_correct");
     setAiProgress(null);
     setAiSuggestion(null);
@@ -1225,22 +1378,32 @@ export function AdminOcrReviewScreen({
     setAiDiffPage(0);
     setNotice(null);
     try {
-      const correctedText = (
-        await ocr.aiCorrectText(
+      const workflow = await ocr.runCombinedWorkflow(
           pageId,
+          requestedRevisionId,
           requestedText,
           words,
           (progress) => {
             if (mountedRef.current) setAiProgress(progress);
           },
           controller.signal,
-        )
-      ).normalize("NFC");
+        );
       if (
         !mountedRef.current ||
         draftEditVersionRef.current !== requestedVersion ||
         detail?.page_revision_id !== requestedRevisionId
       ) {
+        return;
+      }
+      setAiWorkflow(workflow);
+      const correctedText = workflow.proofread_text?.normalize("NFC");
+      if (!correctedText) {
+        setAiCheckUnavailable(true);
+        setNotice(
+          workflow.error_code
+            ? `Proofreading thất bại (${workflow.error_code}). Nội dung OCR gốc vẫn được giữ nguyên; hãy thử lại.`
+            : "Workflow chưa có kết quả proofreading hợp lệ. Nội dung OCR gốc vẫn được giữ nguyên.",
+        );
         return;
       }
       const result = syncPageTextToWords(correctedText, words);
@@ -1265,14 +1428,18 @@ export function AdminOcrReviewScreen({
           suggestions: [],
         });
         setNotice(
-          "AI không phát hiện lỗi chính tả trong văn bản. Hãy xác nhận để hoàn tất VERIFIED.",
+          workflow.safety_status === "FAILED"
+            ? "Proofreading hoàn tất; Child Safety gặp lỗi và có thể thử lại riêng."
+            : "AI chưa phát hiện lỗi chính tả cần chỉnh sửa. Child Safety đã chạy tự động; hãy kiểm tra hai kết quả trước khi xác nhận.",
         );
         return;
       }
       setAiSuggestion(correctedText);
       setAiAcceptedChanges(new Set());
       setNotice(
-        `AI đưa ra ${changes.length} thay đổi để rà soát. Chưa có thay đổi nào được chọn; bản nháp vẫn giữ nguyên.`,
+        workflow.safety_status === "FAILED"
+          ? `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety gặp lỗi; kết quả proofreading vẫn được giữ và có thể thử lại Safety.`
+          : `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety đã quét Candidate; chưa có thay đổi nào được chọn.`,
       );
     } catch (cause) {
       if (
@@ -1286,7 +1453,7 @@ export function AdminOcrReviewScreen({
         controller.signal.aborted ||
         cause instanceof AiCorrectionCancelledError
       ) {
-        setNotice("Đã hủy tác vụ AI OCR. Bản nháp hiện tại được giữ nguyên.");
+        setNotice("Đã dừng theo dõi. Workflow bền vững tiếp tục ở Backend.");
       } else {
         setAiCheckUnavailable(true);
         const safeMessage = isServiceError(cause)
@@ -1312,6 +1479,48 @@ export function AdminOcrReviewScreen({
 
   function cancelAiCorrection() {
     aiCorrectionAbortRef.current?.abort();
+  }
+
+  async function decideSafety(confirmed: boolean) {
+    if (!aiWorkflow?.candidate_hash || !aiWorkflow.hash_match || busy !== null) return;
+    setBusy("workflow");
+    setNotice(null);
+    try {
+      setAiWorkflow(
+        await ocr.decideWorkflowSafety(
+          pageId,
+          aiWorkflow.workflow_id,
+          aiWorkflow.candidate_hash,
+          confirmed,
+        ),
+      );
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? "Không thể lưu quyết định Safety: " + cause.message
+          : "Không thể lưu quyết định Safety. Hãy tải lại kết quả rồi thử lại.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(null);
+    }
+  }
+
+  async function retryWorkflow() {
+    if (!aiWorkflow || aiWorkflow.status !== "FAILED" || busy !== null) return;
+    setBusy("workflow");
+    setNotice(null);
+    try {
+      setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
+      setNotice("Đã đưa giai đoạn lỗi vào hàng đợi thử lại.");
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? "Không thể thử lại workflow: " + cause.message
+          : "Không thể đưa workflow vào hàng đợi thử lại.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(null);
+    }
   }
 
   function applySelectedAiChanges() {
@@ -1343,6 +1552,7 @@ export function AdminOcrReviewScreen({
       setAiSuggestion(null);
       setAiAcceptedChanges(new Set());
     }
+    setCandidateEditPending(true);
     setProofreadAudit({
       mode: "AI_CHECKED",
       checked_text: checkedText,
@@ -1493,6 +1703,10 @@ export function AdminOcrReviewScreen({
     ) {
       return;
     }
+    if (candidateEditPending && aiWorkflow?.proofread_text) {
+      setNotice("Đang đồng bộ Candidate và lên lịch Safety rescan. Hãy lưu lại sau khi hoàn tất bước này.");
+      return;
+    }
     const requestedRevisionId = detail.page_revision_id;
     const requestedVersion = draftEditVersionRef.current;
     setBusy("save");
@@ -1511,7 +1725,12 @@ export function AdminOcrReviewScreen({
       ) {
         return;
       }
+      const latestWorkflow = aiWorkflow
+        ? await ocr.getLatestWorkflow(pageId, requestedRevisionId).catch(() => aiWorkflow)
+        : null;
       applyDetail(saved);
+      setAiWorkflow(latestWorkflow);
+      restoreWorkflowReview(latestWorkflow, saved);
       setNotice("Đã lưu bản nháp vào database.");
       try {
         setHistory(await revisions.list(pageId));
@@ -1550,8 +1769,20 @@ export function AdminOcrReviewScreen({
       );
       return;
     }
-    if (proofreadAudit === null) {
+    let finalProofreadAudit = proofreadAudit;
+    if (finalProofreadAudit === null && aiWorkflow?.proofread_text) {
+      finalProofreadAudit = {
+        mode: "ADMIN_EDITED",
+        checked_text: draftText,
+        suggestions: [],
+      };
+    }
+    if (finalProofreadAudit === null) {
       await correctWithAi();
+      return;
+    }
+    if (candidateEditPending && aiWorkflow?.proofread_text) {
+      setNotice("Candidate wordt opgeslagen en Child Safety wordt opnieuw gestart. Wacht tot de hash is bijgewerkt.");
       return;
     }
     const requestedRevisionId = detail.page_revision_id;
@@ -1561,9 +1792,10 @@ export function AdminOcrReviewScreen({
     try {
       const verifiedResult = await revisions.verify(pageId, {
         page_revision_id: requestedRevisionId,
+        workflow_id: aiWorkflow?.proofread_text ? aiWorkflow.workflow_id : undefined,
         corrected_text: draftText,
         words,
-        proofread_audit: proofreadAudit,
+        proofread_audit: finalProofreadAudit,
       });
       if (
         !mountedRef.current ||
@@ -1882,6 +2114,13 @@ export function AdminOcrReviewScreen({
             verificationStatus={detail.verification_status}
             words={words}
           />
+          <section className="mt-4 rounded-control border border-border bg-canvas p-4">
+            <h2 className="font-extrabold text-ink">OCR gốc (bất biến)</h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-ink">
+              {detail.original_ocr_text ??
+                "Revision cũ chưa có bản chụp OCR gốc riêng. Các revision mới sẽ lưu OCR gốc bất biến."}
+            </p>
+          </section>
           <p className="mt-3 text-sm leading-6 text-muted">
             Xanh biểu thị Admin/reference đã xác minh hoặc hai OCR đồng thuận
             chính xác ở cấp từ với alignment, token mapping và bbox/crop hợp lệ;
@@ -2019,13 +2258,7 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi chỉnh sửa văn bản, từ đã thay đổi sẽ trở về trạng thái cần
-              kiểm tra. Khi bấm nút xác minh, AI sẽ rà soát chính tả trước; hệ
-              thống lần lượt dùng gemini-3.5-flash-lite, gemini-3.1-flash-lite
-              và qwen/qwen3.8-27b; Ollama chỉ là phương án cuối nếu các model đó
-              không hoạt động. Ảnh và văn bản cần thiết được gửi tới dịch vụ AI
-              khi bạn bấm nút. AI chỉ đề xuất; Admin phải duyệt từng thay đổi và
-              xác nhận cuối. Lỗi cần tách/gộp từ cần được rà soát thủ công.
+              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend chạy Proofreading theo cấu hình Gemini Primary → Gemini Fallback → Groq Qwen, rồi tự động chạy Child Safety trên Candidate. Ollama chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ. AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2036,10 +2269,16 @@ export function AdminOcrReviewScreen({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="font-bold">
                     {aiProgress?.status === "QUEUED"
-                      ? "AI OCR đang chờ máy xử lý"
-                      : aiProgress
-                        ? `AI OCR đang xử lý đoạn ${aiProgress.completed_chunks}/${aiProgress.total_chunks}`
-                        : "Đang chuẩn bị tác vụ AI OCR…"}
+                      ? "Workflow đang chờ worker"
+                      : aiProgress?.status === "PROOFREADING"
+                        ? `Proofreading · đoạn ${aiProgress.progress.completed_chunks}/${aiProgress.progress.total_chunks}`
+                        : aiProgress?.status === "CHILD_SAFETY_SCANNING"
+                          ? "Proofreading xong · Child Safety đang quét"
+                          : aiProgress?.status === "FAILED"
+                            ? "Workflow gặp lỗi"
+                            : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
+                              ? "Proofreading và Child Safety hoàn tất"
+                              : "Đang chuẩn bị workflow bền vững…"}
                   </span>
                   <Button
                     className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
@@ -2047,14 +2286,14 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <X aria-hidden className="size-4" /> Hủy xử lý
+                    <X aria-hidden className="size-4" /> Dừng theo dõi
                   </Button>
                 </div>
                 <progress
                   aria-label="Tiến độ AI OCR"
                   className="h-2 w-full accent-purple-700"
-                  max={aiProgress?.total_chunks ?? 1}
-                  value={aiProgress?.completed_chunks ?? 0}
+                  max={aiProgress?.progress.total_chunks ?? 1}
+                  value={aiProgress?.progress.completed_chunks ?? 0}
                 />
                 <span className="text-xs text-purple-900">
                   Kết quả chỉ là gợi ý. Bản nháp sẽ không đổi cho đến khi bạn áp
@@ -2302,7 +2541,11 @@ export function AdminOcrReviewScreen({
                       detail.lifecycle_status !== "ACTIVE" ||
                       words.length === 0 ||
                       wordSyncError !== null ||
-                      aiSuggestion !== null
+                      aiSuggestion !== null ||
+                      (aiWorkflow !== null &&
+                        ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+                          aiWorkflow.status,
+                        ))
                     }
                     isLoading={busy === "verify" || busy === "ai_correct"}
                     onClick={() => void verifyRevision()}
@@ -2314,10 +2557,10 @@ export function AdminOcrReviewScreen({
                       <Sparkles aria-hidden className="size-4" />
                     )}
                     {busy === "ai_correct"
-                      ? "AI đang kiểm tra…"
-                      : proofreadAudit
-                        ? "Xác nhận nội dung và hoàn tất VERIFIED"
-                        : "AI kiểm tra trước khi xác minh"}
+                      ? "Proofreading và Child Safety đang chạy…"
+                      : proofreadAudit || aiWorkflow?.proofread_text
+                        ? "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG"
+                        : "XÁC NHẬN & CHẠY AI"}
                   </Button>
                   {aiCheckUnavailable && proofreadAudit === null ? (
                     <Button
@@ -2334,6 +2577,179 @@ export function AdminOcrReviewScreen({
               )}
             </div>
           </Card>
+
+          {aiWorkflow ? (
+            <Card className="bg-white" data-testid="admin-ai-workflow">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-black">Child Safety · GRADE_1_TO_5</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Quét văn bản Candidate sau Proofreading. Kết quả là provisional cho đến khi Admin xác nhận.
+                  </p>
+                </div>
+                <span className="rounded-full border border-border px-3 py-1 text-sm font-bold">
+                  {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
+                    ? "Sẵn sàng Admin review"
+                    : aiWorkflow.status === "FAILED"
+                      ? `Lỗi · ${aiWorkflow.error_code ?? "UNKNOWN"}`
+                      : aiWorkflow.stage === "PROOFREADING"
+                        ? "Đang Proofreading"
+                        : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                          ? "Đang quét Safety"
+                          : "Đang chờ xử lý"}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Overall suitability</p>
+                  <p className="mt-1 font-extrabold text-ink">
+                    {aiWorkflow.suitability ?? "CHƯA CÓ KẾT QUẢ"}
+                  </p>
+                </div>
+                <div className="rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Safety scan</p>
+                  <p className="mt-1 font-extrabold text-ink">
+                    {aiWorkflow.safety_status}
+                  </p>
+                </div>
+                <div className="rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Candidate version</p>
+                  <p className="mt-1 font-extrabold text-ink">
+                    {aiWorkflow.candidate_version}
+                  </p>
+                </div>
+                <div className="rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Safety hash match</p>
+                  <p className="mt-1 font-extrabold text-ink">
+                    {candidateEditPending
+                      ? "Đang lưu Candidate…"
+                      : aiWorkflow.hash_match
+                        ? "Khớp Candidate hiện tại"
+                        : "Chưa khớp / cần quét lại"}
+                  </p>
+                </div>
+              </div>
+
+              {aiWorkflow.uncertain_word_indices.length > 0 ? (
+                <p className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
+                  Proofreading còn {aiWorkflow.uncertain_word_indices.length} từ chưa chắc chắn (vị trí {aiWorkflow.uncertain_word_indices.map((index) => index + 1).join(", ")}). Các từ này được giữ nguyên để Admin đối chiếu.
+                </p>
+              ) : null}
+
+              <dl className="mt-4 grid gap-2 break-all rounded-control border border-border p-3 font-mono text-xs">
+                <div>
+                  <dt className="font-bold">CandidateHash</dt>
+                  <dd>{aiWorkflow.candidate_hash ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-bold">SafetyInputHash</dt>
+                  <dd>{aiWorkflow.safety_input_hash ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-bold">FinalApprovedTextHash</dt>
+                  <dd>{aiWorkflow.final_approved_text_hash ?? "Chưa xác nhận OCR cuối cùng"}</dd>
+                </div>
+              </dl>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {aiWorkflow.status === "FAILED" ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={busy !== null}
+                    isLoading={busy === "workflow"}
+                    onClick={() => void retryWorkflow()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <RefreshCw aria-hidden className="size-4" /> Thử lại giai đoạn lỗi
+                  </Button>
+                ) : null}
+                {aiWorkflow.safety_status === "PROVISIONAL" && aiWorkflow.hash_match ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={busy !== null || candidateEditPending}
+                    isLoading={busy === "workflow"}
+                    onClick={() => void decideSafety(true)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận kết quả Safety
+                  </Button>
+                ) : aiWorkflow.safety_status === "CONFIRMED" && aiWorkflow.hash_match ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={busy !== null}
+                    isLoading={busy === "workflow"}
+                    onClick={() => void decideSafety(false)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Bỏ xác nhận Safety
+                  </Button>
+                ) : null}
+              </div>
+
+              <section className="mt-5">
+                <h3 className="font-extrabold">Safety findings</h3>
+                {aiWorkflow.findings.length ? (
+                  <ul className="mt-2 grid gap-3">
+                    {aiWorkflow.findings.map((finding, index) => (
+                      <li className="rounded-control border border-border p-3" key={String(finding.finding_id ?? index)}>
+                        <p className="font-bold">
+                          {String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.content_type ?? "MENTION")} · {String(finding.severity ?? "REVIEW")}
+                        </p>
+                        <blockquote className="mt-2 border-l-2 border-primary pl-3 text-sm">
+                          “{String(finding.evidence_text ?? "")}”
+                          <span className="ml-2 font-mono text-xs text-muted">
+                            [{String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}]
+                          </span>
+                        </blockquote>
+                        <p className="mt-2 text-sm">{String(finding.explanation ?? "")}</p>
+                        <p className="mt-1 text-sm text-muted">{String(finding.recommendation ?? "")}</p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">
+                    {aiWorkflow.safety_status === "PROVISIONAL" || aiWorkflow.safety_status === "CONFIRMED"
+                      ? "AI chưa phát hiện finding trong Candidate này."
+                      : "Findings sẽ hiển thị sau khi Safety hoàn tất."}
+                  </p>
+                )}
+              </section>
+
+              <section className="mt-5">
+                <h3 className="font-extrabold">Provider và model provenance</h3>
+                <p className="mt-1 break-all font-mono text-xs text-muted">
+                  Run {String(aiWorkflow.proofread_metadata.run_id ?? aiWorkflow.workflow_id)}
+                  {" · Prompt "}{String(aiWorkflow.proofread_metadata.prompt_version ?? "—")}
+                  {" · "}{String(aiWorkflow.proofread_metadata.processing_time_ms ?? 0)} ms
+                  {" · Safety prompt "}{String(aiWorkflow.safety_metadata.prompt_version ?? "—")}
+                </p>
+                {aiWorkflow.provider_events.length ? (
+                  <ul className="mt-2 grid gap-2 text-xs">
+                    {aiWorkflow.provider_events.map((event, index) => (
+                      <li className="rounded-control bg-canvas p-3" key={`${String(event.provider ?? "provider")}-${index}`}>
+                        <span className="font-bold">{String(event.provider ?? "—")}</span>
+                        {" · "}{String(event.model ?? "—")}
+                        {" · "}{event.availability === true ? "khả dụng" : event.availability === false ? "không khả dụng" : "đang kiểm tra"}
+                        {" · HTTP "}{String(event.http_status ?? "—")}
+                        {" · "}{String(event.duration_ms ?? 0)} ms
+                        {event.error_code ? ` · ${String(event.error_code)}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">Chưa có provider event.</p>
+                )}
+              </section>
+
+              <p className="mt-4 text-xs text-muted">
+                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. OCR và Safety là hai quyết định độc lập; có thể lưu VERIFIED khi Safety còn PENDING.
+              </p>
+            </Card>
+          ) : null}
 
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

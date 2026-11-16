@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { adminAiWorkflowSchema } from "@/lib/api/ocr-review-service";
 
 export const bookContentIssueTypeSchema = z.enum([
   "BOOK_METADATA_ERROR",
@@ -173,6 +174,7 @@ export const bookQualityBookDetailSchema = z.object({
   reports: z.array(bookContentReportSchema),
   scans: z.array(bookQualityScanSchema),
   latest_scan_detail: bookQualityScanDetailSchema.nullable(),
+  ai_workflows: z.array(adminAiWorkflowSchema).default([]),
 });
 
 export type BookContentIssueType = z.infer<typeof bookContentIssueTypeSchema>;

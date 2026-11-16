@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.admin_ai_workflow import AdminAiWorkflowRead
+
 
 BookContentIssueType = Literal[
     "BOOK_METADATA_ERROR",
@@ -210,3 +212,4 @@ class BookQualityBookDetail(BaseModel):
     reports: list[BookContentReportRead]
     scans: list[BookQualityScanRead]
     latest_scan_detail: BookQualityScanDetail | None
+    ai_workflows: list[AdminAiWorkflowRead] = Field(default_factory=list)

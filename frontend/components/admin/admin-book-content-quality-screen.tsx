@@ -330,9 +330,15 @@ export function AdminBookContentQualityScreen() {
   );
 
   useEffect(() => {
-    const active =
+    const activeScan =
       selectedBook?.latest_scan_detail?.status === "QUEUED" ||
       selectedBook?.latest_scan_detail?.status === "RUNNING";
+    const activeWorkflow = selectedBook?.ai_workflows.some((workflow) =>
+      ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+        workflow.status,
+      ),
+    );
+    const active = activeScan || activeWorkflow;
     if (!selectedBook || !active) return;
     const timeout = globalThis.setTimeout(() => {
       void refreshSelectedBook(selectedBook.book_id).catch(() =>
@@ -1061,7 +1067,7 @@ export function AdminBookContentQualityScreen() {
                 {selectedBook.book_title}
               </h2>
               <p className="mt-1 text-sm text-muted">
-                Chi tiết báo cáo và lịch sử scan
+                Chất lượng sách, lịch sử AI, findings và review Admin
               </p>
             </div>
             <div className="flex gap-2">
@@ -1110,6 +1116,139 @@ export function AdminBookContentQualityScreen() {
             ) : (
               <p className="mt-2 text-sm text-muted">
                 Sách chưa có lần kiểm tra nào.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-5 border-t border-border pt-4">
+            <h3 className="font-bold text-ink">Proofreading & Child Safety history</h3>
+            {selectedBook.ai_workflows.length ? (
+              <div className="mt-3 grid gap-3">
+                {selectedBook.ai_workflows.map((workflow) => (
+                  <article
+                    className="rounded-control border border-border p-4"
+                    key={workflow.workflow_id}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-ink">
+                          {workflow.status} · {workflow.safety_status}
+                        </h4>
+                        <p className="mt-1 text-xs text-muted">
+                          {workflow.suitability ?? "Chưa có suitability"} · Candidate v{workflow.candidate_version}
+                          {workflow.hash_match ? " · Safety hash khớp" : " · Safety hash stale/chưa khớp"}
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-muted">
+                          Workflow {workflow.workflow_id} · Revision {workflow.page_revision_id}
+                        </p>
+                      </div>
+                      <Link
+                        className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+                        href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(workflow.page_id)}?revisionId=${encodeURIComponent(workflow.page_revision_id)}`}
+                      >
+                        Mở trang OCR Review
+                      </Link>
+                    </div>
+
+                    {workflow.error_code ? (
+                      <p className="mt-3 text-sm text-danger">
+                        Lỗi workflow: {workflow.error_code}
+                      </p>
+                    ) : null}
+
+                    {workflow.findings.length ? (
+                      <div className="mt-3 grid gap-2">
+                        {workflow.findings.map((finding, index) => (
+                          <div
+                            className="rounded-control bg-canvas p-3"
+                            key={String(finding.finding_id ?? index)}
+                          >
+                            <p className="font-bold">
+                              {String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.content_type ?? "MENTION")} · {String(finding.severity ?? "REVIEW")}
+                            </p>
+                            <p className="mt-1 text-xs text-muted">
+                              {String(finding.review_status ?? "PROVISIONAL")} · {String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}
+                            </p>
+                            <blockquote className="mt-2 whitespace-pre-wrap text-sm">
+                              {String(finding.evidence_text ?? "")}
+                            </blockquote>
+                            <p className="mt-1 text-sm text-muted">
+                              {String(finding.explanation ?? "")}
+                            </p>
+                            <p className="mt-1 text-sm text-ink">
+                              {String(finding.recommendation ?? "")}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-muted">
+                        {workflow.safety_status === "PROVISIONAL" || workflow.safety_status === "CONFIRMED"
+                          ? "Không có safety finding trong scan này."
+                          : "Chưa có kết quả Child Safety hợp lệ."}
+                      </p>
+                    )}
+
+                    {workflow.safety_history.length ? (
+                      <details className="mt-3 rounded-control border border-border p-3">
+                        <summary className="cursor-pointer text-sm font-bold">
+                          Safety scans trước đây ({workflow.safety_history.length})
+                        </summary>
+                        <ul className="mt-2 grid gap-2">
+                          {workflow.safety_history.map((scan, index) => (
+                            <li className="break-all rounded-control bg-canvas p-3 text-xs" key={`${String(scan.scan_id)}-${index}`}>
+                              <p className="font-bold">
+                                {String(scan.status)} · {String(scan.suitability ?? "Chưa có suitability")} · {Array.isArray(scan.findings) ? scan.findings.length : 0} findings
+                              </p>
+                              <p className="mt-1 font-mono text-muted">
+                                Hash: {String(scan.content_hash ?? "?")} · Archived: {String(scan.archived_at ?? "")}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+
+                    <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                      <div>
+                        <h5 className="text-sm font-bold">Candidate versions</h5>
+                        <ul className="mt-1 space-y-1 text-xs text-muted">
+                          {workflow.candidate_history.map((version, index) => (
+                            <li className="break-all" key={`${String(version.version)}-${index}`}>
+                              v{String(version.version)} · {String(version.changed_by ?? "unknown")} · {String(version.content_hash ?? "")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-bold">Workflow / Admin review history</h5>
+                        <ul className="mt-1 space-y-1 text-xs text-muted">
+                          {workflow.review_history.map((event, index) => (
+                            <li key={`${String(event.created_at)}-${index}`}>
+                              {String(event.event)} · {String(event.actor_id ?? "unknown")} · {String(event.created_at ?? "")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h5 className="text-sm font-bold">Provider / model provenance</h5>
+                        <ul className="mt-1 space-y-1 text-xs text-muted">
+                          {workflow.provider_events.map((event, index) => (
+                            <li key={`${String(event.provider)}-${String(event.chunk_id)}-${index}`}>
+                              {String(event.provider)} · {String(event.model)} · {event.availability ? "available" : "unavailable"}
+                              {event.http_status ? ` · HTTP ${String(event.http_status)}` : ""}
+                              {event.duration_ms !== undefined ? ` · ${String(event.duration_ms)} ms` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-muted">
+                Sách chưa có Combined AI workflow history.
               </p>
             )}
           </div>

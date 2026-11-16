@@ -35,6 +35,66 @@ export type AiCorrectionProgress = Pick<
   "status" | "completed_chunks" | "total_chunks"
 >;
 
+export const adminAiWorkflowSchema = z.object({
+  workflow_id: z.uuid(),
+  page_id: z.uuid(),
+  book_id: z.uuid(),
+  page_revision_id: z.uuid(),
+  status: z.enum([
+    "QUEUED",
+    "PROOFREADING",
+    "CHILD_SAFETY_SCANNING",
+    "READY_FOR_ADMIN_REVIEW",
+    "FAILED",
+  ]),
+  stage: z.enum([
+    "PROOFREADING",
+    "CHILD_SAFETY_SCANNING",
+    "READY_FOR_ADMIN_REVIEW",
+    "FAILED",
+  ]),
+  progress: z.object({
+    completed_chunks: z.number().int().nonnegative(),
+    total_chunks: z.number().int().positive(),
+  }),
+  error_code: z.string().nullable(),
+  original_ocr_hash: z.string().regex(/^[a-f0-9]{64}$/u),
+  admin_input_hash: z.string().regex(/^[a-f0-9]{64}$/u),
+  proofread_text: z.string().nullable(),
+  proofread_output_hash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  corrections: z.array(z.record(z.string(), z.unknown())),
+  uncertain_word_indices: z.array(z.number().int().nonnegative()),
+  proofread_metadata: z.record(z.string(), z.unknown()),
+  safety_metadata: z.record(z.string(), z.unknown()),
+  candidate_history: z.array(z.record(z.string(), z.unknown())),
+  safety_history: z.array(z.record(z.string(), z.unknown())),
+  review_history: z.array(z.record(z.string(), z.unknown())),
+  candidate_text: z.string().nullable(),
+  candidate_hash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  candidate_version: z.number().int().nonnegative(),
+  safety_input_hash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  hash_match: z.boolean(),
+  suitability: z.enum([
+    "SUITABLE",
+    "SUITABLE_WITH_GUIDANCE",
+    "REVIEW_REQUIRED",
+    "NOT_RECOMMENDED",
+  ]).nullable(),
+  safety_status: z.enum(["PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "FAILED"]),
+  findings: z.array(z.record(z.string(), z.unknown())),
+  provider_events: z.array(z.record(z.string(), z.unknown())),
+  ocr_approved_at: z.iso.datetime({ offset: true }).nullable(),
+  final_approved_text_hash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  created_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+});
+
+export type AdminAiWorkflowDTO = z.infer<typeof adminAiWorkflowSchema>;
+export type AdminAiWorkflowProgress = Pick<
+  AdminAiWorkflowDTO,
+  "status" | "progress"
+>;
+
 function waitForJobPoll(signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
@@ -69,6 +129,31 @@ export interface OcrReviewService {
     onProgress?: (progress: AiCorrectionProgress) => void,
     signal?: AbortSignal,
   ): Promise<string>;
+  runCombinedWorkflow(
+    pageId: string,
+    revisionId: string,
+    draftText: string,
+    words: readonly AdminRevisionWordDTO[],
+    onProgress?: (progress: AdminAiWorkflowProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<AdminAiWorkflowDTO>;
+  getLatestWorkflow(
+    pageId: string,
+    revisionId: string,
+  ): Promise<AdminAiWorkflowDTO | null>;
+  updateWorkflowCandidate(
+    pageId: string,
+    workflowId: string,
+    candidateVersion: number,
+    candidateText: string,
+  ): Promise<AdminAiWorkflowDTO>;
+  decideWorkflowSafety(
+    pageId: string,
+    workflowId: string,
+    candidateHash: string,
+    confirmed: boolean,
+  ): Promise<AdminAiWorkflowDTO>;
+  retryWorkflow(pageId: string, workflowId: string): Promise<AdminAiWorkflowDTO>;
 }
 
 export const adminRevisionDetailSchema = z.object({
@@ -77,6 +162,7 @@ export const adminRevisionDetailSchema = z.object({
   revision_no: z.number().int().positive(),
   verification_status: z.enum(["PROCESSING", "NEEDS_REVIEW", "VERIFIED"]),
   lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
+  original_ocr_text: z.string().nullable().optional(),
   draft_text: z.string().nullable(),
   words: z.array(
     z.object({
@@ -211,6 +297,9 @@ export const adminRevisionDetailSchema = z.object({
 });
 
 export function createOcrReviewService(): OcrReviewService {
+  const workflowPath = (pageId: string, workflowId?: string) =>
+    "/books/admin/pages/" + encodeURIComponent(pageId) + "/ai-workflows" +
+    (workflowId ? "/" + encodeURIComponent(workflowId) : "");
   return {
     getRevision: (pageId, revisionId) =>
       requestApi(
@@ -318,5 +407,82 @@ export function createOcrReviewService(): OcrReviewService {
         current.error ?? "AI OCR cục bộ không thể hoàn tất tác vụ.",
       );
     },
+    runCombinedWorkflow: async (
+      pageId,
+      revisionId,
+      draftText,
+      words,
+      onProgress,
+      signal,
+    ) => {
+      const basePath = workflowPath(pageId);
+      let current = await requestApi(basePath, adminAiWorkflowSchema, undefined, {
+        method: "POST",
+        body: {
+          page_revision_id: revisionId,
+          idempotency_key: globalThis.crypto.randomUUID(),
+          draft_text: draftText,
+          words: words.map((word) => ({
+            word_index: word.word_index,
+            line_index: word.line_index,
+            text: word.text,
+            normalized_text: word.normalized_text,
+            bbox: [...word.bbox],
+            ocr_confidence: word.ocr_confidence,
+          })),
+        },
+      });
+      onProgress?.({ status: current.status, progress: current.progress });
+      while (
+        current.status !== "READY_FOR_ADMIN_REVIEW" &&
+        current.status !== "FAILED"
+      ) {
+        if (signal?.aborted) throw new AiCorrectionCancelledError();
+        await waitForJobPoll(signal);
+        current = await requestApi(
+          workflowPath(pageId, current.workflow_id),
+          adminAiWorkflowSchema,
+          signal,
+        );
+        onProgress?.({ status: current.status, progress: current.progress });
+      }
+      return current;
+    },
+    getLatestWorkflow: (pageId, revisionId) =>
+      requestApi(
+        "/books/admin/pages/" + encodeURIComponent(pageId) +
+          "/revisions/" + encodeURIComponent(revisionId) + "/ai-workflows/latest",
+        adminAiWorkflowSchema.nullable(),
+      ),
+    updateWorkflowCandidate: (pageId, workflowId, candidateVersion, candidateText) =>
+      requestApi(
+        workflowPath(pageId, workflowId) + "/candidate",
+        adminAiWorkflowSchema,
+        undefined,
+        {
+          method: "PATCH",
+          body: {
+            expected_candidate_version: candidateVersion,
+            candidate_text: candidateText,
+          },
+        },
+      ),
+    decideWorkflowSafety: (pageId, workflowId, candidateHash, confirmed) =>
+      requestApi(
+        workflowPath(pageId, workflowId) + "/safety-decision",
+        adminAiWorkflowSchema,
+        undefined,
+        {
+          method: "POST",
+          body: { expected_candidate_hash: candidateHash, confirmed },
+        },
+      ),
+    retryWorkflow: (pageId, workflowId) =>
+      requestApi(
+        workflowPath(pageId, workflowId) + "/retry",
+        adminAiWorkflowSchema,
+        undefined,
+        { method: "POST" },
+      ),
   };
 }

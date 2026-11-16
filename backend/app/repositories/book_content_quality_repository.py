@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, PageRevision, Profile
+from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
@@ -68,6 +69,17 @@ class BookContentQualityRepository:
         if lock:
             query = query.with_for_update()
         return await self.db.scalar(query)
+
+    async def ai_workflows_for_book(
+        self, book_id: UUID, *, limit: int = 100
+    ) -> list[AdminAiWorkflow]:
+        rows = await self.db.scalars(
+            select(AdminAiWorkflow)
+            .where(AdminAiWorkflow.BookId == book_id)
+            .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
+            .limit(limit)
+        )
+        return list(rows.all())
 
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
         query = select(BookPage).where(BookPage.Id == page_id)

@@ -15,6 +15,7 @@ from app.models.book_content_quality import (
     BookQualityScanRun,
 )
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
+from app.services.admin_ai_workflow_service import AdminAiWorkflowService
 from app.schemas.book_content_quality import (
     BookContentReportCreate,
     BookContentReportDetail,
@@ -622,12 +623,14 @@ class BookContentQualityService:
         latest_detail = (
             await self.get_scan_detail(actor_id, scans[0].Id) if scans else None
         )
+        workflows = await self.repository.ai_workflows_for_book(book_id)
         return BookQualityBookDetail(
             book_id=book.Id,
             book_title=str(book.Title),
             reports=[self._report_read(report) for report in reports],
             scans=[self._scan_read(run) for run in scans],
             latest_scan_detail=latest_detail,
+            ai_workflows=[AdminAiWorkflowService._read(row) for row in workflows],
         )
 
     async def update_finding(

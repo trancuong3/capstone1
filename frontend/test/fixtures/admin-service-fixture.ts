@@ -12,12 +12,47 @@ import type {
   AdminPageRevisionDetailDTO,
   AdminRevisionSummaryUI,
 } from "@/types/admin";
+import type { AdminAiWorkflowDTO } from "@/lib/api/ocr-review-service";
 
 export const ADMIN_BOOK_ID = "81000000-0000-4000-8000-000000000001";
 export const ADMIN_PAGE_ID = "83000000-0000-4000-8000-000000000001";
 export const ADMIN_R1_ID = "84000000-0000-4000-8000-000000000001";
 export const ADMIN_R2_ID = "84000000-0000-4000-8000-000000000002";
 const createdAt = "2026-10-01T00:00:00Z";
+const workflowFixture: AdminAiWorkflowDTO = {
+  workflow_id: "85000000-0000-4000-8000-000000000001",
+  page_id: ADMIN_PAGE_ID,
+  book_id: ADMIN_BOOK_ID,
+  page_revision_id: ADMIN_R2_ID,
+  status: "READY_FOR_ADMIN_REVIEW",
+  stage: "READY_FOR_ADMIN_REVIEW",
+  progress: { completed_chunks: 1, total_chunks: 1 },
+  error_code: null,
+  original_ocr_hash: "a".repeat(64),
+  admin_input_hash: "b".repeat(64),
+  proofread_text: "Nội dung đã sửa bằng AI",
+  proofread_output_hash: "c".repeat(64),
+  corrections: [],
+  uncertain_word_indices: [],
+  proofread_metadata: {},
+  safety_metadata: {},
+  candidate_history: [],
+  safety_history: [],
+  review_history: [],
+  candidate_text: "Nội dung đã sửa bằng AI",
+  candidate_hash: "c".repeat(64),
+  candidate_version: 1,
+  safety_input_hash: "c".repeat(64),
+  hash_match: true,
+  suitability: "SUITABLE",
+  safety_status: "PROVISIONAL",
+  findings: [],
+  provider_events: [],
+  ocr_approved_at: null,
+  final_approved_text_hash: null,
+  created_at: createdAt,
+  updated_at: createdAt,
+};
 
 export const adminBookFixture: AdminBookDTO = {
   id: ADMIN_BOOK_ID,
@@ -42,6 +77,7 @@ export const adminR1Fixture: AdminPageRevisionDetailDTO = {
   revision_no: 1,
   verification_status: "VERIFIED",
   lifecycle_status: "ACTIVE",
+  original_ocr_text: "Nội dung OCR gốc",
   draft_text: "Nội dung revision đầu tiên",
   words: [
     {
@@ -254,6 +290,40 @@ export function createAdminServiceFixture() {
       aiCorrectText: vi
         .fn<AdminServices["ocr"]["aiCorrectText"]>()
         .mockResolvedValue("Nội dung đã sửa bằng AI"),
+      runCombinedWorkflow: vi
+        .fn<AdminServices["ocr"]["runCombinedWorkflow"]>()
+        .mockResolvedValue(workflowFixture),
+      getLatestWorkflow: vi
+        .fn<AdminServices["ocr"]["getLatestWorkflow"]>()
+        .mockResolvedValue(null),
+      updateWorkflowCandidate: vi
+        .fn<AdminServices["ocr"]["updateWorkflowCandidate"]>()
+        .mockImplementation(async (_pageId, _workflowId, version, candidateText) => ({
+          ...workflowFixture,
+          candidate_text: candidateText,
+          candidate_hash: "d".repeat(64),
+          candidate_version: version + 1,
+          safety_input_hash: null,
+          hash_match: false,
+          suitability: null,
+          safety_status: "STALE",
+          findings: [],
+          status: "CHILD_SAFETY_SCANNING",
+          stage: "CHILD_SAFETY_SCANNING",
+        })),
+      decideWorkflowSafety: vi
+        .fn<AdminServices["ocr"]["decideWorkflowSafety"]>()
+        .mockImplementation(async (_pageId, _workflowId, _hash, confirmed) => ({
+          ...workflowFixture,
+          safety_status: confirmed ? "CONFIRMED" : "PROVISIONAL",
+        })),
+      retryWorkflow: vi
+        .fn<AdminServices["ocr"]["retryWorkflow"]>()
+        .mockResolvedValue({
+          ...workflowFixture,
+          status: "QUEUED",
+          stage: "CHILD_SAFETY_SCANNING",
+        }),
     },
     revisions: {
       list: vi

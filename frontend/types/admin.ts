@@ -174,6 +174,7 @@ export interface AdminPageRevisionDetailDTO {
   readonly revision_no: number;
   readonly verification_status: PageRevisionVerificationStatus;
   readonly lifecycle_status: BookLifecycleStatus;
+  readonly original_ocr_text?: string | null;
   readonly draft_text: string | null;
   readonly words: readonly AdminRevisionWordDTO[];
   readonly ocr_metadata: Record<string, unknown>;
@@ -219,10 +220,11 @@ export interface AdminPageUploadProgressUI {
 
 export interface AdminRevisionVerifyRequestDTO {
   readonly page_revision_id: UUID;
+  readonly workflow_id?: UUID | null;
   readonly corrected_text: string;
   readonly words: readonly AdminRevisionWordDTO[];
   readonly proofread_audit: {
-    readonly mode: "AI_CHECKED" | "AI_AUTO_VERIFIED" | "MANUAL_FALLBACK";
+    readonly mode: "AI_CHECKED" | "AI_AUTO_VERIFIED" | "MANUAL_FALLBACK" | "ADMIN_EDITED";
     readonly checked_text: string;
     readonly suggestions: readonly {
       readonly word_index: number;
