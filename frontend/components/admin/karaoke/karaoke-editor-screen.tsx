@@ -13,6 +13,7 @@ import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
+import type { TimingFocus } from "./syllable-timing-editor";
 import {
   emptyKaraokeMetadata,
   karaokeMetadataSchema,
@@ -51,6 +52,8 @@ const issueLabels: Record<KaraokeValidation["issues"][number]["code"], string> =
     TIMING_AUDIO_MISMATCH: "Lời chưa được căn theo bản nhạc hiện tại",
     MEDIA_UNAVAILABLE: "Không đọc được file media",
     CONTENT_INVALID: "Dữ liệu nội dung chưa hợp lệ",
+    SYLLABLES_REQUIRED: "Chưa tách tiếng cho câu",
+    SYLLABLE_TEXT_MISMATCH: "Nội dung tiếng chưa khớp lời câu",
   };
 
 export function KaraokeEditorScreen({ songId }: { songId?: string }) {
@@ -71,6 +74,7 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
   const [preview, setPreview] = useState<KaraokePreview | null>(null);
   const [validation, setValidation] = useState<KaraokeValidation | null>(null);
   const [reviewed, setReviewed] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<TimingFocus>();
   const action = useRef<AbortController | null>(null);
   const dirty = fingerprint(metadata, lyrics) !== saved;
   const draft = detail?.draft;
@@ -87,6 +91,7 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
     setValidation(null);
     setReviewed(false);
     setConflict(false);
+    setFocusTarget(undefined);
   }
   useEffect(() => {
     if (!songId) return;
@@ -455,6 +460,8 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
                         disabled={disabled}
                         player={player}
                         onChange={changeLyrics}
+                        onSave={save}
+                        focusTarget={focusTarget}
                       />
                     )}
                   </KaraokePlayer>
@@ -464,6 +471,8 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
                     duration={draft.duration_ms}
                     disabled={disabled}
                     onChange={changeLyrics}
+                    onSave={save}
+                    focusTarget={focusTarget}
                   />
                 )}
                 <Button
@@ -520,8 +529,25 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
                           );
                           return (
                             <li key={i}>
-                              {issueLabels[issue.code]}
-                              {index >= 0 ? ` · Dòng ${index + 1}` : ""}
+                              {issue.line_id ? (
+                                <button
+                                  type="button"
+                                  className="min-h-11 text-left underline"
+                                  onClick={() =>
+                                    setFocusTarget({
+                                      lineId: issue.line_id!,
+                                      syllableId:
+                                        issue.syllable_id ?? undefined,
+                                      request: (focusTarget?.request ?? 0) + 1,
+                                    })
+                                  }
+                                >
+                                  {issueLabels[issue.code]}
+                                  {index >= 0 ? ` · Dòng ${index + 1}` : ""}
+                                </button>
+                              ) : (
+                                issueLabels[issue.code]
+                              )}
                             </li>
                           );
                         })}

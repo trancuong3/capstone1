@@ -11,6 +11,7 @@ import {
 import { KaraokeControls } from "@/components/karaoke/karaoke-controls";
 import { LyricsDisplay } from "@/components/karaoke/lyrics-display";
 import type { KaraokeLyrics, KaraokePreview } from "@/types/karaoke";
+import { KaraokeStage } from "@/components/karaoke/karaoke-stage";
 
 type AudioSource = Omit<KaraokePreview, "revision"> & { revision?: number };
 
@@ -20,6 +21,9 @@ export function KaraokePlayer(props: {
   lyrics?: KaraokeLyrics;
   onPlayed?: () => void;
   children?: (player: KaraokePlayerController) => ReactNode;
+  presentation?: "preview" | "child";
+  childAlias?: string;
+  onReload?: () => void;
 }) {
   // Remount resets pending play promises, clocks and errors even when a signed URL is renewed.
   return (
@@ -35,12 +39,18 @@ function PlayerSession({
   children,
   onPlayed,
   label = "Nghe thử bài hát",
+  presentation = "preview",
+  childAlias = "Bé",
+  onReload,
 }: {
   source: AudioSource;
   label?: string;
   lyrics?: KaraokeLyrics;
   onPlayed?: () => void;
   children?: (player: KaraokePlayerController) => ReactNode;
+  presentation?: "preview" | "child";
+  childAlias?: string;
+  onReload?: () => void;
 }) {
   const [coverFailed, setCoverFailed] = useState(false);
   const player = useKaraokePlayer(
@@ -49,6 +59,16 @@ function PlayerSession({
     source.audio_url_expires_at,
     onPlayed,
   );
+  if (presentation === "child")
+    return (
+      <KaraokeStage
+        source={{ ...source, lyrics }}
+        player={player}
+        childAlias={childAlias}
+        label={label}
+        onReload={onReload}
+      />
+    );
   return (
     <section aria-label={label} className="grid gap-5">
       {source.cover_url && !coverFailed ? (

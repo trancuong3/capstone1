@@ -82,7 +82,7 @@ describe("karaoke lyric import", () => {
       data,
     );
   });
-  it.each([true, 2, "1"])("rejects non-canonical version %s", (version) => {
+  it.each([true, 3, "1"])("rejects unsupported version %s", (version) => {
     expect(() =>
       importLyrics(
         JSON.stringify({ format_version: version, lines: [] }),

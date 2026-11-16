@@ -1,5 +1,109 @@
 # Kế hoạch triển khai Hát vui — Karaoke cho trẻ
 
+## Nâng cấp karaoke theo từng tiếng — 2026-11-15
+
+Nhánh `feature/linh-karaoke-upgrade`, base ban đầu `3d7e01e`, đã đồng bộ main
+`6a18a07` mà không sửa các file training/OCR được đưa vào từ main. Phạm vi là
+module karaoke. Các phần bản đầu ở phía dưới là lịch sử triển khai.
+
+Phase 1–4 đã triển khai và kiểm chứng cục bộ. Phase 5 đã có bundle MP3/lời v2
+thật, test PostgreSQL và nghiệm thu preview live; còn cổng nghe duyệt bằng tai
+và xuất bản sau khi triển khai code tương thích. Phase 6 đang hoàn tất kiểm tra
+và bàn giao PR. Bằng chứng/giới hạn ở đầu `KARAOKE_VERIFICATION.md`.
+
+| Phase | Phạm vi nâng cấp                                                                                              | Bằng chứng hoàn tất                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| 1     | Nhánh, thiết kế trải nghiệm, contract v2, file và tiêu chí kiểm thử                                           | Mục thiết kế này và git branch/base                      |
+| 2     | Backend/schema FE đọc v1/v2; lưu nháp, kiểm tra tiếng, reset khi thay MP3                                     | Contract/service/API và kiểm thử tương thích             |
+| 3     | Chữ tô dần dùng chung; admin căn tiếng, undo, chỉnh mốc, lặp/chậm, tiến độ, lỗi có thể chọn, nhập/xuất JSON   | Unit, browser desktop/mobile, typecheck, lint, build     |
+| 4     | Màn hát tập trung của bé, báo vào câu, luyện câu, điều khiển lớn, thông tin bài thu gọn, thư viện và kết thúc | Đã triển khai; browser desktop/mobile đạt                |
+| 5     | Nghe/căn nội dung thật, xuất bản bài v2, nghiệm thu với người dùng                                            | Preview live đạt; chờ duyệt tai và release trước publish |
+| 6     | Tài liệu nghiệm thu cuối, commit/push/PR và rollout                                                           | Đang hoàn tất; không tự merge                            |
+
+### Thiết kế dữ liệu và đồng bộ
+
+Giữ `karaoke_song_versions.lyrics` JSONB, hai bảng và bucket private hiện có;
+không cần migration cho format mới. Backend/frontend đọc được cả hai định dạng.
+V1 chỉ có thời gian câu. V2 thêm `syllables` vào từng câu, mỗi tiếng gồm UUID,
+text, `start_ms`, `end_ms`. Nháp cho phép mốc null và danh sách tiếng trống;
+xuất bản yêu cầu tiếng đầy đủ, nội dung ráp khớp câu và thời gian hợp lệ.
+
+Text chuẩn hóa NFC và khoảng trắng theo cùng quy tắc Unicode ở hai phía;
+dấu câu nằm cùng tiếng. Tách theo khoảng trắng chỉ tạo tiếng, không tự đoán
+mốc. Có thể sửa/gộp/tách các cụm bằng sửa nội dung tiếng rồi xác nhận lại.
+Tối đa 150 tiếng/câu, 10.000 tiếng/bài, 300 câu/50.000 ký tự lời. ID câu và
+tiếng không trùng. Mốc nguyên trong 0–300.000 ms, đầu < cuối, tiếng nằm trong
+câu/nhạc, thứ tự không chồng lấn; khoảng nghỉ được phép. Lỗi ghi line_id và
+syllable_id để admin đi đến đúng chỗ. TXT/LRC 256 KiB; JSON v1/v2 tối đa 2 MiB
+để chứa mốc tiếng. Xuất JSON đầy đủ để sao lưu/tái nhập.
+
+Sửa nội dung câu làm rỗng mốc tiếng của câu đó. Thay MP3 giữ version/text/ID
+nhưng xóa toàn bộ mốc câu/tiếng và liên kết hash timing. Thay ảnh không xóa mốc.
+Giữ snapshot bản xuất bản, kiểm tra revision/CAS, quyền admin/parent/ownership
+và signed URL. Không chuyển đổi hàng loạt bài đang xuất bản.
+
+Renderer lấy currentTime của đúng một audio element: v2 tô dần từng tiếng,
+tiếng đang hát có gạch chân để không chỉ dựa vào màu. Khi có khoảng nghỉ không
+tiếp tục tô tiếng mới. Pause/seek/buffer/chậm/lặp đều tính lại từ audio; không
+timer độc lập. Reduced motion giữ highlight tĩnh tiếng đang hát. Renderer này
+dùng chung preview admin và player hiện có, chưa đổi bố cục toàn màn bé.
+
+### Trải nghiệm admin Phase 3
+
+Giữ form/câu/phân trang hiện có. Chọn “Căn từng tiếng” để chuyển bản nháp sang
+v2 và mở duy nhất câu đang căn. Các tiếng là nút chọn có trạng thái. Admin có
+thể đánh dấu đầu/cuối tiếng từ audio, dùng nút/phím Space đánh dấu đầu tiếng
+tiếp theo, kết thúc tiếng cuối, undo, chỉnh ±50/100 ms, căn lại câu và sao chép
+mốc từ câu giống lời (dịch theo đầu câu đích rồi kiểm tra lại). Các cuối tiếng
+gợi ý từ đầu tiếng sau cần nghe duyệt, nhất là khoảng nghỉ/ngân dài. Phím tắt
+chỉ hoạt động khi vùng căn tiếng có focus, không chặn ô nhập hoặc modal.
+
+Thanh công cụ ghim có Phát/Dừng, 0.75×/1×, lặp câu, thời gian và Lưu nháp;
+preview nằm cạnh vùng căn tiếng trên màn rộng. Hiện tiến độ đầy đủ/hợp lệ,
+lỗi chọn được kể cả dòng ở trang khác. Sửa text/mốc làm mất xác nhận nghe và
+kiểm tra xuất bản; cần lưu, tải/nghe đúng revision và kiểm tra lại như luồng cũ.
+Không autosave hay thêm endpoint cho Phase 1–3.
+
+### Phạm vi file và kiểm thử
+
+- Sửa: `backend/app/schemas/karaoke.py`, `backend/app/services/karaoke_service.py`;
+  tạo helper `backend/app/services/karaoke_lyrics.py` cho validation/reset.
+- Sửa FE: `types/karaoke.ts`, `lib/api/karaoke-service.ts`,
+  `lib/karaoke/lyrics-import.ts`, `lyrics-timeline.ts`, `hooks/use-karaoke-player.ts`,
+  `components/karaoke/{karaoke-player,lyrics-display}.tsx`,
+  `components/admin/karaoke/{lyric-timing-editor,karaoke-editor-screen}.tsx`.
+- Tạo: `lib/karaoke/syllable-timing.ts`,
+  `components/karaoke/syllable-lyrics.tsx` và CSS module,
+  `components/admin/karaoke/syllable-timing-editor.tsx`.
+- Mở rộng test karaoke backend/FE/browser; thêm test v2 có gaps, tiếng ngân,
+  NFC/dấu câu, lỗi timing/ID/text, audio đổi, draft/publish/CAS, pause/seek/chậm,
+  undo/phím tắt, nhập/xuất và lỗi nhảy đến câu ngoài trang hiện tại.
+- Xác minh build/typecheck/lint/format, kiểm thử module và hồi quy phù hợp.
+  Test browser dùng API/audio cô lập; không coi đó là đã căn bài thật.
+- Rollout: backend đọc v1/v2 → frontend đọc v1/v2 → mới cho xuất bản v2.
+  Rollback code chỉ đọc v1 cần xử lý các bài đã xuất bản v2 trước.
+
+Các nâng cấp sau: bản hát mẫu có giọng (cần nội dung có quyền và timing tương
+ứng), waveform, AI tự căn. Ghi âm/chấm điểm/báo cáo đọc nằm ngoài phạm vi này.
+
+### Trải nghiệm bé Phase 4 và nội dung thật Phase 5
+
+- Màn hát chữ lớn, câu hiện tại/tiếp theo, tiếng đang hát có gạch chân và tô
+  theo audio. Bấm bắt đầu mới đếm chuẩn bị 3 giây; hủy/đổi câu/rời trang dọn timer.
+  Báo vào câu sau khoảng nhạc dựa vào audio clock, không chạy lời bằng timer riêng.
+- Nút chính cao tối thiểu 64 px; tạm dừng/tiếp tục, hát lại câu, chọn câu để luyện,
+  lặp câu, 0.75×/1×, tua thoát luyện câu, mở rộng/fullscreen với fallback và Escape.
+  Kết thúc thân thiện, hát lại/chọn bài khác. Âm lượng và ghi công thu gọn, không xóa.
+- Bộ `ngoi-sao-nho-v2.json` có 18 câu × 7 tiếng, giữ MP3 gốc. Mốc lấy từ score
+  giai điệu và phân tích attack năng lượng đúng cao độ, không chia đều theo ký tự.
+  Manifest ghi rõ chưa có người nghe duyệt; bộ v1 cũ giữ nguyên để tương thích.
+- Có kiểm thử phát/lưu/xuất bản bundle v2 trên PostgreSQL tạm. Live preview chỉ
+  nhập v2 trong bộ nhớ, không lưu nó vào DB đang phục vụ bản v1. Nháp v1 từ bài
+  mẫu được giữ để admin tiếp tục; không thay bản đã xuất bản hoặc dữ liệu đọc sách.
+- Thứ tự release bắt buộc: backend v1/v2 → frontend v1/v2 → nghe duyệt MP3 cùng
+  lời v2 → nhập/lưu/preview/validate/publish. Không chạy lại migration karaoke,
+  không tự merge; rollback về code chỉ hiểu v1 cần phục hồi publication v1 trước.
+
 Ngày chốt Phase 1: 2026-11-14. Nhánh: `feature/linh-karaoke`.
 
 ## 1. Mục tiêu và trạng thái

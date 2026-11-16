@@ -6,6 +6,7 @@ No application DATABASE_URL is used to select this integration database.
 """
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 import unittest
@@ -283,6 +284,70 @@ class KaraokePostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as caught:
             await self.service.catalog(self.parent, self.child)
         self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_v2_jsonb_roundtrip_and_draft_publish_isolation(self):
+        from test_karaoke_syllables import lyrics_v2
+        from app.schemas.karaoke import DraftRequest
+        ready = await self.ready()
+        data = lyrics_v2()
+        saved = await self.service.save(self.admin, self.song_id, DraftWrite(
+            expected_revision=ready.revision, draft_version_id=ready.draft.id,
+            title=self.title, source_note="Synthetic", usage_note="Tests only", lyrics=data))
+        # New session forces a real JSONB read, not an identity-map value.
+        async with self.sessions() as db:
+            other = KaraokeService(KaraokeRepository(db), self.storage)
+            reread = await other.detail(self.admin, self.song_id)
+            self.assertEqual(reread.draft.lyrics.model_dump(mode="json"), data)
+        published = await self.publish(saved)
+        draft = await self.service.draft(self.admin, self.song_id, RevisionRequest(expected_revision=published.revision))
+        incomplete = {"format_version": 2, "lines": [{**data["lines"][0], "syllables": []}]}
+        changed = await self.service.save(self.admin, self.song_id, DraftWrite(
+            expected_revision=draft.revision, draft_version_id=draft.draft.id,
+            title=self.title, source_note="Synthetic", usage_note="Tests only", lyrics=incomplete))
+        playback = await self.service.playback(self.parent, self.song_id, self.child)
+        self.assertEqual(playback.model_dump(mode="json")["lyrics"], data)
+        with self.assertRaises(HTTPException) as caught:
+            await self.publish(changed)
+        self.assertEqual(caught.exception.status_code, 422)
+        with self.assertRaises(HTTPException) as caught:
+            await self.service.save(self.admin, self.song_id, DraftWrite(
+                expected_revision=draft.revision, draft_version_id=draft.draft.id, lyrics=data))
+        self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_actual_mp3_and_126_sung_units_survive_publication(self):
+        """Real bundled bytes + JSONB/service; Storage remains an isolated double."""
+        from io import BytesIO
+        from fastapi import UploadFile
+        from app.schemas.karaoke import DraftRequest
+        bundle = Path(__file__).resolve().parents[1] / "docs/karaoke-demo"
+        audio = (bundle / "ngoi-sao-nho.mp3").read_bytes()
+        data = json.loads((bundle / "ngoi-sao-nho-v2.json").read_text(encoding="utf-8"))
+        metadata = json.loads((bundle / "song-v2.json").read_text(encoding="utf-8"))
+        uploaded = await self.service.upload(self.admin, self.song_id, DraftRequest(
+            expected_revision=self.detail.revision, draft_version_id=self.detail.draft.id,
+        ), UploadFile(file=BytesIO(audio), filename="ngoi-sao-nho.mp3"))
+        self.assertLessEqual(abs(uploaded.draft.duration_ms - 103367), 1)
+        saved = await self.service.save(self.admin, self.song_id, DraftWrite(
+            expected_revision=uploaded.revision, draft_version_id=uploaded.draft.id,
+            **metadata, lyrics=data))
+        self.assertTrue((await self.service.validation(self.admin, self.song_id)).valid)
+        published = await self.publish(saved)
+        async with self.sessions() as db:
+            reread = KaraokeService(KaraokeRepository(db), TestStorage(db))
+            # Both sessions refer to the same simulated object store.
+            reread.storage.objects = self.storage.objects
+            detail = await reread.detail(self.admin, self.song_id)
+            self.assertEqual(detail.published.id, published.published.id)
+            self.assertEqual(detail.published.lyrics.model_dump(mode="json"), data)
+            playback = await reread.playback(self.parent, self.song_id, self.child)
+            dto = playback.model_dump(mode="json")
+            self.assertEqual(dto["lyrics"], data)
+            self.assertEqual(sum(len(line["syllables"]) for line in dto["lyrics"]["lines"]), 126)
+            self.assertNotIn("source_note", dto)
+            self.assertNotIn("audio_sha256", dto)
+            version = await db.get(KaraokeSongVersion, published.published.id)
+            self.assertEqual(version.audio_sha256, hashlib.sha256(audio).hexdigest())
+            self.assertEqual(version.timed_audio_sha256, version.audio_sha256)
 
 
 if __name__ == "__main__":

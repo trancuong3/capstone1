@@ -10,6 +10,7 @@ import {
   songDetail,
   songId,
   versionId,
+  syllableLyrics,
 } from "@/test/karaoke-fixtures";
 
 vi.mock("@/lib/supabase/client", () => ({
@@ -38,6 +39,27 @@ afterEach(() => {
 });
 
 describe("karaoke real HTTP adapter", () => {
+  it("accepts v2 published syllables but rejects incomplete or mismatching nested timing", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const parent = createKaraokeService();
+    const data = { ...previewDetail(), lyrics: syllableLyrics() };
+    fetchMock.mockResolvedValueOnce(Response.json(data));
+    expect((await parent.playback(songId, versionId)).lyrics).toEqual(
+      data.lyrics,
+    );
+    for (const patch of [
+      { start_ms: null },
+      { end_ms: 5000 },
+      { text: "Không khớp" },
+    ]) {
+      const invalid = structuredClone(data);
+      Object.assign(invalid.lyrics.lines[0].syllables![0], patch);
+      fetchMock.mockResolvedValueOnce(Response.json(invalid));
+      await expect(parent.playback(songId, versionId)).rejects.toBeInstanceOf(
+        ServiceError,
+      );
+    }
+  });
   it("prepares read-only parent catalog/playback bound to child and published version", async () => {
     const parent = createKaraokeService();
     const source = previewDetail();

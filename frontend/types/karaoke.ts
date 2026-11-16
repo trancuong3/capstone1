@@ -9,7 +9,7 @@ export const karaokeMetadataSchema = z.object({
   usage_note: z.string().max(1000),
 });
 const milliseconds = z.number().int().min(0).max(300000);
-export const lyricLineSchema = z
+const lyricUnitSchema = z
   .object({
     id: z.guid(),
     text: z
@@ -20,16 +20,47 @@ export const lyricLineSchema = z
     end_ms: milliseconds.nullable(),
   })
   .strict();
+export const syllableSchema = lyricUnitSchema;
+export const lyricLineSchema = lyricUnitSchema.extend({
+  syllables: z.array(syllableSchema).max(150).optional(),
+});
 export const lyricsSchema = z
   .object({
-    format_version: z.literal(1),
+    format_version: z.union([z.literal(1), z.literal(2)]),
     lines: z.array(lyricLineSchema).max(300),
   })
-  .superRefine(({ lines }, ctx) => {
+  .superRefine(({ lines, format_version }, ctx) => {
     if (new Set(lines.map((line) => line.id)).size !== lines.length)
       ctx.addIssue({ code: "custom", message: "ID dòng lời bị trùng." });
     if (lines.reduce((n, line) => n + Array.from(line.text).length, 0) > 50000)
       ctx.addIssue({ code: "custom", message: "Lời vượt quá 50.000 ký tự." });
+    const ids = new Set(lines.map((line) => line.id));
+    let count = 0;
+    let syllableCharacters = 0;
+    for (const line of lines) {
+      if (
+        (format_version === 1 && line.syllables !== undefined) ||
+        (format_version === 2 && line.syllables === undefined)
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Danh sách tiếng không khớp định dạng lời.",
+        });
+      for (const syllable of line.syllables ?? []) {
+        if (ids.has(syllable.id))
+          ctx.addIssue({ code: "custom", message: "ID tiếng bị trùng." });
+        ids.add(syllable.id);
+        count++;
+        syllableCharacters += Array.from(syllable.text).length;
+      }
+    }
+    if (count > 10000)
+      ctx.addIssue({ code: "custom", message: "Lời vượt quá 10.000 tiếng." });
+    if (syllableCharacters > 50000)
+      ctx.addIssue({
+        code: "custom",
+        message: "Nội dung tiếng vượt quá 50.000 ký tự.",
+      });
   });
 const date = z.iso.datetime({ offset: true });
 const status = z.enum(["DRAFT", "PUBLISHED", "HIDDEN"]);
@@ -120,15 +151,19 @@ export const karaokeValidationSchema = z.object({
         "TIMING_AUDIO_MISMATCH",
         "MEDIA_UNAVAILABLE",
         "CONTENT_INVALID",
+        "SYLLABLES_REQUIRED",
+        "SYLLABLE_TEXT_MISMATCH",
       ]),
       field: z.string(),
       line_id: z.guid().nullable(),
+      syllable_id: z.guid().nullable().optional(),
     }),
   ),
 });
 export type KaraokeMetadata = z.infer<typeof karaokeMetadataSchema>;
 export type KaraokeLyrics = z.infer<typeof lyricsSchema>;
 export type KaraokeLine = KaraokeLyrics["lines"][number];
+export type KaraokeSyllable = z.infer<typeof syllableSchema>;
 export type AdminKaraokeDetail = z.infer<typeof adminKaraokeDetailSchema>;
 export type AdminKaraokeList = z.infer<typeof adminKaraokeListSchema>;
 export type KaraokePreview = z.infer<typeof karaokePreviewSchema>;

@@ -1,0 +1,28 @@
+.unit {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #526574;
+}
+.fill {
+  position: absolute;
+  inset: 0;
+  color: #006575;
+  clip-path: inset(0 calc(100% - var(--karaoke-fill)) 0 0);
+  pointer-events: none;
+}
+.active {
+  text-decoration: underline;
+  text-decoration-color: #006575;
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    clip-path: none;
+  }
+  .unit[data-state="upcoming"] .fill {
+    visibility: hidden;
+  }
+}

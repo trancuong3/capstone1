@@ -34,8 +34,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
             Hát vui cùng {child.alias}
           </h1>
           <p className="mt-3 text-muted">
-            Chọn bài hát phù hợp với lớp của bé. Chỉ hiển thị bài đã được admin
-            xuất bản.
+            Chọn một bài bé thích, nghe nhạc và cùng hát theo chữ nhé!
           </p>
         </div>
         <ButtonLink href="/dashboard" variant="secondary" className="sm:w-auto">
@@ -149,7 +148,7 @@ function Catalog({
           description={
             query.search
               ? "Thử tìm bằng tên khác hoặc xóa từ khóa nhé."
-              : "Khi admin xuất bản bài hát phù hợp với lớp của bé, bài hát sẽ xuất hiện ở đây."
+              : "Những bài hát mới đang được chuẩn bị. Bé quay lại sau nhé!"
           }
         />
       )}

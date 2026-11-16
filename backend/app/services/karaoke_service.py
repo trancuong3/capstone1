@@ -16,6 +16,7 @@ from app.schemas.karaoke import (
 )
 from app.services.karaoke_media_service import inspect_audio, normalize_cover, read_upload
 from app.services.karaoke_storage_service import KaraokeStorage, URL_TTL
+from app.services.karaoke_lyrics import clear_timings, timing_issues
 
 logger = logging.getLogger(__name__)
 META = ("title", "author", "min_grade", "max_grade", "source_note", "usage_note")
@@ -40,19 +41,7 @@ def content_issues(version, *, require_binding=True):
         return issues
     if not lyrics.lines:
         issue("LYRICS_REQUIRED", "lyrics")
-    previous_end = 0
-    for line in lyrics.lines:
-        start, end = line.start_ms, line.end_ms
-        if start is None or end is None:
-            issue("TIMING_REQUIRED", "lyrics", line.id)
-            continue
-        if start >= end:
-            issue("TIMING_INVALID", "lyrics", line.id)
-        if start < previous_end:
-            issue("TIMING_OVERLAP", "lyrics", line.id)
-        if version.duration_ms is not None and end > version.duration_ms:
-            issue("TIMING_OUT_OF_RANGE", "lyrics", line.id)
-        previous_end = end
+    issues.extend(timing_issues(lyrics, version.duration_ms))
     if require_binding and version.audio_sha256 != version.timed_audio_sha256:
         issue("TIMING_AUDIO_MISMATCH", "lyrics")
     return issues
@@ -275,11 +264,7 @@ class KaraokeService:
                     state.draft.audio_size_bytes = audio.size_bytes
                     state.draft.duration_ms = audio.duration_ms
                     state.draft.timed_audio_sha256 = None
-                    state.draft.lyrics = {
-                        "format_version": 1,
-                        "lines": [{**line, "start_ms": None, "end_ms": None}
-                                  for line in state.draft.lyrics["lines"]],
-                    }
+                    state.draft.lyrics = clear_timings(state.draft.lyrics)
                 state.draft.updated_at = utcnow()
                 await self.repository.bump(state.song, payload.expected_revision)
                 result = self._detail(state)

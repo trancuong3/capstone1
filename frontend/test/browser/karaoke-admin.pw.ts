@@ -5,6 +5,7 @@ import {
   songDetail,
   songId,
   versionId,
+  syllableLyrics,
 } from "../karaoke-fixtures";
 
 // Entirely isolated browser API. No request reaches a real DB/Storage account.
@@ -42,13 +43,28 @@ async function fixture(page: Page) {
       body: status === 204 ? undefined : JSON.stringify(json),
     });
   }
-  await page.context().route("https://media.example.test/**", (route) =>
-    route.fulfill({
+  await page.context().route("https://media.example.test/**", (route) => {
+    const bytes = silentWav();
+    const range = /^bytes=(\d+)-(\d*)$/.exec(
+      route.request().headers().range ?? "",
+    );
+    const start = range ? Number(range[1]) : 0;
+    const end = range?.[2]
+      ? Math.min(bytes.length - 1, Number(range[2]))
+      : bytes.length - 1;
+    return route.fulfill({
+      status: range ? 206 : 200,
       contentType: "audio/wav",
-      body: silentWav(),
-      headers: { "access-control-allow-origin": "*" },
-    }),
-  );
+      body: bytes.subarray(start, end + 1),
+      headers: {
+        "access-control-allow-origin": "*",
+        "accept-ranges": "bytes",
+        ...(range
+          ? { "content-range": `bytes ${start}-${end}/${bytes.length}` }
+          : {}),
+      },
+    });
+  });
   await page
     .context()
     .route("http://127.0.0.1:8000/karaoke/admin/songs**", async (route) => {
@@ -133,6 +149,236 @@ async function assertNoHorizontalOverflow(page: Page) {
     ),
   ).toBe(true);
 }
+
+test("upgrades a draft to syllables, marks/undoes, saves/reloads and previews before publish", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const NativeAudio = window.Audio;
+    const audios: HTMLAudioElement[] = [];
+    Object.defineProperty(window, "__karaokeProbe", { value: audios });
+    window.Audio = new Proxy(NativeAudio, {
+      construct(target, args) {
+        const audio = Reflect.construct(target, args) as HTMLAudioElement;
+        audios.push(audio);
+        return audio;
+      },
+    });
+  });
+  const state = await fixture(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`/admin/karaoke/${songId}/edit`);
+  await page
+    .getByRole("button", { name: "Căn từng tiếng dòng 1", exact: true })
+    .click();
+  const region = page.getByRole("region", {
+    name: "Căn tiếng dòng 1",
+    exact: true,
+  });
+  await expect(region.getByLabel("Nội dung tiếng đang chọn")).toHaveValue("Em");
+  await page
+    .getByRole("button", { name: "Lưu lời và thời gian", exact: true })
+    .click();
+  expect(state.data.draft!.lyrics.format_version).toBe(2);
+  await page
+    .getByRole("button", {
+      name: "Tải bản nghe thử / Căn thời gian",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", { name: "Căn từng tiếng dòng 1", exact: true })
+    .click();
+  await expect(
+    region.getByRole("button", { name: "Nghe câu từ đầu", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Phát", exact: true }).click();
+  await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { __karaokeProbe: HTMLAudioElement[] }
+          ).__karaokeProbe.at(-1)!.seekable.length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  const position = page.getByRole("slider", { name: "Vị trí phát" });
+  async function seek(value: number) {
+    await position.evaluate((node, value) => {
+      (node as HTMLInputElement).value = String(value - 1);
+    }, value);
+    // Use the browser's range keyboard input, not a synthetic React event.
+    await position.press("ArrowRight");
+    await expect(position).toHaveValue(String(value));
+  }
+  for (const time of [1000, 1500, 2000, 2500]) {
+    await seek(time);
+    await region.focus();
+    await page.keyboard.press("Space");
+  }
+  await seek(3000);
+  await region
+    .getByRole("button", { name: "Đánh dấu cuối tiếng", exact: true })
+    .click();
+  await expect(
+    region.getByText("4/4 tiếng đã căn · Hợp lệ", { exact: true }),
+  ).toBeVisible();
+  await region
+    .getByRole("button", { name: "Bắt đầu tiếng +50 ms", exact: true })
+    .click();
+  await expect(
+    region.getByLabel("Bắt đầu tiếng (ms)", { exact: true }),
+  ).toHaveValue("2550");
+  await region
+    .getByRole("button", { name: "Hoàn tác căn tiếng", exact: true })
+    .click();
+  await expect(
+    region.getByLabel("Bắt đầu tiếng (ms)", { exact: true }),
+  ).toHaveValue("2500");
+  await region.getByLabel("Tốc độ căn", { exact: true }).selectOption("0.75");
+  await region.getByLabel("Lặp câu", { exact: true }).check();
+  await region
+    .getByRole("button", { name: "Nghe câu từ đầu", exact: true })
+    .click();
+  await expect(
+    region.getByRole("button", { name: "Dừng nghe câu", exact: true }),
+  ).toBeVisible();
+  await region
+    .getByRole("button", { name: "Dừng nghe câu", exact: true })
+    .click();
+  await assertNoHorizontalOverflow(page);
+  await page.screenshot({
+    path: test.info().outputPath("karaoke-syllable-editor.png"),
+    fullPage: true,
+  });
+  await region
+    .getByRole("button", { name: "Lưu nháp khi căn", exact: true })
+    .click();
+  expect(
+    state.data.draft!.lyrics.lines[0].syllables!.map((s) => [
+      s.start_ms,
+      s.end_ms,
+    ]),
+  ).toEqual([
+    [1000, 1500],
+    [1500, 2000],
+    [2000, 2500],
+    [2500, 3000],
+  ]);
+  await page
+    .getByRole("button", { name: "Tải lại từ máy chủ", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Kiểm tra điều kiện xuất bản", exact: true })
+    .click();
+  await page
+    .getByRole("button", {
+      name: "Tải bản nghe thử / Căn thời gian",
+      exact: true,
+    })
+    .click();
+  await page.getByRole("button", { name: "Phát", exact: true }).click();
+  await expect(
+    page.locator('[data-testid="karaoke-active-line"] [data-state="active"]'),
+  ).toHaveCount(1);
+  await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Xuất bản bài hát", exact: true })
+    .click();
+  await expect(
+    page.getByText("Đã xuất bản bài hát.", { exact: true }),
+  ).toBeVisible();
+  expect(state.data.published!.lyrics.format_version).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test("v2 export reimports losslessly and validation focuses a syllable on another page", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  const data = syllableLyrics();
+  const targetId = crypto.randomUUID();
+  const targetUnit = crypto.randomUUID();
+  state.data.draft!.lyrics = {
+    format_version: 2,
+    lines: Array.from({ length: 30 }, (_, i) => ({
+      ...data.lines[0],
+      id: i === 29 ? targetId : crypto.randomUUID(),
+      start_ms: i * 500,
+      end_ms: i * 500 + 500,
+      text: "Bé",
+      syllables: [
+        {
+          id: i === 29 ? targetUnit : crypto.randomUUID(),
+          text: "Bé",
+          start_ms: null,
+          end_ms: null,
+        },
+      ],
+    })),
+  };
+  await page
+    .context()
+    .route(
+      `http://127.0.0.1:8000/karaoke/admin/songs/${songId}/draft/validation`,
+      (route) =>
+        route.fulfill({
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({
+            valid: false,
+            revision: state.data.revision,
+            draft_version_id: versionId,
+            issues: [
+              {
+                code: "TIMING_REQUIRED",
+                field: "lyrics",
+                line_id: targetId,
+                syllable_id: targetUnit,
+              },
+            ],
+          }),
+        }),
+    );
+  await page.goto(`/admin/karaoke/${songId}/edit`);
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Xuất lời và mốc JSON", exact: true })
+    .click();
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  expect(JSON.parse(Buffer.concat(chunks).toString("utf8"))).toEqual(
+    state.data.draft!.lyrics,
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByLabel("File lời bài hát").setInputFiles({
+    name: "roundtrip-v2.json",
+    mimeType: "application/json",
+    buffer: Buffer.concat(chunks),
+  });
+  await expect(
+    page.getByText("Đã nhập lời. Hãy kiểm tra và căn thời gian từng dòng.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Kiểm tra điều kiện xuất bản", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Thiếu mốc thời gian · Dòng 30", exact: true })
+    .click();
+  await expect(page.getByLabel("Lời dòng 30", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Chọn tiếng 1: Bé", exact: true }),
+  ).toBeFocused();
+  await assertNoHorizontalOverflow(page);
+});
 test("imports UTF-8 LRC as editable suggested timing and saves it", async ({
   page,
 }) => {

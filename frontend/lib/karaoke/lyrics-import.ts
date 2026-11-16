@@ -5,6 +5,7 @@ import {
 } from "@/types/karaoke";
 
 export const MAX_LYRICS_BYTES = 256 * 1024;
+export const MAX_LYRICS_JSON_BYTES = 2 * 1024 * 1024;
 const clean = (s: string) =>
   s
     .replace(/^\uFEFF/, "")
@@ -23,8 +24,11 @@ export function importLyrics(
   format: "txt" | "lrc" | "json",
   duration: number | null,
 ): { lyrics: KaraokeLyrics; suggestedEnds: boolean } {
-  if (new TextEncoder().encode(input).byteLength > MAX_LYRICS_BYTES)
-    throw new Error("File lời không được quá 256 KiB.");
+  if (
+    new TextEncoder().encode(input).byteLength >
+    (format === "json" ? MAX_LYRICS_JSON_BYTES : MAX_LYRICS_BYTES)
+  )
+    throw new Error("File lời vượt giới hạn: TXT/LRC 256 KiB, JSON 2 MiB.");
   const text = clean(input);
   let lines: KaraokeLine[];
   if (format === "json") {
@@ -37,12 +41,10 @@ export function importLyrics(
     const result = lyricsSchema.strict().safeParse(parsed);
     if (!result.success)
       throw new Error(
-        "JSON cần format_version: 1 và danh sách lines hợp lệ, ID UUID không trùng, thời gian nguyên hoặc null.",
+        "JSON cần format_version: 1 hoặc 2 và danh sách lines hợp lệ, ID UUID không trùng, thời gian nguyên hoặc null.",
       );
-    lines = result.data.lines.map((item) => ({
-      ...item,
-      text: clean(item.text).trim(),
-    }));
+    if (!result.data.lines.length) throw new Error("Cần ít nhất một dòng lời.");
+    return { lyrics: result.data, suggestedEnds: false };
   } else if (format === "txt") {
     lines = text
       .split("\n")
