@@ -487,10 +487,18 @@ export function AdminVireadTrainingScreen() {
                         Mã lỗi: {job.last_error_code}
                       </p>
                     ) : null}
-                    {job.status === "FAILED" &&
+                    {(job.status === "FAILED" ||
+                      (job.status === "BLOCKED" &&
+                        job.run_status === "TRAINING" &&
+                        job.last_error_code ===
+                          "COLAB_RETRY_REQUIRES_RUN_RECOVERY")) &&
                     job.target === "COLAB" &&
                     job.attempts < 3 &&
-                    !job.run_id &&
+                    (!job.run_id ||
+                      (job.run_status === "TRAINING" &&
+                        (job.last_error_code === "HTTPERROR" ||
+                          job.last_error_code ===
+                            "COLAB_RETRY_REQUIRES_RUN_RECOVERY"))) &&
                     !job.colab_execution_id &&
                     !job.colab_execution_resource_name &&
                     !job.colab_operation_name ? (
@@ -503,8 +511,9 @@ export function AdminVireadTrainingScreen() {
                           Thử lại job này
                         </Button>
                         <p className="mt-1 text-xs text-muted">
-                          Thử lại job lỗi trước khi tạo run; giữ nguyên dataset
-                          và lineage. Locked Test không bắt buộc để train.
+                          Thử lại trước khi train hoặc tiếp tục tải checkpoint
+                          bị gián đoạn; giữ nguyên dataset và lineage. Locked
+                          Test không bắt buộc để train.
                         </p>
                       </div>
                     ) : null}

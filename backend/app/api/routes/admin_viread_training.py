@@ -154,7 +154,28 @@ async def retry_failed_viread_colab_training_job(
         and row["last_error_code"] in {"HTTPERROR", "COLAB_FAILURE_REQUIRES_RUN_RECOVERY"}
     )
     retry_before_run = row["status"] == "FAILED" and row["run_id"] is None
-    if not retry_before_run and not retry_candidate_for_benchmark:
+    retry_partial_upload = (
+        row["status"] == "BLOCKED" and row["run_id"] is not None
+        and row["last_error_code"] == "COLAB_RETRY_REQUIRES_RUN_RECOVERY"
+        and not has_locked_test
+    )
+    if retry_partial_upload:
+        partial_run_result = await db.execute(text("""
+            SELECT id, status, profile, dataset_version_id, manifest_sha256,
+                   config_sha256, parent_checkpoint_sha256, created_by
+            FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE
+        """), {"run_id": row["run_id"]})
+        partial_run = partial_run_result.mappings().first()
+        if (not partial_run or partial_run["status"] != "TRAINING"
+                or partial_run["profile"] != row["profile"]
+                or str(partial_run["dataset_version_id"]) != str(row["dataset_version_id"])
+                or partial_run["manifest_sha256"] != row["manifest_sha256"]
+                or partial_run["config_sha256"] != row["config_sha256"]
+                or partial_run["parent_checkpoint_sha256"] != row["parent_checkpoint_sha256"]
+                or str(partial_run["created_by"]) != str(row["created_by"])):
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="The partial checkpoint upload run is missing or has different lineage")
+    if not retry_before_run and not retry_candidate_for_benchmark and not retry_partial_upload:
         await db.rollback()
         raise HTTPException(
             status_code=409,
@@ -237,16 +258,19 @@ async def retry_failed_viread_colab_training_job(
         "job_id": job_id,
         "actor_id": str(actor_id),
         "previous_error": row["last_error_code"],
-        "retry_mode": "candidate_benchmark_recovery" if retry_candidate_for_benchmark else "pre_run_retry",
+        "retry_mode": ("candidate_benchmark_recovery" if retry_candidate_for_benchmark else
+                       "partial_checkpoint_upload" if retry_partial_upload else "pre_run_retry"),
         "progress": json.dumps({
             "stage": "waiting_for_colab_worker",
             "retry_requested": True,
-            "recovery_mode": "candidate_benchmark" if retry_candidate_for_benchmark else "pre_run",
+            "recovery_mode": ("candidate_benchmark" if retry_candidate_for_benchmark else
+                              "partial_checkpoint_upload" if retry_partial_upload else "pre_run"),
         }),
     })
     await db.commit()
     return {"job_id": job_id, "status": "WAITING_FOR_COLAB_WORKER",
-            "recovery_mode": "candidate_benchmark" if retry_candidate_for_benchmark else "pre_run"}
+            "recovery_mode": ("candidate_benchmark" if retry_candidate_for_benchmark else
+                              "partial_checkpoint_upload" if retry_partial_upload else "pre_run")}
 
 
 @router.post("/admin/viread-training/jobs/{job_id}/discard-mismatched-candidate")

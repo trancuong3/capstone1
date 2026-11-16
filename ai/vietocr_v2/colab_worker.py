@@ -270,14 +270,17 @@ class ColabWorker:
             if run.get("checkpoint_sha256") != candidate["checkpoint_sha256"]:
                 raise ValueError("REGISTERED_CANDIDATE_HASH_MISMATCH")
             return run_id, run["status"], stable_candidate
-        chunks_root = run_dir / "upload-shards"
+        # Keep multipart bodies well below reverse-proxy request limits. The
+        # storage API accepts larger objects, but Render may reject 40 MiB
+        # multipart requests before FastAPI can read them.
+        chunks_root = run_dir / "upload-shards-8mib"
         manifest_path = chunks_root / "shards.manifest.json"
         if manifest_path.exists():
             shard_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if shard_manifest["sha256"] != candidate["checkpoint_sha256"]:
                 raise ValueError("CACHED_CANDIDATE_SHARDS_MISMATCH")
         else:
-            shard_manifest = shard_file(stable_candidate, chunks_root)
+            shard_manifest = shard_file(stable_candidate, chunks_root, chunk_bytes=8 * 1024 * 1024)
         for chunk in shard_manifest["chunks"]:
             with (chunks_root / chunk["name"]).open("rb") as stream:
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/chunks",
