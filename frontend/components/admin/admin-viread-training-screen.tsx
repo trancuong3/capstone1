@@ -511,9 +511,9 @@ export function AdminVireadTrainingScreen() {
                           Thử lại job này
                         </Button>
                         <p className="mt-1 text-xs text-muted">
-                          Thử lại trước khi train hoặc tiếp tục tải checkpoint bị
-                          gián đoạn; giữ nguyên dataset và lineage. Locked Test
-                          không bắt buộc để train.
+                          Thử lại trước khi train hoặc tiếp tục tải checkpoint
+                          bị gián đoạn; giữ nguyên dataset và lineage. Locked
+                          Test không bắt buộc để train.
                         </p>
                       </div>
                     ) : null}
