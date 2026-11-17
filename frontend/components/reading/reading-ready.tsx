@@ -39,7 +39,7 @@ export function ReadingReady({
             width={96}
           />
           <div>
-            <h1 className="text-[26px] font-extrabold text-ink">
+            <h1 className="text-[26px] font-semibold text-ink">
               Sẵn sàng đọc chưa nào?
             </h1>
             <p className="mt-2 text-body text-muted">
@@ -48,7 +48,7 @@ export function ReadingReady({
           </div>
         </div>
 
-        <h1 className="text-heading font-extrabold text-ink sm:hidden">
+        <h1 className="text-heading font-semibold text-ink sm:hidden">
           Sẵn sàng đọc chưa nào?
         </h1>
 
@@ -61,7 +61,7 @@ export function ReadingReady({
           width={320}
         />
 
-        <p className="hidden text-center text-label font-bold text-primary sm:block">
+        <p className="hidden text-center text-label font-semibold text-primary sm:block">
           {child.alias} · {book.title}
         </p>
 
@@ -71,7 +71,7 @@ export function ReadingReady({
             className="mt-1 size-6 shrink-0 text-primary"
           />
           <div className="text-left">
-            <p className="font-extrabold text-ink">{book.title}</p>
+            <p className="font-semibold text-ink">{book.title}</p>
             <p className="mt-1 text-sm text-muted">
               Microphone đã được kiểm tra ở bước chuẩn bị. Khi ba mẹ bắt đầu,
               ViRead sẽ mở microphone để nghe bé đọc.
@@ -80,7 +80,7 @@ export function ReadingReady({
         </div>
 
         <div className="text-left sm:text-center">
-          <p className="text-body text-ink sm:text-[26px] sm:font-bold">
+          <p className="text-body text-ink sm:text-[26px] sm:font-semibold">
             Đặt sách trước mặt bé và đọc to, tự nhiên nhé.
           </p>
           <p className="text-body text-ink sm:mt-3 sm:text-muted">

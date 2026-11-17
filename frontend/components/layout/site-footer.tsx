@@ -55,7 +55,7 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               className="min-w-0"
             >
               <h2
-                className="text-sm font-extrabold uppercase tracking-wide text-ink"
+                className="text-sm font-semibold text-ink"
                 id="footer-viread-contact"
               >
                 Thông tin liên hệ
@@ -67,7 +67,7 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                     className="mt-1 size-4 shrink-0 text-primary"
                   />
                   <span>
-                    <span className="font-bold text-ink">Địa chỉ: </span>
+                    <span className="font-semibold text-ink">Địa chỉ: </span>
                     Đại học Duy Tân
                   </span>
                 </p>
@@ -77,7 +77,7 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                     className="mt-1 size-4 shrink-0 text-primary"
                   />
                   <span>
-                    <span className="font-bold text-ink">Email: </span>
+                    <span className="font-semibold text-ink">Email: </span>
                     <a
                       className="break-words underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       href={"mailto:" + VIREAD_SUPPORT_EMAIL}
@@ -92,7 +92,9 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                     className="mt-1 size-4 shrink-0 text-primary"
                   />
                   <span>
-                    <span className="font-bold text-ink">Số điện thoại: </span>
+                    <span className="font-semibold text-ink">
+                      Số điện thoại:{" "}
+                    </span>
                     <a
                       className="underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       href="tel:0905373633"
@@ -106,7 +108,7 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
 
             <nav aria-labelledby="footer-viread-links" className="min-w-0">
               <h2
-                className="text-sm font-extrabold uppercase tracking-wide text-ink"
+                className="text-sm font-semibold text-ink"
                 id="footer-viread-links"
               >
                 Truy cập nhanh

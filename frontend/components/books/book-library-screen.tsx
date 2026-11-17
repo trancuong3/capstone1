@@ -244,7 +244,7 @@ export function BookLibraryScreen() {
                 ? `${child.alias} muốn đọc gì hôm nay?`
                 : "Bé muốn đọc gì hôm nay?"
             }
-            className="min-w-0 flex-1 text-heading font-extrabold text-ink"
+            className="min-w-0 flex-1 text-heading font-semibold text-ink"
           >
             <span className="hidden sm:inline">
               {child
@@ -274,7 +274,7 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex h-16 min-w-[132px] shrink-0 items-center justify-center gap-2 rounded-control px-4 text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "flex h-16 min-w-[132px] shrink-0 items-center justify-center gap-2 rounded-control px-4 text-button font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                     isSelected
                       ? "bg-sky text-primary-hover ring-2 ring-primary"
                       : "bg-white text-ink hover:bg-sky",

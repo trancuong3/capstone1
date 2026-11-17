@@ -54,7 +54,7 @@ export function StatusMessage({
     >
       <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
       <div className="min-w-0 text-label">
-        {title ? <p className="font-extrabold">{title}</p> : null}
+        {title ? <p className="font-semibold">{title}</p> : null}
         <div className={cn(title && "mt-1")}>{children}</div>
       </div>
     </div>

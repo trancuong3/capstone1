@@ -59,7 +59,7 @@ function PasswordField({
 }) {
   return (
     <div className="flex min-h-[88px] w-full flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-      <label className="text-label font-bold text-muted" htmlFor={id}>
+      <label className="text-label font-semibold text-muted" htmlFor={id}>
         {label}
       </label>
       <div className="flex min-w-0 items-center gap-2">
@@ -277,7 +277,7 @@ export function AccountSettingsScreen() {
             <UserRound aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">
+            <h2 className="text-lg font-semibold text-ink">
               Thông tin tài khoản
             </h2>
             <p className="text-sm text-muted">
@@ -288,14 +288,18 @@ export function AccountSettingsScreen() {
 
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Tên hiển thị</dt>
-            <dd className="mt-1 break-words text-body font-bold text-ink">
+            <dt className="text-label font-semibold text-muted">
+              Tên hiển thị
+            </dt>
+            <dd className="mt-1 break-words text-body font-semibold text-ink">
               {displayName}
             </dd>
           </div>
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Email tài khoản</dt>
-            <dd className="mt-1 break-all text-body font-bold text-ink">
+            <dt className="text-label font-semibold text-muted">
+              Email tài khoản
+            </dt>
+            <dd className="mt-1 break-all text-body font-semibold text-ink">
               {email || "Không thể tải thông tin"}
             </dd>
             <p className="mt-1 text-label text-muted">{emailStatus}</p>
@@ -307,18 +311,18 @@ export function AccountSettingsScreen() {
             ) : null}
           </div>
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">
+            <dt className="text-label font-semibold text-muted">
               Vai trò tài khoản
             </dt>
-            <dd className="mt-1 text-body font-bold text-ink">
+            <dd className="mt-1 text-body font-semibold text-ink">
               {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
             </dd>
           </div>
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">
+            <dt className="text-label font-semibold text-muted">
               Trạng thái email
             </dt>
-            <dd className="mt-1 flex items-center gap-2 text-body font-bold text-ink">
+            <dd className="mt-1 flex items-center gap-2 text-body font-semibold text-ink">
               <ShieldCheck aria-hidden="true" className="size-5 text-primary" />
               {emailStatus}
             </dd>
@@ -339,7 +343,7 @@ export function AccountSettingsScreen() {
             <LockKeyhole aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">Đổi mật khẩu</h2>
+            <h2 className="text-lg font-semibold text-ink">Đổi mật khẩu</h2>
             <p className="text-sm text-muted">
               Cập nhật mật khẩu để bảo vệ tài khoản ViRead của bạn.
             </p>
@@ -420,7 +424,7 @@ export function AccountSettingsScreen() {
             <Mail aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">
+            <h2 className="text-lg font-semibold text-ink">
               Email và xác minh
             </h2>
             <p className="text-sm text-muted">
@@ -434,7 +438,7 @@ export function AccountSettingsScreen() {
             : "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh."}
         </p>
         <Link
-          className="font-bold text-primary underline-offset-4 hover:underline"
+          className="font-semibold text-primary underline-offset-4 hover:underline"
           href="/profile"
         >
           Mở hồ sơ phụ huynh
@@ -447,7 +451,7 @@ export function AccountSettingsScreen() {
             <CalendarClock aria-hidden="true" className="size-5" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">
+            <h2 className="text-lg font-semibold text-ink">
               Quản lý lịch nhắc đọc sách
             </h2>
             <p className="text-sm text-muted">

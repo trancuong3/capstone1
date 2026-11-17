@@ -97,7 +97,7 @@ export function Modal({
         tabIndex={-1}
       >
         <div className="mb-6 flex items-start justify-between gap-4">
-          <h2 className="text-heading font-extrabold text-ink" id={titleId}>
+          <h2 className="text-heading font-semibold text-ink" id={titleId}>
             {title}
           </h2>
           {showCloseButton ? (

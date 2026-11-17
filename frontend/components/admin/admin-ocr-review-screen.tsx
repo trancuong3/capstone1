@@ -762,13 +762,13 @@ function OcrImageViewer({
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-black">Ảnh trang gốc</h2>
+        <h2 className="text-2xl font-semibold">Ảnh trang gốc</h2>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted">
             {image.width} × {image.height} px
           </span>
           <button
-            className="min-h-10 rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+            className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
             onClick={() => setIsExpanded(true)}
             ref={expandButtonRef}
             type="button"
@@ -790,11 +790,11 @@ function OcrImageViewer({
         >
           <div className="grid max-h-full w-full justify-items-center gap-3">
             <div className="flex w-full max-w-[92vw] items-center justify-between gap-3 text-white">
-              <h2 className="font-bold" id="ocr-expanded-image-title">
+              <h2 className="font-semibold" id="ocr-expanded-image-title">
                 Trang {image.page_number} · {book.title}
               </h2>
               <button
-                className="min-h-11 rounded-control bg-white px-4 font-bold text-ink hover:bg-canvas"
+                className="min-h-11 rounded-control bg-white px-4 font-semibold text-ink hover:bg-canvas"
                 onClick={() => setIsExpanded(false)}
                 ref={closeButtonRef}
                 type="button"
@@ -1831,7 +1831,7 @@ export function AdminOcrReviewScreen({
               Thử lại
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline"
               href={`/admin/books/${bookId}`}
             >
               Quay lại sách
@@ -1853,7 +1853,7 @@ export function AdminOcrReviewScreen({
         actions={<AdminStatusBadge status={detail.verification_status} />}
       />
       <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href={`/admin/books/${bookId}`}
       >
         <ArrowLeft aria-hidden className="size-5" /> Chi tiết sách
@@ -1919,7 +1919,7 @@ export function AdminOcrReviewScreen({
               ] as const
             ).map((state) => (
               <div
-                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-bold ${state.cardClass}`}
+                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-semibold ${state.cardClass}`}
                 key={state.id}
               >
                 <strong className="text-xl leading-none">{state.count}</strong>
@@ -1974,7 +1974,7 @@ export function AdminOcrReviewScreen({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
-              className="min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!nextWordToReview}
               onClick={() => {
                 if (nextWordToReview) {
@@ -1997,13 +1997,13 @@ export function AdminOcrReviewScreen({
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-black">Văn bản OCR</h2>
+                <h2 className="text-2xl font-semibold">Văn bản OCR</h2>
                 <p className="mt-1 text-sm text-muted">
                   Chỉnh nội dung tại đây; các vùng từ và ảnh sẽ được đồng bộ.
                 </p>
               </div>
             </div>
-            <label className="grid gap-2 font-bold" htmlFor="ocr-text">
+            <label className="grid gap-2 font-semibold" htmlFor="ocr-text">
               Nội dung trang
               <textarea
                 aria-describedby="ocr-help"
@@ -2034,7 +2034,7 @@ export function AdminOcrReviewScreen({
                 role="status"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-bold">
+                  <span className="font-semibold">
                     {aiProgress?.status === "QUEUED"
                       ? "AI OCR đang chờ máy xử lý"
                       : aiProgress
@@ -2079,7 +2079,7 @@ export function AdminOcrReviewScreen({
               >
                 <div>
                   <h3
-                    className="text-lg font-extrabold text-purple-950"
+                    className="text-lg font-semibold text-purple-950"
                     id="ai-correction-review-title"
                   >
                     Rà soát đề xuất AI
@@ -2092,7 +2092,7 @@ export function AdminOcrReviewScreen({
                   </p>
                   <p
                     aria-live="polite"
-                    className="mt-1 text-sm font-bold text-purple-950"
+                    className="mt-1 text-sm font-semibold text-purple-950"
                   >
                     Đã chọn {aiAcceptedChanges.size} / {aiChanges.length} đề
                     xuất. Chọn thay đổi bên dưới hoặc dùng “Chọn tất cả”.
@@ -2137,7 +2137,7 @@ export function AdminOcrReviewScreen({
                 </div>
                 <div
                   aria-live="polite"
-                  className="text-xs font-bold text-muted"
+                  className="text-xs font-semibold text-muted"
                 >
                   Trang {Math.min(aiDiffPage + 1, aiDiffPageCount)} /{" "}
                   {aiDiffPageCount}
@@ -2338,7 +2338,7 @@ export function AdminOcrReviewScreen({
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
+                <h2 className="text-2xl font-semibold">Danh sách từ OCR</h2>
                 <p className="mt-1 text-sm text-muted">
                   Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần kiểm
                   tra; {colorCounts.green} từ đã có evidence tốt, nhưng nhóm
@@ -2375,7 +2375,9 @@ export function AdminOcrReviewScreen({
               className="mb-4 rounded-control border border-border bg-canvas px-3 py-2 text-sm text-muted"
               role="status"
             >
-              <span className="font-bold">Đối chiếu văn bản ↔ vùng OCR: </span>
+              <span className="font-semibold">
+                Đối chiếu văn bản ↔ vùng OCR:{" "}
+              </span>
               {textAlignment.canCompare ? (
                 <>
                   {textAlignment.matched}/{words.length} từ khớp ·{" "}
@@ -2432,7 +2434,7 @@ export function AdminOcrReviewScreen({
               ).map((filter) => (
                 <button
                   aria-pressed={wordFilter === filter.id}
-                  className={`min-h-10 rounded-full border px-3 text-sm font-bold ${
+                  className={`min-h-10 rounded-full border px-3 text-sm font-semibold ${
                     wordFilter === filter.id
                       ? filter.id === "risk" || filter.id === "disagreement"
                         ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
@@ -2519,7 +2521,7 @@ export function AdminOcrReviewScreen({
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <button
                           aria-pressed={word.word_index === selectedWord}
-                          className="rounded-sm text-left text-sm font-extrabold text-primary underline underline-offset-2"
+                          className="rounded-sm text-left text-sm font-semibold text-primary underline underline-offset-2"
                           onClick={() => selectWordOnImage(word.word_index)}
                           type="button"
                         >
@@ -2527,7 +2529,7 @@ export function AdminOcrReviewScreen({
                         </button>
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <span
-                            className={`rounded border px-2 py-0.5 text-xs font-bold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
+                            className={`rounded border px-2 py-0.5 text-xs font-semibold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
                           >
                             {reviewLabel}
                           </span>
@@ -2538,7 +2540,7 @@ export function AdminOcrReviewScreen({
                         <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
                           {reviewStatus === "confirmed_mismatch" ? (
                             <>
-                              <span className="font-bold">
+                              <span className="font-semibold">
                                 Reference đã xác minh không khớp
                               </span>
                               <span className="break-words">
@@ -2550,7 +2552,7 @@ export function AdminOcrReviewScreen({
                             </>
                           ) : (
                             <>
-                              <span className="font-bold">
+                              <span className="font-semibold">
                                 Reference mismatch đã được xác nhận
                               </span>
                               <span className="break-words">
@@ -2572,7 +2574,7 @@ export function AdminOcrReviewScreen({
                       ) : null}
 
                       <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
-                        <span className="text-xs font-bold text-muted">
+                        <span className="text-xs font-semibold text-muted">
                           Văn bản trang ↔ từ gắn với vùng ảnh
                         </span>
                         <span className="break-words font-semibold">
@@ -2580,14 +2582,14 @@ export function AdminOcrReviewScreen({
                             ? `${draftToken} ↔ ${word.text}`
                             : "Không thể ghép từ này theo vị trí hiện tại"}
                           {canCompareToken ? (
-                            <span className="ml-2 whitespace-nowrap text-xs font-bold text-muted">
+                            <span className="ml-2 whitespace-nowrap text-xs font-semibold text-muted">
                               {tokenMatches ? "Khớp" : "Cần đối chiếu"}
                             </span>
                           ) : null}
                         </span>
                       </div>
 
-                      <label className="grid gap-1 text-sm font-bold">
+                      <label className="grid gap-1 text-sm font-semibold">
                         Chỉnh từ OCR - Từ {word.word_index + 1}
                         <input
                           className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
@@ -2604,14 +2606,14 @@ export function AdminOcrReviewScreen({
                         />
                       </label>
                       <details className="mt-2 rounded-control border border-border bg-white">
-                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
+                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
                           Tọa độ vùng ảnh · chỉnh sửa nâng cao
                         </summary>
                         <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
                           {(["x", "y", "w", "h"] as const).map(
                             (label, coordinate) => (
                               <label
-                                className="grid gap-1 text-xs font-bold"
+                                className="grid gap-1 text-xs font-semibold"
                                 key={label}
                               >
                                 {label}
@@ -2641,7 +2643,7 @@ export function AdminOcrReviewScreen({
                         className="mt-2 rounded-control border border-border bg-canvas"
                         open={word.word_index === selectedWord}
                       >
-                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
+                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
                           Bằng chứng nhận dạng ·{" "}
                           {getWordScoreLabel(word, detail.ocr_metadata)}
                         </summary>
@@ -2649,7 +2651,9 @@ export function AdminOcrReviewScreen({
                           aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
                           className="grid gap-1 border-t border-border px-3 py-3 text-xs"
                         >
-                          <h3 className="text-sm font-bold">Bằng chứng OCR</h3>
+                          <h3 className="text-sm font-semibold">
+                            Bằng chứng OCR
+                          </h3>
                           <span>
                             PaddleOCR:{" "}
                             {getEngineEvidenceDisplay(
@@ -2899,7 +2903,7 @@ export function AdminOcrReviewScreen({
           </Card>
 
           <Card className="bg-white">
-            <h2 className="mb-3 text-2xl font-black">Lịch sử revision</h2>
+            <h2 className="mb-3 text-2xl font-semibold">Lịch sử revision</h2>
             <div className="grid gap-2">
               {history.map((revision) => (
                 <button
@@ -2913,7 +2917,7 @@ export function AdminOcrReviewScreen({
                   onClick={() => void chooseRevision(revision.page_revision_id)}
                   type="button"
                 >
-                  <span className="font-bold">
+                  <span className="font-semibold">
                     Revision R{revision.revision_no}
                   </span>
                   <span className="ml-2 text-sm text-muted">
@@ -2925,7 +2929,7 @@ export function AdminOcrReviewScreen({
             </div>
             <div className="mt-4 grid gap-3">
               <label
-                className="grid gap-2 text-sm font-bold"
+                className="grid gap-2 text-sm font-semibold"
                 htmlFor="replacement-page-image"
               >
                 Tải ảnh mới cho riêng trang này

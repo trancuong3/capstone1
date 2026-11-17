@@ -66,10 +66,10 @@ export function AdminHealthScreen() {
           <Card className="mb-6 bg-white">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-bold text-muted">
+                <p className="text-sm font-semibold text-muted">
                   Trạng thái các dịch vụ đã kiểm tra
                 </p>
-                <h2 className="text-2xl font-black">ViRead</h2>
+                <h2 className="text-2xl font-semibold">ViRead</h2>
               </div>
               <AdminStatusBadge status={snapshot.overall_status} />
             </div>
@@ -82,7 +82,7 @@ export function AdminHealthScreen() {
             {snapshot.services.map((service) => (
               <Card className="bg-white" key={service.id}>
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-xl font-black">{service.label}</h2>
+                  <h2 className="text-xl font-semibold">{service.label}</h2>
                   <AdminStatusBadge status={service.status} />
                 </div>
                 <p className="text-muted">{service.safe_message}</p>

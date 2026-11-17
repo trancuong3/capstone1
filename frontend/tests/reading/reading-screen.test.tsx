@@ -528,7 +528,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await waitFor(() => expect(speechPlayerMock.play).toHaveBeenCalledOnce());
     await user.click(screen.getByRole("button", { name: /^mèo$/ }));
     await waitFor(() => expect(speechPlayerMock.play).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Đọc mẫu 1 chữ:")).toBeInTheDocument();
+    expect(screen.getByText("Đọc mẫu từ")).toBeInTheDocument();
     expect(screen.queryByText("Đọc mẫu cả đoạn:")).not.toBeInTheDocument();
     await act(async () => finishSecond());
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
@@ -2662,7 +2662,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     const user = userEvent.setup();
     renderReading("question");
-    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé!" });
+    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé" });
     expect(document.body.textContent).not.toContain("expected_answer");
     await user.click(await screen.findByRole("button", { name: /Trên bàn/ }));
     expect(
@@ -2670,7 +2670,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Bên cửa sổ/ }));
     expect(
-      await screen.findByText("Đúng rồi! Bé nhớ rất tốt."),
+      await screen.findByText("Đúng rồi. Bé nhớ rất tốt."),
     ).toBeInTheDocument();
     expect(services.comprehensionService.submitAnswer).toHaveBeenLastCalledWith(
       TEST_SESSION_ID,

@@ -229,10 +229,8 @@ export function ParentProfileForm({
       onSubmit={(event) => void saveChanges(event)}
     >
       <header>
-        <p className="text-label font-bold text-primary">HỒ SƠ TÀI KHOẢN</p>
-        <h2 className="mt-1 text-xl font-extrabold text-ink">
-          Chỉnh sửa hồ sơ
-        </h2>
+        <p className="text-label font-semibold text-primary">HỒ SƠ TÀI KHOẢN</p>
+        <h2 className="mt-1 text-xl font-semibold text-ink">Chỉnh sửa hồ sơ</h2>
       </header>
 
       <ProfileAvatarUpload
@@ -306,14 +304,16 @@ export function ParentProfileForm({
 
       <dl className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-control bg-canvas p-4">
-          <dt className="text-sm font-bold text-muted">Vai trò</dt>
-          <dd className="mt-1 text-label font-bold text-ink">
+          <dt className="text-sm font-semibold text-muted">Vai trò</dt>
+          <dd className="mt-1 text-label font-semibold text-ink">
             {getRoleLabel(profile.role)}
           </dd>
         </div>
         <div className="rounded-control bg-canvas p-4">
-          <dt className="text-sm font-bold text-muted">Ngày tạo tài khoản</dt>
-          <dd className="mt-1 text-label font-bold text-ink">
+          <dt className="text-sm font-semibold text-muted">
+            Ngày tạo tài khoản
+          </dt>
+          <dd className="mt-1 text-label font-semibold text-ink">
             {formatCreatedDate(profile.created_at)}
           </dd>
         </div>

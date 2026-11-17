@@ -17,7 +17,7 @@ export function StatusBanner({
     <div
       aria-live="polite"
       className={cn(
-        "rounded-control px-4 py-3 text-center text-label font-bold shadow-sm",
+        "rounded-control px-4 py-3 text-center text-label font-semibold shadow-sm",
         tone === "warning"
           ? "bg-warning-surface text-warning"
           : "bg-sky text-primary-hover",

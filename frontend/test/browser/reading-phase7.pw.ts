@@ -250,17 +250,17 @@ test("Phase 7: 200 percent reading zoom keeps text and controls reachable", asyn
   expect(fixture.unexpected).toEqual([]);
 });
 
-test("Phase 7: reduced motion limits microphone animation and releases audio on pause", async ({
+test("Phase 7: microphone indicator stays static and audio releases on pause", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   const fixture = await installReadingExperience(page);
   await page.getByRole("button", { name: startName }).click();
-  const pulse = page
+  const indicator = page
     .getByRole("button", { name: stopName })
-    .locator(".animate-ping");
-  await expect(pulse).toBeVisible();
-  const animation = await pulse.evaluate((element) => {
+    .locator(".bg-red-300");
+  await expect(indicator).toBeVisible();
+  const animation = await indicator.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       duration: parseFloat(style.animationDuration),

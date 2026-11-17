@@ -65,7 +65,7 @@ export function ProfileAvatar({
     <span
       aria-label={label}
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky font-extrabold leading-none text-primary",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky font-semibold leading-none text-primary",
         avatarSizes[size],
         className,
       )}

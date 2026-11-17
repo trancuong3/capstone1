@@ -78,10 +78,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     <section className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-[1100px] flex-col gap-5 px-4 py-6 sm:py-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-label font-bold uppercase tracking-wide text-primary">
-            ViRead · Quét trang sách
-          </p>
-          <h1 className="mt-1 text-heading font-extrabold text-ink">
+          <p className="text-sm font-semibold text-primary">Quét trang sách</p>
+          <h1 className="mt-1 text-heading font-semibold text-ink">
             Đưa trang sách vào khung camera
           </h1>
           <p className="mt-2 max-w-[720px] text-body leading-7 text-muted">
@@ -117,7 +115,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             <Camera aria-hidden="true" className="size-8" />
           </span>
           <div>
-            <h2 className="text-xl font-extrabold text-ink">Camera đang tắt</h2>
+            <h2 className="text-xl font-semibold text-ink">Camera đang tắt</h2>
             <p className="mt-2 max-w-[520px] text-body text-muted">
               ViRead chỉ yêu cầu camera sau khi ba mẹ bấm nút bên dưới. Trang
               quét này không yêu cầu quyền microphone.

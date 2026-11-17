@@ -85,7 +85,7 @@ export function ProfileAvatarUpload({
       />
 
       <div className="flex min-w-0 flex-col items-start gap-2">
-        <p className="text-label font-bold text-ink">Ảnh đại diện</p>
+        <p className="text-label font-semibold text-ink">Ảnh đại diện</p>
         <div className="flex flex-wrap gap-2">
           <input
             accept="image/jpeg,image/png,image/webp"

@@ -107,7 +107,7 @@ function OcrLink({
     : "";
   return (
     <Link
-      className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+      className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
       href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(finding.page_id)}${query}`}
     >
       {children}
@@ -132,10 +132,10 @@ function FindingCard({
   return (
     <article className="rounded-control border border-border bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="font-bold text-ink">
+        <div className="font-semibold text-ink">
           Trang {finding.page_number} · {finding.issue_type}
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-bold">
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
           <span className="rounded-full bg-canvas px-3 py-1">
             {finding.severity}
           </span>
@@ -510,7 +510,7 @@ export function AdminBookContentQualityScreen() {
               key={key}
             >
               <p className="text-sm text-muted">{label}</p>
-              <p className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
                 {reportSummary?.[key] ?? "—"}
               </p>
             </div>
@@ -521,7 +521,7 @@ export function AdminBookContentQualityScreen() {
       <section className="rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">
+            <h2 className="text-xl font-semibold text-ink">
               Báo cáo từ phụ huynh
             </h2>
             <p className="mt-1 text-sm text-muted">
@@ -654,7 +654,9 @@ export function AdminBookContentQualityScreen() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="font-bold text-ink">{report.book_title}</h3>
+                    <h3 className="font-semibold text-ink">
+                      {report.book_title}
+                    </h3>
                     <p className="mt-1 text-sm text-muted">
                       {issueLabels[report.issue_type]}
                       {report.page_number !== null
@@ -667,7 +669,7 @@ export function AdminBookContentQualityScreen() {
                       {formatDate(report.created_at)}
                     </p>
                   </div>
-                  <span className="rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover">
+                  <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold text-primary-hover">
                     {reportStatusLabels[report.status]}
                   </span>
                 </div>
@@ -735,7 +737,7 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">
+              <h2 className="text-xl font-semibold text-ink">
                 Chi tiết báo cáo
               </h2>
               <p className="mt-1 break-all font-mono text-xs text-muted">
@@ -752,7 +754,9 @@ export function AdminBookContentQualityScreen() {
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <div>
-              <h3 className="font-bold text-ink">Snapshot lúc phụ huynh gửi</h3>
+              <h3 className="font-semibold text-ink">
+                Snapshot lúc phụ huynh gửi
+              </h3>
               <p className="mt-2 text-sm text-muted">
                 {selectedReport.book_title}
                 {selectedReport.page_number !== null
@@ -776,7 +780,7 @@ export function AdminBookContentQualityScreen() {
               )}
               {selectedReport.page_id && selectedReport.book_id ? (
                 <Link
-                  className="mt-3 inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+                  className="mt-3 inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
                   href={`/admin/books/${encodeURIComponent(selectedReport.book_id)}/pages/${encodeURIComponent(selectedReport.page_id)}${selectedReport.page_revision_id ? `?revisionId=${encodeURIComponent(selectedReport.page_revision_id)}` : ""}`}
                 >
                   Mở trang và ảnh gốc trong OCR Review
@@ -789,11 +793,11 @@ export function AdminBookContentQualityScreen() {
               ) : null}
             </div>
             <div>
-              <h3 className="font-bold text-ink">Lịch sử xử lý</h3>
+              <h3 className="font-semibold text-ink">Lịch sử xử lý</h3>
               <ol className="mt-2 space-y-3 border-l-2 border-border pl-4">
                 {selectedReport.history.map((item, index) => (
                   <li key={`${item.created_at}-${index}`}>
-                    <p className="text-sm font-bold text-ink">
+                    <p className="text-sm font-semibold text-ink">
                       {item.from_status
                         ? `${reportStatusLabels[item.from_status]} → `
                         : ""}
@@ -809,7 +813,9 @@ export function AdminBookContentQualityScreen() {
                   </li>
                 ))}
               </ol>
-              <h3 className="mt-5 font-bold text-ink">Findings liên quan</h3>
+              <h3 className="mt-5 font-semibold text-ink">
+                Findings liên quan
+              </h3>
               {selectedReport.related_findings.length ? (
                 <div className="mt-2 grid gap-2">
                   {selectedReport.related_findings.map((finding) => (
@@ -817,7 +823,7 @@ export function AdminBookContentQualityScreen() {
                       className="rounded-control bg-canvas p-3"
                       key={finding.id}
                     >
-                      <p className="text-sm font-bold text-ink">
+                      <p className="text-sm font-semibold text-ink">
                         Trang {finding.page_number} · {finding.issue_type}
                       </p>
                       <p className="mt-1 text-xs text-muted">
@@ -840,7 +846,7 @@ export function AdminBookContentQualityScreen() {
           </div>
           <div className="mt-5 border-t border-border pt-4">
             <label
-              className="block text-sm font-bold text-ink"
+              className="block text-sm font-semibold text-ink"
               htmlFor="report-resolution-note"
             >
               Ghi chú xử lý của Admin
@@ -930,7 +936,7 @@ export function AdminBookContentQualityScreen() {
       <section className="mt-8 rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">
+            <h2 className="text-xl font-semibold text-ink">
               Kiểm tra nội dung toàn sách
             </h2>
             <p className="mt-1 text-sm text-muted">
@@ -973,7 +979,9 @@ export function AdminBookContentQualityScreen() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="font-bold text-ink">{book.book_title}</h3>
+                    <h3 className="font-semibold text-ink">
+                      {book.book_title}
+                    </h3>
                     <p className="mt-1 text-sm text-muted">
                       {book.report_count} báo cáo · {book.finding_count}{" "}
                       findings · {book.needs_review_finding_count} cần xem xét
@@ -1057,7 +1065,7 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">
+              <h2 className="text-xl font-semibold text-ink">
                 {selectedBook.book_title}
               </h2>
               <p className="mt-1 text-sm text-muted">
@@ -1090,7 +1098,7 @@ export function AdminBookContentQualityScreen() {
           </div>
 
           <div className="mt-4">
-            <h3 className="font-bold text-ink">Lịch sử scan</h3>
+            <h3 className="font-semibold text-ink">Lịch sử scan</h3>
             {selectedBook.scans.length ? (
               <div className="mt-2 flex flex-wrap gap-2">
                 {selectedBook.scans.map((scan) => (
@@ -1117,7 +1125,7 @@ export function AdminBookContentQualityScreen() {
           {selectedScan ? (
             <div className="mt-5 border-t border-border pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-bold text-ink">
+                <h3 className="font-semibold text-ink">
                   Kết quả scan · {scanStatusLabels[selectedScan.status]}
                 </h3>
                 <span className="font-mono text-xs text-muted">
@@ -1137,7 +1145,7 @@ export function AdminBookContentQualityScreen() {
                     key={String(label)}
                   >
                     <p className="text-xs text-muted">{label}</p>
-                    <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">
+                    <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
                       {value}
                     </p>
                   </div>
@@ -1163,7 +1171,7 @@ export function AdminBookContentQualityScreen() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h4 className="font-bold text-ink">
+                        <h4 className="font-semibold text-ink">
                           Trang {page.page_number}
                         </h4>
                         <p className="mt-1 text-xs text-muted">
@@ -1188,7 +1196,7 @@ export function AdminBookContentQualityScreen() {
                       <div className="flex flex-wrap gap-2">
                         {page.page_id ? (
                           <Link
-                            className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+                            className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
                             href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(page.page_id)}${page.page_revision_id ? `?revisionId=${encodeURIComponent(page.page_revision_id)}` : ""}`}
                           >
                             Kiểm tra và sửa trang

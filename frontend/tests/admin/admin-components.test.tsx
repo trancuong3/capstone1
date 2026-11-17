@@ -56,7 +56,7 @@ describe("admin components", () => {
 
     const outsideButton = render(<Button>Parent action</Button>);
     expect(within(outsideButton.container).getByRole("button")).toHaveClass(
-      "h-16",
+      "min-h-12",
     );
   });
 

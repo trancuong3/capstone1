@@ -41,14 +41,14 @@ export function DifficultWordItem({ childId, word }: DifficultWordItemProps) {
   }
 
   return (
-    <article className="rounded-card bg-white p-5 shadow-[0_12px_32px_rgba(33,65,86,0.06)] sm:p-6">
+    <article className="rounded-card border border-border bg-white p-5 sm:p-6">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-[30px] font-extrabold leading-tight text-ink">
+            <h2 className="text-2xl font-semibold leading-tight text-ink">
               {word.display_text}
             </h2>
-            <span className="rounded-full bg-warning-surface px-3 py-1 text-label font-bold text-warning">
+            <span className="rounded-full bg-warning-surface px-3 py-1 text-label font-semibold text-warning">
               Điểm bằng chứng {word.difficulty_score}
             </span>
           </div>

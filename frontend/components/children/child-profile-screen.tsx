@@ -335,7 +335,7 @@ export function ChildProfileScreen({
       <section className="mx-auto w-full max-w-[640px]">
         <Card>
           <div>
-            <h1 className="text-heading font-extrabold text-ink">{title}</h1>
+            <h1 className="text-heading font-semibold text-ink">{title}</h1>
 
             <p className="mt-4 text-body text-muted sm:mt-6">{description}</p>
           </div>

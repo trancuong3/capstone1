@@ -88,7 +88,7 @@ export function AdminNewBookScreen() {
         description="Tạo đầu sách trong PostgreSQL trước khi tải ảnh các trang và chạy OCR."
       />
       <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href="/admin/books"
       >
         <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
@@ -100,7 +100,7 @@ export function AdminNewBookScreen() {
           </StatusMessage>
         ) : null}
         <form className="grid gap-5" noValidate onSubmit={submit}>
-          <label className="grid gap-2 font-bold" htmlFor="book-name">
+          <label className="grid gap-2 font-semibold" htmlFor="book-name">
             Tên sách *
             <input
               id="book-name"
@@ -125,7 +125,7 @@ export function AdminNewBookScreen() {
               </span>
             ) : null}
           </label>
-          <label className="grid gap-2 font-bold" htmlFor="book-title">
+          <label className="grid gap-2 font-semibold" htmlFor="book-title">
             Tiêu đề sách *
             <input
               id="book-title"
@@ -150,7 +150,7 @@ export function AdminNewBookScreen() {
               </span>
             ) : null}
           </label>
-          <label className="grid gap-2 font-bold" htmlFor="book-author">
+          <label className="grid gap-2 font-semibold" htmlFor="book-author">
             Tác giả{" "}
             <span className="font-normal text-muted">(không bắt buộc)</span>
             <input
@@ -162,7 +162,10 @@ export function AdminNewBookScreen() {
             />
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 font-bold" htmlFor="book-min-grade">
+            <label
+              className="grid gap-2 font-semibold"
+              htmlFor="book-min-grade"
+            >
               Khối lớp nhỏ nhất *
               <select
                 id="book-min-grade"
@@ -178,7 +181,10 @@ export function AdminNewBookScreen() {
                 ))}
               </select>
             </label>
-            <label className="grid gap-2 font-bold" htmlFor="book-max-grade">
+            <label
+              className="grid gap-2 font-semibold"
+              htmlFor="book-max-grade"
+            >
               Khối lớp lớn nhất *
               <select
                 id="book-max-grade"

@@ -208,6 +208,35 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin === "http://127.0.0.1:3106") return route.continue();
+    if (
+      url.hostname === "example.supabase.co" &&
+      url.pathname === "/auth/v1/user"
+    ) {
+      if (request.method() === "OPTIONS")
+        return route.fulfill({
+          status: 204,
+          headers: { ...headers, "access-control-allow-credentials": "true" },
+        });
+      if (request.method() === "GET")
+        return route.fulfill({
+          status: 200,
+          headers: {
+            ...headers,
+            "access-control-allow-credentials": "true",
+          },
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: ids.parent,
+            aud: "authenticated",
+            role: "authenticated",
+            email: "parent@example.test",
+            app_metadata: {},
+            user_metadata: { display_name: "Ba mẹ API" },
+            created_at: timestamp,
+            updated_at: timestamp,
+          }),
+        });
+    }
     // Every other origin is intercepted: no real network calls can escape.
     if (url.origin !== "http://127.0.0.1:8000") {
       state.unexpected.push(`external:${url.hostname}`);
@@ -387,6 +416,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (
       path === "/reading-management/collections" ||
       path === "/reading-management/goals" ||
+      path === "/reading-management/plans" ||
       path === "/reading-management/reminders" ||
       path === "/reading-management/reminders/due"
     )
@@ -403,6 +433,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (path === `/profiles/children/${ids.child}`)
       return respond(route, child);
     if (path.startsWith("/profiles/children/")) return respond(route, {}, 404);
+    if (path === "/profiles/admin/parents")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === `/profiles/admin/parents/${ids.parent}`)
+      return respond(route, {
+        id: ids.parent,
+        display_name: "Ba mẹ API",
+        email: "parent@example.test",
+        phone: null,
+        created_at: timestamp,
+        children: [child],
+        contact_info_status: "not_configured",
+      });
     if (path === "/books/catalog") {
       if (state.catalogStatus !== 200)
         return respond(
@@ -424,8 +471,26 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       );
     }
     if (path === `/books/catalog/${ids.book}`) return respond(route, book);
-    if (path === `/books/catalog/${ids.book}/preview`)
-      return respond(route, [], state.previewStatus);
+    if (path === `/books/catalog/${ids.book}/preview`) {
+      if (state.previewStatus !== 200)
+        return respond(route, [], state.previewStatus);
+      return respond(route, [
+        {
+          page_id: ids.page,
+          page_number: 1,
+          lifecycle_status: "ACTIVE",
+          current_verified_revision_id: ids.revision,
+          preview_url: "http://127.0.0.1:8000/test-page.svg",
+        },
+      ]);
+    }
+    if (path === "/books/reports/mine")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 20),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
     if (path.startsWith("/books/catalog/")) return respond(route, {}, 404);
     if (path === "/reading/history")
       return respond(
@@ -539,6 +604,47 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           }),
         ),
       );
+    if (path === "/books/admin/metadata-quality")
+      return respond(route, {
+        summary: {
+          total_books: 0,
+          books_with_issues: 0,
+          missing_title: 0,
+          missing_author: 0,
+          invalid_grade_range: 0,
+          possible_duplicate_groups: 0,
+          books_in_duplicate_groups: 0,
+          checked_at: timestamp,
+        },
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/quality/reports")
+      return respond(route, {
+        items: [],
+        total: 0,
+        summary: {},
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/quality/books")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/viread-training/overview")
+      return respond(route, {
+        outbox: [],
+        samples: [],
+        jobs: [],
+        runs: [],
+        benchmarks: [],
+        active_model: null,
+      });
     if (
       state.createdBook &&
       path === `/books/admin/catalog/${state.createdBook.id}`

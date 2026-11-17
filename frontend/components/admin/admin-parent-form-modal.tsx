@@ -195,7 +195,9 @@ export function AdminParentFormModal({
           className="grid min-h-40 place-items-center text-center"
           role="status"
         >
-          <p className="font-bold text-muted">Đang tải thông tin tài khoản…</p>
+          <p className="font-semibold text-muted">
+            Đang tải thông tin tài khoản…
+          </p>
         </div>
       ) : (
         <form className="grid gap-4" noValidate onSubmit={handleSubmit}>

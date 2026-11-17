@@ -12,7 +12,7 @@ export function ReadingProgress({
   return (
     <div
       aria-live="polite"
-      className="flex flex-wrap items-center justify-center gap-x-16 gap-y-2 text-label font-bold text-muted"
+      className="flex flex-wrap items-center justify-center gap-x-16 gap-y-2 text-label font-semibold text-muted"
       role="status"
     >
       <span className="inline-flex items-center gap-2">

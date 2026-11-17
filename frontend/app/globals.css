@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --ra-color-primary: #147d87;
-  --ra-color-primary-hover: #0e6d76;
-  --ra-color-ink: #213c42;
-  --ra-color-muted: #526970;
-  --ra-color-canvas: #f6faf8;
-  --ra-color-cream: #fff8eb;
-  --ra-color-sky: #ddf3f5;
+  --ra-color-primary: #176c68;
+  --ra-color-primary-hover: #105954;
+  --ra-color-ink: #263a38;
+  --ra-color-muted: #596b67;
+  --ra-color-canvas: #f7f7f3;
+  --ra-color-cream: #f4f0e6;
+  --ra-color-sky: #e4efeb;
   --ra-color-white: #ffffff;
-  --ra-color-border: #d5e3de;
+  --ra-color-border: #d8dfda;
   --ra-color-green: #e5f2dc;
   --ra-color-orange: #fbe5cb;
   --ra-color-green-ink: #3b6a46;
@@ -19,19 +19,19 @@
   --ra-color-danger-surface: #fdebec;
   --ra-color-warning: #765b12;
   --ra-color-warning-surface: #fff3c4;
-  --ra-color-desk: #dce8e4;
-  --ra-color-highlight: #ffd968;
+  --ra-color-desk: #e7e5dc;
+  --ra-color-highlight: #ffd766;
   --ra-gap-4: 4px;
   --ra-gap-8: 8px;
   --ra-gap-12: 12px;
   --ra-gap-16: 16px;
   --ra-gap-24: 24px;
   --ra-gap-32: 32px;
+  --ra-radius-12: 12px;
   --ra-radius-16: 16px;
-  --ra-radius-24: 24px;
-  --ra-font-size-heading: 32px;
-  --ra-font-size-body: 20px;
-  --ra-font-size-label: 16px;
+  --ra-font-size-heading: 30px;
+  --ra-font-size-body: 16px;
+  --ra-font-size-label: 14px;
   --ra-line-height-copy: 1.4;
 }
 
@@ -66,8 +66,8 @@
   --color-warning-surface: var(--ra-color-warning-surface);
   --color-desk: var(--ra-color-desk);
   --color-highlight: var(--ra-color-highlight);
-  --radius-control: var(--ra-radius-16);
-  --radius-card: var(--ra-radius-24);
+  --radius-control: var(--ra-radius-12);
+  --radius-card: var(--ra-radius-16);
 }
 
 * {
@@ -108,12 +108,8 @@ a {
 :where(button, a, input, textarea, select, summary) {
   transition-property:
     color, background-color, border-color, box-shadow, opacity, transform;
-  transition-duration: 160ms;
+  transition-duration: 140ms;
   transition-timing-function: ease-out;
-}
-
-button:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 button:disabled {

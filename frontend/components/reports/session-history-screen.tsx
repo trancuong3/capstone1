@@ -131,7 +131,7 @@ export function SessionHistoryScreen({
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-extrabold text-ink">
+        <h1 className="text-heading font-semibold text-ink">
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">

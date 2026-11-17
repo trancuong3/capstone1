@@ -6,12 +6,12 @@ interface ProgressChartProps {
 
 export function ProgressChart({ report }: ProgressChartProps) {
   const rows = [
-    { label: "Bỏ sót", value: report.omission_count, color: "bg-[#ffad7a]" },
+    { label: "Bỏ sót", value: report.omission_count, color: "bg-primary" },
     { label: "Lặp từ", value: report.repetition_count, color: "bg-primary" },
     {
       label: "Dừng lâu",
       value: report.long_pause_count,
-      color: "bg-[#86c8bc]",
+      color: "bg-primary",
     },
   ] as const;
   const maxValue = Math.max(...rows.map((row) => row.value ?? 0), 1);
@@ -19,10 +19,10 @@ export function ProgressChart({ report }: ProgressChartProps) {
   return (
     <section
       aria-labelledby="reading-evidence-title"
-      className="rounded-card bg-white p-5 shadow-[0_12px_32px_rgba(33,65,86,0.06)] sm:p-8"
+      className="rounded-card border border-border bg-white p-5 sm:p-6"
     >
       <h2
-        className="text-2xl font-extrabold text-ink"
+        className="text-xl font-semibold text-ink"
         id="reading-evidence-title"
       >
         Thống kê trong báo cáo đã lưu
@@ -39,7 +39,7 @@ export function ProgressChart({ report }: ProgressChartProps) {
             className="flex h-full min-w-0 flex-1 flex-col justify-end"
             key={row.label}
           >
-            <span className="mb-2 text-center text-lg font-extrabold text-ink">
+            <span className="mb-2 text-center text-lg font-semibold text-ink">
               {row.value ?? "Chưa có dữ liệu"}
             </span>
             <div
@@ -48,7 +48,7 @@ export function ProgressChart({ report }: ProgressChartProps) {
                 height: `${((row.value ?? 0) / maxValue) * 132}px`,
               }}
             />
-            <span className="mt-3 text-center text-label font-bold text-muted">
+            <span className="mt-3 text-center text-label font-semibold text-muted">
               {row.label}
             </span>
           </div>

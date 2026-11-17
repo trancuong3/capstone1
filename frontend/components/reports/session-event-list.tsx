@@ -42,7 +42,7 @@ export function SessionEventList({ events }: SessionEventListProps) {
     <div className="flex flex-col gap-5">
       {retryEvents.length > 0 ? (
         <section aria-label="Kết quả đọc lại" className="flex flex-col gap-3">
-          <h3 className="text-lg font-extrabold text-ink">Kết quả đọc lại</h3>
+          <h3 className="text-lg font-semibold text-ink">Kết quả đọc lại</h3>
           <ol className="flex flex-col gap-3">
             {retryEvents.map((event) => {
               const metadata = event.metadata;
@@ -56,14 +56,14 @@ export function SessionEventList({ events }: SessionEventListProps) {
                   key={event.id}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-extrabold text-ink">
+                    <p className="font-semibold text-ink">
                       {event.status === "CONFIRMED"
                         ? "Đã đọc đúng ở lượt đọc lại"
                         : event.status === "FAILED"
                           ? "Chưa đọc đúng ở lượt đọc lại"
                           : "Kết quả đọc lại chưa chắc chắn"}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-bold text-primary-hover">
+                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
                       {typeof attempt === "number" && Number.isInteger(attempt)
                         ? `Lần thử ${attempt}`
                         : statusLabels[event.status]}
@@ -99,7 +99,7 @@ export function SessionEventList({ events }: SessionEventListProps) {
           className="flex flex-col gap-3"
         >
           {retryEvents.length > 0 ? (
-            <h3 className="text-lg font-extrabold text-ink">
+            <h3 className="text-lg font-semibold text-ink">
               Sự kiện lượt đọc đầu
             </h3>
           ) : null}
@@ -120,10 +120,10 @@ export function SessionEventList({ events }: SessionEventListProps) {
                   key={event.id}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-extrabold text-ink">
+                    <p className="font-semibold text-ink">
                       {eventLabels[event.type]}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-bold text-primary-hover">
+                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
                       {statusLabels[event.status]}
                     </span>
                   </div>
@@ -132,7 +132,7 @@ export function SessionEventList({ events }: SessionEventListProps) {
                     sử{" "}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
-                  <p className="mt-2 text-label font-bold text-muted">
+                  <p className="mt-2 text-label font-semibold text-muted">
                     {countsAsError
                       ? "Bằng chứng lỗi đã xác nhận."
                       : "Sự kiện hỗ trợ/không chắc chắn, không tính là lỗi của bé."}

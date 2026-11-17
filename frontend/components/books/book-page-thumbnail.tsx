@@ -36,11 +36,11 @@ export function BookPageThumbnail({
           src={page.preview_url}
           unoptimized
         />
-        <span className="absolute bottom-2 left-2 right-2 z-10 text-[5px] font-bold text-ink">
+        <span className="absolute bottom-2 left-2 right-2 z-10 text-[5px] font-semibold text-ink">
           Trang sách đã được xác minh
         </span>
       </span>
-      <span className="text-body font-bold text-ink">
+      <span className="text-body font-semibold text-ink">
         Trang {page.page_number}
       </span>
     </button>

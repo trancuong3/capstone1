@@ -99,11 +99,11 @@ export function BookContentReportDialog({
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-primary">
+            <p className="text-sm font-semibold text-primary">
               ViRead · Góp ý chất lượng
             </p>
             <h2
-              className="mt-1 text-xl font-extrabold text-ink"
+              className="mt-1 text-xl font-semibold text-ink"
               id="book-content-report-title"
             >
               {pageId ? "Báo lỗi trang sách" : "Báo lỗi sách"}
@@ -117,7 +117,7 @@ export function BookContentReportDialog({
           </div>
           <button
             aria-label="Đóng biểu mẫu"
-            className="min-h-10 rounded-control px-3 font-bold text-muted hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-10 rounded-control px-3 font-semibold text-muted hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary"
             disabled={submitting}
             onClick={onClose}
             type="button"
@@ -129,7 +129,7 @@ export function BookContentReportDialog({
         {created ? (
           <div className="space-y-4" role="status">
             <div className="rounded-control border border-emerald-200 bg-emerald-50 p-4">
-              <p className="font-bold text-emerald-900">
+              <p className="font-semibold text-emerald-900">
                 Báo cáo đã được lưu thành công.
               </p>
               <p className="mt-1 text-sm text-emerald-800">
@@ -140,13 +140,13 @@ export function BookContentReportDialog({
             <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-muted">Mã báo cáo</dt>
-                <dd className="break-all font-mono font-bold text-ink">
+                <dd className="break-all font-mono font-semibold text-ink">
                   {created.id}
                 </dd>
               </div>
               <div>
                 <dt className="text-muted">Trạng thái</dt>
-                <dd className="font-bold text-ink">{created.status}</dd>
+                <dd className="font-semibold text-ink">{created.status}</dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="text-muted">Yêu cầu kiểm tra</dt>
@@ -159,7 +159,7 @@ export function BookContentReportDialog({
             <div className="flex flex-wrap gap-3">
               <Button onClick={onClose}>Hoàn tất</Button>
               <Link
-                className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-bold text-primary hover:bg-canvas"
+                className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-canvas"
                 href="/book-reports"
               >
                 Xem báo cáo của tôi
@@ -170,7 +170,7 @@ export function BookContentReportDialog({
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label
-                className="mb-2 block text-sm font-bold text-ink"
+                className="mb-2 block text-sm font-semibold text-ink"
                 htmlFor="book-report-issue"
               >
                 Loại vấn đề
@@ -193,7 +193,7 @@ export function BookContentReportDialog({
 
             <div>
               <label
-                className="mb-2 block text-sm font-bold text-ink"
+                className="mb-2 block text-sm font-semibold text-ink"
                 htmlFor="book-report-description"
               >
                 Mô tả vấn đề <span className="text-danger">*</span>
@@ -214,7 +214,7 @@ export function BookContentReportDialog({
 
             <div>
               <label
-                className="mb-2 block text-sm font-bold text-ink"
+                className="mb-2 block text-sm font-semibold text-ink"
                 htmlFor="book-report-text"
               >
                 Đoạn nội dung nghi ngờ (không bắt buộc)
@@ -231,7 +231,7 @@ export function BookContentReportDialog({
 
             <div>
               <label
-                className="mb-2 block text-sm font-bold text-ink"
+                className="mb-2 block text-sm font-semibold text-ink"
                 htmlFor="book-report-correction"
               >
                 Nội dung đề xuất sửa (không bắt buộc)

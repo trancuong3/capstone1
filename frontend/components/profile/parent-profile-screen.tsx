@@ -209,7 +209,7 @@ export function ParentProfileScreen() {
                 size="lg"
               />
               <div className="min-w-0 flex-1">
-                <h2 className="break-words text-2xl font-extrabold leading-[1.4] text-ink">
+                <h2 className="break-words text-2xl font-semibold leading-[1.4] text-ink">
                   {displayName || "Chưa cập nhật tên hiển thị"}
                 </h2>
                 <p className="mt-1 text-body text-muted">
@@ -232,11 +232,11 @@ export function ParentProfileScreen() {
 
             <dl className="mt-8 grid gap-4 sm:grid-cols-2">
               <div className="min-w-0 rounded-control bg-white p-4">
-                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                <dt className="flex items-center gap-2 text-label font-semibold text-muted">
                   <Mail aria-hidden="true" className="size-5" />
                   Email
                 </dt>
-                <dd className="mt-2 break-words text-body font-bold text-ink">
+                <dd className="mt-2 break-words text-body font-semibold text-ink">
                   {contactValue(profile.email, profile.contact_info_status)}
                 </dd>
                 <p className="mt-1 text-label text-muted">
@@ -255,31 +255,31 @@ export function ParentProfileScreen() {
               </div>
 
               <div className="min-w-0 rounded-control bg-white p-4">
-                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                <dt className="flex items-center gap-2 text-label font-semibold text-muted">
                   <Phone aria-hidden="true" className="size-5" />
                   Số điện thoại liên hệ
                 </dt>
-                <dd className="mt-2 break-words text-body font-bold text-ink">
+                <dd className="mt-2 break-words text-body font-semibold text-ink">
                   {profile.contact_phone || "Chưa cập nhật"}
                 </dd>
               </div>
 
               <div className="rounded-control bg-white p-4">
-                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                <dt className="flex items-center gap-2 text-label font-semibold text-muted">
                   <ShieldCheck aria-hidden="true" className="size-5" />
                   Vai trò
                 </dt>
-                <dd className="mt-2 text-body font-bold text-ink">
+                <dd className="mt-2 text-body font-semibold text-ink">
                   {getRoleLabel(profile.role)}
                 </dd>
               </div>
 
               <div className="rounded-control bg-white p-4">
-                <dt className="flex items-center gap-2 text-label font-bold text-muted">
+                <dt className="flex items-center gap-2 text-label font-semibold text-muted">
                   <CalendarDays aria-hidden="true" className="size-5" />
                   Ngày tạo tài khoản
                 </dt>
-                <dd className="mt-2 text-body font-bold text-ink">
+                <dd className="mt-2 text-body font-semibold text-ink">
                   {formatCreatedDate(profile.created_at)}
                 </dd>
               </div>
@@ -294,9 +294,9 @@ export function ParentProfileScreen() {
       >
         <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-label font-bold text-primary">GIA ĐÌNH</p>
+            <p className="text-label font-semibold text-primary">GIA ĐÌNH</p>
             <h2
-              className="mt-1 text-xl font-extrabold text-ink"
+              className="mt-1 text-xl font-semibold text-ink"
               id="parent-children-heading"
             >
               Hồ sơ của trẻ
@@ -306,7 +306,7 @@ export function ParentProfileScreen() {
             </p>
           </div>
           <Link
-            className="text-body font-bold text-primary underline-offset-4 hover:underline"
+            className="text-body font-semibold text-primary underline-offset-4 hover:underline"
             href="/children"
           >
             Quản lý hồ sơ trẻ
@@ -325,7 +325,7 @@ export function ParentProfileScreen() {
                     size="md"
                   />
                   <div className="min-w-0">
-                    <h3 className="break-words text-lg font-extrabold text-ink">
+                    <h3 className="break-words text-lg font-semibold text-ink">
                       {child.alias}
                     </h3>
                     <p className="mt-1 text-body text-muted">
