@@ -118,7 +118,11 @@ class AdminCatalogService:
 
     @staticmethod
     def revision_number(revision):
-        value = str(revision.RevisionNo)
+        return AdminCatalogService.revision_number_value(revision.RevisionNo)
+
+    @staticmethod
+    def revision_number_value(revision_no):
+        value = str(revision_no)
         if not value.isascii() or not value.isdecimal() or len(value) > 16 or int(value) <= 0 or int(value) > 9007199254740991:
             raise HTTPException(status_code=501, detail="Revision number contract is not available yet")
         return int(value)
@@ -149,6 +153,43 @@ class AdminCatalogService:
         return page
 
     async def list(self, search: str | None, lifecycle_status: str | None, verification_status: str | None):
+        if isinstance(self.repository, AdminCatalogRepository):
+            output = []
+            rows = await self.repository.catalog_rows(
+                search, lifecycle_status, verification_status
+            )
+            for (
+                book,
+                page_count,
+                processing_count,
+                needs_review_count,
+                verified_count,
+                unknown_status_count,
+                parent_catalog_eligible,
+            ) in rows:
+                if unknown_status_count:
+                    raise HTTPException(status_code=501, detail="Page status contract is not available yet")
+                if verification_status is not None and not {
+                    "PROCESSING": processing_count,
+                    "NEEDS_REVIEW": needs_review_count,
+                    "VERIFIED": verified_count,
+                }.get(verification_status, 0):
+                    continue
+                try:
+                    output.append(
+                        AdminCatalogBookResponse(
+                            book=AdminBookMetadataResponse.model_validate(book),
+                            page_count=page_count,
+                            processing_count=processing_count,
+                            needs_review_count=needs_review_count,
+                            verified_count=verified_count,
+                            parent_catalog_eligible=parent_catalog_eligible,
+                        )
+                    )
+                except ValidationError:
+                    raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
+            return output
+
         output = []
         for book in await self.repository.books(search, lifecycle_status):
             pages = await self.repository.pages(book.Id)
@@ -177,11 +218,24 @@ class AdminCatalogService:
             raise HTTPException(status_code=501, detail="Page has no revision yet")
         # Only numeric version numbers can be mapped to the current UI contract.
         revision = revisions[0]
+        revision_metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+        ai_audit = revision_metadata.get("ai_proofread_audit")
+        ai_review_required = (
+            isinstance(ai_audit, dict)
+            and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
+        )
         try:
             return AdminPageProcessingRead(
                 page_id=page.Id, page_revision_id=revision.Id, revision_no=self.revision_number(revision),
                 verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
-                ocr_preview_metadata={}, verified_at=revision.VerifiedAt,
+                ocr_preview_metadata=(
+                    {
+                        "ai_review_required": True,
+                        "ai_review_mode": "AI_AUTO_VERIFIED",
+                    }
+                    if ai_review_required
+                    else {}
+                ), verified_at=revision.VerifiedAt,
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
             )
         except ValidationError:
@@ -200,11 +254,67 @@ class AdminCatalogService:
         if not isinstance(text_value, str) or not text_value.strip():
             return None
         compact = " ".join(text_value.split())
-        return compact[:240] + ("…" if len(compact) > 240 else "")
+        return compact[:120] + ("…" if len(compact) > 120 else "")
 
     async def pages(self, book_id: UUID):
         await self.book(book_id)
         try:
+            if isinstance(self.repository, AdminCatalogRepository):
+                output = []
+                rows = await self.repository.page_list_rows(book_id)
+                for (
+                    page,
+                    revision_id,
+                    revision_no,
+                    verification_status,
+                    draft_text,
+                    verified_text,
+                    verified_at,
+                    processing_meta,
+                ) in rows:
+                    if revision_id is None or revision_no is None or verification_status is None:
+                        raise HTTPException(status_code=501, detail="Page has no revision yet")
+                    text_value = draft_text or verified_text
+                    text_preview = None
+                    if isinstance(text_value, str) and text_value.strip():
+                        compact = " ".join(text_value.split())
+                        text_preview = compact[:120] + ("…" if len(compact) > 120 else "")
+                    revision_metadata = (
+                        dict(processing_meta)
+                        if isinstance(processing_meta, dict)
+                        else {}
+                    )
+                    ai_audit = revision_metadata.get("ai_proofread_audit")
+                    ai_review_required = (
+                        isinstance(ai_audit, dict)
+                        and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
+                    )
+                    output.append(
+                        AdminPageListRead(
+                            book_id=page.BookId,
+                            page_number=page.PageNumber,
+                            processing=AdminPageProcessingRead(
+                                page_id=page.Id,
+                                page_revision_id=revision_id,
+                                revision_no=self.revision_number_value(revision_no),
+                                verification_status=verification_status,
+                                lifecycle_status=page.LifecycleStatus,
+                                ocr_preview_metadata=(
+                                    {
+                                        "ai_review_required": True,
+                                        "ai_review_mode": "AI_AUTO_VERIFIED",
+                                    }
+                                    if ai_review_required
+                                    else {}
+                                ),
+                                verified_at=verified_at,
+                                current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                            ),
+                            text_preview=text_preview,
+                        )
+                    )
+                return output
+
             output = []
             for page in await self.repository.pages(book_id):
                 output.append(

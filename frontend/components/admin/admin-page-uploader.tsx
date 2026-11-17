@@ -1,10 +1,24 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from "react";
 import { UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import {
+  emptyAdminBookUploadSession,
+  getAdminBookUploadSession,
+  hasRetryableAdminBookUploads,
+  retryAdminBookUpload,
+  runAdminBookUpload,
+  subscribeAdminBookUploadSession,
+} from "@/lib/admin/admin-book-upload-session";
 import type {
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -23,72 +37,31 @@ export function AdminPageUploader({
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
   const [files, setFiles] = useState<File[]>([]);
-  const [progress, setProgress] = useState<AdminPageUploadProgressUI[]>([]);
-  const progressRef = useRef<AdminPageUploadProgressUI[]>([]);
-  const [retryEntries, setRetryEntries] = useState<AdminPageUploadInputUI[]>(
-    [],
+  const [formError, setFormError] = useState<string | null>(null);
+  const session = useSyncExternalStore(
+    (onChange) => subscribeAdminBookUploadSession(bookId, onChange),
+    () => getAdminBookUploadSession(bookId),
+    () => emptyAdminBookUploadSession,
   );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const lastCompletedRunIdRef = useRef(0);
 
-  function updateProgress(item: AdminPageUploadProgressUI) {
-    const current = progressRef.current;
-    const found = current.some((entry) => entry.client_id === item.client_id);
-    const next = found
-      ? current.map((entry) =>
-          entry.client_id === item.client_id ? item : entry,
-        )
-      : [...current, item];
-    progressRef.current = next;
-    setProgress(next);
-  }
-
-  async function retryFailed() {
-    const failed = retryEntries.filter((entry) =>
-      progressRef.current.some(
-        (item) =>
-          item.client_id === entry.client_id && item.status === "FAILED",
-      ),
-    );
-    if (!failed.length || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await pages.upload(bookId, failed, updateProgress);
+  useEffect(() => {
+    if (
+      session.completedRunId > lastCompletedRunIdRef.current &&
+      !session.busy
+    ) {
+      lastCompletedRunIdRef.current = session.completedRunId;
       onUploaded();
-      const stillFailed = failed.filter((entry) =>
-        progressRef.current.some(
-          (item) =>
-            item.client_id === entry.client_id && item.status === "FAILED",
-        ),
-      );
-      setRetryEntries(stillFailed);
-      if (stillFailed.length) {
-        const message = progressRef.current.find(
-          (item) => item.status === "FAILED" && item.error_message,
-        )?.error_message;
-        setError(
-          message ??
-            "Một số file vẫn thất bại. Kiểm tra cấu hình Backend/Storage rồi thử lại.",
-        );
-      }
-    } catch {
-      setError(
-        "Không thể tải lại danh sách trang sau khi thử lại. Hãy tải lại dữ liệu để xác minh.",
-      );
-    } finally {
-      setBusy(false);
     }
-  }
+  }, [onUploaded, session.busy, session.completedRunId]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setFormError(null);
     if (!files.length) {
-      setError("Hãy chọn ít nhất một ảnh trang sách.");
+      setFormError("Hãy chọn ít nhất một ảnh trang sách.");
       return;
     }
-    setBusy(true);
     const entries: AdminPageUploadInputUI[] = [];
     const localFailures: AdminPageUploadProgressUI[] = [];
     for (const [index, file] of files.entries()) {
@@ -139,7 +112,7 @@ export function AdminPageUploader({
         });
       }
     }
-    const initialProgress = [
+    const initialProgress: AdminPageUploadProgressUI[] = [
       ...localFailures,
       ...entries.map((entry) => ({
         client_id: entry.client_id,
@@ -147,47 +120,23 @@ export function AdminPageUploader({
         status: "QUEUED" as const,
       })),
     ];
-    progressRef.current = initialProgress;
-    setProgress(initialProgress);
-    setRetryEntries(entries);
-
-    try {
-      if (entries.length) {
-        await pages.upload(bookId, entries, updateProgress);
-      }
-      const failedEntries = entries.filter((entry) =>
-        progressRef.current.some(
-          (item) =>
-            item.client_id === entry.client_id && item.status === "FAILED",
-        ),
+    if (entries.length === 0) {
+      setFormError(
+        "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
       );
-      setRetryEntries(failedEntries);
-      if (entries.length === 0 || localFailures.length === files.length) {
-        setError(
-          "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
-        );
-      } else if (localFailures.length || failedEntries.length) {
-        const message = progressRef.current.find(
-          (item) => item.status === "FAILED" && item.error_message,
-        )?.error_message;
-        setError(
-          message ??
-            "Một số file không hợp lệ hoặc upload thất bại. Dùng nút thử lại cho file thất bại.",
-        );
-      }
-      if (entries.length) onUploaded();
-      setFiles([]);
-      const input = document.getElementById(
-        "page-images",
-      ) as HTMLInputElement | null;
-      if (input) input.value = "";
-    } catch {
-      setError(
-        "Không thể tải danh sách trang sau upload. Dữ liệu có thể đã được lưu; hãy tải lại để xác minh.",
-      );
-    } finally {
-      setBusy(false);
+      return;
     }
+    if (localFailures.length > 0) {
+      setFormError(
+        "Một số ảnh không hợp lệ nên chưa được upload. Hãy thay ảnh sai định dạng, dung lượng hoặc kích thước.",
+      );
+    }
+    setFiles([]);
+    const input = document.getElementById(
+      "page-images",
+    ) as HTMLInputElement | null;
+    if (input) input.value = "";
+    void runAdminBookUpload(bookId, pages, entries, initialProgress);
   }
 
   return (
@@ -200,11 +149,13 @@ export function AdminPageUploader({
       </h2>
       <p className="mb-4 text-sm text-muted">
         JPEG, PNG hoặc WebP; tối đa 12 MB mỗi ảnh, kích thước tối đa 6000 × 6000
-        px. Mỗi ảnh được gửi thành một request riêng.
+        px. Mỗi ảnh được gửi thành một request riêng. Sau khi bấm upload, tiến
+        trình vẫn chạy và được giữ khi bạn chuyển sang màn hình khác trong cùng
+        tab.
       </p>
-      {error ? (
+      {formError || session.error ? (
         <StatusMessage className="mb-4" tone="error">
-          {error}
+          {formError ?? session.error}
         </StatusMessage>
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
@@ -233,15 +184,16 @@ export function AdminPageUploader({
         </label>
         <Button
           className="sm:w-auto sm:justify-self-start"
-          isLoading={busy}
+          disabled={session.busy}
+          isLoading={session.busy}
           type="submit"
         >
           Upload và chạy OCR
         </Button>
       </form>
-      {progress.length ? (
+      {session.progress.length ? (
         <div className="mt-5 grid gap-2" aria-live="polite">
-          {progress.map((item) => (
+          {session.progress.map((item) => (
             <div
               className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-white p-3"
               key={item.client_id}
@@ -274,12 +226,12 @@ export function AdminPageUploader({
           ))}
         </div>
       ) : null}
-      {retryEntries.length ? (
+      {hasRetryableAdminBookUploads(bookId) ? (
         <Button
           className="mt-4 sm:w-auto"
-          disabled={busy}
-          isLoading={busy}
-          onClick={() => void retryFailed()}
+          disabled={session.busy}
+          isLoading={session.busy}
+          onClick={() => void retryAdminBookUpload(bookId, pages)}
           variant="secondary"
         >
           Thử lại các file thất bại

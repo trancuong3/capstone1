@@ -22,6 +22,7 @@ describe("SessionComplete component", () => {
     render(
       <SessionComplete
         booksHref="/books"
+        bookId={TEST_SESSION_ID}
         child={childFixture}
         sessionId={TEST_SESSION_ID}
         summary={baseSummary}
@@ -68,6 +69,7 @@ describe("SessionComplete component", () => {
     render(
       <SessionComplete
         booksHref="/books"
+        bookId={TEST_SESSION_ID}
         child={childFixture}
         sessionId={TEST_SESSION_ID}
         summary={{
@@ -93,6 +95,7 @@ describe("SessionComplete component", () => {
     render(
       <SessionComplete
         booksHref="/books"
+        bookId={TEST_SESSION_ID}
         child={childFixture}
         sessionId={TEST_SESSION_ID}
         summary={{
@@ -115,6 +118,7 @@ describe("SessionComplete component", () => {
     render(
       <SessionComplete
         booksHref="/books"
+        bookId={TEST_SESSION_ID}
         child={childFixture}
         sessionId={TEST_SESSION_ID}
         summary={{
@@ -141,5 +145,47 @@ describe("SessionComplete component", () => {
       screen.getByText(/không thay đổi kết quả lượt đầu/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Đúng 1\/2 từ/)).toBeInTheDocument();
+  });
+
+  it("links a completed reading session to Sentence Shooter with its book", () => {
+    render(
+      <SessionComplete
+        booksHref="/books"
+        bookId="book-id-with-special-chars"
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={baseSummary}
+      />,
+    );
+
+    const gameLink = screen.getByRole("link", { name: /Chơi game/i });
+    const href = new URL(
+      gameLink.getAttribute("href") ?? "",
+      "https://viread.test",
+    );
+    expect(href.pathname).toBe("/entertainment/sentence-shooter");
+    expect(href.searchParams.get("book_id")).toBe("book-id-with-special-chars");
+    expect(href.searchParams.get("source")).toBe("reading-completion");
+    expect(href.searchParams.get("reading_session_id")).toBe(TEST_SESSION_ID);
+  });
+
+  it("does not offer the game for an incomplete selected reading range", () => {
+    render(
+      <SessionComplete
+        booksHref="/books"
+        bookId={TEST_SESSION_ID}
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          ...baseSummary,
+          selected_range_pages: 3,
+          pages_explored: 2,
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("link", { name: /Chơi game/i }),
+    ).not.toBeInTheDocument();
   });
 });

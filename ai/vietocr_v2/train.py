@@ -41,6 +41,7 @@ def validate_flow1_sample_counts(counts: dict[str, int]) -> None:
 ORIGINAL_WEIGHTS_URL = "https://vocr.vn/data/vietocr/vgg_transformer.pth"
 PREPROCESSING_CONFIG = {
     "pipeline": "opencv-line-v1",
+    "label_unicode_policy": "locked-vocab-typographic-punctuation-v1",
     "deskew_max_degrees": 10.0,
     "denoise_h": 3,
     "clahe_clip_limit": 2.0,
@@ -95,7 +96,31 @@ def _profile_config(profile: str, config: dict[str, Any], data_root: Path, train
     return cfg
 
 
-def _write_annotations(rows, manifest_dir: Path, root: Path) -> tuple[Path, Path]:
+_LOCKED_VOCAB_PUNCTUATION = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-",
+    "\u2026": "...", "\u00a0": " ",
+})
+
+
+def _label_for_locked_vocabulary(label: str, vocabulary: str) -> str:
+    """Map common typographic punctuation to equivalent characters in Original.
+
+    The VietOCR Original decoder has a fixed, hash-locked vocabulary. Keep source
+    labels untouched, normalize only their training/validation text view, and
+    fail early with a readable codepoint for any unsupported character that
+    cannot be represented without changing its meaning.
+    """
+    normalized = label.translate(_LOCKED_VOCAB_PUNCTUATION)
+    unsupported = sorted(set(normalized).difference(vocabulary))
+    if unsupported:
+        details = ", ".join(f"U+{ord(char):04X} ({char!r})" for char in unsupported)
+        raise ValueError(f"training label contains characters unsupported by the locked VietOCR vocabulary: {details}")
+    return normalized
+
+
+def _write_annotations(rows, manifest_dir: Path, root: Path, *, vocabulary: str) -> tuple[Path, Path]:
     import sys
 
     service_dir = Path(__file__).resolve().parents[2] / "backend" / "app" / "services"
@@ -121,7 +146,8 @@ def _write_annotations(rows, manifest_dir: Path, root: Path) -> tuple[Path, Path
                 processed = processed_root / f"{sha256_file(image)}.png"
                 if not processed.exists():
                     preprocess_line_image(image, processed)
-                stream.write(f"{processed.as_posix()}\t{row.label}\n")
+                label = _label_for_locked_vocabulary(row.label, vocabulary)
+                stream.write(f"{processed.as_posix()}\t{label}\n")
     if not train_path.stat().st_size or not valid_path.stat().st_size:
         raise ValueError("training requires both train and validation groups")
     return train_path, valid_path
@@ -157,6 +183,170 @@ def _restore_rng(torch, state: dict[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
+class _WidthBucketBatchSampler:
+    """Yield complete and partial batches without mixing image-width buckets.
+
+    VietOCR 0.3.12's ``ClusterRandomSampler`` discards every bucket tail shorter
+    than the configured batch size. With a small verified dataset, that can
+    leave the training DataLoader empty even when its reported length is nonzero.
+    Batches must stay within a single bucket because the collator stacks images
+    into one tensor and different resized widths cannot be stacked together.
+    """
+
+    def __init__(self, dataset, batch_size: int, shuffle: bool = True):
+        if batch_size < 1:
+            raise ValueError("VietOCR batch size must be positive")
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+    def __iter__(self):
+        batches = []
+        for indices in self.dataset.cluster_indices.values():
+            bucket = list(indices)
+            if self.shuffle:
+                random.shuffle(bucket)
+            batches.extend(
+                bucket[start : start + self.batch_size]
+                for start in range(0, len(bucket), self.batch_size)
+            )
+        if self.shuffle:
+            random.shuffle(batches)
+        yield from batches
+
+    def __len__(self) -> int:
+        return sum(
+            (len(indices) + self.batch_size - 1) // self.batch_size
+            for indices in self.dataset.cluster_indices.values()
+        )
+
+
+def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
+    """Make VietOCR 0.3.12's LMDB image paths work with NumPy 2.x.
+
+    Upstream VietOCR uses ``np.fromstring`` both for encoded image bytes while
+    building LMDB and for the binary int32 dimensions while loading it. NumPy 2
+    removed that binary-input behavior. It also uses Pillow's removed
+    ``Image.ANTIALIAS`` alias while resizing samples. Adapt only these legacy
+    call sites instead of changing NumPy globally or modifying installed
+    packages; preserve the original VietOCR contracts.
+    """
+    from PIL import Image
+    from vietocr.tool import create_dataset as vietocr_dataset
+    from vietocr.loader import dataloader as vietocr_dataloader
+    from vietocr.model import trainer as vietocr_trainer
+
+    if not hasattr(Image, "ANTIALIAS"):
+        Image.ANTIALIAS = Image.Resampling.LANCZOS
+
+    current_validator = vietocr_dataset.checkImageIsValid
+    if not getattr(current_validator, "_viread_numpy_bytes_compatibility", False):
+        def check_image_is_valid(image_bytes):
+            height = width = None
+            try:
+                if image_bytes is None:
+                    return False, height, width
+                encoded = np.frombuffer(image_bytes, dtype=np.uint8)
+                image = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+                if image is None:
+                    return False, height, width
+                height, width = (int(image.shape[0]), int(image.shape[1]))
+                return bool(height * width), height, width
+            except Exception:
+                return False, height, width
+
+        check_image_is_valid._viread_numpy_bytes_compatibility = True
+        vietocr_dataset.checkImageIsValid = check_image_is_valid
+
+    current_get_bucket = vietocr_dataloader.OCRDataset.get_bucket
+    if not getattr(current_get_bucket, "_viread_numpy_bytes_compatibility", False):
+        def get_bucket(dataset, idx):
+            key = f"dim-{idx:09d}".encode()
+            dimension_bytes = dataset.txn.get(key)
+            if dimension_bytes is None:
+                raise ValueError(f"VietOCR LMDB is missing dimension metadata for sample {idx}")
+            dimensions = np.frombuffer(dimension_bytes, dtype=np.int32)
+            if dimensions.size != 2:
+                raise ValueError(f"VietOCR LMDB has invalid dimension metadata for sample {idx}")
+            image_height, image_width = dimensions
+            resized_width, _ = vietocr_dataloader.resize(
+                image_width,
+                image_height,
+                dataset.image_height,
+                dataset.image_min_width,
+                dataset.image_max_width,
+            )
+            return resized_width
+
+        get_bucket._viread_numpy_bytes_compatibility = True
+        vietocr_dataloader.OCRDataset.get_bucket = get_bucket
+
+    current_init = vietocr_dataloader.OCRDataset.__init__
+    if not getattr(current_init, "_viread_lmdb_sample_count_compatibility", False):
+        def initialize_dataset(dataset, *args, **kwargs):
+            current_init(dataset, *args, **kwargs)
+            cursor = dataset.txn.cursor()
+            image_count = 0
+            try:
+                if cursor.set_range(b"image-"):
+                    while cursor.key().startswith(b"image-"):
+                        expected_key = f"image-{image_count:09d}".encode()
+                        if cursor.key() != expected_key:
+                            raise ValueError("VietOCR LMDB image keys are not contiguous")
+                        if (
+                            dataset.txn.get(f"label-{image_count:09d}".encode()) is None
+                            or dataset.txn.get(f"dim-{image_count:09d}".encode()) is None
+                        ):
+                            raise ValueError(
+                                f"VietOCR LMDB sample {image_count} is missing its label or dimensions"
+                            )
+                        image_count += 1
+                        cursor.next()
+            finally:
+                cursor.close()
+            if image_count not in (dataset.nSamples, dataset.nSamples + 1):
+                raise ValueError(
+                    "VietOCR LMDB sample count mismatch: metadata reports "
+                    f"{dataset.nSamples}, but found {image_count} image entries"
+                )
+            if image_count != dataset.nSamples:
+                previous_count = dataset.nSamples
+                dataset.nSamples = image_count
+                dataset.build_cluster_indices()
+                print(
+                    "VietOCR LMDB sample count corrected from "
+                    f"{previous_count} to {image_count}; all stored image-label pairs are included."
+                )
+
+        initialize_dataset._viread_lmdb_sample_count_compatibility = True
+        vietocr_dataloader.OCRDataset.__init__ = initialize_dataset
+
+    current_data_gen = vietocr_trainer.Trainer.data_gen
+    if not getattr(current_data_gen, "_viread_partial_bucket_batches", False):
+        def data_gen(trainer, lmdb_path, data_root, annotation,
+                     masked_language_model=True, transform=None):
+            dataset = vietocr_dataloader.OCRDataset(
+                lmdb_path=lmdb_path,
+                root_dir=data_root,
+                annotation_path=annotation,
+                vocab=trainer.vocab,
+                transform=transform,
+                image_height=trainer.config["dataset"]["image_height"],
+                image_min_width=trainer.config["dataset"]["image_min_width"],
+                image_max_width=trainer.config["dataset"]["image_max_width"],
+            )
+            batch_sampler = _WidthBucketBatchSampler(dataset, trainer.batch_size, shuffle=True)
+            return vietocr_trainer.DataLoader(
+                dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=vietocr_dataloader.Collator(masked_language_model),
+                **trainer.config["dataloader"],
+            )
+
+        data_gen._viread_partial_bucket_batches = True
+        vietocr_trainer.Trainer.data_gen = data_gen
+
+
 def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:
     """Store an immutable validation-best weights file for crash-safe resume."""
     temporary = run_dir / f".best-{uuid4().hex}.tmp"
@@ -188,17 +378,89 @@ def _should_resume(requested: bool, checkpoint_path: Path, run_dir: Path) -> boo
     return requested
 
 
+def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
+    """Import the pinned training stack before a Colab worker claims a job.
+
+    VietOCR 0.3.12 pins imgaug 0.4.0, which reads ``numpy.sctypes`` during
+    import and uses the removed ``numpy.complex`` alias in one augmentation.
+    Restore only those legacy compatibility names; this does not alter arrays,
+    model weights, labels, or the OCR architecture.
+    """
+    from importlib.metadata import version as package_version
+
+    import numpy as np
+
+    if not hasattr(np, "sctypes"):
+        np.sctypes = {
+            "int": [np.int8, np.int16, np.int32, np.int64],
+            "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+            "float": [np.float16, np.float32, np.float64, np.longdouble],
+            "complex": [np.complex64, np.complex128, np.clongdouble],
+            "others": [np.bool_, np.object_, np.str_, np.bytes_, np.void],
+        }
+    if not hasattr(np, "complex"):
+        np.complex = complex
+
+    import cv2
+    import torch
+    import torchvision
+    from PIL import Image  # noqa: F401 - verify the image dependency before claim
+    from prefetch_generator import background  # noqa: F401 - required by VietOCR's dataloader
+    from vietocr.model.trainer import Trainer  # noqa: F401 - imports imgaug
+    from vietocr.tool.config import Cfg  # noqa: F401
+    _install_vietocr_numpy_bytes_compatibility(np, cv2)
+
+    torch_version = torch.__version__.split("+", 1)[0]
+    torchvision_version = torchvision.__version__.split("+", 1)[0]
+    vietocr_version = package_version("vietocr")
+    imgaug_version = package_version("imgaug")
+    prefetch_generator_version = package_version("prefetch-generator")
+    pillow_version = package_version("Pillow")
+    if np.__version__ not in {"1.26.4", "2.3.5", "2.4.6"}:
+        raise RuntimeError(f"COLAB_NUMPY_VERSION_MISMATCH:{np.__version__}")
+    if vietocr_version != "0.3.12" or imgaug_version != "0.4.0":
+        raise RuntimeError(
+            f"VIETOCR_TRAINING_PACKAGE_VERSION_MISMATCH:{vietocr_version}/{imgaug_version}"
+        )
+    if prefetch_generator_version != "1.0.1":
+        raise RuntimeError(f"PREFETCH_GENERATOR_VERSION_MISMATCH:{prefetch_generator_version}")
+    if torch_version != "2.14.1" or torchvision_version != "0.29.1":
+        raise RuntimeError(
+            f"COLAB_TORCH_VERSION_MISMATCH:{torch_version}/{torchvision_version}"
+        )
+    if np.__version__ in {"2.3.5", "2.4.6"} and package_version("opencv-python") != "4.13.0.92":
+        raise RuntimeError(f"COLAB_OPENCV_VERSION_MISMATCH:{cv2.__version__}")
+    return {
+        "numpy_version": np.__version__,
+        "vietocr_version": vietocr_version,
+        "imgaug_version": imgaug_version,
+        "prefetch_generator_version": prefetch_generator_version,
+        "pillow_version": pillow_version,
+        "torch_version": torch_version,
+        "torchvision_version": torchvision_version,
+        "opencv_version": cv2.__version__,
+        "cuda_available": bool(torch.cuda.is_available()),
+    }
+
+
 def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_checkpoint: str,
                  total_steps: int, dataset_receipt_path: str, dataset_version_sha256: str,
                  batch_size: int = 32, seed: int = 20261112, resume: bool = False,
                  freeze_epochs: int = 5, use_fp16: bool = True,
-                 progress_callback: Callable[[int, int], None] | None = None) -> dict[str, Any]:
+                 job_config_sha256: str | None = None,
+                 progress_callback: Callable[[int, int], None] | None = None,
+                 progress_interval_steps: int = 100) -> dict[str, Any]:
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {sorted(PROFILES)}")
     manifest = Path(manifest_path).resolve()
     run_dir = Path(output_dir).resolve()
     if len(dataset_version_sha256) != 64 or any(c not in "0123456789abcdef" for c in dataset_version_sha256.lower()):
         raise ValueError("dataset_version_sha256 must be a 64-character SHA-256 digest")
+    if job_config_sha256 is not None and (
+        len(job_config_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in job_config_sha256.lower())
+    ):
+        raise ValueError("job_config_sha256 must be a 64-character SHA-256 digest")
     run_dir.mkdir(parents=True, exist_ok=True)
     rows = load_jsonl(manifest, verify_files=True)
     _validate_dataset_receipt(rows, dataset_receipt_path, dataset_version_sha256.lower())
@@ -209,9 +471,13 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         validate_flow1_sample_counts(dict(Counter(row.source_flow for row in rows)))
     if total_steps < 2 or freeze_epochs < 1:
         raise ValueError("training requires at least two steps and one VGG freeze epoch")
+    if progress_interval_steps < 1:
+        raise ValueError("progress_interval_steps must be positive")
     if any(row.split == "holdout" or row.split == "locked_test" for row in rows) and all(row.split != "train" for row in rows):
         raise ValueError("holdout or Locked Test samples cannot be used as training data")
     original_parent = parent_checkpoint.lower() in {"original", ORIGINAL_CHECKPOINT_SHA256}
+    prepare_vietocr_training_runtime()
+
     if original_parent:
         parent_path = run_dir / "vgg_transformer_original.pth"
         if not parent_path.exists():
@@ -234,11 +500,13 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
 
     config = dict(Cfg.load_config_from_name("vgg_transformer"))
     architecture_sha = _assert_original_config(config)
-    train_tsv, valid_tsv = _write_annotations(rows, manifest.parent, run_dir / "dataset")
+    train_tsv, valid_tsv = _write_annotations(
+        rows, manifest.parent, run_dir / "dataset", vocabulary=str(config["vocab"]),
+    )
     cfg = _profile_config(profile, config, run_dir / "dataset", train_tsv, valid_tsv, run_dir,
                           total_steps, batch_size, seed, dataset_version_sha256)
     amp_enabled = bool(use_fp16 and cfg["device"] == "cuda")
-    config_sha = canonical_sha256({"architecture_sha256": architecture_sha, "profile": profile,
+    effective_config_sha = canonical_sha256({"architecture_sha256": architecture_sha, "profile": profile,
                                   "optimizer": cfg["optimizer"], "trainer": {"steps": total_steps, "batch_size": batch_size},
                                   "freeze_epochs": freeze_epochs, "freeze_encoder_lr": 1e-5,
                                   "full_model_lr": 1e-5, "fp16": amp_enabled,
@@ -247,6 +515,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                                   "training_weight_decay": cfg["training_weight_decay"], "image_aug": cfg["aug"]["image_aug"],
                                   "dataset_version_sha256": dataset_version_sha256.lower(),
                                   "local_manifest_sha256": sha256_file(manifest)})
+    candidate_config_sha = job_config_sha256.lower() if job_config_sha256 else effective_config_sha
     random.seed(seed)
     __import__("numpy").random.seed(seed)
     torch.manual_seed(seed)
@@ -262,7 +531,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         parent_state = parent_state["model_state"]
     trainer.model.load_state_dict(parent_state, strict=True)
     trainer.iter = 0
-    train_batches_per_epoch = max(1, len(trainer.train_gen))
+    train_batches_per_epoch = len(trainer.train_gen)
+    if train_batches_per_epoch < 1:
+        raise ValueError("VietOCR training dataset produced no width-compatible batches")
     freeze_steps = min(freeze_epochs * train_batches_per_epoch, total_steps - 1)
     cnn_parameters = list(trainer.model.cnn.parameters())
     cnn_ids = {id(parameter) for parameter in cnn_parameters}
@@ -293,7 +564,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         saved = torch.load(checkpoint_path, map_location=cfg["device"], weights_only=False)
         if saved.get("model_family") != ORIGINAL_MODEL_FAMILY or saved.get("parent_checkpoint_sha256") != parent_hash:
             raise ValueError("resume checkpoint has a different lineage parent")
-        if saved.get("profile") != profile or saved.get("config_sha256") != config_sha or saved.get("manifest_sha256") != dataset_version_sha256.lower():
+        if (saved.get("profile") != profile
+                or saved.get("config_sha256") != effective_config_sha
+                or saved.get("manifest_sha256") != dataset_version_sha256.lower()):
             raise ValueError("resume checkpoint config, profile, or dataset manifest changed")
         trainer.model.load_state_dict(saved["model_state"], strict=True)
         trainer.iter = int(saved["step"])
@@ -397,7 +670,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                      "stage": stage,
                      "parent_checkpoint_sha256": parent_hash, "manifest_sha256": dataset_version_sha256.lower(),
                      "local_manifest_sha256": sha256_file(manifest),
-                     "config_sha256": config_sha, "architecture_sha256": architecture_sha,
+                     "config_sha256": effective_config_sha, "architecture_sha256": architecture_sha,
                      "vocabulary_sha256": ORIGINAL_VOCAB_SHA256, "validation_loss": validation_loss,
                      "best_validation_loss": best_validation_loss, "best_step": best_step,
                      "best_model_sha256": best_model_sha256,
@@ -409,7 +682,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
             torch.save(state, temporary)
             temporary.replace(checkpoint_path)
             _prune_stale_best_models(run_dir, best_model_path)
-        if progress_callback is not None and (step % 100 == 0 or validated or step == total_steps):
+        if (progress_callback is not None
+                and (step % progress_interval_steps == 0 or validated or step == total_steps)):
             progress_callback(step, total_steps)
     if (best_model_path is None or not best_model_path.is_file()
             or best_model_sha256 != sha256_file(best_model_path)):
@@ -418,7 +692,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     trainer.model.load_state_dict(best_model, strict=True)
     torch.save(trainer.model.state_dict(), candidate_path)
     result = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "parent_checkpoint_sha256": parent_hash,
-              "checkpoint_sha256": sha256_file(candidate_path), "config_sha256": config_sha,
+              "checkpoint_sha256": sha256_file(candidate_path), "config_sha256": candidate_config_sha,
+              "effective_config_sha256": effective_config_sha,
               "architecture_sha256": architecture_sha, "vocabulary_sha256": ORIGINAL_VOCAB_SHA256,
               "manifest_sha256": dataset_version_sha256.lower(), "local_manifest_sha256": sha256_file(manifest),
               "dataset_receipt_sha256": sha256_file(dataset_receipt_path), "steps": step, "candidate_path": str(candidate_path),

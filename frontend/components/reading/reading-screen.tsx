@@ -3860,6 +3860,7 @@ function ReadingSessionScreen({
     return (
       <SessionComplete
         booksHref={booksHref}
+        bookId={book.id}
         child={child}
         sessionId={sessionId}
         summary={sessionSummary ?? completion}

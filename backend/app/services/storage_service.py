@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
+import requests
 from fastapi import HTTPException, status
 
 from app.database.config import (
@@ -206,6 +208,61 @@ def download_object(object_path: str) -> bytes:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not read the image from Supabase Storage",
+        ) from exc
+
+
+def hash_storage_object(object_path: str, aggregate_digest: object | None = None) -> tuple[str, int]:
+    """Hash a private Storage object without buffering the full object in memory.
+
+    ``aggregate_digest`` may be a hashlib digest updated with the same streamed
+    bytes, allowing callers to verify both each shard and the assembled file.
+    """
+    if not object_path or object_path.startswith(("/", "http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The stored checkpoint is not a Storage object path",
+        )
+    bucket_name = _bucket_name()
+    if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server-side Supabase Storage credentials are not configured",
+        )
+
+    url = (
+        f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/authenticated/"
+        f"{quote(bucket_name, safe='')}/{quote(object_path, safe='/')}"
+    )
+    headers = {
+        "apikey": SUPABASE_ADMIN_KEY,
+        "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
+    }
+    digest = hashlib.sha256()
+    total_bytes = 0
+    try:
+        with requests.get(url, headers=headers, stream=True, timeout=(10, 120)) as response:
+            response.raise_for_status()
+            for block in response.iter_content(chunk_size=1024 * 1024):
+                if not block:
+                    continue
+                digest.update(block)
+                if aggregate_digest is not None:
+                    aggregate_digest.update(block)
+                total_bytes += len(block)
+        if total_bytes <= 0:
+            raise ValueError("empty Storage object")
+        return digest.hexdigest(), total_bytes
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="storage_download_failed",
+            stage="storage_download",
+            exception=exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not verify the checkpoint in Supabase Storage",
         ) from exc
 
 

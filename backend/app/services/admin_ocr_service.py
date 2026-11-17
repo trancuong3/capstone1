@@ -2106,6 +2106,38 @@ class AdminOcrService:
                 raise HTTPException(status_code=422, detail="Final verified text does not match the Admin's AI suggestion decisions")
             decisions.append({"word_index": index, "original": suggestion.original,
                               "proposed": suggestion.proposed, "decision": suggestion.decision})
+        if proofread.mode == "AI_AUTO_VERIFIED":
+            suggested_indices = {item["word_index"] for item in decisions}
+            checked_surfaces = [
+                unicodedata.normalize("NFC", token)
+                for token in checked_text.split()
+                if normalize_word(token)
+            ]
+            final_surfaces = [
+                unicodedata.normalize("NFC", token)
+                for token in corrected_text.split()
+                if normalize_word(token)
+            ]
+            if len(checked_surfaces) != len(final_surfaces):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Automatic AI verification requires aligned source and final word surfaces",
+                )
+            changed_indices = {
+                index
+                for index, (checked, final) in enumerate(
+                    zip(checked_surfaces, final_surfaces, strict=True)
+                )
+                if checked != final
+            }
+            if (
+                suggested_indices != changed_indices
+                or any(item["decision"] != "ACCEPTED" for item in decisions)
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Automatic AI verification requires an accepted audit entry for every changed word",
+                )
         if proofread.mode == "MANUAL_FALLBACK" and checked_text != corrected_text:
             raise HTTPException(status_code=422, detail="Manual fallback audit must describe the exact text being verified")
         return decisions
@@ -2380,23 +2412,41 @@ class AdminOcrService:
                     "verification_source": "admin",
                     "reference_text": str(word["text"]),
                     "reference_alignment": "match",
-                    "review_reason": "Admin đã xác minh nội dung từ này trong revision hiện tại.",
+                    "review_reason": (
+                        "Hệ thống tự động xác minh nội dung sau khi AI rà soát theo yêu cầu Admin."
+                        if proofread.mode == "AI_AUTO_VERIFIED"
+                        else "Admin đã xác minh nội dung từ này trong revision hiện tại."
+                    ),
                 })
                 admin_verified_evidence.append(evidence)
             verification_metadata["word_review_statuses"] = ["verified"] * len(words)
             verification_metadata["word_evidence_v2"] = admin_verified_evidence
             verification_metadata["word_evidence_v2_authoritative"] = True
+            audit_timestamp = datetime.now(timezone.utc).isoformat()
+            automatic_verification = proofread.mode == "AI_AUTO_VERIFIED"
             verification_metadata["ai_proofread_audit"] = {
                 "mode": proofread.mode,
-                "outcome": "AI_NO_SUGGESTIONS" if proofread.mode == "AI_CHECKED" and not decisions else "ADMIN_REVIEWED" if proofread.mode == "AI_CHECKED" else "MANUAL_FALLBACK",
+                "outcome": (
+                    "AUTO_VERIFIED_WITH_AI_CHANGES"
+                    if proofread.mode == "AI_AUTO_VERIFIED" and decisions
+                    else "AUTO_VERIFIED_NO_CHANGES"
+                    if proofread.mode == "AI_AUTO_VERIFIED"
+                    else "AI_NO_SUGGESTIONS"
+                    if proofread.mode == "AI_CHECKED" and not decisions
+                    else "ADMIN_REVIEWED"
+                    if proofread.mode == "AI_CHECKED"
+                    else "MANUAL_FALLBACK"
+                ),
                 "source_revision_id": str(revision.Id),
                 "checked_text_sha256": hashlib.sha256(checked_text.encode("utf-8")).hexdigest(),
                 "checked_text": checked_text,
                 "suggestions": decisions,
                 "reason_code": proofread.reason_code,
                 "final_content_sha256": content_hash,
-                "reviewed_by": str(actor_id),
-                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_by": None if automatic_verification else str(actor_id),
+                "automated_by": str(actor_id) if automatic_verification else None,
+                "reviewed_at": None if automatic_verification else audit_timestamp,
+                "automated_at": audit_timestamp if automatic_verification else None,
             }
             revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)

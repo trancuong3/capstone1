@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
@@ -29,6 +29,7 @@ export function AdminVireadTrainingScreen() {
   const [data, setData] = useState<VireadTrainingOverview | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [reason, setReason] = useState(
     "Đã rà soát báo cáo Locked Test và chấp thuận bản VietOCR V2.",
@@ -94,6 +95,126 @@ export function AdminVireadTrainingScreen() {
     }
   }
 
+  async function retry(jobId: string) {
+    if (!vireadTraining || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.retry(jobId);
+      setMessage(
+        "Đã đưa lại job lỗi vào hàng đợi. Colab sẽ nhận đúng snapshot dữ liệu khi bạn chạy worker.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể thử lại job này. Job có thể đã tạo run, model gốc đã đổi hoặc một job khác đang chạy.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteJob(jobId: string) {
+    if (!vireadTraining || busy || deletingJobId) return;
+    if (
+      !globalThis.confirm(
+        "Xóa job cũ này? Dataset, run và checkpoint vẫn được giữ nguyên.",
+      )
+    ) {
+      return;
+    }
+    setDeletingJobId(jobId);
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.deleteJob(jobId);
+      setMessage(
+        "Đã xóa job cũ. Dataset, run và checkpoint được giữ; hàng đợi sẽ tạo job mới theo cấu hình backend hiện tại nếu dữ liệu vẫn đủ điều kiện.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể xóa job. Job có thể đang chờ hoặc đang chạy; hãy làm mới trạng thái rồi thử lại.",
+      );
+    } finally {
+      setDeletingJobId(null);
+      setBusy(false);
+    }
+  }
+
+  async function evaluateCandidate(
+    jobId: string,
+    evaluationType: "PILOT" | "PRODUCTION",
+  ) {
+    if (!vireadTraining || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await vireadTraining.requestEvaluation(
+        jobId,
+        evaluationType,
+      );
+      setMessage(
+        `${evaluationType === "PILOT" ? "Pilot" : "Production"} đã vào hàng đợi: ${result.sample_count} mẫu, ${result.group_count} nhóm. Worker chỉ benchmark checkpoint có sẵn; không train lại.`,
+      );
+      await load();
+    } catch {
+      setMessage(
+        evaluationType === "PRODUCTION" && data?.locked_test?.status !== "READY"
+          ? "Chưa đủ Locked Test Production độc lập. Candidate được giữ nguyên; có thể dùng Pilot để kiểm tra nhanh pipeline."
+          : "Không thể xếp đánh giá. Candidate hoặc cohort có thể đã đổi trạng thái; hãy tải lại trang.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeMismatchedCandidate(jobId: string) {
+    if (!vireadTraining || busy) return;
+    const confirmed = globalThis.confirm(
+      "Đóng job candidate bị lệch fingerprint cấu hình? Run và checkpoint sẽ được giữ để kiểm toán; candidate không được benchmark hay kích hoạt.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.discardMismatchedCandidate(jobId);
+      setMessage(
+        "Đã đóng job lỗi cấu hình. Run và checkpoint được giữ nguyên, candidate chưa được benchmark/duyệt; hệ thống có thể tạo job mới theo cấu hình đã khóa đúng.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeUnbenchmarkedCandidate(jobId: string) {
+    if (!vireadTraining || busy) return;
+    const confirmed = globalThis.confirm(
+      "Đóng candidate chưa benchmark? Checkpoint và run được giữ để kiểm toán; model đang dùng không đổi. Job thay thế chỉ được xếp sau khi Locked Test đủ mẫu VERIFIED độc lập.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await vireadTraining.closeUnbenchmarkedCandidate(jobId);
+      setMessage(
+        "Đã đóng candidate chưa benchmark; run và checkpoint được giữ nguyên. Hệ thống sẽ tự tạo Locked Test và job thay thế khi đủ holdout VERIFIED độc lập.",
+      );
+      await load();
+    } catch {
+      setMessage(
+        "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const totalSamples =
     data?.samples.reduce((sum, item) => sum + item.count, 0) ?? 0;
   const outboxPending =
@@ -116,7 +237,6 @@ export function AdminVireadTrainingScreen() {
   );
   const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
   const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
-
   return (
     <>
       <AdminPageHeader
@@ -145,7 +265,7 @@ export function AdminVireadTrainingScreen() {
       {message ? (
         <p
           aria-live="polite"
-          className="mb-4 rounded-control bg-sky p-4 font-semibold text-primary-hover"
+          className="mb-4 rounded-control bg-sky p-4 font-bold text-primary-hover"
         >
           {message}
         </p>
@@ -155,8 +275,8 @@ export function AdminVireadTrainingScreen() {
         <>
           <div className="mb-6 grid gap-4 md:grid-cols-3">
             <Card className="bg-white">
-              <p className="font-semibold text-muted">Model đang hoạt động</p>
-              <h2 className="mt-2 text-xl font-semibold">
+              <p className="font-bold text-muted">Model đang hoạt động</p>
+              <h2 className="mt-2 text-xl font-black">
                 {data.active_model
                   ? trainingProfileName(data.active_model.profile)
                   : "Chưa khởi tạo"}
@@ -168,8 +288,8 @@ export function AdminVireadTrainingScreen() {
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-semibold text-muted">Mẫu dữ liệu đã đăng ký</p>
-              <h2 className="mt-2 text-3xl font-semibold">
+              <p className="font-bold text-muted">Mẫu dữ liệu đã đăng ký</p>
+              <h2 className="mt-2 text-3xl font-black">
                 {totalSamples.toLocaleString("vi-VN")}
               </h2>
               <p className="mt-2 text-sm text-muted">
@@ -177,10 +297,8 @@ export function AdminVireadTrainingScreen() {
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-semibold text-muted">
-                Outbox VERIFIED đang chờ
-              </p>
-              <h2 className="mt-2 text-3xl font-semibold">
+              <p className="font-bold text-muted">Outbox VERIFIED đang chờ</p>
+              <h2 className="mt-2 text-3xl font-black">
                 {outboxPending.toLocaleString("vi-VN")}
               </h2>
               <p className="mt-2 text-sm text-muted">
@@ -190,13 +308,15 @@ export function AdminVireadTrainingScreen() {
           </div>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-semibold">Nguồn dữ liệu</h2>
+            <h2 className="text-xl font-black">
+              Training Readiness · nguồn dữ liệu
+            </h2>
             <p className="mt-2 text-sm text-muted">
               Hai luồng dùng dataset và run riêng, cùng fine-tune VietOCR V2.
             </p>
             <ul className="mt-4 grid gap-3 md:grid-cols-2">
               <li className="rounded-control border border-border p-4">
-                <p className="font-semibold">
+                <p className="font-extrabold">
                   Luồng 1 · ảnh thực tế + DBNet + TRDG
                 </p>
                 <p className="mt-2 text-sm">
@@ -211,7 +331,7 @@ export function AdminVireadTrainingScreen() {
                     "holdout",
                   ).toLocaleString("vi-VN")}
                 </p>
-                <p className="mt-2 text-sm font-semibold text-muted">
+                <p className="mt-2 text-sm font-bold text-muted">
                   {flow1External > 1_000 || flow1Trdg > 50_000
                     ? "Vượt khoảng dữ liệu cho phép: 500–1.000 mẫu thật và 20.000–50.000 mẫu TRDG"
                     : flow1External < 500 ||
@@ -219,11 +339,11 @@ export function AdminVireadTrainingScreen() {
                         !flow1Train ||
                         !flow1Validation
                       ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
-                      : "Đủ dữ liệu; hệ thống tự đăng ký job Flow 1 riêng sau khi snapshot hợp lệ"}
+                      : "Train/Validation đủ; training có thể bắt đầu. Candidate được lưu riêng và chờ Pilot hoặc Locked Test Production để đánh giá."}
                 </p>
               </li>
               <li className="rounded-control border border-border p-4">
-                <p className="font-semibold">
+                <p className="font-extrabold">
                   Luồng 2 · văn bản Admin xác nhận
                 </p>
                 <p className="mt-2 text-sm">
@@ -241,9 +361,9 @@ export function AdminVireadTrainingScreen() {
                   Mỗi mẫu là một ảnh dòng chữ; nhiều từ trong cùng dòng được
                   ghép thành một nhãn.
                 </p>
-                <p className="mt-2 text-sm font-semibold text-muted">
+                <p className="mt-2 text-sm font-bold text-muted">
                   {flow2Train > 0 && flow2Validation > 0
-                    ? "Đủ Train và Validation; hệ thống tự tạo job Flow 2 riêng"
+                    ? "Đủ Train/Validation; training bắt đầu độc lập với Locked Test. Candidate được giữ để đánh giá sau."
                     : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
                 </p>
               </li>
@@ -251,14 +371,59 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-semibold">
-              Hàng đợi huấn luyện tự động
+            <h2 className="text-xl font-black">
+              Candidate Management · hàng đợi huấn luyện
             </h2>
             <p className="mt-2 text-sm text-muted">
-              Mỗi job giữ riêng dataset, profile và lineage. Colab Enterprise tự
-              chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin
-              duyệt.
+              Training chạy ngay khi Train/Validation sẵn sàng. Candidate được
+              giữ nguyên; Pilot nhỏ chỉ kiểm tra sơ bộ, còn model chỉ đổi sau
+              Production Locked Test độc lập, thắng baseline và Admin duyệt.
             </p>
+            {data.locked_test ? (
+              <div className="mt-4 rounded-control border border-border p-4">
+                <p className="font-extrabold">Locked Test tự động</p>
+                {data.locked_test.status === "READY" ? (
+                  <>
+                    <p className="mt-2 text-sm">
+                      Sẵn sàng ·{" "}
+                      {data.locked_test.sample_count.toLocaleString("vi-VN")}{" "}
+                      mẫu ·{" "}
+                      {data.locked_test.group_count.toLocaleString("vi-VN")}{" "}
+                      trang/nhóm
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs text-muted">
+                      Manifest{" "}
+                      {data.locked_test.manifest_sha256
+                        ? hash(data.locked_test.manifest_sha256)
+                        : "—"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">
+                    Chưa đủ dữ liệu holdout VERIFIED độc lập: còn{" "}
+                    {(
+                      data.locked_test.missing_sample_count ??
+                      Math.max(
+                        0,
+                        data.locked_test.minimum_samples -
+                          data.locked_test.eligible_sample_count,
+                      )
+                    ).toLocaleString("vi-VN")}{" "}
+                    cặp ảnh-nhãn và{" "}
+                    {(
+                      data.locked_test.missing_group_count ??
+                      Math.max(
+                        0,
+                        data.locked_test.minimum_groups -
+                          data.locked_test.eligible_group_count,
+                      )
+                    ).toLocaleString("vi-VN")}{" "}
+                    trang/nhóm. Không dùng mẫu Train/Validation hoặc tự sinh
+                    nhãn để lấp phần thiếu.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <div className="mt-4 space-y-3">
               {data.jobs.map((job) => {
                 const stage = job.progress.stage;
@@ -277,13 +442,38 @@ export function AdminVireadTrainingScreen() {
                     key={job.job_id}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-semibold">
-                        {trainingProfileName(job.profile)} · {job.status}
+                      <h3 className="font-extrabold">
+                        {job.metadata.operation === "BENCHMARK_ONLY"
+                          ? `${String(job.metadata.evaluation_type ?? "Evaluation")} benchmark-only · ${job.status}`
+                          : `${trainingProfileName(job.profile)} · ${job.status}`}
                       </h3>
                       <span className="text-sm text-muted">
                         {job.target} · lần thử {job.attempts}
                       </span>
                     </div>
+                    {[
+                      "QUEUED",
+                      "LOCAL_RUNNING",
+                      "FALLBACK_QUEUED_COLAB",
+                      "COLAB_RUNNING",
+                      "WAITING_FOR_DATA",
+                      "WAITING_FOR_COLAB_WORKER",
+                      "COLAB_SUBMITTING",
+                      "COLAB_SUBMITTED",
+                      "COLAB_EXECUTING",
+                    ].includes(job.status) ? null : (
+                      <Button
+                        className="mt-3 h-11 w-auto"
+                        disabled={busy}
+                        onClick={() => void deleteJob(job.job_id)}
+                        variant="destructive"
+                      >
+                        <Trash2 aria-hidden className="size-4" />
+                        {deletingJobId === job.job_id
+                          ? "Đang xóa…"
+                          : "Xóa job cũ"}
+                      </Button>
+                    )}
                     <p className="mt-2 break-all font-mono text-xs text-muted">
                       Job {job.job_id} · manifest {hash(job.manifest_sha256)}
                     </p>
@@ -349,10 +539,174 @@ export function AdminVireadTrainingScreen() {
                         Mã lỗi: {job.last_error_code}
                       </p>
                     ) : null}
+                    {(job.status === "FAILED" ||
+                      (job.status === "BLOCKED" &&
+                        job.run_status === "TRAINING" &&
+                        job.last_error_code ===
+                          "COLAB_RETRY_REQUIRES_RUN_RECOVERY")) &&
+                    job.target === "COLAB" &&
+                    job.attempts < 3 &&
+                    (!job.run_id ||
+                      (job.run_status === "TRAINING" &&
+                        (job.last_error_code === "HTTPERROR" ||
+                          job.last_error_code ===
+                            "COLAB_RETRY_REQUIRES_RUN_RECOVERY"))) &&
+                    !job.colab_execution_id &&
+                    !job.colab_execution_resource_name &&
+                    !job.colab_operation_name ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() => void retry(job.job_id)}
+                          variant="secondary"
+                        >
+                          Thử lại job này
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Thử lại trước khi train hoặc tiếp tục tải checkpoint
+                          bị gián đoạn; giữ nguyên dataset và lineage. Locked
+                          Test không bắt buộc để train.
+                        </p>
+                      </div>
+                    ) : null}
+                    {job.status === "BLOCKED" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.target === "COLAB" &&
+                    job.run_config_sha256 === job.config_sha256 &&
+                    Boolean(job.locked_test_version_id) &&
+                    Boolean(job.locked_test_manifest_sha256) &&
+                    job.attempts < 3 &&
+                    !job.colab_execution_id &&
+                    !job.colab_execution_resource_name &&
+                    !job.colab_operation_name &&
+                    [
+                      "HTTPERROR",
+                      "COLAB_FAILURE_REQUIRES_RUN_RECOVERY",
+                    ].includes(job.last_error_code ?? "") ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() => void retry(job.job_id)}
+                          variant="secondary"
+                        >
+                          Tiếp tục kiểm thử candidate
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Checkpoint đã có; dùng lại cùng Google Drive Colab để
+                          tiếp tục Locked Test và benchmark. Nếu tệp candidate
+                          chưa được lưu trên Drive, worker sẽ dừng an toàn.
+                        </p>
+                      </div>
+                    ) : null}
+                    {job.status === "CANDIDATE" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.candidate_has_benchmark === false &&
+                    job.run_config_sha256 === job.config_sha256 &&
+                    job.worker_id === null ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() =>
+                            void closeUnbenchmarkedCandidate(job.job_id)
+                          }
+                          variant="secondary"
+                        >
+                          Đóng candidate, chờ job thay thế
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Chỉ đóng candidate đã dừng và chưa benchmark.
+                          Checkpoint được lưu làm hồ sơ; job mới chỉ được tạo
+                          khi Locked Test đạt tối thiểu{" "}
+                          {data.locked_test?.minimum_samples ?? 200} cặp và{" "}
+                          {data.locked_test?.minimum_groups ?? 30} trang độc
+                          lập.
+                        </p>
+                      </div>
+                    ) : null}
+                    {job.status === "BLOCKED" &&
+                    job.run_status === "CANDIDATE" &&
+                    job.run_config_sha256 &&
+                    job.run_config_sha256 !== job.config_sha256 ? (
+                      <div className="mt-3">
+                        <Button
+                          disabled={busy}
+                          onClick={() =>
+                            void closeMismatchedCandidate(job.job_id)
+                          }
+                          variant="secondary"
+                        >
+                          Đóng candidate lệch cấu hình
+                        </Button>
+                        <p className="mt-1 text-xs text-muted">
+                          Giữ run và checkpoint làm hồ sơ; chỉ đóng job lỗi để
+                          cho phép tạo job mới. Candidate này không được
+                          benchmark hoặc kích hoạt.
+                        </p>
+                      </div>
+                    ) : null}
                     {job.run_id ? (
-                      <p className="mt-1 break-all font-mono text-xs text-muted">
-                        Run {job.run_id}
-                      </p>
+                      <>
+                        <p className="mt-1 break-all font-mono text-xs text-muted">
+                          Run {job.run_id}
+                        </p>
+                        {job.run_status === "CANDIDATE" ||
+                        job.run_status === "BENCHMARKED" ? (
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <section className="rounded-control border border-border p-3">
+                              <h4 className="font-bold">Pilot Evaluation</h4>
+                              <p className="mt-1 text-xs text-muted">
+                                Tối đa 40 holdout VERIFIED, ít nhất 5 nhóm. Chỉ
+                                xem CER/WER và khoảng tin cậy; không thể
+                                promotion.
+                              </p>
+                              <Button
+                                className="mt-2 h-11 w-auto"
+                                disabled={busy}
+                                onClick={() =>
+                                  void evaluateCandidate(job.job_id, "PILOT")
+                                }
+                                variant="secondary"
+                              >
+                                Chạy Pilot trên candidate đã lưu
+                              </Button>
+                            </section>
+                            <section className="rounded-control border border-border p-3">
+                              <h4 className="font-bold">
+                                Production Evaluation
+                              </h4>
+                              <p className="mt-1 text-xs text-muted">
+                                Dùng cohort độc lập, tối thiểu 200 mẫu và 30
+                                nhóm; so CER/WER với Original, parent và active.
+                              </p>
+                              <Button
+                                className="mt-2 h-11 w-auto"
+                                disabled={
+                                  busy || data.locked_test?.status !== "READY"
+                                }
+                                onClick={() =>
+                                  void evaluateCandidate(
+                                    job.job_id,
+                                    "PRODUCTION",
+                                  )
+                                }
+                              >
+                                Chạy Production Locked Test
+                              </Button>
+                            </section>
+                          </div>
+                        ) : null}
+                        {typeof job.metadata.evaluation_status === "string" ? (
+                          <p className="mt-2 text-sm text-muted">
+                            Đánh giá{" "}
+                            {String(job.metadata.evaluation_type ?? "")} ·{" "}
+                            {String(job.metadata.evaluation_status)}
+                            {typeof job.metadata.evaluation_gate_status ===
+                            "string"
+                              ? ` · ${String(job.metadata.evaluation_gate_status)}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </>
                     ) : null}
                   </article>
                 );
@@ -366,7 +720,9 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-semibold">Các lần huấn luyện</h2>
+            <h2 className="text-xl font-black">
+              Quality Gate · kết quả benchmark
+            </h2>
             <p className="mt-2 text-sm text-muted">
               {latestPassing.length} checkpoint đạt quality gate và đủ điều kiện
               xét duyệt.
@@ -382,7 +738,7 @@ export function AdminVireadTrainingScreen() {
                     key={run.run_id}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-semibold">
+                      <h3 className="font-extrabold">
                         {trainingProfileName(run.profile)} · {run.status}
                       </h3>
                       <span className="text-sm text-muted">
@@ -434,9 +790,11 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="bg-white">
-            <h2 className="text-xl font-semibold">Quản lý quyết định</h2>
+            <h2 className="text-xl font-black">
+              Admin Approval · quản lý quyết định
+            </h2>
             <label
-              className="mt-4 block font-semibold"
+              className="mt-4 block font-bold"
               htmlFor="viread-decision-reason"
             >
               Lý do phê duyệt hoặc rollback

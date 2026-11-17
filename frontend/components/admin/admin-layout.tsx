@@ -6,6 +6,7 @@ import {
   BrainCircuit,
   HeartPulse,
   LogOut,
+  Music2,
   ScrollText,
   UsersRound,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { cn } from "@/lib/utils/cn";
 
 const links = [
+  { href: "/admin/karaoke", label: "Bài hát", icon: Music2 },
   { href: "/admin/parents", label: "Phụ huynh", icon: UsersRound },
   { href: "/admin/books", label: "Kho sách", icon: BookOpenCheck },
   {

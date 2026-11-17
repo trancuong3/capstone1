@@ -90,8 +90,8 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
 async def _process(event: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(text("""
-            SELECT p.imagepath, p.width, p.height, r.verificationstatus, r.verifiedtext,
-                   r.contenthash, w.wordindex, w.lineindex, w.text, w.boundingbox
+            SELECT p.imagepath, p.bookid, p.width, p.height, r.verificationstatus, r.verifiedtext,
+                   r.contenthash, r.processingmeta, w.wordindex, w.lineindex, w.text, w.boundingbox
             FROM public.bookpages AS p
             JOIN public.pagerevisions AS r ON r.pageid = p.id
             JOIN public.pagerevisionwords AS w ON w.pagerevisionid = r.id
@@ -101,6 +101,16 @@ async def _process(event: dict[str, Any]) -> None:
         rows = [dict(row) for row in result.mappings().all()]
     if not rows or rows[0]["verificationstatus"] != "VERIFIED":
         raise ValueError("outbox source revision is missing or not VERIFIED")
+    processing_meta = rows[0].get("processingmeta")
+    ai_audit = (
+        processing_meta.get("ai_proofread_audit")
+        if isinstance(processing_meta, dict)
+        else None
+    )
+    ai_review_required = (
+        isinstance(ai_audit, dict)
+        and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
+    )
     image_path = rows[0]["imagepath"]
     image_bytes = await asyncio.to_thread(download_object, image_path)
     words = [{key: row[key] for key in ("wordindex", "lineindex", "text", "boundingbox")} for row in rows]
@@ -125,15 +135,19 @@ async def _process(event: dict[str, Any]) -> None:
                         :page_id, :revision_id, CAST(:provenance AS jsonb))
                 ON CONFLICT DO NOTHING
             """), {
-                "group_id": str(event["page_id"]),
-                "split": _stable_split(str(event["page_id"])),
+                # Group and split at book/document level, never at an individual page.
+                "group_id": str(rows[0]["bookid"] or event["page_id"]),
+                "split": "train" if ai_review_required else _stable_split(str(rows[0]["bookid"] or event["page_id"])),
                 "path": object_path,
                 "image_sha": image_hash,
                 "label": label,
                 "page_id": event["page_id"],
                 "revision_id": event["revision_id"],
                 "provenance": json.dumps({"outbox_event_id": str(event["id"]), "line_index": line_index,
-                                           "source_content_hash": rows[0]["contenthash"], "verified_by_admin": True}),
+                                           "source_content_hash": rows[0]["contenthash"],
+                                           "verified_by_admin": not ai_review_required,
+                                           "ai_review_required": ai_review_required,
+                                           "verification_source": "ai_auto" if ai_review_required else "admin"}),
             })
             await db.commit()
 

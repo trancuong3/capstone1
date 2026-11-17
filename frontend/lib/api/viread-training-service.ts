@@ -22,7 +22,12 @@ const overviewSchema = z.object({
         config_sha256: z.string(),
         parent_checkpoint_sha256: z.string(),
         run_id: z.uuid().nullable(),
+        run_status: z.string().nullable().optional(),
+        run_config_sha256: z.string().nullable().optional(),
+        generation: z.number().int().optional(),
+        candidate_has_benchmark: z.boolean().optional(),
         attempts: z.number().int(),
+        evaluation_attempts: z.number().int().optional(),
         progress: z.record(z.string(), z.unknown()),
         last_error_code: z.string().nullable(),
         metadata: z.record(z.string(), z.unknown()),
@@ -30,6 +35,13 @@ const overviewSchema = z.object({
         colab_execution_resource_name: z.string().nullable().optional(),
         colab_operation_name: z.string().nullable().optional(),
         colab_execution_number: z.number().int().optional(),
+        worker_id: z.string().nullable().optional(),
+        lease_expires_at: z.iso
+          .datetime({ offset: true })
+          .nullable()
+          .optional(),
+        locked_test_version_id: z.uuid().nullable().optional(),
+        locked_test_manifest_sha256: z.string().nullable().optional(),
         created_at: z.iso.datetime({ offset: true }),
         updated_at: z.iso.datetime({ offset: true }),
       }),
@@ -58,6 +70,7 @@ const overviewSchema = z.object({
       candidate_checkpoint_sha256: z.string(),
       locked_test_manifest_sha256: z.string(),
       created_at: z.iso.datetime({ offset: true }),
+      evaluation_type: z.string().optional(),
     }),
   ),
   active_model: z
@@ -70,12 +83,57 @@ const overviewSchema = z.object({
       updated_at: z.iso.datetime({ offset: true }),
     })
     .nullable(),
+  locked_test: z
+    .object({
+      status: z.string(),
+      version_id: z.uuid().nullable(),
+      manifest_sha256: z.string().nullable(),
+      sample_count: z.number().int(),
+      group_count: z.number().int(),
+      eligible_sample_count: z.number().int(),
+      eligible_group_count: z.number().int(),
+      missing_sample_count: z.number().int().optional(),
+      missing_group_count: z.number().int().optional(),
+      minimum_samples: z.number().int(),
+      minimum_groups: z.number().int(),
+    })
+    .optional(),
 });
 
 export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  deleteJob(jobId: string): Promise<unknown>;
+  requestEvaluation(
+    jobId: string,
+    evaluationType: "PILOT" | "PRODUCTION",
+  ): Promise<{
+    job_id: string;
+    run_id: string;
+    status: string;
+    operation: string;
+    evaluation_type: string;
+    cohort_id: string;
+    sample_count: number;
+    group_count: number;
+    trainer_will_run: boolean;
+  }>;
+  retry(jobId: string): Promise<{ job_id: string; status: string }>;
+  discardMismatchedCandidate(jobId: string): Promise<{
+    job_id: string;
+    status: string;
+    run_id: string;
+    checkpoint_retained: boolean;
+    candidate_promoted: boolean;
+  }>;
+  closeUnbenchmarkedCandidate(jobId: string): Promise<{
+    job_id: string;
+    status: string;
+    run_id: string;
+    checkpoint_retained: boolean;
+    candidate_promoted: boolean;
+  }>;
   decide(input: {
     action: "APPROVE" | "ROLLBACK";
     run_id?: string;
@@ -88,6 +146,63 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    deleteJob: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}`,
+        z.unknown(),
+        undefined,
+        { method: "DELETE" },
+      ),
+    requestEvaluation: (jobId, evaluationType) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/evaluate`,
+        z.object({
+          job_id: z.uuid(),
+          run_id: z.uuid(),
+          status: z.string(),
+          operation: z.string(),
+          evaluation_type: z.string(),
+          cohort_id: z.uuid(),
+          sample_count: z.number().int(),
+          group_count: z.number().int(),
+          trainer_will_run: z.boolean(),
+        }),
+        undefined,
+        { method: "POST", body: { evaluation_type: evaluationType } },
+      ),
+    retry: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/retry`,
+        z.object({ job_id: z.uuid(), status: z.string() }),
+        undefined,
+        { method: "POST" },
+      ),
+    discardMismatchedCandidate: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/discard-mismatched-candidate`,
+        z.object({
+          job_id: z.uuid(),
+          status: z.string(),
+          run_id: z.uuid(),
+          checkpoint_retained: z.boolean(),
+          candidate_promoted: z.boolean(),
+        }),
+        undefined,
+        { method: "POST" },
+      ),
+    closeUnbenchmarkedCandidate: (jobId) =>
+      requestApi(
+        `/books/admin/viread-training/jobs/${jobId}/close-unbenchmarked-candidate`,
+        z.object({
+          job_id: z.uuid(),
+          status: z.string(),
+          run_id: z.uuid(),
+          checkpoint_retained: z.boolean(),
+          candidate_promoted: z.boolean(),
+        }),
+        undefined,
+        { method: "POST" },
+      ),
     decide: (input) =>
       requestApi(
         "/books/admin/viread-training/decisions",

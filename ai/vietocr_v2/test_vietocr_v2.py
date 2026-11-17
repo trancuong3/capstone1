@@ -25,6 +25,8 @@ from ai.vietocr_v2.flow2_register import _locked_test_rows, _read_trdg_provenanc
 from ai.vietocr_v2.flow2_prepare import match_external_annotations
 from ai.vietocr_v2.train import (
     PROFILES,
+    _WidthBucketBatchSampler,
+    _install_vietocr_numpy_bytes_compatibility,
     _should_resume,
     validate_flow1_sample_counts,
 )
@@ -236,6 +238,33 @@ def test_t24_trdg_provenance_must_be_explicit_and_unique(tmp_path):
 def test_t25_public_training_profiles_map_to_separate_legacy_dataset_sources():
     assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"] == {"FLOW2_EXTERNAL", "FLOW2_TRDG"}
     assert PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"] == {"FLOW1_VERIFIED"}
+
+
+def test_t26_production_gate_checks_parent_and_active_non_regression():
+    metrics = _metrics("win")
+    regression = {
+        "candidate_rate": 0.11,
+        "parent_rate": 0.10,
+        "delta_candidate_minus_parent": 0.01,
+        "paired_cluster_bootstrap_95ci_candidate_minus_parent": [0.002, 0.018],
+    }
+    metrics["parent_cer"] = regression
+    metrics["parent_wer"] = regression
+    metrics["active_cer"] = {"candidate_rate": 0.11, "active_rate": 0.10,
+                             "delta_candidate_minus_active": 0.0,
+                             "paired_cluster_bootstrap_95ci_candidate_minus_active": [-0.01, 0.0]}
+    metrics["active_wer"] = metrics["active_cer"]
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "ORIGINAL_WIN"
+    assert result["promotion_allowed"] is False
+
+
+def test_t27_non_finite_confidence_interval_fails_closed():
+    metrics = _metrics("win")
+    metrics["cer"]["paired_cluster_bootstrap_95ci"] = [float("nan"), -0.01]
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "EVALUATION_FAILED"
+    assert result["promotion_allowed"] is False
     assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"].isdisjoint(PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"])
 
 
@@ -261,6 +290,120 @@ def test_t30_resume_refuses_best_weights_without_the_matching_training_state(tmp
     (tmp_path / "best-example.pth").write_bytes(b"best weights")
     with pytest.raises(FileNotFoundError, match="resumable checkpoint is missing"):
         _should_resume(True, tmp_path / "latest.pt", tmp_path)
+
+
+def test_vietocr_width_bucket_sampler_keeps_partial_batches_without_mixing_widths():
+    dataset = types.SimpleNamespace(cluster_indices={
+        64: [0, 1, 2],
+        96: [3, 4],
+        128: [5, 6, 7, 8, 9, 10],
+    })
+    sampler = _WidthBucketBatchSampler(dataset, batch_size=8, shuffle=False)
+
+    batches = list(sampler)
+    assert len(sampler) == 3
+    assert [len(batch) for batch in batches] == [3, 2, 6]
+    assert sorted(index for batch in batches for index in batch) == list(range(11))
+    bucket_for_index = {
+        index: bucket
+        for bucket, indices in dataset.cluster_indices.items()
+        for index in indices
+    }
+    assert all(len({bucket_for_index[index] for index in batch}) == 1 for batch in batches)
+
+
+def test_vietocr_width_bucket_sampler_rejects_nonpositive_batch_size():
+    dataset = types.SimpleNamespace(cluster_indices={})
+    with pytest.raises(ValueError, match="batch size must be positive"):
+        _WidthBucketBatchSampler(dataset, batch_size=0)
+
+
+def test_vietocr_legacy_lmdb_image_validator_supports_numpy_2_bytes(tmp_path, monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    lmdb = pytest.importorskip("lmdb")
+    pillow_image = pytest.importorskip("PIL.Image")
+    pytest.importorskip("vietocr")
+    import vietocr.tool.create_dataset as vietocr_dataset
+    from vietocr.loader import dataloader as vietocr_dataloader
+
+    original_validator = vietocr_dataset.checkImageIsValid
+    monkeypatch.setattr(vietocr_dataset, "checkImageIsValid", original_validator)
+
+    original_fromstring = np.fromstring
+
+    def numpy2_fromstring_behavior(value, *args, **kwargs):
+        if isinstance(value, (bytes, bytearray, memoryview)) and not kwargs.get("sep", ""):
+            raise ValueError("The binary mode of fromstring is removed, use frombuffer instead")
+        return original_fromstring(value, *args, **kwargs)
+
+    monkeypatch.setattr(np, "fromstring", numpy2_fromstring_behavior)
+    monkeypatch.delattr(pillow_image, "ANTIALIAS", raising=False)
+    _install_vietocr_numpy_bytes_compatibility(np, cv2)
+    assert pillow_image.ANTIALIAS == pillow_image.Resampling.LANCZOS
+
+    image = np.full((23, 57), 255, dtype=np.uint8)
+    encoded_ok, encoded = cv2.imencode(".png", image)
+    assert encoded_ok
+    image_bytes = encoded.tobytes()
+    assert vietocr_dataset.checkImageIsValid(image_bytes) == (True, 23, 57)
+    assert vietocr_dataset.checkImageIsValid(b"not an encoded image") == (False, None, None)
+
+    (tmp_path / "line-a.png").write_bytes(image_bytes)
+    (tmp_path / "line-b.png").write_bytes(image_bytes)
+    (tmp_path / "train.tsv").write_text(
+        "line-a.png\tverified label one\nline-b.png\tverified label two\n",
+        encoding="utf-8",
+    )
+    lmdb_path = tmp_path / "train.lmdb"
+    vietocr_dataset.createDataset(str(lmdb_path), str(tmp_path), "train.tsv")
+
+    environment = lmdb.open(str(lmdb_path), readonly=True, lock=False, readahead=False)
+    try:
+        with environment.begin() as transaction:
+            assert transaction.get(b"image-000000000") == image_bytes
+            assert transaction.get(b"label-000000000") == b"verified label one"
+            assert transaction.get(b"image-000000001") == image_bytes
+            assert transaction.get(b"label-000000001") == b"verified label two"
+    finally:
+        environment.close()
+
+    dataset = vietocr_dataloader.OCRDataset(
+        lmdb_path=str(lmdb_path),
+        root_dir=str(tmp_path),
+        annotation_path="train.tsv",
+        vocab=types.SimpleNamespace(encode=lambda label: label),
+    )
+    try:
+        assert dataset.nSamples == 2
+        assert dataset.get_bucket(0) == 80
+        assert dataset.get_bucket(1) == 80
+        assert dataset.cluster_indices[80] == [0, 1]
+        assert dataset.read_buffer(0)[1:] == ("verified label one", "line-a.png")
+        assert dataset.read_buffer(1)[1:] == ("verified label two", "line-b.png")
+        assert dataset[0]["word"] == "verified label one"
+        assert dataset[1]["word"] == "verified label two"
+    finally:
+        dataset.env.close()
+
+    from vietocr.model.trainer import Trainer
+
+    trainer = types.SimpleNamespace(
+        config={
+            "dataset": {"image_height": 32, "image_min_width": 32, "image_max_width": 512},
+            "dataloader": {"num_workers": 0},
+        },
+        vocab=types.SimpleNamespace(encode=lambda _label: np.array([1, 2], dtype=np.int32)),
+        batch_size=8,
+    )
+    train_generator = Trainer.data_gen(trainer, str(lmdb_path), str(tmp_path), "train.tsv")
+    try:
+        batches = list(train_generator)
+        assert len(batches) == 1
+        assert batches[0]["img"].shape[0] == 2
+        assert len(batches[0]["filenames"]) == 2
+    finally:
+        train_generator.dataset.env.close()
 
 
 def test_t26_trdg_supports_multiple_reviewed_fonts_without_changing_ground_truth(tmp_path, monkeypatch):

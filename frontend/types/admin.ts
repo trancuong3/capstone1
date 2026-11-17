@@ -222,7 +222,7 @@ export interface AdminRevisionVerifyRequestDTO {
   readonly corrected_text: string;
   readonly words: readonly AdminRevisionWordDTO[];
   readonly proofread_audit: {
-    readonly mode: "AI_CHECKED" | "MANUAL_FALLBACK";
+    readonly mode: "AI_CHECKED" | "AI_AUTO_VERIFIED" | "MANUAL_FALLBACK";
     readonly checked_text: string;
     readonly suggestions: readonly {
       readonly word_index: number;

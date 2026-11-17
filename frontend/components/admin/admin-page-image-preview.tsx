@@ -6,17 +6,46 @@ import { Button } from "@/components/common/button";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import type { AdminPageImageUI } from "@/types/admin";
 
-export function AdminPageImagePreview({
-  pageId,
-  revisionId,
-  pageNumber,
-  onReplaced,
-}: {
+interface AdminPageImagePreviewProps {
   readonly pageId: string;
   readonly revisionId: string;
   readonly pageNumber: number;
   readonly onReplaced?: () => void;
-}) {
+}
+
+export function AdminPageImagePreview(props: AdminPageImagePreviewProps) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = `page-image-panel-${props.pageId}`;
+
+  return (
+    <div className="grid gap-3">
+      <Button
+        aria-controls={panelId}
+        aria-expanded={expanded}
+        className="sm:w-auto sm:self-start"
+        onClick={() => setExpanded((value) => !value)}
+        type="button"
+        variant="secondary"
+      >
+        {expanded
+          ? `Ẩn ảnh trang ${props.pageNumber}`
+          : `Xem ảnh / thay ảnh trang ${props.pageNumber}`}
+      </Button>
+      {expanded ? (
+        <div id={panelId}>
+          <AdminPageImagePreviewContent {...props} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AdminPageImagePreviewContent({
+  pageId,
+  revisionId,
+  pageNumber,
+  onReplaced,
+}: AdminPageImagePreviewProps) {
   const { pages } = useAdminServices();
   const [requestKey, setRequestKey] = useState(0);
   const [file, setFile] = useState<File | null>(null);

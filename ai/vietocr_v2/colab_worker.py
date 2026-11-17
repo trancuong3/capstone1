@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-"""Long-running, one-time-configured Colab worker for queued Flow 2 jobs."""
+"""Colab worker for queued ViRead VietOCR jobs.
+
+Use ``run_next_job_once`` from an interactive Colab Free session. The persistent
+polling entrypoint is retained for explicitly managed runtimes only.
+"""
 
 import hashlib
 import json
@@ -16,10 +20,24 @@ from typing import Any, Callable
 import requests
 
 from .artifact_store import assemble_shards, shard_file
-from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, sha256_file, write_jsonl
+from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, canonical_sha256, sha256_file, write_jsonl
 
 logger = logging.getLogger("viread.vietocr.colab_worker")
 API_PREFIX = "/books/admin/viread-training/worker"
+
+
+def verify_worker_source_lock(config: dict[str, Any]) -> None:
+    """Fail closed unless this checkout matches the job's trainer/dependency pins."""
+    expected_files = {
+        "trainer_sha256": Path(__file__).with_name("train.py"),
+        "requirements_sha256": Path(__file__).with_name("requirements.txt"),
+        "colab_requirements_sha256": Path(__file__).with_name("requirements-colab.txt"),
+    }
+    if any(
+        not isinstance(config.get(key), str) or sha256_file(path) != config[key]
+        for key, path in expected_files.items()
+    ):
+        raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
 
 
 class ColabWorker:
@@ -87,9 +105,16 @@ class ColabWorker:
         if free_vram < minimum_vram:
             raise RuntimeError("COLAB_INSUFFICIENT_VRAM")
         available_ram = ColabWorker.available_ram_bytes()
-        minimum_ram = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "8")) * 1024**3
+        # Free Colab T4 runtimes have limited host RAM after PyTorch imports.
+        # Dataset images stream from local disk with dataloader workers disabled,
+        # so 4 GiB available RAM is the safe minimum for this worker.
+        minimum_ram_gb = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "4"))
+        minimum_ram = minimum_ram_gb * 1024**3
         if available_ram < minimum_ram:
-            raise RuntimeError("COLAB_INSUFFICIENT_RAM")
+            available_ram_gb = available_ram / 1024**3
+            raise RuntimeError(
+                f"COLAB_INSUFFICIENT_RAM:{available_ram_gb:.1f}GB_AVAILABLE_REQUIRED_{minimum_ram_gb}GB"
+            )
         work_dir.mkdir(parents=True, exist_ok=True)
         free_disk = shutil.disk_usage(work_dir).free
         minimum_disk = int(os.getenv("VIETOCR_TRAINING_MIN_DISK_GB", "8")) * 1024**3
@@ -242,15 +267,20 @@ class ColabWorker:
                         json=run_payload)
         run_id = str(run["run_id"])
         if run["status"] in {"CANDIDATE", "BENCHMARKED"}:
+            if run.get("checkpoint_sha256") != candidate["checkpoint_sha256"]:
+                raise ValueError("REGISTERED_CANDIDATE_HASH_MISMATCH")
             return run_id, run["status"], stable_candidate
-        chunks_root = run_dir / "upload-shards"
+        # Keep multipart bodies well below reverse-proxy request limits. The
+        # storage API accepts larger objects, but Render may reject 40 MiB
+        # multipart requests before FastAPI can read them.
+        chunks_root = run_dir / "upload-shards-8mib"
         manifest_path = chunks_root / "shards.manifest.json"
         if manifest_path.exists():
             shard_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if shard_manifest["sha256"] != candidate["checkpoint_sha256"]:
                 raise ValueError("CACHED_CANDIDATE_SHARDS_MISMATCH")
         else:
-            shard_manifest = shard_file(stable_candidate, chunks_root)
+            shard_manifest = shard_file(stable_candidate, chunks_root, chunk_bytes=8 * 1024 * 1024)
         for chunk in shard_manifest["chunks"]:
             with (chunks_root / chunk["name"]).open("rb") as stream:
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/chunks",
@@ -270,6 +300,114 @@ class ColabWorker:
                   })
         return run_id, "CANDIDATE", stable_candidate
 
+    def materialize_candidate_artifact(self, job_id: str, run_id: str, run_dir: Path) -> tuple[dict[str, Any], Path]:
+        artifact = self.call("GET", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/artifact",
+                             params={"worker_id": self.worker_id})
+        checkpoint_sha = str(artifact.get("checkpoint_sha256", ""))
+        checkpoint_bytes = int(artifact.get("checkpoint_bytes") or 0)
+        chunks = artifact.get("chunks")
+        if len(checkpoint_sha) != 64 or checkpoint_bytes <= 0 or not isinstance(chunks, list) or not chunks:
+            raise ValueError("CANDIDATE_ARTIFACT_MANIFEST_INVALID")
+        destination = run_dir / f"candidate-{checkpoint_sha}.pth"
+        if destination.is_file():
+            if destination.stat().st_size == checkpoint_bytes and sha256_file(destination) == checkpoint_sha:
+                return artifact, destination
+            raise ValueError("CACHED_CANDIDATE_ARTIFACT_HASH_MISMATCH")
+        shard_root = run_dir / f"candidate-shards-{checkpoint_sha}"
+        shard_root.mkdir(parents=True, exist_ok=True)
+        local_chunks = []
+        for index, chunk in enumerate(chunks):
+            if int(chunk.get("index", -1)) != index:
+                raise ValueError("CANDIDATE_ARTIFACT_CHUNK_ORDER_INVALID")
+            local = shard_root / f"part-{index:04d}.bin"
+            self.download(str(chunk["url"]), local, str(chunk["sha256"]))
+            if local.stat().st_size != int(chunk.get("bytes", -1)):
+                raise ValueError("CANDIDATE_ARTIFACT_CHUNK_SIZE_MISMATCH")
+            local_chunks.append({"index": index, "name": local.name,
+                                 "bytes": int(chunk["bytes"]), "sha256": chunk["sha256"]})
+        assemble_shards({"schema": "viread-checkpoint-shards-v1", "filename": destination.name,
+                         "bytes": checkpoint_bytes, "sha256": checkpoint_sha,
+                         "chunks": local_chunks}, shard_root, destination)
+        if destination.stat().st_size != checkpoint_bytes or sha256_file(destination) != checkpoint_sha:
+            destination.unlink(missing_ok=True)
+            raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
+        return artifact, destination
+
+    def process_benchmark_only_job(self, job: dict[str, Any], run_dir: Path,
+                                   progress: dict[str, Any]) -> None:
+        metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+        evaluation_type = metadata.get("evaluation_type")
+        if evaluation_type not in {"PILOT", "PRODUCTION"}:
+            raise ValueError("BENCHMARK_ONLY_EVALUATION_TYPE_INVALID")
+        run_id = str(job.get("run_id") or "")
+        if not run_id:
+            raise ValueError("BENCHMARK_ONLY_RUN_ID_MISSING")
+        artifact, candidate = self.materialize_candidate_artifact(str(job["id"]), run_id, run_dir)
+        if artifact.get("checkpoint_sha256") != metadata.get("candidate_checkpoint_sha256"):
+            raise ValueError("BENCHMARK_ONLY_CANDIDATE_LINEAGE_MISMATCH")
+        locked_data, locked_items = self.dataset(str(job["id"]), locked_test=True)
+        if (not locked_data or locked_data.get("version_sha256") != job.get("locked_test_manifest_sha256")
+                or str(locked_data.get("id")) != str(job.get("locked_test_version_id"))):
+            raise ValueError("BENCHMARK_ONLY_COHORT_LINEAGE_MISMATCH")
+        receipt, _, cache = self.materialize_dataset(str(job["id"]), locked_data, locked_items,
+                                                      run_dir, locked_test=True)
+        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        if not original.exists():
+            from vietocr.tool.utils import download_weights
+            downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
+            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            shutil.copyfile(downloaded, original)
+        if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
+            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+
+        parent = active = None
+        parent_hash = active_hash = None
+        if evaluation_type == "PRODUCTION":
+            parent = self.materialize_parent(job, run_dir)
+            active = parent
+            parent_hash = active_hash = str(job["parent_checkpoint_sha256"])
+            baseline_profile = str((job.get("active_model") or {}).get("profile") or "ORIGINAL")
+        else:
+            baseline_profile = "ORIGINAL"
+        report_path = run_dir / f"{evaluation_type.lower()}-{locked_data['version_sha256']}-benchmark.json"
+        if report_path.is_file():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        else:
+            from .benchmark import run_locked_benchmark
+            report = run_locked_benchmark(
+                manifest_path=str(receipt), expected_manifest_sha256=locked_data["version_sha256"],
+                original_checkpoint=str(original), candidate_checkpoint=str(candidate),
+                candidate_profile=job["profile"], output_path=str(report_path), image_cache_dir=str(cache),
+                parent_checkpoint=str(parent) if parent else None,
+                active_checkpoint=str(active) if active else None,
+                parent_profile=baseline_profile, active_profile=baseline_profile,
+            )
+        if (report.get("candidate_checkpoint_sha256") != artifact["checkpoint_sha256"]
+                or report.get("locked_manifest_sha256") != locked_data["version_sha256"]
+                or report.get("parent_checkpoint_sha256") != parent_hash
+                or report.get("active_checkpoint_sha256") != active_hash):
+            raise ValueError("BENCHMARK_ONLY_REPORT_LINEAGE_MISMATCH")
+        progress.update({"stage": "registering_benchmark", "completed_steps": len(report["outputs"]),
+                         "total_steps": len(report["outputs"])})
+        self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/benchmarks",
+                  params={"worker_id": self.worker_id}, json={
+                      "run_id": run_id,
+                      "locked_test_version_id": job["locked_test_version_id"],
+                      "locked_test_manifest_sha256": job["locked_test_manifest_sha256"],
+                      "parent_checkpoint_sha256": parent_hash,
+                      "active_checkpoint_sha256": active_hash,
+                      "outputs": [{key: row[key] for key in (
+                          "sample_id", "group_id", "original", "candidate", "parent", "active"
+                      ) if row.get(key) is not None} for row in report["outputs"]],
+                  })
+        self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/finish", json={
+            "worker_id": self.worker_id, "run_id": run_id,
+            "status": "BENCHMARKED" if report.get("quality_gate", {}).get("status") == "V2_WIN"
+                      and evaluation_type == "PRODUCTION" else "QUALITY_GATE_REJECTED",
+            "runtime": self.runtime_data,
+        })
+
     def process_job(self, job: dict[str, Any]) -> None:
         job_id = str(job["id"])
         run_dir = self.work_root / job_id
@@ -284,6 +422,11 @@ class ColabWorker:
         try:
             runtime = self.assert_runtime_capacity(run_dir)
             self.runtime_data = runtime
+            metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+            if metadata.get("operation") == "BENCHMARK_ONLY":
+                progress.update(stage="downloading_candidate_artifact", runtime=runtime)
+                self.process_benchmark_only_job(job, run_dir, progress)
+                return
             progress.update(stage="downloading_dataset", runtime=runtime)
             dataset, items = self.dataset(job_id)
             if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
@@ -293,12 +436,22 @@ class ColabWorker:
             progress.update(stage="training", completed_steps=0,
                             total_steps=int(job["metadata"]["training_config"]["steps"]))
             config = job["metadata"]["training_config"]
-            if (sha256_file(Path(__file__).with_name("train.py")) != config["trainer_sha256"]
-                    or sha256_file(Path(__file__).with_name("requirements.txt")) != config["requirements_sha256"]):
-                raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
+            verify_worker_source_lock(config)
+            if canonical_sha256(config) != job.get("config_sha256"):
+                raise ValueError("JOB_CONFIG_FINGERPRINT_MISMATCH")
+            if (config.get("profile") != job.get("profile")
+                    or int(config.get("steps", 0)) < 2
+                    or int(config.get("batch_size", 0)) < 1
+                    or int(config.get("freeze_epochs", 0)) < 1
+                    or config.get("optimizer") != "AdamW"
+                    or config.get("scheduler") != "CosineAnnealingLR"
+                    or config.get("preprocessing") != "opencv-line-v1"):
+                raise ValueError("JOB_TRAINING_PARAMETERS_MISMATCH")
             self.assert_runtime_capacity(run_dir)
             candidate_record = run_dir / "candidate.json"
             stable_candidate = run_dir / "candidate.pth"
+            if job.get("run_id") and not (candidate_record.is_file() and stable_candidate.is_file()):
+                raise ValueError("PERSISTED_CANDIDATE_REQUIRED_FOR_RUN_RECOVERY")
             if candidate_record.is_file() and stable_candidate.is_file():
                 candidate = json.loads(candidate_record.read_text(encoding="utf-8"))
                 if sha256_file(stable_candidate) != candidate.get("checkpoint_sha256"):
@@ -318,6 +471,7 @@ class ColabWorker:
                     batch_size=int(config["batch_size"]), seed=int(config["seed"]),
                     resume=(run_dir / "latest.pt").is_file(), freeze_epochs=int(config["freeze_epochs"]),
                     use_fp16=bool(config["fp16"]),
+                    job_config_sha256=job["config_sha256"],
                     progress_callback=persist_training_progress,
                 )
                 temporary = stable_candidate.with_suffix(".tmp")
@@ -333,6 +487,8 @@ class ColabWorker:
                 manifest_temporary.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2),
                                               encoding="utf-8")
                 manifest_temporary.replace(stable_manifest)
+            if candidate.get("config_sha256") != job.get("config_sha256"):
+                raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
             if state_store is not None:
                 # Commit the finished candidate before registering its run in the database.
                 state_store.sync()
@@ -346,6 +502,15 @@ class ColabWorker:
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
                     "worker_id": self.worker_id, "run_id": run_id,
                     "status": registered_result["job_status"],
+                    "runtime": self.runtime_data,
+                })
+                return
+
+            # Training is complete once the immutable candidate is registered.
+            # A missing evaluation cohort must not turn the run into a failure.
+            if not job.get("locked_test_version_id") or not job.get("locked_test_manifest_sha256"):
+                self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": run_id, "status": "CANDIDATE",
                     "runtime": self.runtime_data,
                 })
                 return
@@ -377,7 +542,7 @@ class ColabWorker:
                 shutil.copyfile(downloaded, original)
             if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
                 raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-            report_path = run_dir / "locked-test-report.json"
+            report_path = run_dir / f"production-{test_job['locked_test_manifest_sha256']}-{job['parent_checkpoint_sha256']}.json"
             if report_path.exists():
                 report = json.loads(report_path.read_text(encoding="utf-8"))
             else:
@@ -387,6 +552,9 @@ class ColabWorker:
                     expected_manifest_sha256=test_job["locked_test_manifest_sha256"],
                     original_checkpoint=str(original), candidate_checkpoint=str(stable_candidate),
                     candidate_profile=job["profile"], output_path=str(report_path), image_cache_dir=str(cache),
+                    parent_checkpoint=str(parent), active_checkpoint=str(parent),
+                    parent_profile=str((job.get("active_model") or {}).get("profile") or "ORIGINAL"),
+                    active_profile=str((job.get("active_model") or {}).get("profile") or "ORIGINAL"),
                 )
             if (report["candidate_checkpoint_sha256"] != candidate["checkpoint_sha256"]
                     or report["locked_manifest_sha256"] != test_job["locked_test_manifest_sha256"]):
@@ -398,7 +566,11 @@ class ColabWorker:
                           "run_id": run_id,
                           "locked_test_version_id": test_job["locked_test_version_id"],
                           "locked_test_manifest_sha256": test_job["locked_test_manifest_sha256"],
-                          "outputs": [{key: row[key] for key in ("sample_id", "group_id", "original", "candidate")}
+                          "parent_checkpoint_sha256": job["parent_checkpoint_sha256"],
+                          "active_checkpoint_sha256": job["parent_checkpoint_sha256"],
+                          "outputs": [{key: row[key] for key in (
+                              "sample_id", "group_id", "original", "candidate", "parent", "active"
+                          ) if row.get(key) is not None}
                                       for row in report["outputs"]],
                       })
             self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
@@ -480,6 +652,50 @@ class ColabWorker:
             raise
         return True
 
+    def run_next_job_once(self) -> bool:
+        """Claim and process at most one ready job from an interactive Colab session.
+
+        Unlike ``run_forever``, this method performs one queue request and exits, so
+        a free browser runtime is not used as an unattended background poller.
+        """
+        try:
+            self.runtime_data = self.assert_runtime_capacity(self.work_root)
+        except RuntimeError as exc:
+            reason = str(exc).upper()[:64]
+            state = ("WAITING_FOR_GPU" if any(
+                token in reason for token in ("CUDA", "GPU", "VRAM")
+            ) else "WAITING_FOR_RESOURCES")
+            try:
+                self.report_status(state, reason)
+            except Exception as report_exc:
+                logger.error("Could not report Colab capacity (%s)", type(report_exc).__name__)
+            raise
+
+        self.report_status("READY")
+        job = self.claim()
+        if not job:
+            return False
+
+        job_id = str(job["id"])
+        try:
+            self.process_job(job)
+        except Exception as exc:
+            try:
+                self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
+                    "worker_id": self.worker_id, "run_id": job.get("run_id"),
+                    "status": "FAILED", "error_code": type(exc).__name__.upper()[:64],
+                    "runtime": self.runtime_data,
+                })
+            except Exception as finish_exc:
+                logger.error("Could not record one-shot job failure (%s)", type(finish_exc).__name__)
+            raise
+        return True
+
 
 def run_worker(api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30) -> None:
     ColabWorker(api_base, token, work_root, poll_seconds=poll_seconds).run_forever()
+
+
+def run_next_job_once(api_base: str, token: str, work_root: str | Path) -> bool:
+    """Process no more than one ready job; intended for a user-started Colab cell."""
+    return ColabWorker(api_base, token, work_root).run_next_job_once()

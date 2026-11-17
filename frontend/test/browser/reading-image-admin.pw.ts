@@ -50,6 +50,21 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const url = new URL(route.request().url());
+    if (
+      url.pathname === `/books/admin/catalog/${ids.book}` &&
+      route.request().method() === "GET"
+    ) {
+      return respond(route, {
+        id: ids.book,
+        name: "Sách kiểm thử",
+        title: "Sách kiểm thử",
+        author: null,
+        min_grade: 1,
+        max_grade: 1,
+        lifecycle_status: "ACTIVE",
+        next_page_number: 1,
+      });
+    }
     if (url.pathname === `/books/admin/catalog/${ids.book}/pages`) {
       if (route.request().method() === "POST") {
         uploads.push(route.request().postData() ?? "");
@@ -123,6 +138,12 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
   await expect(
     page.getByRole("heading", { name: "Trang 2", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Xem ảnh / thay ảnh trang 1", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Xem ảnh / thay ảnh trang 2", exact: true })
+    .click();
   const first = page.getByRole("img", { name: "Ảnh trang 1", exact: true });
   const second = page.getByRole("img", { name: "Ảnh trang 2", exact: true });
   await expect(first).toHaveAttribute("src", /admin-source-1/);

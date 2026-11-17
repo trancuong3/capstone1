@@ -2367,8 +2367,8 @@ export function AdminOcrReviewScreen({
               </div>
             </div>
             <p className="mb-4 text-sm text-muted">
-              Chọn một từ để làm nổi bật vùng trên ảnh. Tọa độ và log engine
-              được đặt trong phần chi tiết của từng từ.
+              Chọn một từ để làm nổi bật vùng trên ảnh. Bằng chứng engine nằm
+              trong chi tiết; tọa độ chỉ hiện khi mở phần chỉnh sửa nâng cao.
             </p>
             <div
               aria-live="polite"
@@ -2654,12 +2654,6 @@ export function AdminOcrReviewScreen({
                           <h3 className="text-sm font-semibold">
                             Bằng chứng OCR
                           </h3>
-                          <span>
-                            Bounding box:{" "}
-                            {word.bbox
-                              .map((value) => value.toFixed(4))
-                              .join(", ")}
-                          </span>
                           <span>
                             PaddleOCR:{" "}
                             {getEngineEvidenceDisplay(

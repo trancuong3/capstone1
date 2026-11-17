@@ -5,6 +5,7 @@ import { createRevisionService } from "@/lib/api/revision-service";
 import { createOcrReviewService } from "@/lib/api/ocr-review-service";
 import { createAuditService } from "@/lib/api/audit-service";
 import { createHealthService } from "@/lib/api/health-service";
+import { createVireadTrainingService } from "@/lib/api/viread-training-service";
 
 // Exercise Admin OCR writes through the real request adapter.
 vi.mock("@/lib/supabase/client", () => ({
@@ -79,6 +80,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real Admin adapters", () => {
+  it("requeues only the requested ViRead training job through the Admin API", async () => {
+    const jobId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const result = { job_id: jobId, status: "WAITING_FOR_COLAB_WORKER" };
+    fetchMock.mockResolvedValue(Response.json(result));
+
+    await expect(createVireadTrainingService().retry(jobId)).resolves.toEqual(
+      result,
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/books/admin/viread-training/jobs/${jobId}/retry`,
+    );
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+  });
   it.each([
     "00000000-0000-0000-0000-000000000101",
     "11111111-1111-1111-1111-111111111111",

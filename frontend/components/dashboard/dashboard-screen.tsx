@@ -6,6 +6,7 @@ import {
   BookOpenText,
   Camera,
   History,
+  Music2,
   Plus,
   RefreshCw,
   UsersRound,
@@ -160,7 +161,7 @@ export function DashboardScreen() {
   }, [focusSelectionSection, searchParams, selectedChildId, state.status]);
 
   const handleReadingAction = useCallback(
-    (destination: "/books" | "/book-scanner") => {
+    (destination: "/books" | "/book-scanner" | "/karaoke") => {
       if (!selectedChildId) {
         setSelectionPrompt(true);
         focusSelectionSection();
@@ -351,6 +352,14 @@ export function DashboardScreen() {
               >
                 <BookOpenText aria-hidden="true" className="size-5" />
                 Chọn sách
+              </Button>
+              <Button
+                className="w-full sm:col-span-2"
+                variant="secondary"
+                onClick={() => handleReadingAction("/karaoke")}
+              >
+                <Music2 aria-hidden="true" className="size-5" />
+                Hát vui
               </Button>
             </div>
           </section>
