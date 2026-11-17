@@ -1,15 +1,10 @@
 "use client";
 
-import {
-  CircleHelp,
-  Mail,
-  MessageSquareText,
-  Send,
-  ShieldCheck,
-} from "lucide-react";
+import { Send, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/button";
+import { FormPage } from "@/components/common/form-page";
 import { Card } from "@/components/common/card";
 import { PageHeader } from "@/components/common/page-header";
 import { StatusMessage } from "@/components/common/status-message";
@@ -116,6 +111,7 @@ export function HelpSupportScreen() {
   const [contactEmail, setContactEmail] = useState("");
   const [hasEditedEmail, setHasEditedEmail] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showFeedbackEditor, setShowFeedbackEditor] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -190,8 +186,133 @@ export function HelpSupportScreen() {
     }
   }
 
+  if (showFeedbackEditor)
+    return (
+      <FormPage
+        title="Gửi phản hồi"
+        description="Mô tả vấn đề bạn gặp phải. Đội ngũ ViRead sẽ hỗ trợ qua email."
+        onBack={() => setShowFeedbackEditor(false)}
+      >
+        {successMessage ? (
+          <StatusMessage tone="success">{successMessage}</StatusMessage>
+        ) : null}
+        {errorMessage ? (
+          <StatusMessage tone="error">{errorMessage}</StatusMessage>
+        ) : null}
+
+        <form
+          className="grid gap-4 sm:grid-cols-2"
+          noValidate
+          onSubmit={handleSubmit}
+        >
+          <div className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3">
+            <label
+              className="text-label font-semibold text-muted"
+              htmlFor="support-category"
+            >
+              Loại yêu cầu
+            </label>
+            <select
+              className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              id="support-category"
+              onChange={(event) =>
+                setCategory(event.target.value as SupportFeedbackCategory)
+              }
+              value={category}
+            >
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3">
+            <label
+              className="text-label font-semibold text-muted"
+              htmlFor="support-subject"
+            >
+              Tiêu đề
+            </label>
+            <input
+              className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              id="support-subject"
+              maxLength={120}
+              onChange={(event) => setSubject(event.target.value)}
+              required
+              value={subject}
+            />
+            <span className="text-right text-xs text-muted">
+              {subject.length}/120
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1 rounded-control sm:col-span-2 border border-border bg-white px-4 py-3">
+            <label
+              className="text-label font-semibold text-muted"
+              htmlFor="support-message"
+            >
+              Nội dung
+            </label>
+            <textarea
+              className="min-h-36 resize-y bg-transparent text-body leading-6 text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              id="support-message"
+              maxLength={5000}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="Hãy mô tả vấn đề hoặc góp ý của bạn. Chúng tôi sẽ tiếp nhận và phản hồi sớm nhất có thể."
+              required
+              rows={6}
+              value={message}
+            />
+            <span className="text-right text-xs text-muted">
+              {message.length}/5000
+            </span>
+          </div>
+
+          <div className="flex min-h-[72px] min-w-0 flex-col gap-1 sm:col-span-2 rounded-control border border-border bg-white px-4 py-3">
+            <label
+              className="text-label font-semibold text-muted"
+              htmlFor="support-contact-email"
+            >
+              Email liên hệ
+            </label>
+            <input
+              autoComplete="email"
+              className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              id="support-contact-email"
+              maxLength={254}
+              onChange={(event) => {
+                setHasEditedEmail(true);
+                setContactEmail(event.target.value);
+              }}
+              required
+              type="email"
+              value={contactEmail}
+            />
+          </div>
+
+          <Button
+            className="sm:w-auto sm:self-start sm:px-8"
+            disabled={isSubmitting}
+            isLoading={isSubmitting}
+            type="submit"
+          >
+            <Send aria-hidden="true" className="size-5" />
+            Gửi phản hồi
+          </Button>
+        </form>
+
+        <p className="flex items-start gap-2 text-xs leading-5 text-muted">
+          <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          Thông tin được sử dụng để tiếp nhận và xử lý yêu cầu hỗ trợ. Không gửi
+          mật khẩu hoặc mã xác thực trong nội dung phản hồi.
+        </p>
+      </FormPage>
+    );
+
   return (
-    <section className="mx-auto flex w-full max-w-[1040px] flex-col gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <PageHeader
         description="ViRead luôn sẵn sàng đồng hành cùng bạn. Hãy tìm câu trả lời hoặc gửi yêu cầu hỗ trợ cho chúng tôi."
         eyebrow="Trung tâm hỗ trợ ViRead"
@@ -200,15 +321,12 @@ export function HelpSupportScreen() {
 
       <section
         aria-labelledby="support-faq-heading"
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6"
       >
         <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-            <CircleHelp aria-hidden="true" className="size-5" />
-          </div>
           <div>
             <h2
-              className="text-xl font-semibold text-ink"
+              className="text-2xl font-extrabold text-ink"
               id="support-faq-heading"
             >
               Câu hỏi thường gặp
@@ -220,12 +338,12 @@ export function HelpSupportScreen() {
         </div>
 
         {faqGroups.map((group) => (
-          <Card className="gap-3" key={group.title}>
-            <h3 className="text-base font-semibold text-ink">{group.title}</h3>
-            <div className="divide-y divide-border">
+          <div className="flex flex-col gap-2" key={group.title}>
+            <h3 className="text-xl font-extrabold text-ink">{group.title}</h3>
+            <div className="flex flex-col gap-1">
               {group.items.map((item) => (
-                <details className="group py-3" key={item.question}>
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-control py-2 text-left text-sm font-semibold text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+                <details className="group py-1" key={item.question}>
+                  <summary className="flex cursor-pointer list-none items-center gap-3 rounded-control py-2 text-left text-body text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
                     <span>{item.question}</span>
                     <span
                       aria-hidden="true"
@@ -240,181 +358,38 @@ export function HelpSupportScreen() {
                 </details>
               ))}
             </div>
-          </Card>
+          </div>
         ))}
       </section>
 
       <section aria-labelledby="support-contact-heading">
         <Card>
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-              <Mail aria-hidden="true" className="size-5" />
-            </div>
             <div>
               <h2
-                className="text-xl font-semibold text-ink"
+                className="text-2xl font-extrabold text-ink"
                 id="support-contact-heading"
               >
-                Liên hệ chính thức
+                Liên hệ hỗ trợ
               </h2>
-              <p className="text-sm text-muted">
-                Kết nối trực tiếp với đội ngũ ViRead.
-              </p>
             </div>
           </div>
-          <p className="text-body leading-6 text-muted">
-            Bạn có thể liên hệ với đội ngũ ViRead qua email để được hỗ trợ khi
-            gặp vấn đề trong quá trình sử dụng.
-          </p>
           <a
-            className="inline-flex min-h-12 w-fit max-w-full items-center gap-3 rounded-control border border-border px-4 py-3 font-semibold text-primary underline-offset-4 hover:bg-sky hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+            className="inline-flex min-h-11 w-fit max-w-full items-center gap-3 rounded-control font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
             href={"mailto:" + VIREAD_SUPPORT_EMAIL}
           >
-            <Mail aria-hidden="true" className="size-5 shrink-0" />
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
         </Card>
       </section>
 
-      <section aria-labelledby="support-feedback-heading">
-        <Card>
-          <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-              <MessageSquareText aria-hidden="true" className="size-5" />
-            </div>
-            <div>
-              <h2
-                className="text-xl font-semibold text-ink"
-                id="support-feedback-heading"
-              >
-                Gửi phản hồi
-              </h2>
-              <p className="text-sm text-muted">
-                Mô tả vấn đề hoặc đề xuất để đội ngũ ViRead tiếp nhận.
-              </p>
-            </div>
-          </div>
-
-          {successMessage ? (
-            <StatusMessage tone="success">{successMessage}</StatusMessage>
-          ) : null}
-          {errorMessage ? (
-            <StatusMessage tone="error">{errorMessage}</StatusMessage>
-          ) : null}
-
-          <form
-            className="flex flex-col gap-4"
-            noValidate
-            onSubmit={handleSubmit}
-          >
-            <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label
-                className="text-label font-semibold text-muted"
-                htmlFor="support-category"
-              >
-                Loại yêu cầu
-              </label>
-              <select
-                className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
-                id="support-category"
-                onChange={(event) =>
-                  setCategory(event.target.value as SupportFeedbackCategory)
-                }
-                value={category}
-              >
-                {categoryOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label
-                className="text-label font-semibold text-muted"
-                htmlFor="support-subject"
-              >
-                Tiêu đề
-              </label>
-              <input
-                className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
-                id="support-subject"
-                maxLength={120}
-                onChange={(event) => setSubject(event.target.value)}
-                required
-                value={subject}
-              />
-              <span className="text-right text-xs text-muted">
-                {subject.length}/120
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label
-                className="text-label font-semibold text-muted"
-                htmlFor="support-message"
-              >
-                Nội dung
-              </label>
-              <textarea
-                className="min-h-36 resize-y bg-transparent text-body leading-6 text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
-                id="support-message"
-                maxLength={5000}
-                onChange={(event) => setMessage(event.target.value)}
-                placeholder="Hãy mô tả vấn đề hoặc góp ý của bạn. Chúng tôi sẽ tiếp nhận và phản hồi sớm nhất có thể."
-                required
-                rows={6}
-                value={message}
-              />
-              <span className="text-right text-xs text-muted">
-                {message.length}/5000
-              </span>
-            </div>
-
-            <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-              <label
-                className="text-label font-semibold text-muted"
-                htmlFor="support-contact-email"
-              >
-                Email liên hệ
-              </label>
-              <input
-                autoComplete="email"
-                className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
-                id="support-contact-email"
-                maxLength={254}
-                onChange={(event) => {
-                  setHasEditedEmail(true);
-                  setContactEmail(event.target.value);
-                }}
-                required
-                type="email"
-                value={contactEmail}
-              />
-            </div>
-
-            <Button
-              className="sm:w-auto sm:self-start sm:px-8"
-              disabled={isSubmitting}
-              isLoading={isSubmitting}
-              type="submit"
-            >
-              <Send aria-hidden="true" className="size-5" />
-              Gửi phản hồi
-            </Button>
-          </form>
-
-          <p className="flex items-start gap-2 text-xs leading-5 text-muted">
-            <ShieldCheck
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0"
-            />
-            Thông tin được sử dụng để tiếp nhận và xử lý yêu cầu hỗ trợ. Không
-            gửi mật khẩu hoặc mã xác thực trong nội dung phản hồi.
-          </p>
-        </Card>
-      </section>
+      <Button
+        className="sm:max-w-72"
+        variant="secondary"
+        onClick={() => setShowFeedbackEditor(true)}
+      >
+        Gửi phản hồi
+      </Button>
     </section>
   );
 }

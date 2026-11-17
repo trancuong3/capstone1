@@ -20,6 +20,7 @@ export function AdminPageHeader({
 }) {
   return (
     <PageHeader
+      className="mb-4"
       action={actions}
       description={description}
       eyebrow={eyebrow}

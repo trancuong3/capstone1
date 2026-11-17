@@ -111,7 +111,7 @@ function AdminPageImagePreviewContent({
 
   const preview =
     state === "error" ? (
-      <div className="rounded-control bg-surface p-3 text-sm text-muted">
+      <div className="rounded-control bg-canvas p-3 text-sm text-muted">
         <p>Chưa tải được ảnh trang {pageNumber}.</p>
         <Button
           className="mt-2 sm:w-auto"
@@ -131,7 +131,7 @@ function AdminPageImagePreviewContent({
         Đang tải ảnh trang {pageNumber}…
       </p>
     ) : (
-      <div className="relative h-48 overflow-hidden rounded-control border border-border bg-surface">
+      <div className="relative h-48 overflow-hidden rounded-control border border-border bg-canvas">
         <Image
           alt={`Ảnh trang ${pageNumber}`}
           src={state.image.preview_url}

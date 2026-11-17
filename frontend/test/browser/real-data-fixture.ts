@@ -230,7 +230,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
             aud: "authenticated",
             role: "authenticated",
             email: "parent@example.test",
-            app_metadata: {},
+            app_metadata: { provider: "email", providers: ["email"] },
             user_metadata: { display_name: "Ba mẹ API" },
             created_at: timestamp,
             updated_at: timestamp,
@@ -427,6 +427,11 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         role: "parent",
         display_name: "Ba mẹ API",
         created_at: timestamp,
+        email: "parent@example.test",
+        contact_phone: "+84900000000",
+        email_verified: true,
+        contact_info_status: "available",
+        children: state.emptyChildren ? [] : [child],
       });
     if (path === "/profiles/children")
       return respond(route, state.emptyChildren ? [] : [child]);

@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
@@ -339,12 +338,9 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         child={child}
         mobileLabel={book.title}
       />
-      <div className="mx-auto w-full max-w-[1130px]">
-        <SelectedChildIdentity child={child} />
-      </div>
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:items-start sm:gap-12">
-        <article className="hidden w-[280px] shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:flex">
+        <article className="flex w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:w-[306px]">
           <BookCover book={book} className="h-64 max-w-none p-4" />
           <p className="text-sm font-medium text-muted">
             {book.author ?? "Tác giả đang cập nhật"}
@@ -355,10 +351,10 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         </article>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <h1 className="text-heading font-semibold leading-tight text-ink sm:text-4xl">
+          <h1 className="text-heading font-extrabold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
-          <div className="flex flex-wrap gap-3">
+          <div className="order-last flex flex-wrap gap-3">
             <Button
               className="sm:w-auto"
               onClick={() =>
@@ -384,8 +380,6 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               Báo lỗi trang này
             </Button>
           </div>
-
-          <BookCover book={book} className="sm:hidden" hero />
 
           <p className="text-body text-muted">
             {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
@@ -418,8 +412,8 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </StatusMessage>
           ) : null}
 
-          <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
+          <div className="order-2 grid gap-4 sm:grid-cols-2">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
               <span className="text-sm font-semibold text-ink">
                 Trang bắt đầu
               </span>
@@ -432,7 +426,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 Chọn hình trang bên dưới để thay đổi trang bắt đầu.
               </span>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
               <label
                 className="text-sm font-semibold text-ink"
                 htmlFor="reading-end-page"
@@ -440,7 +434,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 Trang kết thúc
               </label>
               <select
-                className="min-h-11 rounded-control border border-line bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="min-h-11 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={
                   !selectedPage ||
                   pages.length === 0 ||
@@ -467,7 +461,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               </select>
             </div>
             {selectedPage && selectedEndPage ? (
-              <p className="text-sm text-muted sm:col-span-2">
+              <p className="order-first rounded-card bg-sky p-4 text-body text-muted sm:col-span-2">
                 Phạm vi đọc: Trang {selectedPage.page_number}–
                 {selectedEndPage.page_number} ({selectedRangePages.length} trang
                 hợp lệ)
@@ -485,7 +479,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
           <Button
             id="start-reading-button"
-            className="order-6 sm:order-none sm:w-[360px]"
+            className="sm:w-[360px]"
             disabled={
               !selectedPage ||
               !selectedEndPageId ||
@@ -504,7 +498,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             ) : null}
           </Button>
 
-          <div className="order-5 sm:order-none">
+          <div className="order-3">
             {previewUnavailable ? (
               <div className="mb-4 flex flex-col gap-3">
                 <StatusMessage title="Ảnh xem trước chưa sẵn sàng" tone="info">

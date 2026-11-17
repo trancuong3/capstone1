@@ -121,7 +121,9 @@ describe("BookDetailScreen with real API adapters", () => {
       screen.getByRole("button", { name: "Chọn trang 2" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText(/Độ tin cậy 91%/)).toBeInTheDocument();
-    expect(screen.getByText(`${childFixture.alias}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`${childFixture.alias} · Lớp ${childFixture.grade}`),
+    ).toBeInTheDocument();
     const requestedChildren = apiFetchFixture.mock.calls
       .map(([input]) => new URL(String(input)).pathname)
       .filter((path) => path.includes("/profiles/children/"));

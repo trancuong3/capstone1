@@ -48,7 +48,7 @@ export function ReadingReady({
           </div>
         </div>
 
-        <h1 className="text-heading font-semibold text-ink sm:hidden">
+        <h1 className="text-heading font-extrabold text-ink sm:hidden">
           Sẵn sàng đọc chưa nào?
         </h1>
 

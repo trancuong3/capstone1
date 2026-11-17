@@ -73,7 +73,7 @@ export function ProfileAvatarUpload({
   const hasAvatar = Boolean(selectedFile || (imageUrl && !isRemoved));
 
   return (
-    <div className="flex flex-col gap-3 rounded-control bg-white p-4 sm:flex-row sm:items-center sm:gap-5">
+    <div className="flex flex-col items-start gap-4 bg-white">
       <ProfileAvatar
         ariaLabel={`Ảnh xem trước của ${displayName || "tài khoản"}`}
         displayName={displayName}
@@ -84,9 +84,9 @@ export function ProfileAvatarUpload({
         size="lg"
       />
 
-      <div className="flex min-w-0 flex-col items-start gap-2">
+      <div className="flex w-full min-w-0 flex-col items-start gap-2">
         <p className="text-label font-semibold text-ink">Ảnh đại diện</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full gap-4 sm:grid-cols-2">
           <input
             accept="image/jpeg,image/png,image/webp"
             aria-label="Chọn ảnh đại diện PNG, JPG hoặc WEBP"
@@ -99,7 +99,7 @@ export function ProfileAvatarUpload({
             type="file"
           />
           <Button
-            className="!h-11 !w-auto px-4"
+            className="px-4"
             onClick={() => inputRef.current?.click()}
             type="button"
             variant="secondary"
@@ -113,7 +113,7 @@ export function ProfileAvatarUpload({
           </Button>
           {hasAvatar || isRemoved ? (
             <Button
-              className="!h-11 !w-auto px-4"
+              className="px-4"
               onClick={handleRemove}
               type="button"
               variant="quiet"

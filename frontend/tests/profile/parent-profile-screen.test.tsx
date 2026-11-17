@@ -131,7 +131,7 @@ describe("ParentProfileScreen", () => {
     expect(
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Phụ huynh")).toHaveLength(2);
+    expect(screen.getByText("Phụ huynh", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(screen.getByText("+84900000000")).toBeInTheDocument();
     expect(screen.queryByText(profile.id)).not.toBeInTheDocument();
@@ -141,7 +141,10 @@ describe("ParentProfileScreen", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.queryByText("Chưa xác minh")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Bé An" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Bé An, lớp 2" })).toHaveAttribute(
+      "href",
+      `/children/${profile.children[0].id}`,
+    );
     expect(screen.getByText("Lớp 2")).toBeInTheDocument();
     expect(screen.queryByText(/settings/i)).not.toBeInTheDocument();
     expect(requestedApiUrl().pathname).toBe("/profiles/me");
@@ -153,7 +156,9 @@ describe("ParentProfileScreen", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
 
     expect(screen.getByLabelText("Họ và tên")).toHaveValue(
       profile.display_name,
@@ -176,7 +181,9 @@ describe("ParentProfileScreen", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
     await user.clear(screen.getByLabelText("Họ và tên"));
     await user.type(screen.getByLabelText("Họ và tên"), "Tên chưa lưu");
     await user.click(screen.getByRole("button", { name: "Hủy" }));
@@ -200,7 +207,9 @@ describe("ParentProfileScreen", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
@@ -240,7 +249,9 @@ describe("ParentProfileScreen", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
 
     expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
     expect(
@@ -293,7 +304,9 @@ describe("ParentProfileScreen", () => {
     const user = userEvent.setup();
     renderProfile();
 
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
     const field = screen.getByLabelText("Họ và tên");
     await user.clear(field);
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
@@ -325,7 +338,9 @@ describe("ParentProfileScreen", () => {
 
     const user = userEvent.setup();
     renderProfile();
-    await user.click(await screen.findByRole("button", { name: "Chỉnh sửa" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
+    );
     await user.upload(
       screen.getByLabelText("Chọn ảnh đại diện PNG, JPG hoặc WEBP"),
       new File(["new-avatar"], "avatar.png", { type: "image/png" }),

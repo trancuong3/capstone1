@@ -3785,7 +3785,7 @@ function ReadingSessionScreen({
 
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4">
-        <h1 className="text-heading font-semibold text-ink">{title}</h1>
+        <h1 className="text-heading font-extrabold text-ink">{title}</h1>
         <StatusMessage tone="error">
           {notFound
             ? "Buổi đọc không tồn tại hoặc không thuộc tài khoản hiện tại."
@@ -3882,7 +3882,7 @@ function ReadingSessionScreen({
     >
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
         {pageProgress ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-white p-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-white p-2">
             <div className="min-w-0">
               <p className="font-semibold text-ink">
                 Phạm vi đọc: Trang {pageProgress.start_page_number}–

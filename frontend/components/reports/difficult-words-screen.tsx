@@ -87,7 +87,7 @@ export function DifficultWordsScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải từ cần luyện"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         {[0, 1, 2].map((item) => (
@@ -108,7 +108,7 @@ export function DifficultWordsScreen({
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-semibold text-ink">
+        <h1 className="text-heading font-extrabold text-ink">
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">
@@ -155,7 +155,7 @@ export function DifficultWordsScreen({
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         action={
           <ButtonLink
@@ -171,7 +171,7 @@ export function DifficultWordsScreen({
         eyebrow="Cùng luyện mỗi ngày"
         title={`Từ cần luyện của ${state.child.alias}`}
       />
-      <div className="max-w-md">
+      <div className="w-full">
         <ChildSelector
           childrenProfiles={state.children}
           selectedChildId={state.child.id}

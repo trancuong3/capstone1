@@ -117,11 +117,8 @@ export function AdminMetadataQualityScreen() {
         }
       />
 
-      <section
-        aria-label="Bộ lọc chất lượng metadata"
-        className="mb-6 rounded-card border border-border bg-white p-4 sm:p-6"
-      >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_200px]">
+      <section aria-label="Bộ lọc chất lượng metadata" className="mb-4">
+        <div className="grid gap-4 lg:grid-cols-3">
           <div className="relative">
             <Search
               aria-hidden
@@ -214,7 +211,7 @@ export function AdminMetadataQualityScreen() {
         <>
           <section
             aria-label="Tổng quan metadata"
-            className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+            className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
           >
             {[
               {
@@ -251,16 +248,16 @@ export function AdminMetadataQualityScreen() {
               },
             ].map((metric) => (
               <article
-                className="rounded-card border border-border bg-white p-5"
+                className="rounded-card border border-border bg-white p-4"
                 key={metric.label}
               >
                 <p className="text-sm font-semibold text-muted">
                   {metric.label}
                 </p>
-                <p className="mt-2 text-3xl font-semibold tabular-nums text-ink">
+                <p className="mt-2 text-[32px] font-extrabold tabular-nums text-primary">
                   {metric.value.toLocaleString("vi-VN")}
                 </p>
-                <p className="mt-2 text-sm text-muted">{metric.detail}</p>
+                <p className="sr-only">{metric.detail}</p>
               </article>
             ))}
           </section>
@@ -268,7 +265,7 @@ export function AdminMetadataQualityScreen() {
           <section className="rounded-card border border-border bg-white p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-ink">
+                <h2 className="text-2xl font-extrabold text-ink">
                   Sách cần kiểm tra
                 </h2>
                 <p className="mt-1 text-sm text-muted">
@@ -303,7 +300,7 @@ export function AdminMetadataQualityScreen() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-border text-muted">
+                    <tr className="border-b border-border bg-sky text-primary">
                       <th className="px-3 py-3 font-semibold" scope="col">
                         Sách
                       </th>

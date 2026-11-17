@@ -16,7 +16,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "flex w-full flex-col gap-4 overflow-hidden rounded-card border border-border p-4 sm:gap-5 sm:p-6",
+        "flex w-full flex-col gap-4 overflow-hidden rounded-card border border-border p-4 sm:p-6",
         tone === "success" ? "bg-success-surface" : "bg-white",
         className,
       )}

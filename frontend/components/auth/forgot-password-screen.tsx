@@ -51,7 +51,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
             <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
             </p>
-            <h1 className="mt-2 text-heading font-semibold text-ink">
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
               {resendState === "success"
                 ? "Đã yêu cầu gửi lại"
                 : "Kiểm tra email nhé"}
@@ -90,7 +90,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
           <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
           </p>
-          <h1 className="mt-2 text-heading font-semibold text-ink">
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
             Khôi phục mật khẩu
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, PencilLine, Search } from "lucide-react";
+import { BookOpen, CircleCheck, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -161,7 +161,7 @@ export function AdminBooksScreen() {
         title="Kho sách"
         description="Quản lý tên sách, tiêu đề riêng biệt, metadata và trạng thái hoạt động của từng sách."
         actions={
-          <ButtonLink className="sm:w-auto" href="/admin/books/new">
+          <ButtonLink className="sm:w-80" href="/admin/books/new">
             Tạo sách mới
           </ButtonLink>
         }
@@ -171,13 +171,47 @@ export function AdminBooksScreen() {
         metadata hoặc vòng đời sách; trang sách, revision và lịch sử đọc được
         giữ nguyên.
       </StatusMessage>
-      <Card className="mb-6 bg-white">
-        <div className="grid gap-4 lg:grid-cols-[1fr_240px_240px]">
+      <section
+        aria-label="Tổng quan kho sách"
+        className="mb-4 flex flex-wrap gap-x-6 gap-y-2"
+      >
+        {[
+          {
+            label: "Tổng số sách",
+            value: items?.length,
+            detail: "Đang có trong danh mục",
+            Icon: BookOpen,
+            tone: "bg-sky text-primary",
+          },
+          {
+            label: "Sách đang hoạt động",
+            value: items?.filter(
+              (item) => item.book.lifecycle_status === "ACTIVE",
+            ).length,
+            detail: "Có thể xuất hiện trong thư viện",
+            Icon: CircleCheck,
+            tone: "bg-success-surface text-success-ink",
+          },
+          {
+            label: "Cần kiểm tra OCR",
+            value: items?.reduce(
+              (total, item) => total + item.needs_review_count,
+              0,
+            ),
+            detail: "Trang sách đang chờ duyệt",
+            Icon: ClipboardCheck,
+            tone: "bg-warning-surface text-warning",
+          },
+        ].map(({ label, value, detail }) => (
+          <p key={label} title={detail} className="text-sm text-muted">
+            {label}:{" "}
+            <strong className="font-bold text-ink">{value ?? "—"}</strong>
+          </p>
+        ))}
+      </section>
+      <div className="mb-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute right-5 top-9 size-5 text-muted"
-            />
             <TextField
               label="Tìm theo tên sách, tiêu đề hoặc tác giả"
               onChange={(event) => setSearch(event.target.value)}
@@ -210,7 +244,7 @@ export function AdminBooksScreen() {
             <option value="VERIFIED">VERIFIED</option>
           </SelectField>
         </div>
-      </Card>
+      </div>
 
       {actionNotice ? (
         <StatusMessage
@@ -276,75 +310,58 @@ export function AdminBooksScreen() {
               : `/admin/books/${encodeURIComponent(book.id)}/edit`;
 
             return (
-              <Card className="bg-white" key={book.id}>
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-                    <div className="min-w-0">
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        <AdminStatusBadge status={book.lifecycle_status} />
-                        {item.parent_catalog_eligible ? (
-                          <span className="rounded-full bg-sky px-3 py-1 text-sm font-extrabold text-primary-hover">
-                            Có trong thư viện ba mẹ
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mb-1 text-sm text-muted">
-                        Tên sách:{" "}
-                        {book.name?.trim() ? book.name : "Chưa có tên sách"}
-                      </p>
-                      <Link
-                        className="inline-block rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
-                        href={`/admin/books/${encodeURIComponent(book.id)}`}
-                      >
-                        <h2 className="text-2xl font-black">
-                          {missingTitle ? "Chưa có tiêu đề" : book.title}
-                        </h2>
-                      </Link>
-                      <p className="text-muted">
-                        {book.author?.trim() ? book.author : "Chưa có tác giả"}{" "}
-                        · Khối {book.min_grade}–{book.max_grade}
-                      </p>
-                    </div>
-                    <p className="text-sm text-muted lg:max-w-72 lg:text-right">
-                      {item.page_count} trang · {item.needs_review_count} cần
-                      duyệt · {item.processing_count} đang xử lý ·{" "}
-                      {item.verified_count} đã duyệt
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                    <Link
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control border border-border px-3 py-2 text-sm font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
-                      href={editHref}
-                    >
-                      <PencilLine aria-hidden className="size-4" />
-                      {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
-                    </Link>
-                    <Button
-                      className="h-auto min-h-11 w-auto px-3 py-2 text-sm"
-                      disabled={isBusy}
-                      isLoading={lifecycleBusyBookId === book.id}
-                      onClick={() => void changeLifecycle(book)}
-                      variant="secondary"
-                    >
-                      {book.lifecycle_status === "ACTIVE" ? (
-                        <Archive aria-hidden className="size-4" />
-                      ) : (
-                        <ArchiveRestore aria-hidden className="size-4" />
-                      )}
-                      {lifecycleBusyBookId === book.id
-                        ? "Đang cập nhật…"
-                        : book.lifecycle_status === "ACTIVE"
-                          ? "Ngừng hoạt động"
-                          : "Kích hoạt lại"}
-                    </Button>
-                    <Link
-                      className="inline-flex min-h-11 items-center justify-center rounded-control px-3 py-2 text-sm font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                      href={`/admin/books/${encodeURIComponent(book.id)}`}
-                    >
-                      Xem chi tiết / trang sách
-                    </Link>
-                  </div>
+              <Card className="gap-4 bg-white sm:px-8 sm:py-6" key={book.id}>
+                <Link
+                  className="w-fit rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
+                  href={`/admin/books/${encodeURIComponent(book.id)}`}
+                >
+                  <h2 className="break-words text-2xl font-extrabold text-ink">
+                    {missingTitle ? "Chưa có tiêu đề" : book.title}
+                  </h2>
+                </Link>
+                <p className="text-body text-muted">
+                  Tên sách: {book.name?.trim() ? book.name : "Chưa có tên sách"}{" "}
+                  · {book.author?.trim() ? book.author : "Chưa có tác giả"} ·
+                  Khối {book.min_grade}–{book.max_grade}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <AdminStatusBadge status={book.lifecycle_status} />
+                  {item.parent_catalog_eligible ? (
+                    <span className="rounded-control bg-sky px-3 py-1 text-sm font-bold text-primary">
+                      Có trong thư viện ba mẹ
+                    </span>
+                  ) : null}
+                </div>
+                <p
+                  aria-label="Trạng thái trang sách"
+                  className="text-label text-muted"
+                >
+                  {item.page_count} trang · Đang xử lý {item.processing_count} ·
+                  Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
+                  {item.verified_count}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <ButtonLink
+                    variant="secondary"
+                    href={`/admin/books/${encodeURIComponent(book.id)}`}
+                  >
+                    Xem chi tiết / trang sách
+                  </ButtonLink>
+                  <ButtonLink variant="quiet" href={editHref}>
+                    {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
+                  </ButtonLink>
+                  <Button
+                    disabled={isBusy}
+                    isLoading={lifecycleBusyBookId === book.id}
+                    onClick={() => void changeLifecycle(book)}
+                    variant="quiet"
+                  >
+                    {lifecycleBusyBookId === book.id
+                      ? "Đang cập nhật…"
+                      : book.lifecycle_status === "ACTIVE"
+                        ? "Ngừng hoạt động"
+                        : "Kích hoạt lại"}
+                  </Button>
                 </div>
               </Card>
             );

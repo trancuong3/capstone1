@@ -17,8 +17,22 @@ export type ButtonSize = "default" | "compact";
 
 export const ButtonSizeContext = createContext<ButtonSize>("default");
 
+export function ButtonSizeProvider({
+  children,
+  size,
+}: {
+  children: ReactNode;
+  size: ButtonSize;
+}) {
+  return (
+    <ButtonSizeContext.Provider value={size}>
+      {children}
+    </ButtonSizeContext.Provider>
+  );
+}
+
 const baseClassName =
-  "inline-flex w-full items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex w-full items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
 
 const variantClassNames: Record<ButtonVariant, string> = {
   primary: "bg-primary text-white hover:bg-primary-hover",
@@ -28,8 +42,8 @@ const variantClassNames: Record<ButtonVariant, string> = {
 };
 
 const sizeClassNames: Record<ButtonSize, string> = {
-  default: "min-h-12",
-  compact: "min-h-11 px-4 py-2.5 text-sm leading-5",
+  default: "min-h-14",
+  compact: "min-h-12 px-4 py-2.5 text-label leading-5",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

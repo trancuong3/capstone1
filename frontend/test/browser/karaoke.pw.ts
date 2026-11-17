@@ -137,7 +137,12 @@ async function enter(page: Page) {
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
     .click();
   await page.getByRole("button", { name: "Hát vui", exact: true }).click();
+  await expect(page).toHaveURL(/\/entertainment$/);
+  await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
   await expect(page).toHaveURL(/\/karaoke$/);
+  await expect(
+    page.getByRole("link", { name: "Giải trí", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
 }
 async function noOverflow(page: Page) {
   expect(
@@ -262,6 +267,7 @@ test("dashboard → selected child → library → native player → leave stops
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
     .click();
   await page.getByRole("button", { name: "Hát vui", exact: true }).click();
+  await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
   await expect(
     page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
   ).toBeVisible();

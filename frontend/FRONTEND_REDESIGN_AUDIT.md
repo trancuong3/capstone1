@@ -1,4 +1,6 @@
-# ViRead frontend redesign audit
+# ViRead frontend redesign audit (historical)
+
+> This report documents the earlier inferred redesign as it existed before the Figma file became available. Its claim that Figma could not be inspected, its token choices, and its 38-route coverage are not the current audit. See [FIGMA_ALIGNMENT_AUDIT.md](./FIGMA_ALIGNMENT_AUDIT.md) for the current Figma evidence, 46-route source inventory, and alignment work.
 
 ## Baseline and safety
 

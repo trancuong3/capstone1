@@ -54,7 +54,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
           tone="success"
         >
           <div>
-            <h1 className="text-heading font-semibold text-success-ink">
+            <h1 className="text-heading font-extrabold text-success-ink">
               Kiểm tra email nhé
             </h1>
             <p className="mt-4 text-body leading-relaxed text-muted">
@@ -80,13 +80,13 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
       <Card className="mx-auto max-w-[440px] border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
-            Tài khoản phụ huynh
+            BẮT ĐẦU CÙNG VIREAD
           </p>
-          <h1 className="mt-1 text-heading font-semibold leading-tight text-ink">
-            Tạo tài khoản
+          <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
+            Tạo tài khoản phụ huynh
           </h1>
           <p className="mt-2 text-body leading-6 text-muted">
-            Quản lý hồ sơ bé và theo dõi quá trình đọc sách.
+            Tạo tài khoản để quản lý hồ sơ bé và theo dõi quá trình đọc sách.
           </p>
         </div>
         <RegisterForm

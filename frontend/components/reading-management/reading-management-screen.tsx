@@ -19,9 +19,11 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/common/button";
-import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { FormPage } from "@/components/common/form-page";
+import { InformationField } from "@/components/common/information-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
+import { BookCover } from "@/components/books/book-cover";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
@@ -59,7 +61,7 @@ const weekdayOptions = [
   { label: "CN", value: 6 },
 ];
 const inputClass =
-  "min-h-12 rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
+  "min-h-12 min-w-0 w-full rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
 const actionClass =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
 
@@ -130,6 +132,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [loadedRequestKey, setLoadedRequestKey] = useState("");
   const [settledRequestKey, setSettledRequestKey] = useState("");
   const [busyKey, setBusyKey] = useState("");
+  const [activeForm, setActiveForm] = useState<
+    "plan" | "goal" | "reminder" | null
+  >(null);
   const [goalMetric, setGoalMetric] = useState<ReadingGoalMetric>("MINUTES");
   const [goalPeriod, setGoalPeriod] = useState<ReadingGoalPeriod>("DAILY");
   const [goalTarget, setGoalTarget] = useState("20");
@@ -257,6 +262,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     try {
       await operation();
       setSuccess(message);
+      setActiveForm(null);
       setReloadKey((value) => value + 1);
       return true;
     } catch (failure) {
@@ -441,167 +447,34 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       if (saved) setReminderEmailEnabled(false);
     }
   }
-  if (loadingChildren)
+  if (activeForm) {
+    const titles = {
+      plan: editingPlanId ? "Chỉnh sửa kế hoạch đọc" : "Thiết lập kế hoạch đọc",
+      goal: "Thiết lập mục tiêu",
+      reminder: editingReminderId
+        ? "Chỉnh sửa lịch nhắc"
+        : "Thiết lập lịch nhắc",
+    };
+    const descriptions = {
+      plan: "Chọn sách, thời lượng và lịch đọc phù hợp với bé.",
+      goal: "Đặt mục tiêu vừa sức và theo dõi sự tiến bộ của bé.",
+      reminder: "Chọn thời gian và những ngày bạn muốn nhận lời nhắc đọc sách.",
+    };
     return (
-      <section className="mx-auto max-w-5xl p-6" aria-busy="true">
-        Đang tải hồ sơ bé…
-      </section>
-    );
-
-  return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8">
-      <header className="flex flex-wrap items-start gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="mb-2 text-label font-semibold text-primary">
-            ViRead · Thói quen đọc
-          </p>
-          <h1 className="text-heading font-semibold text-ink">
-            Quản lý đọc sách
-          </h1>
-          <p className="mt-2 max-w-3xl text-label text-muted">
-            Đặt mục tiêu, lưu sách và tạo lịch nhắc theo giờ địa phương của gia
-            đình.
-          </p>
-        </div>
-        <Button
-          onClick={() => setReloadKey((value) => value + 1)}
-          variant="secondary"
-          disabled={isReadingDataLoading || !childId}
-        >
-          <RefreshCw aria-hidden="true" className="size-4" /> Tải lại
-        </Button>
-      </header>
-
-      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-white p-4">
-        <label className="font-semibold text-ink" htmlFor="management-child">
-          Hồ sơ bé
-        </label>
-        <select
-          id="management-child"
-          className={inputClass + " min-w-56"}
-          value={childId}
-          onChange={(event) => setChildId(event.target.value)}
-        >
-          {children.map((child) => (
-            <option key={child.id} value={child.id}>
-              {child.alias} · Lớp {child.grade}
-            </option>
-          ))}
-        </select>
-        {selectedChild ? (
-          <div className="flex items-center gap-2 text-label text-muted">
-            <ProfileAvatar
-              ariaLabel={`Ảnh đại diện của ${selectedChild.alias}`}
-              displayName={selectedChild.alias}
-              imageUrl={selectedChild.avatar_url}
-              size="sm"
-            />
-            <span>Đang xem: {selectedChild.alias}</span>
-          </div>
-        ) : null}
-      </div>
-      {error ? (
-        <StatusMessage title="Có vấn đề xảy ra" tone="error">
-          {error}
-        </StatusMessage>
-      ) : null}
-      {success ? (
-        <StatusMessage title="Đã lưu" tone="success">
-          {success}
-        </StatusMessage>
-      ) : null}
-      {!childId && !isReadingDataLoading ? (
-        <EmptyState
-          icon={<Target className="size-9" />}
-          title="Chưa có hồ sơ bé"
-          description="Hãy tạo hồ sơ bé trước khi thiết lập mục tiêu hoặc lịch nhắc."
-        />
-      ) : null}
-      {isReadingDataLoading && childId ? (
-        <p role="status" aria-live="polite">
-          Đang tải dữ liệu của bé…
-        </p>
-      ) : null}
-
-      {childId &&
-      !isReadingDataLoading &&
-      loadedRequestKey === currentRequestKey ? (
-        <>
-          <section
-            aria-label="Tổng quan thói quen đọc"
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-          >
-            {[
-              {
-                label: "Mục tiêu đang chạy",
-                value: goals.filter(isRunningGoal).length,
-                detail: "mục tiêu đọc",
-                icon: <Target className="size-5" />,
-              },
-              {
-                label: "Kế hoạch trong tuần",
-                value: plans.filter(isRunningPlan).length,
-                detail: "kế hoạch đang hoạt động",
-                icon: <CalendarDays className="size-5" />,
-              },
-              {
-                label: "Lịch nhắc đã bật",
-                value: reminders.filter((reminder) => reminder.is_active)
-                  .length,
-                detail: "lịch nhắc cho bé",
-                icon: <BellRing className="size-5" />,
-              },
-              {
-                label: "Sách đã lưu",
-                value: collections.length,
-                detail: "sách yêu thích hoặc muốn đọc",
-                icon: <BookHeart className="size-5" />,
-              },
-            ].map((item) => (
-              <article
-                key={item.label}
-                className="rounded-card border border-border bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-center gap-2 text-primary">
-                  {item.icon}
-                  <p className="text-label font-semibold text-muted">
-                    {item.label}
-                  </p>
-                </div>
-                <p className="mt-3 text-3xl font-semibold text-ink">
-                  {item.value}
-                </p>
-                <p className="mt-1 text-sm text-muted">{item.detail}</p>
-              </article>
-            ))}
-          </section>
-
-          <TodaySummary
-            childName={selectedChild?.alias ?? "bé"}
-            plans={plans}
-            goals={goals}
-          />
-
-          <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6">
-            <div className="mb-5 flex items-start gap-3">
-              <div className="rounded-full bg-sky p-3 text-primary">
-                <CalendarDays className="size-6" />
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold text-ink">
-                  Kế hoạch đọc trong tuần
-                </h2>
-                <p className="mt-1 text-label text-muted">
-                  Chọn ngày, thời lượng và sách dự định đọc. Tiến độ được tính
-                  từ các buổi đọc hợp lệ của bé.
-                </p>
-              </div>
-            </div>
-            <form
-              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-              onSubmit={submitPlan}
-            >
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+      <FormPage
+        title={titles[activeForm]}
+        description={descriptions[activeForm]}
+        onBack={() => setActiveForm(null)}
+      >
+        {activeForm === "plan" ? (
+          <>
+            {error ? (
+              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+                {error}
+              </StatusMessage>
+            ) : null}
+            <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitPlan}>
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Tên kế hoạch
                 <input
                   className={inputClass}
@@ -612,7 +485,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   placeholder="Ví dụ: Đọc cùng bé sau bữa tối"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Sách dự định đọc
                 <select
                   className={inputClass}
@@ -627,7 +500,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Thời lượng mỗi buổi (phút)
                 <input
                   className={inputClass}
@@ -640,7 +513,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanMinutes(event.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Múi giờ
                 <input
                   className={inputClass}
@@ -650,7 +523,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanTimezone(event.target.value)}
                 />
               </label>
-              <fieldset className="sm:col-span-2 lg:col-span-4">
+              <fieldset className="min-w-0 sm:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
                   Ngày đọc mỗi tuần
                 </legend>
@@ -682,7 +555,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Bắt đầu từ
                 <input
                   className={inputClass}
@@ -693,7 +566,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanStart(event.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -718,142 +591,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 ) : null}
               </div>
             </form>
-            {plans.length === 0 ? (
-              <div className="mt-5 rounded-card bg-canvas p-5 text-center">
-                <CalendarDays className="mx-auto size-8 text-primary" />
-                <p className="mt-2 font-semibold text-ink">
-                  Chưa có kế hoạch đọc tuần
-                </p>
-                <p className="mt-1 text-label text-muted">
-                  Tạo lịch đọc phù hợp với thời gian của gia đình.
-                </p>
-              </div>
-            ) : (
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                {plans.map((plan) => (
-                  <article
-                    key={plan.id}
-                    className="rounded-card border border-border bg-canvas p-4"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold text-ink">{plan.title}</h3>
-                        <p className="mt-1 text-label text-muted">
-                          {plan.weekdays
-                            .map(
-                              (day) =>
-                                weekdayOptions.find(
-                                  (option) => option.value === day,
-                                )?.label,
-                            )
-                            .join(", ")}{" "}
-                          · {plan.target_minutes} phút mỗi buổi
-                        </p>
-                        {plan.book_title ? (
-                          <p className="mt-1 text-label text-muted">
-                            Sách: {plan.book_title}
-                          </p>
-                        ) : null}
-                      </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-label font-semibold text-primary">
-                        {planStatusText(plan.status)}
-                      </span>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between gap-3 text-label">
-                      <span>Ngày đọc hoàn thành trong tuần này</span>
-                      <strong>
-                        {plan.completed_days_this_week}/
-                        {plan.scheduled_days_this_week}
-                      </strong>
-                    </div>
-                    <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
-                      <div
-                        className="h-full rounded-full bg-primary transition-[width] duration-200"
-                        style={{
-                          width: `${Math.min(100, plan.progress_percent)}%`,
-                        }}
-                      />
-                    </div>
-                    <p className="mt-1 text-right text-label font-semibold text-primary">
-                      {plan.progress_percent}%
-                    </p>
-                    <PlanInsights plan={plan} />
-                    {plan.status === "ACTIVE" || plan.status === "PAUSED" ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button
-                          className={
-                            actionClass + " border border-border bg-white"
-                          }
-                          type="button"
-                          onClick={() => {
-                            setEditingPlanId(plan.id);
-                            setPlanTitle(plan.title);
-                            setPlanBookId(plan.book_id ?? "");
-                            setPlanMinutes(String(plan.target_minutes));
-                            setPlanDays(plan.weekdays);
-                            setPlanStart(plan.starts_on);
-                            setPlanEnd(plan.ends_on ?? "");
-                            setPlanTimezone(plan.timezone);
-                          }}
-                        >
-                          Chỉnh sửa
-                        </button>
-                        {plan.status === "ACTIVE" ? (
-                          <button
-                            className={actionClass + " bg-cream text-ink"}
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => void transitionPlan(plan, "PAUSED")}
-                          >
-                            Tạm dừng
-                          </button>
-                        ) : (
-                          <button
-                            className={actionClass + " bg-sky text-primary"}
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => void transitionPlan(plan, "ACTIVE")}
-                          >
-                            Tiếp tục
-                          </button>
-                        )}
-                        <button
-                          className={actionClass + " bg-sky text-primary"}
-                          type="button"
-                          disabled={Boolean(busyKey)}
-                          onClick={() => void transitionPlan(plan, "COMPLETED")}
-                        >
-                          <CheckCircle2 className="size-4" /> Hoàn thành
-                        </button>
-                        <button
-                          className={
-                            actionClass +
-                            " border border-border bg-white text-muted"
-                          }
-                          type="button"
-                          disabled={Boolean(busyKey)}
-                          onClick={() => void transitionPlan(plan, "ENDED")}
-                        >
-                          Kết thúc
-                        </button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <Target className="size-6 text-primary" />
-              <h2 className="text-xl font-semibold text-ink">Mục tiêu đọc</h2>
-            </div>
-            <form
-              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
-              onSubmit={submitGoal}
-            >
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+          </>
+        ) : activeForm === "goal" ? (
+          <>
+            {error ? (
+              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+                {error}
+              </StatusMessage>
+            ) : null}
+            <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitGoal}>
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Đo lường
                 <select
                   className={inputClass}
@@ -866,7 +613,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="SESSIONS">Buổi đọc hoàn thành</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Mục tiêu
                 <input
                   className={inputClass}
@@ -879,7 +626,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalTarget(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Chu kỳ
                 <select
                   className={inputClass}
@@ -892,7 +639,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="WEEKLY">Mỗi tuần</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Bắt đầu
                 <input
                   className={inputClass}
@@ -902,7 +649,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalStart(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -918,314 +665,19 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 </Button>
               </div>
             </form>
-            {goals.length === 0 ? (
-              <p className="mt-5 rounded-control bg-canvas p-4 text-label text-muted">
-                Bé chưa có mục tiêu đọc nào.
-              </p>
-            ) : (
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                {goals.map((goal) => (
-                  <article
-                    key={goal.id}
-                    className="rounded-card border border-border p-4"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <h3 className="font-semibold text-ink">
-                        {goal.target_value}{" "}
-                        {goal.metric === "MINUTES" ? "phút" : "buổi"} ·{" "}
-                        {goal.period === "DAILY" ? "mỗi ngày" : "mỗi tuần"}
-                      </h3>
-                      <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary">
-                        {statusText(goal.status)}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-label text-muted">
-                      Từ {goal.starts_on}
-                      {goal.ends_on ? " đến " + goal.ends_on : ""} ·{" "}
-                      {goal.timezone}
-                    </p>
-                    <div className="mt-4 flex items-center justify-between text-label">
-                      <span>Tiến độ chu kỳ hiện tại</span>
-                      <strong>
-                        {goal.current_value}/{goal.target_value}
-                      </strong>
-                    </div>
-                    <div className="mt-2 h-3 overflow-hidden rounded-full bg-canvas">
-                      <div
-                        className="h-full rounded-full bg-primary transition-[width] duration-200"
-                        style={{ width: String(goal.progress_percent) + "%" }}
-                      />
-                    </div>
-                    <p className="mt-1 text-right text-label font-semibold text-primary">
-                      {goal.progress_percent}%
-                    </p>
-                    <GoalInsights goal={goal} />
-                    {editingGoalId === goal.id ? (
-                      <div className="mt-3 flex gap-2">
-                        <input
-                          aria-label="Giá trị mục tiêu mới"
-                          className={inputClass + " w-28"}
-                          type="number"
-                          min={1}
-                          value={editingTarget}
-                          onChange={(e) => setEditingTarget(e.target.value)}
-                        />
-                        <Button
-                          onClick={() => void saveEditedGoal(goal)}
-                          disabled={Boolean(busyKey)}
-                        >
-                          Lưu
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => setEditingGoalId("")}
-                        >
-                          Hủy
-                        </Button>
-                      </div>
-                    ) : null}
-                    {goal.status === "ACTIVE" || goal.status === "PAUSED" ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button
-                          className={
-                            actionClass +
-                            " border border-border hover:bg-canvas"
-                          }
-                          onClick={() => {
-                            setEditingGoalId(goal.id);
-                            setEditingTarget(String(goal.target_value));
-                          }}
-                          type="button"
-                        >
-                          Sửa mục tiêu
-                        </button>
-                        {goal.status === "ACTIVE" ? (
-                          <button
-                            className={actionClass + " bg-cream text-ink"}
-                            disabled={Boolean(busyKey)}
-                            onClick={() => void transition(goal, "PAUSED")}
-                            type="button"
-                          >
-                            Tạm dừng
-                          </button>
-                        ) : (
-                          <button
-                            className={actionClass + " bg-sky text-primary"}
-                            disabled={Boolean(busyKey)}
-                            onClick={() => void transition(goal, "ACTIVE")}
-                            type="button"
-                          >
-                            Tiếp tục
-                          </button>
-                        )}
-                        <button
-                          className={actionClass + " bg-sky text-primary"}
-                          disabled={Boolean(busyKey)}
-                          onClick={() => void transition(goal, "COMPLETED")}
-                          type="button"
-                        >
-                          Hoàn thành
-                        </button>
-                        <button
-                          className={
-                            actionClass + " border border-border text-muted"
-                          }
-                          disabled={Boolean(busyKey)}
-                          onClick={() => void transition(goal, "ENDED")}
-                          type="button"
-                        >
-                          Kết thúc
-                        </button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            )}
-            <p className="mt-4 text-xs text-muted">
-              Tiến độ chỉ tính phiên đã hoàn tất với thời điểm bắt đầu/kết thúc
-              hợp lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.
-            </p>
-          </section>
-
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <BookHeart className="size-6 text-primary" />
-              <h2 className="text-xl font-semibold text-ink">
-                Sách yêu thích và danh sách muốn đọc
-              </h2>
-            </div>
-            <p className="mb-4 text-label text-muted">
-              Trạng thái được lưu trên backend theo hồ sơ bé. Sách đã nghỉ vẫn
-              hiện trong danh sách cũ để có thể gỡ lưu, nhưng không thể bắt đầu
-              đọc.
-            </p>
-            <div className="grid gap-5 lg:grid-cols-2">
-              {[
-                {
-                  type: "FAVORITE" as const,
-                  title: "Sách yêu thích",
-                  rows: favorites,
-                  icon: <Heart className="size-5" />,
-                },
-                {
-                  type: "WANT_TO_READ" as const,
-                  title: "Danh sách muốn đọc",
-                  rows: readingList,
-                  icon: <ListChecks className="size-5" />,
-                },
-              ].map((group) => (
-                <div key={group.type} className="rounded-card bg-canvas p-4">
-                  <h3 className="mb-3 flex items-center gap-2 font-semibold text-ink">
-                    {group.icon}
-                    {group.title}{" "}
-                    <span className="text-label font-normal text-muted">
-                      ({group.rows.length})
-                    </span>
-                  </h3>
-                  {group.rows.length === 0 ? (
-                    <p className="text-label text-muted">
-                      Chưa lưu cuốn sách nào.
-                    </p>
-                  ) : (
-                    <ul className="space-y-3">
-                      {group.rows.map((entry) => (
-                        <li
-                          key={entry.id}
-                          className="flex items-center justify-between gap-3 rounded-control bg-white p-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold text-ink">
-                              {entry.book.title}
-                            </p>
-                            <p className="text-label text-muted">
-                              {entry.book.author ?? "Chưa cập nhật tác giả"} ·{" "}
-                              {entry.book.lifecycle_status === "RETIRED"
-                                ? "Không còn khả dụng để đọc"
-                                : "Lớp " +
-                                  entry.book.min_grade +
-                                  "–" +
-                                  entry.book.max_grade}
-                            </p>
-                          </div>
-                          <button
-                            className={
-                              actionClass + " shrink-0 border border-border"
-                            }
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() =>
-                              void toggleCollection(entry.book_id, group.type)
-                            }
-                          >
-                            <Trash2 className="size-4" />
-                            Bỏ lưu
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
-            </div>
-            <h3 className="mb-3 mt-6 font-semibold text-ink">
-              Thêm từ thư viện sách đã xác minh
-            </h3>
-            {books.length === 0 ? (
-              <p className="text-label text-muted">
-                Hiện chưa có sách khả dụng phù hợp với lớp của bé.
-              </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {books.map((book) => {
-                  const favorite = collections.some(
-                    (entry) =>
-                      entry.book_id === book.id &&
-                      entry.collection_type === "FAVORITE",
-                  );
-                  const planned = collections.some(
-                    (entry) =>
-                      entry.book_id === book.id &&
-                      entry.collection_type === "WANT_TO_READ",
-                  );
-                  return (
-                    <article
-                      key={book.id}
-                      className="flex flex-col gap-2 rounded-card border border-border p-4"
-                    >
-                      <h4 className="font-semibold text-ink">{book.title}</h4>
-                      <p className="text-label text-muted">
-                        {book.author ?? "Chưa cập nhật tác giả"} · Lớp{" "}
-                        {book.min_grade}–{book.max_grade}
-                      </p>
-                      <div className="mt-auto flex flex-wrap gap-2">
-                        <button
-                          className={
-                            actionClass +
-                            (favorite
-                              ? " bg-sky text-primary"
-                              : " border border-border")
-                          }
-                          type="button"
-                          disabled={Boolean(busyKey)}
-                          aria-pressed={favorite}
-                          onClick={() =>
-                            void toggleCollection(book.id, "FAVORITE")
-                          }
-                        >
-                          <Heart className="size-4" />
-                          {favorite ? "Đã yêu thích" : "Yêu thích"}
-                        </button>
-                        <button
-                          className={
-                            actionClass +
-                            (planned
-                              ? " bg-sky text-primary"
-                              : " border border-border")
-                          }
-                          type="button"
-                          disabled={Boolean(busyKey)}
-                          aria-pressed={planned}
-                          onClick={() =>
-                            void toggleCollection(book.id, "WANT_TO_READ")
-                          }
-                        >
-                          <ListChecks className="size-4" />
-                          {planned ? "Đã lưu đọc" : "Muốn đọc"}
-                        </button>
-                        <Link
-                          className={actionClass + " bg-primary text-white"}
-                          href={
-                            "/books/" +
-                            encodeURIComponent(book.id) +
-                            "?childId=" +
-                            encodeURIComponent(childId)
-                          }
-                        >
-                          Mở sách
-                        </Link>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <CalendarClock className="size-6 text-primary" />
-              <h2 className="text-xl font-semibold text-ink">Lịch nhắc đọc</h2>
-            </div>
-            <p className="mb-4 text-label text-muted">
-              Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy chủ sẽ gửi
-              lời nhắc đến địa chỉ đã xác minh của tài khoản phụ huynh.
-            </p>
+          </>
+        ) : (
+          <>
+            {error ? (
+              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+                {error}
+              </StatusMessage>
+            ) : null}
             <form
-              className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"
+              className="grid gap-4 sm:grid-cols-2"
               onSubmit={submitReminder}
             >
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Giờ địa phương
                 <input
                   className={inputClass}
@@ -1235,7 +687,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setReminderTime(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
                 Timezone IANA
                 <input
                   className={inputClass}
@@ -1252,7 +704,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="America/Los_Angeles" />
                 </datalist>
               </label>
-              <fieldset className="md:col-span-2">
+              <fieldset className="min-w-0 sm:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
                   Lặp vào ngày
                 </legend>
@@ -1284,7 +736,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
-              <fieldset className="rounded-control border border-border bg-canvas p-3 md:col-span-2 lg:col-span-4">
+              <fieldset className="min-w-0 rounded-control border border-border bg-canvas p-3 sm:col-span-2">
                 <legend className="px-1 text-label font-semibold text-ink">
                   Email nhắc đọc
                 </legend>
@@ -1309,7 +761,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </span>
                 </label>
               </fieldset>
-              <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-4">
+              <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2">
                 <Button type="submit" disabled={Boolean(busyKey)}>
                   {editingReminderId ? "Lưu chỉnh sửa" : "Tạo lịch nhắc"}
                 </Button>
@@ -1324,154 +776,809 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 ) : null}
               </div>
             </form>
-            {due.length > 0 ? (
-              <div className="mt-5 rounded-card border border-border bg-cream p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-semibold text-ink">
-                  <BellRing className="size-5" />
-                  Đến giờ đọc sách
-                </h3>
-                <ul className="space-y-2">
-                  {due.map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-white p-3"
-                    >
-                      <span className="text-label text-ink">
-                        Lịch nhắc lúc{" "}
-                        {item.reminder
-                          ? clock(item.reminder.remind_at)
-                          : new Date(item.scheduled_for).toLocaleTimeString(
-                              [],
-                              { hour: "2-digit", minute: "2-digit" },
-                            )}{" "}
-                        · {item.scheduled_local_date}
-                      </span>
-                      {item.email_status !== "NOT_REQUESTED" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-primary">
-                          <Mail className="size-4" />{" "}
-                          {item.email_error_code === "PARENT_EMAIL_UNVERIFIED"
-                            ? "Email phụ huynh chưa xác minh"
-                            : emailStatusText(item.email_status)}
-                        </span>
-                      ) : null}
-                      <button
-                        className={actionClass + " bg-sky text-primary"}
-                        type="button"
-                        disabled={Boolean(busyKey)}
-                        onClick={() =>
-                          void runAction(
-                            "due-" + item.id,
-                            () => service.acknowledgeOccurrence(item.id),
-                            "Đã ghi nhận lời nhắc.",
-                          )
-                        }
-                      >
-                        <Check className="size-4" />
-                        Đã xem
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+          </>
+        )}
+      </FormPage>
+    );
+  }
+
+  if (loadingChildren)
+    return (
+      <section className="mx-auto max-w-7xl p-6" aria-busy="true">
+        Đang tải hồ sơ bé…
+      </section>
+    );
+
+  return (
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-5">
+        <div className="min-w-0 flex-1">
+          <p className="mb-2 text-label font-bold text-primary">
+            ViRead · Thói quen đọc
+          </p>
+          <h1 className="text-heading font-extrabold leading-tight text-ink">
+            Quản lý đọc sách
+          </h1>
+          <p className="mt-3 max-w-3xl text-body leading-6 text-muted">
+            Đặt mục tiêu, lưu sách và tạo lịch nhắc theo giờ địa phương của gia
+            đình.
+          </p>
+        </div>
+        <Button
+          onClick={() => setReloadKey((value) => value + 1)}
+          className="sm:w-auto"
+          variant="secondary"
+          disabled={isReadingDataLoading || !childId}
+        >
+          <RefreshCw aria-hidden="true" className="size-4" /> Tải lại
+        </Button>
+      </header>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label
+          className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 text-label text-muted"
+          htmlFor="management-child"
+        >
+          Hồ sơ bé
+          <select
+            id="management-child"
+            className="min-h-6 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
+            value={childId}
+            onChange={(event) => setChildId(event.target.value)}
+          >
+            {children.map((child) => (
+              <option key={child.id} value={child.id}>
+                {child.alias} · Lớp {child.grade}
+              </option>
+            ))}
+          </select>
+        </label>
+        {selectedChild ? (
+          <dl>
+            <InformationField label="Đang xem">
+              {selectedChild.alias} · Lớp {selectedChild.grade}
+            </InformationField>
+          </dl>
+        ) : null}
+      </div>
+      {error && !activeForm ? (
+        <StatusMessage title="Có vấn đề xảy ra" tone="error">
+          {error}
+        </StatusMessage>
+      ) : null}
+      {success ? (
+        <StatusMessage title="Đã lưu" tone="success">
+          {success}
+        </StatusMessage>
+      ) : null}
+      {!childId && !isReadingDataLoading ? (
+        <EmptyState
+          icon={<Target className="size-9" />}
+          title="Chưa có hồ sơ bé"
+          description="Hãy tạo hồ sơ bé trước khi thiết lập mục tiêu hoặc lịch nhắc."
+        />
+      ) : null}
+      {isReadingDataLoading && childId ? (
+        <p role="status" aria-live="polite">
+          Đang tải dữ liệu của bé…
+        </p>
+      ) : null}
+
+      {childId &&
+      !isReadingDataLoading &&
+      loadedRequestKey === currentRequestKey ? (
+        <>
+          <section
+            aria-label="Tổng quan thói quen đọc"
+            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+          >
+            {[
+              {
+                label: "Mục tiêu đang chạy",
+                value: goals.filter(isRunningGoal).length,
+                detail: "mục tiêu đọc",
+                icon: <Target className="size-5" />,
+              },
+              {
+                label: "Kế hoạch trong tuần",
+                value: plans.filter(isRunningPlan).length,
+                detail: "kế hoạch đang hoạt động",
+                icon: <CalendarDays className="size-5" />,
+              },
+              {
+                label: "Lịch nhắc đã bật",
+                value: reminders.filter((reminder) => reminder.is_active)
+                  .length,
+                detail: "lịch nhắc cho bé",
+                icon: <BellRing className="size-5" />,
+              },
+              {
+                label: "Sách đã lưu",
+                value: collections.length,
+                detail: "sách yêu thích hoặc muốn đọc",
+                icon: <BookHeart className="size-5" />,
+              },
+            ].map((item) => (
+              <article
+                key={item.label}
+                className="rounded-card border border-border bg-white p-4"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-label font-bold text-muted">
+                    {item.label}
+                  </p>
+                </div>
+                <p className="mt-2 text-3xl font-extrabold text-primary">
+                  {item.value}
+                </p>
+                <p className="mt-1 text-sm text-muted">{item.detail}</p>
+              </article>
+            ))}
+          </section>
+
+          <details className="rounded-control border border-border bg-white px-4 py-3">
+            <summary className="cursor-pointer font-bold text-primary">
+              Hôm nay bé cần đọc gì?
+            </summary>
+            <TodaySummary
+              childName={selectedChild?.alias ?? "bé"}
+              plans={plans}
+              goals={goals}
+            />
+          </details>
+
+          <div className="grid items-start gap-6 lg:grid-cols-2">
+            <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
+              <div className="mb-5 flex items-start gap-3">
+                <div className="rounded-full bg-sky p-3 text-primary">
+                  <CalendarDays className="size-6" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-extrabold text-ink">
+                    Kế hoạch đọc trong tuần
+                  </h2>
+                  <p className="mt-1 text-label text-muted">
+                    Chọn ngày, thời lượng và sách dự định đọc. Tiến độ được tính
+                    từ các buổi đọc hợp lệ của bé.
+                  </p>
+                </div>
               </div>
-            ) : null}
-            {reminders.length === 0 ? (
-              <p className="mt-5 rounded-control bg-canvas p-4 text-label text-muted">
-                Chưa có lịch nhắc nào.
-              </p>
-            ) : (
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {reminders.map((reminder) => (
-                  <article
-                    key={reminder.id}
-                    className="rounded-card border border-border p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="flex items-center gap-2 font-semibold text-ink">
-                          <Clock3 className="size-5 text-primary" />
-                          {clock(reminder.remind_at)}
-                        </h3>
-                        <p className="mt-1 text-label text-muted">
-                          {reminder.weekdays
-                            .map(
-                              (day) =>
-                                weekdayOptions.find(
-                                  (option) => option.value === day,
-                                )?.label,
-                            )
-                            .join(", ")}{" "}
-                          · {reminder.timezone}
-                        </p>
-                        <p className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-                          <Mail className="size-4" />
-                          {reminder.email_enabled
-                            ? "Có gửi email nhắc"
-                            : "Chỉ nhắc trong ứng dụng"}
-                        </p>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditingPlanId("");
+                  setActiveForm("plan");
+                }}
+              >
+                Thêm kế hoạch
+              </Button>
+
+              {plans.length === 0 ? (
+                <div className="mt-5 rounded-card bg-canvas p-5 text-center">
+                  <CalendarDays className="mx-auto size-8 text-primary" />
+                  <p className="mt-2 font-semibold text-ink">
+                    Chưa có kế hoạch đọc tuần
+                  </p>
+                  <p className="mt-1 text-label text-muted">
+                    Tạo lịch đọc phù hợp với thời gian của gia đình.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 grid gap-4">
+                  {plans.map((plan) => (
+                    <article
+                      key={plan.id}
+                      className="rounded-card border border-border bg-canvas p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold text-ink">
+                            {plan.title}
+                          </h3>
+                          <p className="mt-1 text-label text-muted">
+                            {plan.weekdays
+                              .map(
+                                (day) =>
+                                  weekdayOptions.find(
+                                    (option) => option.value === day,
+                                  )?.label,
+                              )
+                              .join(", ")}{" "}
+                            · {plan.target_minutes} phút mỗi buổi
+                          </p>
+                          {plan.book_title ? (
+                            <p className="mt-1 text-label text-muted">
+                              Sách: {plan.book_title}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-label font-semibold text-primary">
+                          {planStatusText(plan.status)}
+                        </span>
                       </div>
-                      <label className="flex items-center gap-2 text-label font-semibold">
-                        <input
-                          type="checkbox"
-                          checked={reminder.is_active}
+                      <div className="mt-4 flex items-center justify-between gap-3 text-label">
+                        <span>Ngày đọc hoàn thành trong tuần này</span>
+                        <strong>
+                          {plan.completed_days_this_week}/
+                          {plan.scheduled_days_this_week}
+                        </strong>
+                      </div>
+                      <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
+                        <div
+                          className="h-full rounded-full bg-primary transition-[width] duration-200"
+                          style={{
+                            width: `${Math.min(100, plan.progress_percent)}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="mt-1 text-right text-label font-semibold text-primary">
+                        {plan.progress_percent}%
+                      </p>
+                      <PlanInsights plan={plan} />
+                      {plan.status === "ACTIVE" || plan.status === "PAUSED" ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            className={
+                              actionClass + " border border-border bg-white"
+                            }
+                            type="button"
+                            onClick={() => {
+                              setActiveForm("plan");
+                              setEditingPlanId(plan.id);
+                              setPlanTitle(plan.title);
+                              setPlanBookId(plan.book_id ?? "");
+                              setPlanMinutes(String(plan.target_minutes));
+                              setPlanDays(plan.weekdays);
+                              setPlanStart(plan.starts_on);
+                              setPlanEnd(plan.ends_on ?? "");
+                              setPlanTimezone(plan.timezone);
+                            }}
+                          >
+                            Chỉnh sửa
+                          </button>
+                          {plan.status === "ACTIVE" ? (
+                            <button
+                              className={actionClass + " bg-cream text-ink"}
+                              type="button"
+                              disabled={Boolean(busyKey)}
+                              onClick={() =>
+                                void transitionPlan(plan, "PAUSED")
+                              }
+                            >
+                              Tạm dừng
+                            </button>
+                          ) : (
+                            <button
+                              className={actionClass + " bg-sky text-primary"}
+                              type="button"
+                              disabled={Boolean(busyKey)}
+                              onClick={() =>
+                                void transitionPlan(plan, "ACTIVE")
+                              }
+                            >
+                              Tiếp tục
+                            </button>
+                          )}
+                          <button
+                            className={actionClass + " bg-sky text-primary"}
+                            type="button"
+                            disabled={Boolean(busyKey)}
+                            onClick={() =>
+                              void transitionPlan(plan, "COMPLETED")
+                            }
+                          >
+                            <CheckCircle2 className="size-4" /> Hoàn thành
+                          </button>
+                          <button
+                            className={
+                              actionClass +
+                              " border border-border bg-white text-muted"
+                            }
+                            type="button"
+                            disabled={Boolean(busyKey)}
+                            onClick={() => void transitionPlan(plan, "ENDED")}
+                          >
+                            Kết thúc
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
+              <div className="mb-4 flex items-center gap-3">
+                <Target className="size-6 text-primary" />
+                <h2 className="text-2xl font-extrabold text-ink">
+                  Mục tiêu đọc
+                </h2>
+              </div>
+              <Button variant="secondary" onClick={() => setActiveForm("goal")}>
+                Thêm mục tiêu
+              </Button>
+
+              {goals.length === 0 ? (
+                <p className="mt-5 rounded-control bg-canvas p-4 text-label text-muted">
+                  Bé chưa có mục tiêu đọc nào.
+                </p>
+              ) : (
+                <div className="mt-5 grid gap-4">
+                  {goals.map((goal) => (
+                    <article
+                      key={goal.id}
+                      className="rounded-card border border-border p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <h3 className="font-semibold text-ink">
+                          {goal.target_value}{" "}
+                          {goal.metric === "MINUTES" ? "phút" : "buổi"} ·{" "}
+                          {goal.period === "DAILY" ? "mỗi ngày" : "mỗi tuần"}
+                        </h3>
+                        <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary">
+                          {statusText(goal.status)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-label text-muted">
+                        Từ {goal.starts_on}
+                        {goal.ends_on ? " đến " + goal.ends_on : ""} ·{" "}
+                        {goal.timezone}
+                      </p>
+                      <div className="mt-4 flex items-center justify-between text-label">
+                        <span>Tiến độ chu kỳ hiện tại</span>
+                        <strong>
+                          {goal.current_value}/{goal.target_value}
+                        </strong>
+                      </div>
+                      <div className="mt-2 h-3 overflow-hidden rounded-full bg-canvas">
+                        <div
+                          className="h-full rounded-full bg-primary transition-[width] duration-200"
+                          style={{ width: String(goal.progress_percent) + "%" }}
+                        />
+                      </div>
+                      <p className="mt-1 text-right text-label font-semibold text-primary">
+                        {goal.progress_percent}%
+                      </p>
+                      <GoalInsights goal={goal} />
+                      {editingGoalId === goal.id ? (
+                        <div className="mt-3 flex gap-2">
+                          <input
+                            aria-label="Giá trị mục tiêu mới"
+                            className={inputClass + " w-28"}
+                            type="number"
+                            min={1}
+                            value={editingTarget}
+                            onChange={(e) => setEditingTarget(e.target.value)}
+                          />
+                          <Button
+                            onClick={() => void saveEditedGoal(goal)}
+                            disabled={Boolean(busyKey)}
+                          >
+                            Lưu
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => setEditingGoalId("")}
+                          >
+                            Hủy
+                          </Button>
+                        </div>
+                      ) : null}
+                      {goal.status === "ACTIVE" || goal.status === "PAUSED" ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            className={
+                              actionClass +
+                              " border border-border hover:bg-canvas"
+                            }
+                            onClick={() => {
+                              setEditingGoalId(goal.id);
+                              setEditingTarget(String(goal.target_value));
+                            }}
+                            type="button"
+                          >
+                            Sửa mục tiêu
+                          </button>
+                          {goal.status === "ACTIVE" ? (
+                            <button
+                              className={actionClass + " bg-cream text-ink"}
+                              disabled={Boolean(busyKey)}
+                              onClick={() => void transition(goal, "PAUSED")}
+                              type="button"
+                            >
+                              Tạm dừng
+                            </button>
+                          ) : (
+                            <button
+                              className={actionClass + " bg-sky text-primary"}
+                              disabled={Boolean(busyKey)}
+                              onClick={() => void transition(goal, "ACTIVE")}
+                              type="button"
+                            >
+                              Tiếp tục
+                            </button>
+                          )}
+                          <button
+                            className={actionClass + " bg-sky text-primary"}
+                            disabled={Boolean(busyKey)}
+                            onClick={() => void transition(goal, "COMPLETED")}
+                            type="button"
+                          >
+                            Hoàn thành
+                          </button>
+                          <button
+                            className={
+                              actionClass + " border border-border text-muted"
+                            }
+                            disabled={Boolean(busyKey)}
+                            onClick={() => void transition(goal, "ENDED")}
+                            type="button"
+                          >
+                            Kết thúc
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+              <p className="mt-4 text-xs text-muted">
+                Tiến độ chỉ tính phiên đã hoàn tất với thời điểm bắt đầu/kết
+                thúc hợp lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.
+              </p>
+            </section>
+
+            <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
+              <div className="mb-4 flex items-center gap-3">
+                <BookHeart className="size-6 text-primary" />
+                <h2 className="text-2xl font-extrabold text-ink">
+                  Sách yêu thích và danh sách muốn đọc
+                </h2>
+              </div>
+              <p className="mb-4 text-label text-muted">
+                Các cuốn sách bé yêu thích hoặc muốn đọc. Sách ngừng hoạt động
+                vẫn có thể bỏ lưu.
+              </p>
+              <p className="mb-3 text-sm text-muted">
+                Yêu thích {favorites.length} · Muốn đọc {readingList.length}
+              </p>
+              {collections.length === 0 ? (
+                <p className="rounded-control bg-canvas p-4 text-label text-muted">
+                  Chưa lưu cuốn sách nào.
+                </p>
+              ) : (
+                <table className="w-full border-collapse text-left text-label">
+                  <thead className="hidden bg-sky text-primary-hover sm:table-header-group">
+                    <tr>
+                      <th className="p-4">Sách</th>
+                      <th className="p-4">Danh sách</th>
+                      <th className="p-4">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collections.map((entry) => (
+                      <tr
+                        key={entry.id}
+                        className="flex flex-col gap-2 border-b border-border py-4 sm:table-row sm:py-0"
+                      >
+                        <td className="min-w-0 break-words sm:p-4">
+                          <strong className="font-bold text-ink">
+                            {entry.book.title}
+                          </strong>
+                          {entry.book.lifecycle_status === "RETIRED" ? (
+                            <span className="mt-1 block text-sm text-muted">
+                              Không còn khả dụng để đọc
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="text-muted sm:p-4">
+                          {entry.collection_type === "FAVORITE"
+                            ? "Yêu thích"
+                            : "Muốn đọc"}
+                        </td>
+                        <td className="sm:p-4">
+                          <div className="flex flex-wrap gap-3">
+                            {entry.book.lifecycle_status === "ACTIVE" ? (
+                              <Link
+                                className="inline-flex min-h-11 items-center font-bold text-primary hover:underline"
+                                href={`/books/${encodeURIComponent(entry.book_id)}?childId=${encodeURIComponent(childId)}`}
+                              >
+                                Mở sách
+                              </Link>
+                            ) : null}
+                            <button
+                              className={actionClass + " text-primary"}
+                              type="button"
+                              disabled={Boolean(busyKey)}
+                              onClick={() =>
+                                void toggleCollection(
+                                  entry.book_id,
+                                  entry.collection_type,
+                                )
+                              }
+                            >
+                              <Trash2 aria-hidden="true" className="size-4" />
+                              Bỏ lưu
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <details className="mt-4">
+                <summary className="cursor-pointer rounded-control bg-sky px-4 py-3 text-center font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary">
+                  Thêm từ thư viện sách đã xác minh
+                </summary>
+                {books.length === 0 ? (
+                  <p className="text-label text-muted">
+                    Hiện chưa có sách khả dụng phù hợp với lớp của bé.
+                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-4">
+                    {books.map((book) => {
+                      const favorite = collections.some(
+                        (entry) =>
+                          entry.book_id === book.id &&
+                          entry.collection_type === "FAVORITE",
+                      );
+                      const planned = collections.some(
+                        (entry) =>
+                          entry.book_id === book.id &&
+                          entry.collection_type === "WANT_TO_READ",
+                      );
+                      return (
+                        <article
+                          key={book.id}
+                          className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-white p-4 transition-colors hover:border-primary/40 sm:p-5"
+                        >
+                          <div className="flex min-w-0 items-center gap-4">
+                            <BookCover book={book} size="medium" />
+                            <div className="min-w-0">
+                              <h4 className="line-clamp-3 text-lg font-extrabold leading-snug text-ink">
+                                {book.title}
+                              </h4>
+                              <p className="mt-2 line-clamp-2 text-label text-muted">
+                                {book.author ?? "Tác giả đang cập nhật"}
+                              </p>
+                              <p className="mt-2 text-label font-bold text-primary">
+                                Lớp {book.min_grade}–{book.max_grade}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-auto grid grid-cols-2 gap-2">
+                            <button
+                              className={
+                                actionClass +
+                                " w-full " +
+                                (favorite
+                                  ? " bg-sky text-primary"
+                                  : " border border-border")
+                              }
+                              type="button"
+                              disabled={Boolean(busyKey)}
+                              aria-pressed={favorite}
+                              onClick={() =>
+                                void toggleCollection(book.id, "FAVORITE")
+                              }
+                            >
+                              <Heart className="size-4" />
+                              {favorite ? "Đã yêu thích" : "Yêu thích"}
+                            </button>
+                            <button
+                              className={
+                                actionClass +
+                                " w-full " +
+                                (planned
+                                  ? " bg-sky text-primary"
+                                  : " border border-border")
+                              }
+                              type="button"
+                              disabled={Boolean(busyKey)}
+                              aria-pressed={planned}
+                              onClick={() =>
+                                void toggleCollection(book.id, "WANT_TO_READ")
+                              }
+                            >
+                              <ListChecks className="size-4" />
+                              {planned ? "Đã lưu đọc" : "Muốn đọc"}
+                            </button>
+                            <Link
+                              className={
+                                actionClass +
+                                " col-span-2 w-full bg-primary text-white"
+                              }
+                              href={
+                                "/books/" +
+                                encodeURIComponent(book.id) +
+                                "?childId=" +
+                                encodeURIComponent(childId)
+                              }
+                            >
+                              Mở sách
+                            </Link>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </details>
+            </section>
+
+            <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
+              <div className="mb-4 flex items-center gap-3">
+                <CalendarClock className="size-6 text-primary" />
+                <h2 className="text-2xl font-extrabold text-ink">
+                  Lịch nhắc đọc
+                </h2>
+              </div>
+              <p className="mb-4 text-label text-muted">
+                Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy chủ sẽ
+                gửi lời nhắc đến địa chỉ đã xác minh của tài khoản phụ huynh.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditingReminderId("");
+                  setActiveForm("reminder");
+                }}
+              >
+                Thêm lịch nhắc
+              </Button>
+
+              {due.length > 0 ? (
+                <div className="mt-5 rounded-card border border-border bg-cream p-4">
+                  <h3 className="mb-3 flex items-center gap-2 font-semibold text-ink">
+                    <BellRing className="size-5" />
+                    Đến giờ đọc sách
+                  </h3>
+                  <ul className="space-y-2">
+                    {due.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-white p-3"
+                      >
+                        <span className="text-label text-ink">
+                          Lịch nhắc lúc{" "}
+                          {item.reminder
+                            ? clock(item.reminder.remind_at)
+                            : new Date(item.scheduled_for).toLocaleTimeString(
+                                [],
+                                { hour: "2-digit", minute: "2-digit" },
+                              )}{" "}
+                          · {item.scheduled_local_date}
+                        </span>
+                        {item.email_status !== "NOT_REQUESTED" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-primary">
+                            <Mail className="size-4" />{" "}
+                            {item.email_error_code === "PARENT_EMAIL_UNVERIFIED"
+                              ? "Email phụ huynh chưa xác minh"
+                              : emailStatusText(item.email_status)}
+                          </span>
+                        ) : null}
+                        <button
+                          className={actionClass + " bg-sky text-primary"}
+                          type="button"
                           disabled={Boolean(busyKey)}
-                          onChange={(e) =>
+                          onClick={() =>
                             void runAction(
-                              "reminder-toggle-" + reminder.id,
-                              () =>
-                                service.updateReminder(reminder.id, {
-                                  is_active: e.target.checked,
-                                }),
-                              e.target.checked
-                                ? "Đã bật lịch nhắc."
-                                : "Đã tắt lịch nhắc.",
+                              "due-" + item.id,
+                              () => service.acknowledgeOccurrence(item.id),
+                              "Đã ghi nhận lời nhắc.",
                             )
                           }
-                        />
-                        Đang bật
-                      </label>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        className={actionClass + " border border-border"}
-                        type="button"
-                        onClick={() => {
-                          setEditingReminderId(reminder.id);
-                          setReminderTime(clock(reminder.remind_at));
-                          setReminderDays(reminder.weekdays);
-                          setReminderTimezone(reminder.timezone);
-                          setReminderEmailEnabled(reminder.email_enabled);
-                        }}
-                      >
-                        Chỉnh sửa
-                      </button>
-                      <button
-                        className={
-                          actionClass + " border border-border text-danger"
-                        }
-                        type="button"
-                        disabled={Boolean(busyKey)}
-                        onClick={() =>
-                          void (
-                            window.confirm(
-                              "Xóa lịch nhắc này? Các lần gửi trong tương lai sẽ bị hủy.",
-                            ) &&
-                            runAction(
-                              "reminder-delete-" + reminder.id,
-                              () => service.deleteReminder(reminder.id),
-                              "Đã xóa lịch nhắc.",
+                        >
+                          <Check className="size-4" />
+                          Đã xem
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {reminders.length === 0 ? (
+                <p className="mt-5 rounded-control bg-canvas p-4 text-label text-muted">
+                  Chưa có lịch nhắc nào.
+                </p>
+              ) : (
+                <div className="mt-5 grid gap-3">
+                  {reminders.map((reminder) => (
+                    <article
+                      key={reminder.id}
+                      className="rounded-card border border-border p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="flex items-center gap-2 font-semibold text-ink">
+                            <Clock3 className="size-5 text-primary" />
+                            {clock(reminder.remind_at)}
+                          </h3>
+                          <p className="mt-1 text-label text-muted">
+                            {reminder.weekdays
+                              .map(
+                                (day) =>
+                                  weekdayOptions.find(
+                                    (option) => option.value === day,
+                                  )?.label,
+                              )
+                              .join(", ")}{" "}
+                            · {reminder.timezone}
+                          </p>
+                          <p className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
+                            <Mail className="size-4" />
+                            {reminder.email_enabled
+                              ? "Có gửi email nhắc"
+                              : "Chỉ nhắc trong ứng dụng"}
+                          </p>
+                        </div>
+                        <label className="flex items-center gap-2 text-label font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={reminder.is_active}
+                            disabled={Boolean(busyKey)}
+                            onChange={(e) =>
+                              void runAction(
+                                "reminder-toggle-" + reminder.id,
+                                () =>
+                                  service.updateReminder(reminder.id, {
+                                    is_active: e.target.checked,
+                                  }),
+                                e.target.checked
+                                  ? "Đã bật lịch nhắc."
+                                  : "Đã tắt lịch nhắc.",
+                              )
+                            }
+                          />
+                          Đang bật
+                        </label>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          className={actionClass + " border border-border"}
+                          type="button"
+                          onClick={() => {
+                            setEditingReminderId(reminder.id);
+                            setActiveForm("reminder");
+                            setReminderTime(clock(reminder.remind_at));
+                            setReminderDays(reminder.weekdays);
+                            setReminderTimezone(reminder.timezone);
+                            setReminderEmailEnabled(reminder.email_enabled);
+                          }}
+                        >
+                          Chỉnh sửa
+                        </button>
+                        <button
+                          className={
+                            actionClass + " border border-border text-danger"
+                          }
+                          type="button"
+                          disabled={Boolean(busyKey)}
+                          onClick={() =>
+                            void (
+                              window.confirm(
+                                "Xóa lịch nhắc này? Các lần gửi trong tương lai sẽ bị hủy.",
+                              ) &&
+                              runAction(
+                                "reminder-delete-" + reminder.id,
+                                () => service.deleteReminder(reminder.id),
+                                "Đã xóa lịch nhắc.",
+                              )
                             )
-                          )
-                        }
-                      >
-                        <Trash2 className="size-4" />
-                        Xóa
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                          Xóa
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
         </>
       ) : null}
     </section>

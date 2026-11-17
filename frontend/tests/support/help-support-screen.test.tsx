@@ -42,6 +42,7 @@ describe("HelpSupportScreen", () => {
       screen.getByRole("link", { name: "vireadforyou@gmail.com" }),
     ).toHaveAttribute("href", "mailto:vireadforyou@gmail.com");
 
+    await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
     const contactEmail = screen.getByRole("textbox", { name: "Email liên hệ" });
@@ -78,6 +79,7 @@ describe("HelpSupportScreen", () => {
 
     render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
 
+    await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
     const contactEmail = screen.getByRole("textbox", { name: "Email liên hệ" });
@@ -99,6 +101,7 @@ describe("HelpSupportScreen", () => {
 
     render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
 
+    await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
     const subject = screen.getByRole("textbox", { name: "Tiêu đề" });
     const message = screen.getByRole("textbox", { name: "Nội dung" });
     const contactEmail = screen.getByRole("textbox", { name: "Email liên hệ" });

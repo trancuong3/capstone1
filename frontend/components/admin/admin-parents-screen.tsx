@@ -350,6 +350,7 @@ export function AdminParentsScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
+          icon={<UsersRound aria-hidden className="size-10 text-primary" />}
           title={
             search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"
           }
@@ -376,13 +377,10 @@ export function AdminParentsScreen() {
         />
       ) : (
         <>
-          <div className="grid gap-4">
+          <div className="grid gap-6 lg:grid-cols-2">
             {items.map((parent) => (
               <Card className="bg-white" key={parent.id}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                  <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
-                    <UsersRound aria-hidden className="size-6" />
-                  </div>
+                <div className="flex min-w-0 flex-col gap-4">
                   <div className="min-w-0 flex-1">
                     <h2 className="break-words text-xl font-semibold text-ink">
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
@@ -391,7 +389,7 @@ export function AdminParentsScreen() {
                       ID: {parent.id}
                     </p>
                   </div>
-                  <dl className="grid grid-cols-2 gap-3 sm:min-w-64">
+                  <dl className="grid grid-cols-2 gap-3">
                     <div className="rounded-control bg-canvas px-4 py-3">
                       <dt className="text-xs font-semibold text-muted">
                         Ngày tạo
@@ -409,7 +407,7 @@ export function AdminParentsScreen() {
                       </dd>
                     </div>
                   </dl>
-                  <div className="flex flex-wrap gap-2 sm:w-auto">
+                  <div className="grid gap-3 sm:grid-cols-3">
                     <ButtonLink
                       className="sm:w-auto"
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}

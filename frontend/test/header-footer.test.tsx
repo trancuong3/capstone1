@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("shared header and footer", () => {
-  it("renders the ViRead public header without a footer on auth pages", () => {
+  it("renders the public navigation and footer around auth content", () => {
     render(
       <AuthShell>
         <h1>Trang tài khoản</h1>
@@ -55,8 +55,10 @@ describe("shared header and footer", () => {
     expect(main.parentElement?.firstElementChild).toBe(
       screen.getByRole("banner"),
     );
-    expect(main.parentElement?.lastElementChild).toBe(main);
-    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+    expect(main.parentElement?.lastElementChild).toBe(
+      screen.getByRole("contentinfo"),
+    );
+    expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
     expect(
       screen.queryByRole("navigation", { name: "Điều hướng tài khoản" }),
     ).not.toBeInTheDocument();
@@ -65,11 +67,11 @@ describe("shared header and footer", () => {
     ).toHaveAttribute("href", "/login");
   });
 
-  it("does not render a footer while auth content loads", () => {
+  it("retains one public footer while auth content loads", () => {
     render(<AuthLoadingState />);
     expect(screen.getAllByRole("banner")).toHaveLength(1);
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
   });
 
   it.each([
@@ -189,7 +191,7 @@ describe("shared header and footer", () => {
   });
 
   it.each(["/books", "/books/book-1", "/reading/session-1"])(
-    "uses parent navigation outside child reading and one reading landmark on %s",
+    "keeps one immersive landmark without duplicate parent navigation on %s",
     (pathname) => {
       navigationMock.pathname = pathname;
       const { container } = render(
@@ -200,29 +202,13 @@ describe("shared header and footer", () => {
           createAuthServiceFixture(),
         ),
       );
-      if (pathname.startsWith("/reading/")) {
-        expect(container.querySelector("header")).toBeNull();
-        expect(
-          screen.queryByRole("navigation", {
-            name: "Điều hướng dành cho ba mẹ",
-          }),
-        ).not.toBeInTheDocument();
-        expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
-        expect(screen.getAllByRole("main")).toHaveLength(1);
-        expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
-      } else {
-        expect(container.querySelector("header")).not.toHaveClass("hidden");
-        expect(
-          screen.getAllByRole("navigation", {
-            name: "Điều hướng dành cho ba mẹ",
-          }),
-        ).toHaveLength(1);
-        expect(screen.getByRole("contentinfo")).toBeInTheDocument();
-        expect(screen.getAllByRole("contentinfo")).toHaveLength(1);
-        expect(container.querySelector("main")?.nextElementSibling).toBe(
-          screen.getByRole("contentinfo"),
-        );
-      }
+      expect(container.querySelector("header")).toBeNull();
+      expect(
+        screen.queryByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("main")).toHaveLength(1);
+      expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
       expect(screen.getByRole("main")).toHaveTextContent("Không gian đọc");
     },
   );

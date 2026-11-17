@@ -155,19 +155,6 @@ export function ReadingLayout({
         ) : null}
       </header>
 
-      <ReadingControls
-        pauseDisabled={false}
-        disabled={controlsDisabled}
-        isListening={isMicRecording}
-        isPlayingSample={isPlayingSample}
-        retryMode={retryMode}
-        onFinish={onFinish}
-        onHelp={onHelp}
-        onPause={onPause}
-        onReadSample={onReadSample}
-        onToggleListening={onToggleListening}
-        voiceSettings={voiceSettings}
-      />
       <section
         aria-label="Nội dung trang sách"
         className="min-w-0 rounded-card bg-desk p-2 sm:p-4"
@@ -190,6 +177,19 @@ export function ReadingLayout({
           comparisonResult={comparisonResult}
         />
       </section>
+      <ReadingControls
+        pauseDisabled={false}
+        disabled={controlsDisabled}
+        isListening={isMicRecording}
+        isPlayingSample={isPlayingSample}
+        retryMode={retryMode}
+        onFinish={onFinish}
+        onHelp={onHelp}
+        onPause={onPause}
+        onReadSample={onReadSample}
+        onToggleListening={onToggleListening}
+        voiceSettings={voiceSettings}
+      />
       {retryMode ? (
         <div
           className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-3 rounded-card border border-primary/30 bg-white px-4 py-3"
@@ -245,7 +245,7 @@ export function ReadingLayout({
               type="button"
               disabled={controlsDisabled}
               onClick={onSkipRetryWord}
-              className="shrink-0 rounded-full border border-line bg-white px-3.5 py-2 text-xs font-semibold text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-55"
+              className="shrink-0 rounded-full border border-border bg-white px-3.5 py-2 text-xs font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-55"
             >
               Bỏ qua từ này
             </button>

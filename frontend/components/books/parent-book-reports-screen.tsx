@@ -80,13 +80,13 @@ export function ParentBookReportsScreen() {
   const last = Math.min(offset + limit, total);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 px-4 py-8 sm:px-8">
+    <section className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 px-4 py-8 sm:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold text-primary">
             ViRead · Phụ huynh
           </p>
-          <h1 className="mt-1 text-heading font-semibold text-ink">
+          <h1 className="mt-1 text-heading font-extrabold text-ink">
             Báo cáo chất lượng sách
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted">

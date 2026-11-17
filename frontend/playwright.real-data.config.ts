@@ -42,6 +42,7 @@ export default defineConfig({
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8000",
       PLAYWRIGHT_AUTH_FIXTURES: "1",
       PLAYWRIGHT_AUTH_FIXTURE_TOKEN: fixtureToken,
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
   projects: [

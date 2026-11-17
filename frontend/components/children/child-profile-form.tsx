@@ -72,7 +72,7 @@ export function ChildProfileForm({
 
   return (
     <form
-      className="flex w-full flex-col gap-4 sm:gap-6"
+      className="flex w-full flex-col gap-4"
       noValidate
       onSubmit={submitForm}
     >

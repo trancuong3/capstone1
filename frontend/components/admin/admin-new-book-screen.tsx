@@ -81,11 +81,11 @@ export function AdminNewBookScreen() {
   }
 
   return (
-    <>
+    <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
         eyebrow="Kho sách"
         title="Tạo sách mới"
-        description="Tạo đầu sách trong PostgreSQL trước khi tải ảnh các trang và chạy OCR."
+        description="Tạo bản ghi sách, sau đó tải trang sách và kiểm tra OCR."
       />
       <Link
         className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -93,13 +93,14 @@ export function AdminNewBookScreen() {
       >
         <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
       </Link>
-      <Card className="max-w-3xl bg-white">
+      <Card className="bg-white sm:px-8 sm:py-6">
         {error ? (
           <StatusMessage className="mb-5" tone="error">
             {error}
           </StatusMessage>
         ) : null}
-        <form className="grid gap-5" noValidate onSubmit={submit}>
+        <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
+        <form className="grid gap-4" noValidate onSubmit={submit}>
           <label className="grid gap-2 font-semibold" htmlFor="book-name">
             Tên sách *
             <input
@@ -210,6 +211,6 @@ export function AdminNewBookScreen() {
           </Button>
         </form>
       </Card>
-    </>
+    </section>
   );
 }

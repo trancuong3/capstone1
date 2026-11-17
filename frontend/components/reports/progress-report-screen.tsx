@@ -204,7 +204,7 @@ function ProgressReportContent({
   );
   if (selected === "invalid")
     return (
-      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
         <StatusMessage title="Kỳ báo cáo không hợp lệ" tone="error">
           Cần đủ ngày bắt đầu và kết thúc hợp lệ, ngày kết thúc không trước ngày
           bắt đầu.
@@ -221,7 +221,7 @@ function ProgressReportContent({
       <section
         aria-busy="true"
         aria-label="Đang tải báo cáo tiến bộ"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-80 rounded-card" />
@@ -238,7 +238,7 @@ function ProgressReportContent({
     );
   if (state.status !== "loaded")
     return (
-      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
         <StatusMessage
           title={
             state.status === "not-found"
@@ -255,7 +255,7 @@ function ProgressReportContent({
     );
   const { child, children, report, periods } = state;
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         eyebrow="Tiến bộ của bé"
         title={`Cùng nhìn lại hành trình của ${child.alias}`}
@@ -271,7 +271,6 @@ function ProgressReportContent({
           </ButtonLink>
         }
       />
-      <ChildProgressAssessmentCard childId={child.id} childName={child.alias} />
       <ProgressReportFilters
         childrenProfiles={children}
         childId={child.id}
@@ -336,7 +335,6 @@ function ProgressReportContent({
               không được coi là số 0.
             </StatusMessage>
           ) : null}
-          <ReadingAssessmentSummary assessment={report.assessment} />
           {report.assessment_coverage &&
           report.assessment_coverage.assessed_sessions <
             report.assessment_coverage.total_sessions ? (
@@ -352,10 +350,10 @@ function ProgressReportContent({
               <MetricCard key={metric.id} metric={metric} />
             ))}
           </div>
-          <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+          <div className="grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
             <ProgressChart report={report} />
             <section
-              className="rounded-card bg-cream p-5 sm:p-8"
+              className="rounded-card border border-border bg-cream p-5 sm:p-8"
               aria-labelledby="comparison-title"
             >
               <h2
@@ -411,8 +409,9 @@ function ProgressReportContent({
               )}
             </section>
           </div>
+          <ReadingAssessmentSummary assessment={report.assessment} />
           {report.legacy ? (
-            <section className="rounded-card bg-white p-5 sm:p-8">
+            <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
               <h2 className="text-2xl font-semibold text-ink">
                 Chỉ số định dạng cũ
               </h2>
@@ -440,7 +439,7 @@ function ProgressReportContent({
               </dl>
             </section>
           ) : null}
-          <section className="rounded-card bg-white p-5 sm:p-8">
+          <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-semibold text-ink">
               Từ cần luyện nổi bật
             </h2>
@@ -483,6 +482,20 @@ function ProgressReportContent({
           </section>
         </>
       ) : null}
+      <details
+        className="rounded-card border border-border bg-white p-4 sm:p-6"
+        open
+      >
+        <summary className="cursor-pointer font-bold text-primary">
+          Đánh giá đọc của bé
+        </summary>
+        <div className="mt-4">
+          <ChildProgressAssessmentCard
+            childId={child.id}
+            childName={child.alias}
+          />
+        </div>
+      </details>
     </section>
   );
 }

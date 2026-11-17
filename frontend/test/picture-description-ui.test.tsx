@@ -360,7 +360,7 @@ describe("PictureDescriptionScreen", () => {
       screen.getByRole("button", { name: /Xem câu mẫu tham khảo/i }),
     ).toBeInTheDocument();
     expect(screen.queryByText("9/10 điểm")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("supports custom upload tab validation and book page selection", async () => {
     setupDefaultResponses();

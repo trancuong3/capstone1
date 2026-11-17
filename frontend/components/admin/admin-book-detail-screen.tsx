@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, FileSearch, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -186,21 +186,23 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         title={book.title.trim() ? book.title : "Chưa có tiêu đề"}
         description={`Tên sách: ${book.name?.trim() ? book.name : "Chưa có tên sách"} · ${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
       />
-      <Link
-        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
-        href="/admin/books"
-      >
-        <ArrowLeft aria-hidden className="size-5" /> Kho sách
-      </Link>
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <AdminStatusBadge status={book.lifecycle_status} />
-        <span className="text-sm text-muted">ID: {book.id}</span>
+      <div className="mb-4 grid gap-4 sm:grid-cols-2">
         <Link
-          className="inline-flex min-h-11 items-center rounded-control border border-border px-4 font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-white px-4 font-bold text-ink focus-visible:outline-3 focus-visible:outline-primary"
+          href="/admin/books"
+        >
+          <ArrowLeft aria-hidden className="size-5" /> Kho sách
+        </Link>
+        <Link
+          className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-4 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
           href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
         >
           Chỉnh sửa metadata / vòng đời
         </Link>
+      </div>
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <AdminStatusBadge status={book.lifecycle_status} />
+        <span className="break-all text-sm text-muted">ID: {book.id}</span>
       </div>
       <AdminPageUploader bookId={book.id} onUploaded={refreshPages} />
       {items && items.length > 0 ? (
@@ -286,10 +288,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           void load();
                         }}
                       />
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="grid size-12 shrink-0 place-items-center rounded-control bg-sky text-primary">
-                          <FileSearch aria-hidden />
-                        </div>
+                      <h3 className="text-2xl font-extrabold">
+                        Trang {item.page_number}
+                      </h3>
+                      <div className="flex items-start gap-3">
                         <AdminStatusBadge
                           status={
                             active
@@ -315,9 +317,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         </span>
                       ) : null}
                       <div>
-                        <h3 className="text-xl font-black">
-                          Trang {item.page_number}
-                        </h3>
                         <p className="mt-1 text-sm text-muted">
                           Revision R{item.processing.revision_no}
                         </p>
@@ -327,9 +326,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                             : "Chưa có văn bản OCR để xem trước."}
                         </p>
                       </div>
-                      <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-3">
+                      <div className="mt-auto flex flex-col items-stretch gap-3">
                         <Link
-                          className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                          className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-4 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
                           href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                         >
                           {active
@@ -338,13 +337,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         </Link>
                         {active ? (
                           <Button
-                            className="sm:w-auto"
                             disabled={retiringPageId !== null}
                             onClick={() => {
                               setPageActionNotice(null);
                               setPendingRetire(item);
                             }}
-                            variant="secondary"
+                            variant="quiet"
                           >
                             <Trash2 aria-hidden className="size-4" /> Xóa trang
                           </Button>

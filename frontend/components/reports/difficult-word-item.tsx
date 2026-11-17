@@ -42,13 +42,13 @@ export function DifficultWordItem({ childId, word }: DifficultWordItemProps) {
 
   return (
     <article className="rounded-card border border-border bg-white p-5 sm:p-6">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+      <div className="flex flex-col items-start gap-4">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col items-start gap-4">
             <h2 className="text-2xl font-semibold leading-tight text-ink">
               {word.display_text}
             </h2>
-            <span className="rounded-full bg-warning-surface px-3 py-1 text-label font-semibold text-warning">
+            <span className="min-w-60 rounded-full bg-warning-surface px-2 py-1 text-label font-semibold text-primary">
               Điểm bằng chứng {word.difficulty_score}
             </span>
           </div>
@@ -63,7 +63,7 @@ export function DifficultWordItem({ childId, word }: DifficultWordItemProps) {
           </p>
         </div>
         <Button
-          className="sm:w-auto sm:min-w-44"
+          className="sm:w-60"
           isLoading={isPracticing}
           onClick={() => void practice()}
           variant="secondary"

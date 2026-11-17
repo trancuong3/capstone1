@@ -176,7 +176,7 @@ function ReportCard({
         ) : null}
       </div>
 
-      <div className="rounded-card border border-[#e3d7bf] bg-[#fff8ea] p-3 sm:p-5">
+      <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
         {page ? (
           <article
             className="relative mx-auto flex aspect-[3/2] min-h-[280px] w-full max-w-[1008px] flex-col overflow-hidden rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
@@ -219,7 +219,7 @@ function ReportCard({
             className={`min-h-20 rounded-control border p-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary ${
               selectedMetric === metric.key
                 ? "border-primary bg-sky"
-                : "border-border bg-white hover:bg-surface"
+                : "border-border bg-white hover:bg-canvas"
             }`}
             key={metric.key}
             onClick={() => onSelectMetric(metric.key)}
@@ -228,7 +228,7 @@ function ReportCard({
             <span className={`block text-sm font-semibold ${metric.color}`}>
               {metric.label}
             </span>
-            <span className="mt-1 block text-2xl font-semibold text-ink">
+            <span className="mt-1 block text-[32px] font-extrabold text-primary">
               {metric.count}
             </span>
           </button>
@@ -247,7 +247,7 @@ function ReportCard({
             <ul className="mt-3 flex flex-wrap gap-2">
               {activeMetric.words.map((word, index) => (
                 <li
-                  className="rounded-full bg-surface px-3 py-1.5 text-sm font-semibold text-ink"
+                  className="rounded-full bg-canvas px-3 py-1.5 text-sm font-semibold text-ink"
                   key={`${word}-${index}`}
                 >
                   {word}

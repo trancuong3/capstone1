@@ -84,7 +84,7 @@ export function SessionDetailScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải chi tiết buổi đọc"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-72 rounded-card" />
@@ -93,7 +93,7 @@ export function SessionDetailScreen({
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-semibold text-ink">
+        <h1 className="text-heading font-extrabold text-ink">
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">
@@ -119,7 +119,7 @@ export function SessionDetailScreen({
   if (state.status === "not-found")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-semibold text-ink">
+        <h1 className="text-heading font-extrabold text-ink">
           Không tìm thấy buổi đọc
         </h1>
         <StatusMessage tone="error">
@@ -168,7 +168,7 @@ export function SessionDetailScreen({
   const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
   const availability = detail.availability;
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         action={
           <ButtonLink
@@ -211,7 +211,7 @@ export function SessionDetailScreen({
           thời lượng.
         </StatusMessage>
       ) : null}
-      <dl className="grid gap-3 text-label text-muted sm:grid-cols-2">
+      <dl className="grid gap-4 text-label text-muted sm:grid-cols-2 [&>div]:min-h-[72px] [&>div]:rounded-control [&>div]:border [&>div]:border-border [&>div]:bg-white [&>div]:px-4 [&>div]:py-3 [&_dd]:mt-1 [&_dd]:text-body [&_dd]:text-ink">
         <div>
           <dt className="font-semibold">Bắt đầu (giờ Việt Nam)</dt>
           <dd>{formatHistoryDateTime(detail.started_at)}</dd>
@@ -267,16 +267,21 @@ export function SessionDetailScreen({
               : String(detail.fluency_assessment.score),
           ],
         ].map(([label, value]) => (
-          <Card className="gap-2 bg-white p-5 sm:p-6" key={label}>
+          <Card className="gap-2 bg-white p-4 sm:p-4" key={label}>
             <p className="text-label font-semibold text-muted">{label}</p>
-            <p className="text-2xl font-semibold text-ink">{value}</p>
+            <p className="text-[32px] font-extrabold leading-snug text-primary">
+              {value}
+            </p>
           </Card>
         ))}
       </div>
       <Card className="bg-white">
         <SessionReadingReports sessionId={sessionId} />
       </Card>
-      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
+      <details
+        open
+        className="rounded-card border border-border bg-white p-4 sm:p-6"
+      >
         <summary className="cursor-pointer font-semibold text-primary">
           Thông tin khác của buổi đọc
         </summary>

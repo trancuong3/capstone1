@@ -17,9 +17,9 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
     const errorId = `${selectId}-error`;
 
     return (
-      <div className={cn("w-full", className)}>
+      <div className={cn("relative w-full", className)}>
         <label
-          className="mb-2 block text-label font-semibold text-ink"
+          className="absolute left-4 top-3 z-10 text-sm font-bold text-muted"
           htmlFor={selectId}
         >
           {label}
@@ -28,7 +28,7 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
           aria-describedby={error ? errorId : undefined}
           aria-invalid={Boolean(error)}
           className={cn(
-            "h-12 w-full cursor-pointer rounded-control border bg-white px-3.5 text-body text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-canvas disabled:text-muted",
+            "h-[72px] w-full cursor-pointer rounded-control border bg-white px-4 pb-3 pt-8 text-body text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-canvas disabled:text-muted",
             error ? "border-danger" : "border-border",
           )}
           id={selectId}

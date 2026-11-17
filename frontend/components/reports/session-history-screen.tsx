@@ -107,7 +107,7 @@ export function SessionHistoryScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải lịch sử đọc"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-40 rounded-card" />
@@ -131,7 +131,7 @@ export function SessionHistoryScreen({
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-semibold text-ink">
+        <h1 className="text-heading font-extrabold text-ink">
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">
@@ -184,13 +184,13 @@ export function SessionHistoryScreen({
   const nextPage =
     state.nextCursor === null ? null : historyPageFromCursor(state.nextCursor);
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         description="Các buổi đọc được sắp xếp từ mới nhất; chỉ hiển thị dữ liệu của gia đình mình."
         eyebrow="Hành trình đọc"
         title="Lịch sử buổi đọc"
       />
-      <div className="max-w-md">
+      <div className="w-full">
         <ChildSelector
           childrenProfiles={state.children}
           selectedChildId={state.child.id}
