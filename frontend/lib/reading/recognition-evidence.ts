@@ -46,7 +46,8 @@ export function hasHighConfidenceKeytermResult(
   transcript: SpeechTranscript,
 ): boolean {
   const words =
-    transcript.words?.filter((word) => !word.type || word.type === "word") ?? [];
+    transcript.words?.filter((word) => !word.type || word.type === "word") ??
+    [];
   // Require at least one word with a logprob score to make a judgement.
   if (!words.length || !words.some((w) => w.logprob != null)) return false;
   return words.every(

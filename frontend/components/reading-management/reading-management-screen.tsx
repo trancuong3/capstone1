@@ -786,7 +786,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
   if (loadingChildren)
     return (
-      <section className="mx-auto max-w-[1120px] p-6 text-body text-muted" aria-busy="true">
+      <section
+        className="mx-auto max-w-[1120px] p-6 text-body text-muted"
+        aria-busy="true"
+      >
         Đang tải hồ sơ bé…
       </section>
     );
