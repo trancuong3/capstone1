@@ -208,7 +208,7 @@ export function HelpSupportScreen() {
           </div>
           <div>
             <h2
-              className="text-xl font-extrabold text-ink"
+              className="text-xl font-semibold text-ink"
               id="support-faq-heading"
             >
               Câu hỏi thường gặp
@@ -221,11 +221,11 @@ export function HelpSupportScreen() {
 
         {faqGroups.map((group) => (
           <Card className="gap-3" key={group.title}>
-            <h3 className="text-base font-extrabold text-ink">{group.title}</h3>
+            <h3 className="text-base font-semibold text-ink">{group.title}</h3>
             <div className="divide-y divide-border">
               {group.items.map((item) => (
                 <details className="group py-3" key={item.question}>
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-control py-2 text-left text-sm font-bold text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-control py-2 text-left text-sm font-semibold text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
                     <span>{item.question}</span>
                     <span
                       aria-hidden="true"
@@ -252,7 +252,7 @@ export function HelpSupportScreen() {
             </div>
             <div>
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-xl font-semibold text-ink"
                 id="support-contact-heading"
               >
                 Liên hệ chính thức
@@ -267,7 +267,7 @@ export function HelpSupportScreen() {
             gặp vấn đề trong quá trình sử dụng.
           </p>
           <a
-            className="inline-flex min-h-12 w-fit max-w-full items-center gap-3 rounded-control border border-border px-4 py-3 font-extrabold text-primary underline-offset-4 hover:bg-sky hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+            className="inline-flex min-h-12 w-fit max-w-full items-center gap-3 rounded-control border border-border px-4 py-3 font-semibold text-primary underline-offset-4 hover:bg-sky hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
             href={"mailto:" + VIREAD_SUPPORT_EMAIL}
           >
             <Mail aria-hidden="true" className="size-5 shrink-0" />
@@ -284,7 +284,7 @@ export function HelpSupportScreen() {
             </div>
             <div>
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-xl font-semibold text-ink"
                 id="support-feedback-heading"
               >
                 Gửi phản hồi
@@ -309,7 +309,7 @@ export function HelpSupportScreen() {
           >
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
               <label
-                className="text-label font-bold text-muted"
+                className="text-label font-semibold text-muted"
                 htmlFor="support-category"
               >
                 Loại yêu cầu
@@ -332,7 +332,7 @@ export function HelpSupportScreen() {
 
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
               <label
-                className="text-label font-bold text-muted"
+                className="text-label font-semibold text-muted"
                 htmlFor="support-subject"
               >
                 Tiêu đề
@@ -352,7 +352,7 @@ export function HelpSupportScreen() {
 
             <div className="flex flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
               <label
-                className="text-label font-bold text-muted"
+                className="text-label font-semibold text-muted"
                 htmlFor="support-message"
               >
                 Nội dung
@@ -374,7 +374,7 @@ export function HelpSupportScreen() {
 
             <div className="flex min-h-[88px] flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
               <label
-                className="text-label font-bold text-muted"
+                className="text-label font-semibold text-muted"
                 htmlFor="support-contact-email"
               >
                 Email liên hệ

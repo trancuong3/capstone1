@@ -20,7 +20,7 @@ import {
 } from "@/lib/reading/speech-preferences";
 import { cn } from "@/lib/utils/cn";
 
-const PREVIEW_TEXT = "Chào bé, mình cùng đọc sách nhé!";
+const PREVIEW_TEXT = "Chào bé, mình cùng đọc sách nhé.";
 const SPEED_PRESETS = [
   { label: "Chậm", value: 0.8 },
   { label: "Vừa", value: 0.9 },
@@ -157,7 +157,7 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+        className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
         disabled={disabled}
         onClick={open}
         variant="quiet"
@@ -173,14 +173,14 @@ export function ReadingVoiceSettings({
           <section aria-labelledby="voice-speed-heading" className="space-y-3">
             <div className="flex items-baseline justify-between gap-3">
               <h3
-                className="text-label font-extrabold text-ink"
+                className="text-label font-semibold text-ink"
                 id="voice-speed-heading"
               >
                 Tốc độ đọc
               </h3>
               <output
                 aria-live="polite"
-                className="text-label font-extrabold text-primary"
+                className="text-label font-semibold text-primary"
               >
                 {formatSpeed(preferences.speed)}
               </output>
@@ -206,7 +206,7 @@ export function ReadingVoiceSettings({
                   <button
                     aria-pressed={active}
                     className={cn(
-                      "rounded-control border-2 px-3 py-1.5 text-label font-bold transition",
+                      "rounded-control border-2 px-3 py-1.5 text-label font-semibold transition",
                       active
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:border-primary hover:bg-cream",
@@ -224,7 +224,7 @@ export function ReadingVoiceSettings({
 
           <section aria-labelledby="voice-choice-heading" className="space-y-3">
             <h3
-              className="text-label font-extrabold text-ink"
+              className="text-label font-semibold text-ink"
               id="voice-choice-heading"
             >
               Chọn giọng đọc
@@ -285,8 +285,8 @@ export function ReadingVoiceSettings({
                       className={cn(
                         "flex w-full items-center gap-3 rounded-card border-2 p-3 text-left transition",
                         selected
-                          ? "border-primary bg-cream font-extrabold"
-                          : "border-border bg-white font-bold hover:border-primary hover:bg-cream",
+                          ? "border-primary bg-cream font-semibold"
+                          : "border-border bg-white font-semibold hover:border-primary hover:bg-cream",
                       )}
                       key={voice.voice_id}
                       onClick={() =>

@@ -164,7 +164,7 @@ export function AdminBookEditorScreen({
               Thử lại
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
               Quay lại kho sách
@@ -191,7 +191,7 @@ export function AdminBookEditorScreen({
         description="Chỉnh sửa đầu sách hiện có. Thay đổi này không sửa hoặc xóa trang sách, revision hay lịch sử đọc."
       />
       <Link
-        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href={
           returnTo === "metadata-quality"
             ? "/admin/metadata-quality"
@@ -233,7 +233,7 @@ export function AdminBookEditorScreen({
         </StatusMessage>
       ) : null}
       <Card className="max-w-3xl bg-white">
-        <h2 className="mb-5 text-xl font-black">Thông tin sách</h2>
+        <h2 className="mb-5 text-xl font-semibold">Thông tin sách</h2>
         <AdminBookForm
           initial={initial}
           onSubmit={saveMetadata}

@@ -266,7 +266,7 @@ function PageSurface(props: BookPageViewerProps) {
                     ].includes(state) ? (
                       <span
                         aria-hidden="true"
-                        className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-extrabold text-ink"
+                        className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
                       >
                         {state === "self-corrected"
                           ? "↺"

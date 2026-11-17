@@ -58,12 +58,8 @@ describe("shared header and footer", () => {
     expect(main.parentElement?.lastElementChild).toBe(main);
     expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
     expect(
-      within(
-        screen.getByRole("navigation", { name: "Điều hướng tài khoản" }),
-      ).getByRole("link", {
-        name: "Đăng ký",
-      }),
-    ).toHaveAttribute("href", "/register");
+      screen.queryByRole("navigation", { name: "Điều hướng tài khoản" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "ViRead - đăng nhập" }),
     ).toHaveAttribute("href", "/login");

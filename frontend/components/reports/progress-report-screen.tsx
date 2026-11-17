@@ -299,7 +299,7 @@ function ProgressReportContent({
       ) : null}
       {state.reportStatus === "unavailable" ? (
         <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-extrabold text-ink">
+          <h2 className="text-2xl font-semibold text-ink">
             Dữ liệu đang chờ bổ sung
           </h2>
           <StatusMessage>
@@ -360,7 +360,7 @@ function ProgressReportContent({
             >
               <h2
                 id="comparison-title"
-                className="text-2xl font-extrabold text-ink"
+                className="text-2xl font-semibold text-ink"
               >
                 So sánh trong báo cáo đã lưu
               </h2>
@@ -393,8 +393,8 @@ function ProgressReportContent({
                       ],
                     ].map(([label, value, suffix]) => (
                       <div key={String(label)}>
-                        <dt className="font-bold text-muted">{label}</dt>
-                        <dd className="text-xl font-extrabold text-ink">
+                        <dt className="font-semibold text-muted">{label}</dt>
+                        <dd className="text-xl font-semibold text-ink">
                           {typeof value !== "number"
                             ? "Chưa đủ dữ liệu"
                             : `${value > 0 ? "+" : ""}${Number(value.toFixed(2))}${suffix}`}
@@ -413,7 +413,7 @@ function ProgressReportContent({
           </div>
           {report.legacy ? (
             <section className="rounded-card bg-white p-5 sm:p-8">
-              <h2 className="text-2xl font-extrabold text-ink">
+              <h2 className="text-2xl font-semibold text-ink">
                 Chỉ số định dạng cũ
               </h2>
               <p className="mt-2 text-label text-muted">
@@ -424,20 +424,24 @@ function ProgressReportContent({
                 {report.legacy.total_books !== null ? (
                   <div>
                     <dt>Tổng sách đã lưu (total_books)</dt>
-                    <dd className="font-bold">{report.legacy.total_books}</dd>
+                    <dd className="font-semibold">
+                      {report.legacy.total_books}
+                    </dd>
                   </div>
                 ) : null}
                 {report.legacy.avg_fluency !== null ? (
                   <div>
                     <dt>Giá trị avg_fluency đã lưu (chưa xác định đơn vị)</dt>
-                    <dd className="font-bold">{report.legacy.avg_fluency}</dd>
+                    <dd className="font-semibold">
+                      {report.legacy.avg_fluency}
+                    </dd>
                   </div>
                 ) : null}
               </dl>
             </section>
           ) : null}
           <section className="rounded-card bg-white p-5 sm:p-8">
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               Từ cần luyện nổi bật
             </h2>
             <p className="mt-2 text-label text-muted">
@@ -454,7 +458,7 @@ function ProgressReportContent({
                 {report.difficult_words.map((word, index) => (
                   <li
                     key={`${word.normalized_word}-${index}`}
-                    className="rounded-full bg-warning-surface px-4 py-2 font-bold text-warning"
+                    className="rounded-full bg-warning-surface px-4 py-2 font-semibold text-warning"
                   >
                     {word.display_text} · {word.difficulty_score}
                   </li>

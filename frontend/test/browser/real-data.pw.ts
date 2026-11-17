@@ -6,6 +6,7 @@ import {
   installApiFixture,
   setRole,
 } from "./real-data-fixture";
+import { installReadingExperience } from "./reading-experience-fixture";
 
 async function assertLayout(page: Page) {
   const dimensions = await page.evaluate(() => {
@@ -367,48 +368,255 @@ test("Admin book creation requires separate name and title and sends normalized 
   expect(api.unexpected).toEqual([]);
 });
 
-for (const width of [320, 375, 430, 768, 1366, 1920]) {
+test("Visual QA: book, scanner and reading preparation at requested widths", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "This flow captures all four requested viewport widths.",
+  );
+  const api = await installApiFixture(page);
+  api.previewStatus = 200;
+  await page.addInitScript(() => {
+    const probe = { cameraRequests: 0, microphoneRequests: 0 };
+    Object.assign(window, { __deviceProbe: probe });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async (constraints: MediaStreamConstraints) => {
+        if (constraints.video) probe.cameraRequests += 1;
+        if (constraints.audio) probe.microphoneRequests += 1;
+        throw new DOMException(
+          "Isolated denied device fixture",
+          "NotAllowedError",
+        );
+      },
+    });
+  });
+
+  for (const width of [390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    await setRole(page, "parent");
+    await page.goto("/dashboard");
+    const childButton = page.getByRole("button", {
+      name: `${child.alias}, lớp ${child.grade}`,
+    });
+    await childButton.click();
+    await expect(childButton).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByRole("button", { name: "Quét sách" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Camera đang tắt" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Bật camera để quét" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __deviceProbe: { cameraRequests: number } })
+            .__deviceProbe.cameraRequests,
+      ),
+    ).toBe(0);
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`after-book-scanner-${width}.png`),
+      fullPage: true,
+      caret: "initial",
+      style: "nextjs-portal { display: none !important; }",
+    });
+
+    await page.getByRole("button", { name: "Bật camera để quét" }).click();
+    await expect(
+      page.getByText("Camera chưa sẵn sàng", { exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as { __deviceProbe: { cameraRequests: number } })
+            .__deviceProbe.cameraRequests,
+      ),
+    ).toBe(1);
+    await page.getByRole("link", { name: "Về tổng quan", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Chọn sách" }).click();
+    await expect(
+      page.getByRole("link", { name: `Đọc sách ${book.title}` }),
+    ).toBeVisible();
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`after-book-library-${width}.png`),
+      fullPage: true,
+      caret: "initial",
+      style: "nextjs-portal { display: none !important; }",
+    });
+
+    await page.getByRole("link", { name: `Đọc sách ${book.title}` }).click();
+    await expect(
+      page.getByRole("button", { name: "Chuẩn bị đọc" }),
+    ).toBeEnabled();
+    await page.getByRole("button", { name: "Chuẩn bị đọc" }).click();
+    await expect(
+      page.getByRole("button", { name: "Kiểm tra và cấp quyền microphone" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __deviceProbe: { microphoneRequests: number };
+            }
+          ).__deviceProbe.microphoneRequests,
+      ),
+    ).toBe(0);
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`after-reading-preparation-${width}.png`),
+      fullPage: true,
+      caret: "initial",
+      style: "nextjs-portal { display: none !important; }",
+    });
+
+    await page
+      .getByRole("button", { name: "Kiểm tra và cấp quyền microphone" })
+      .click();
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __deviceProbe: { microphoneRequests: number };
+              }
+            ).__deviceProbe.microphoneRequests,
+        ),
+      )
+      .toBe(1);
+    expect(api.unexpected).toEqual([]);
+  }
+});
+
+for (const width of [390, 768, 1024, 1440]) {
   test(`read-route matrix, headings, console and overflow at ${width}px`, async ({
     page,
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop",
-      "Matrix itself covers all six widths.",
+      "Matrix itself covers all four requested widths.",
     );
     test.setTimeout(360_000);
-    const api = await installApiFixture(page);
+    const readingFixture = await installReadingExperience(page);
+    const api = readingFixture.api;
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
+    const resourceFailures: string[] = [];
+    const apiRequests: string[] = [];
+    let activePath = "(before first route)";
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("console", (message) => {
       if (
         message.type() === "error" &&
         !message.text().includes("503 (Service Unavailable)")
       )
-        consoleErrors.push(message.text());
+        consoleErrors.push(`${activePath}: ${message.text()}`);
+    });
+    page.on("requestfailed", (request) =>
+      resourceFailures.push(
+        `${activePath}: ${request.url()} (${request.failure()?.errorText ?? "failed"})`,
+      ),
+    );
+    page.on("response", (response) => {
+      if (response.status() >= 400)
+        resourceFailures.push(
+          `${activePath}: ${response.status()} ${response.url()}`,
+        );
+    });
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.port === "8000" || url.hostname === "example.supabase.co")
+        apiRequests.push(
+          `${activePath}: ${request.method()} ${url.pathname}${url.search}`,
+        );
     });
     const paths = [
+      "/",
+      "/login",
+      "/register",
+      "/forgot-password",
+      "/reset-password",
+      "/admin/login",
       "/dashboard",
       "/profile",
+      "/settings",
+      "/help-support",
+      "/device-permissions",
       "/children",
+      "/children/new",
+      `/children/${ids.child}`,
       "/books",
       `/books/${ids.book}`,
+      "/book-reports",
+      "/book-scanner",
+      `/reading-preparation?bookId=${ids.book}&pageId=${ids.page}&endPageId=${ids.page}`,
+      `/reading/${ids.session}?state=reading`,
       "/sessions",
       `/sessions/${ids.session}`,
+      `/sessions/${ids.session}/report`,
       "/reports",
       "/reports/difficult-words",
+      "/reading-management",
+      "/admin",
+      "/admin/parents",
+      `/admin/parents/${ids.parent}`,
       "/admin/books",
+      "/admin/books/new",
       `/admin/books/${ids.book}`,
+      `/admin/books/${ids.book}/edit`,
       `/admin/books/${ids.book}/pages/${ids.page}`,
       "/admin/audit-logs",
       "/admin/health",
-      "/admin/books/new",
+      "/admin/metadata-quality",
+      "/admin/viread-training",
     ];
-    for (const [index, path] of paths.entries()) {
-      await setRole(page, path.startsWith("/admin/") ? "admin" : "parent");
+    const screenshotNames: Record<string, string> = {
+      "/login": "auth-login",
+      "/dashboard": "parent-dashboard",
+      [`/reading/${ids.session}?state=reading`]: "reading-session",
+      "/reports": "parent-reports",
+      "/sessions": "reading-history",
+      "/admin/books": "admin-books",
+      [`/admin/books/${ids.book}/pages/${ids.page}`]: "admin-ocr",
+    };
+    const routeFilter = process.env.PLAYWRIGHT_ROUTE_FILTER;
+    const routeFilters = new Set(
+      routeFilter?.split(",").map((path) => path.trim()),
+    );
+    const routesToVisit = routeFilter
+      ? paths.filter((path) => routeFilters.has(path))
+      : paths;
+    expect(
+      routesToVisit.length,
+      `route filter did not match: ${routeFilter}`,
+    ).toBeGreaterThan(0);
+    for (const path of routesToVisit) {
+      activePath = path;
+      await setRole(page, path.startsWith("/admin") ? "admin" : "parent");
       const response = await page.goto(path);
       expect(response?.status(), path).toBe(200);
+      if (path === `/reading/${ids.session}?state=reading`)
+        expect(
+          await page.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  __readingProbe: { microphoneRequests: number };
+                }
+              ).__readingProbe.microphoneRequests,
+          ),
+          "opening a reading session must not request microphone access",
+        ).toBe(0);
       await expect(page.locator("h1").first(), path).toBeVisible();
       // Wait for the intended content, not a transient skeleton or hidden heading.
       await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
@@ -433,16 +641,31 @@ for (const width of [320, 375, 430, 768, 1366, 1920]) {
           page.getByRole("heading", { name: "Database" }),
         ).toBeVisible();
       await assertLayout(page);
-      if (width === 1366 || width === 375)
+      const screenshotName = screenshotNames[path];
+      if (screenshotName)
         await page.screenshot({
-          path: testInfo.outputPath(`route-${index}-${width}.png`),
+          path: testInfo.outputPath(`after-${screenshotName}-${width}.png`),
           fullPage: true,
           // Do not mutate input styles while React is hydrating the page.
           caret: "initial",
+          style: "nextjs-portal { display: none !important; }",
         });
     }
     expect(pageErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
+    expect(
+      consoleErrors,
+      JSON.stringify(
+        {
+          resourceFailures,
+          apiRequests,
+          unexpectedApi: api.unexpected,
+          unexpectedReading: readingFixture.unexpected,
+        },
+        null,
+        2,
+      ),
+    ).toEqual([]);
     expect(api.unexpected).toEqual([]);
+    expect(readingFixture.unexpected).toEqual([]);
   });
 }

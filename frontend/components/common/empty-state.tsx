@@ -19,15 +19,15 @@ export function EmptyState({
   const Heading = headingLevel === 1 ? "h1" : headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <section className="flex w-full flex-col items-center gap-4 rounded-card bg-cream p-8 text-center">
+    <section className="flex w-full flex-col items-center gap-4 rounded-card border border-border bg-white p-6 text-center">
       {icon ?? (
-        <BookOpenText aria-hidden="true" className="size-10 text-primary" />
+        <BookOpenText aria-hidden="true" className="size-6 text-primary" />
       )}
-      <div>
-        <Heading className="text-2xl font-extrabold leading-[1.4] text-ink">
+      <div className="max-w-xl">
+        <Heading className="text-xl font-semibold leading-snug text-ink">
           {title}
         </Heading>
-        <p className="mt-2 text-lg leading-[1.4] text-muted">{description}</p>
+        <p className="mt-2 text-base leading-6 text-muted">{description}</p>
       </div>
       {action}
     </section>

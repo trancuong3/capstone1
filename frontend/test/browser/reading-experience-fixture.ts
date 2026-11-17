@@ -168,6 +168,7 @@ export async function installReadingExperience(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path.startsWith("/reading/history")) return route.fallback();
     if (path === base) return respond(route, session());
     if (path === base + "/page" || path === `/reading/pages/${ids.page}`)
       return respond(route, {
@@ -334,14 +335,20 @@ export async function installReadingExperience(
     unexpected.push(path);
     return respond(route, {}, 404);
   });
-  await page.route("http://127.0.0.1:8000/tutor/**", (route) =>
-    respond(route, {
+  await page.route("http://127.0.0.1:8000/tutor/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (
+      path.startsWith("/tutor/children/") &&
+      path.endsWith("/progress-assessment")
+    )
+      return route.fallback();
+    return respond(route, {
       session_id: ids.session,
       total: 0,
       source: null,
       created: false,
-    }),
-  );
+    });
+  });
   await page.addInitScript(
     ({ deny, silent }) => {
       const probe = {

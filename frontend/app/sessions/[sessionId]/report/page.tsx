@@ -86,7 +86,7 @@ export default function ReadingReportPage() {
   if (loading) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
+        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
         <p>Đang tải báo cáo...</p>
       </main>
     );
@@ -95,7 +95,7 @@ export default function ReadingReportPage() {
   if (error) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
+        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
         <p className="text-red-600">{error}</p>
         <Button
           className="sm:w-auto"
@@ -112,7 +112,7 @@ export default function ReadingReportPage() {
   if (reports.length === 0) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
+        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
         <p>
           Buổi đọc đã được lưu nhưng hiện chưa có báo cáo đối chiếu nào được
           lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực
@@ -133,7 +133,7 @@ export default function ReadingReportPage() {
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold">Báo cáo đọc</h1>
+        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
         <p className="mt-1 text-sm text-gray-500">
           Có {reports.length} báo cáo trong phiên đọc này.
         </p>

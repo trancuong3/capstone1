@@ -121,7 +121,7 @@ export function AccountAvatarMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Mở menu tài khoản"
-        className="flex size-11 items-center justify-center rounded-full border-2 border-primary/20 bg-sky text-base font-extrabold text-primary transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60 sm:size-12"
+        className="flex size-11 items-center justify-center rounded-full border-2 border-primary/20 bg-sky text-base font-semibold text-primary transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60 sm:size-12"
         disabled={isSigningOut}
         onClick={() => setOpen((value) => !value)}
         ref={triggerRef}
@@ -142,12 +142,12 @@ export function AccountAvatarMenu({
           <div className="flex items-center gap-3 border-b border-border p-4">
             <div
               aria-hidden="true"
-              className="flex size-12 shrink-0 items-center justify-center rounded-full bg-sky text-lg font-extrabold text-primary"
+              className="flex size-12 shrink-0 items-center justify-center rounded-full bg-sky text-lg font-semibold text-primary"
             >
               {initial}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-extrabold text-ink">
+              <p className="truncate text-sm font-semibold text-ink">
                 {accountLabel}
               </p>
               {email ? (
@@ -162,7 +162,7 @@ export function AccountAvatarMenu({
           </div>
 
           <div className="p-2">
-            <p className="px-3 pb-1 pt-2 text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
               Hồ sơ
             </p>
             <Link
@@ -194,7 +194,7 @@ export function AccountAvatarMenu({
           />
 
           <div className="p-2">
-            <p className="px-3 pb-1 pt-2 text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
               Tài khoản
             </p>
             <Link
@@ -216,7 +216,7 @@ export function AccountAvatarMenu({
           />
 
           <div className="p-2">
-            <p className="px-3 pb-1 pt-2 text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
               Trợ giúp
             </p>
             <Link
@@ -238,7 +238,7 @@ export function AccountAvatarMenu({
           />
 
           <div className="p-2">
-            <p className="px-3 pb-1 pt-2 text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
               Phiên đăng nhập
             </p>
             <button

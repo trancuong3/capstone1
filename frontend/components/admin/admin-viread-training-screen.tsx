@@ -145,7 +145,7 @@ export function AdminVireadTrainingScreen() {
       {message ? (
         <p
           aria-live="polite"
-          className="mb-4 rounded-control bg-sky p-4 font-bold text-primary-hover"
+          className="mb-4 rounded-control bg-sky p-4 font-semibold text-primary-hover"
         >
           {message}
         </p>
@@ -155,8 +155,8 @@ export function AdminVireadTrainingScreen() {
         <>
           <div className="mb-6 grid gap-4 md:grid-cols-3">
             <Card className="bg-white">
-              <p className="font-bold text-muted">Model đang hoạt động</p>
-              <h2 className="mt-2 text-xl font-black">
+              <p className="font-semibold text-muted">Model đang hoạt động</p>
+              <h2 className="mt-2 text-xl font-semibold">
                 {data.active_model
                   ? trainingProfileName(data.active_model.profile)
                   : "Chưa khởi tạo"}
@@ -168,8 +168,8 @@ export function AdminVireadTrainingScreen() {
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-bold text-muted">Mẫu dữ liệu đã đăng ký</p>
-              <h2 className="mt-2 text-3xl font-black">
+              <p className="font-semibold text-muted">Mẫu dữ liệu đã đăng ký</p>
+              <h2 className="mt-2 text-3xl font-semibold">
                 {totalSamples.toLocaleString("vi-VN")}
               </h2>
               <p className="mt-2 text-sm text-muted">
@@ -177,8 +177,10 @@ export function AdminVireadTrainingScreen() {
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-bold text-muted">Outbox VERIFIED đang chờ</p>
-              <h2 className="mt-2 text-3xl font-black">
+              <p className="font-semibold text-muted">
+                Outbox VERIFIED đang chờ
+              </p>
+              <h2 className="mt-2 text-3xl font-semibold">
                 {outboxPending.toLocaleString("vi-VN")}
               </h2>
               <p className="mt-2 text-sm text-muted">
@@ -188,13 +190,13 @@ export function AdminVireadTrainingScreen() {
           </div>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Nguồn dữ liệu</h2>
+            <h2 className="text-xl font-semibold">Nguồn dữ liệu</h2>
             <p className="mt-2 text-sm text-muted">
               Hai luồng dùng dataset và run riêng, cùng fine-tune VietOCR V2.
             </p>
             <ul className="mt-4 grid gap-3 md:grid-cols-2">
               <li className="rounded-control border border-border p-4">
-                <p className="font-extrabold">
+                <p className="font-semibold">
                   Luồng 1 · ảnh thực tế + DBNet + TRDG
                 </p>
                 <p className="mt-2 text-sm">
@@ -209,7 +211,7 @@ export function AdminVireadTrainingScreen() {
                     "holdout",
                   ).toLocaleString("vi-VN")}
                 </p>
-                <p className="mt-2 text-sm font-bold text-muted">
+                <p className="mt-2 text-sm font-semibold text-muted">
                   {flow1External > 1_000 || flow1Trdg > 50_000
                     ? "Vượt khoảng dữ liệu cho phép: 500–1.000 mẫu thật và 20.000–50.000 mẫu TRDG"
                     : flow1External < 500 ||
@@ -221,7 +223,7 @@ export function AdminVireadTrainingScreen() {
                 </p>
               </li>
               <li className="rounded-control border border-border p-4">
-                <p className="font-extrabold">
+                <p className="font-semibold">
                   Luồng 2 · văn bản Admin xác nhận
                 </p>
                 <p className="mt-2 text-sm">
@@ -239,7 +241,7 @@ export function AdminVireadTrainingScreen() {
                   Mỗi mẫu là một ảnh dòng chữ; nhiều từ trong cùng dòng được
                   ghép thành một nhãn.
                 </p>
-                <p className="mt-2 text-sm font-bold text-muted">
+                <p className="mt-2 text-sm font-semibold text-muted">
                   {flow2Train > 0 && flow2Validation > 0
                     ? "Đủ Train và Validation; hệ thống tự tạo job Flow 2 riêng"
                     : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
@@ -249,7 +251,9 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Hàng đợi huấn luyện tự động</h2>
+            <h2 className="text-xl font-semibold">
+              Hàng đợi huấn luyện tự động
+            </h2>
             <p className="mt-2 text-sm text-muted">
               Mỗi job giữ riêng dataset, profile và lineage. Colab Enterprise tự
               chạy job theo thứ tự; model chỉ đổi sau quality gate và Admin
@@ -273,7 +277,7 @@ export function AdminVireadTrainingScreen() {
                     key={job.job_id}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-extrabold">
+                      <h3 className="font-semibold">
                         {trainingProfileName(job.profile)} · {job.status}
                       </h3>
                       <span className="text-sm text-muted">
@@ -362,7 +366,7 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="mb-6 bg-white">
-            <h2 className="text-xl font-black">Các lần huấn luyện</h2>
+            <h2 className="text-xl font-semibold">Các lần huấn luyện</h2>
             <p className="mt-2 text-sm text-muted">
               {latestPassing.length} checkpoint đạt quality gate và đủ điều kiện
               xét duyệt.
@@ -378,7 +382,7 @@ export function AdminVireadTrainingScreen() {
                     key={run.run_id}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="font-extrabold">
+                      <h3 className="font-semibold">
                         {trainingProfileName(run.profile)} · {run.status}
                       </h3>
                       <span className="text-sm text-muted">
@@ -430,9 +434,9 @@ export function AdminVireadTrainingScreen() {
           </Card>
 
           <Card className="bg-white">
-            <h2 className="text-xl font-black">Quản lý quyết định</h2>
+            <h2 className="text-xl font-semibold">Quản lý quyết định</h2>
             <label
-              className="mt-4 block font-bold"
+              className="mt-4 block font-semibold"
               htmlFor="viread-decision-reason"
             >
               Lý do phê duyệt hoặc rollback

@@ -61,7 +61,7 @@ const weekdayOptions = [
 const inputClass =
   "min-h-12 rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
 const actionClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-bold";
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
 
 function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -452,10 +452,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8">
       <header className="flex flex-wrap items-start gap-4">
         <div className="min-w-0 flex-1">
-          <p className="mb-2 text-label font-bold text-primary">
+          <p className="mb-2 text-label font-semibold text-primary">
             ViRead · Thói quen đọc
           </p>
-          <h1 className="text-heading font-extrabold text-ink">
+          <h1 className="text-heading font-semibold text-ink">
             Quản lý đọc sách
           </h1>
           <p className="mt-2 max-w-3xl text-label text-muted">
@@ -473,7 +473,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       </header>
 
       <div className="flex flex-wrap items-center gap-3 rounded-card border border-border bg-white p-4">
-        <label className="font-bold text-ink" htmlFor="management-child">
+        <label className="font-semibold text-ink" htmlFor="management-child">
           Hồ sơ bé
         </label>
         <select
@@ -564,11 +564,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               >
                 <div className="flex items-center gap-2 text-primary">
                   {item.icon}
-                  <p className="text-label font-bold text-muted">
+                  <p className="text-label font-semibold text-muted">
                     {item.label}
                   </p>
                 </div>
-                <p className="mt-3 text-3xl font-extrabold text-ink">
+                <p className="mt-3 text-3xl font-semibold text-ink">
                   {item.value}
                 </p>
                 <p className="mt-1 text-sm text-muted">{item.detail}</p>
@@ -588,7 +588,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 <CalendarDays className="size-6" />
               </div>
               <div>
-                <h2 className="text-xl font-extrabold text-ink">
+                <h2 className="text-xl font-semibold text-ink">
                   Kế hoạch đọc trong tuần
                 </h2>
                 <p className="mt-1 text-label text-muted">
@@ -601,7 +601,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
               onSubmit={submitPlan}
             >
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Tên kế hoạch
                 <input
                   className={inputClass}
@@ -612,7 +612,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   placeholder="Ví dụ: Đọc cùng bé sau bữa tối"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Sách dự định đọc
                 <select
                   className={inputClass}
@@ -627,7 +627,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Thời lượng mỗi buổi (phút)
                 <input
                   className={inputClass}
@@ -640,7 +640,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanMinutes(event.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Múi giờ
                 <input
                   className={inputClass}
@@ -651,7 +651,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <fieldset className="sm:col-span-2 lg:col-span-4">
-                <legend className="mb-2 text-label font-bold text-ink">
+                <legend className="mb-2 text-label font-semibold text-ink">
                   Ngày đọc mỗi tuần
                 </legend>
                 <div className="flex flex-wrap gap-2">
@@ -682,7 +682,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Bắt đầu từ
                 <input
                   className={inputClass}
@@ -693,7 +693,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanStart(event.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -721,7 +721,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             {plans.length === 0 ? (
               <div className="mt-5 rounded-card bg-canvas p-5 text-center">
                 <CalendarDays className="mx-auto size-8 text-primary" />
-                <p className="mt-2 font-bold text-ink">
+                <p className="mt-2 font-semibold text-ink">
                   Chưa có kế hoạch đọc tuần
                 </p>
                 <p className="mt-1 text-label text-muted">
@@ -737,9 +737,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h3 className="font-extrabold text-ink">
-                          {plan.title}
-                        </h3>
+                        <h3 className="font-semibold text-ink">{plan.title}</h3>
                         <p className="mt-1 text-label text-muted">
                           {plan.weekdays
                             .map(
@@ -757,7 +755,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           </p>
                         ) : null}
                       </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-label font-bold text-primary">
+                      <span className="rounded-full bg-white px-3 py-1 text-label font-semibold text-primary">
                         {planStatusText(plan.status)}
                       </span>
                     </div>
@@ -770,13 +768,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
                       <div
-                        className="h-full rounded-full bg-primary transition-all"
+                        className="h-full rounded-full bg-primary transition-[width] duration-200"
                         style={{
                           width: `${Math.min(100, plan.progress_percent)}%`,
                         }}
                       />
                     </div>
-                    <p className="mt-1 text-right text-label font-bold text-primary">
+                    <p className="mt-1 text-right text-label font-semibold text-primary">
                       {plan.progress_percent}%
                     </p>
                     <PlanInsights plan={plan} />
@@ -849,13 +847,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
               <Target className="size-6 text-primary" />
-              <h2 className="text-xl font-extrabold text-ink">Mục tiêu đọc</h2>
+              <h2 className="text-xl font-semibold text-ink">Mục tiêu đọc</h2>
             </div>
             <form
               className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
               onSubmit={submitGoal}
             >
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Đo lường
                 <select
                   className={inputClass}
@@ -868,7 +866,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="SESSIONS">Buổi đọc hoàn thành</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Mục tiêu
                 <input
                   className={inputClass}
@@ -881,7 +879,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalTarget(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Chu kỳ
                 <select
                   className={inputClass}
@@ -894,7 +892,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="WEEKLY">Mỗi tuần</option>
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Bắt đầu
                 <input
                   className={inputClass}
@@ -904,7 +902,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalStart(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -932,12 +930,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     className="rounded-card border border-border p-4"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <h3 className="font-extrabold text-ink">
+                      <h3 className="font-semibold text-ink">
                         {goal.target_value}{" "}
                         {goal.metric === "MINUTES" ? "phút" : "buổi"} ·{" "}
                         {goal.period === "DAILY" ? "mỗi ngày" : "mỗi tuần"}
                       </h3>
-                      <span className="rounded-full bg-sky px-3 py-1 text-label font-bold text-primary">
+                      <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary">
                         {statusText(goal.status)}
                       </span>
                     </div>
@@ -954,11 +952,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="mt-2 h-3 overflow-hidden rounded-full bg-canvas">
                       <div
-                        className="h-full rounded-full bg-primary transition-all"
+                        className="h-full rounded-full bg-primary transition-[width] duration-200"
                         style={{ width: String(goal.progress_percent) + "%" }}
                       />
                     </div>
-                    <p className="mt-1 text-right text-label font-bold text-primary">
+                    <p className="mt-1 text-right text-label font-semibold text-primary">
                       {goal.progress_percent}%
                     </p>
                     <GoalInsights goal={goal} />
@@ -1053,7 +1051,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
               <BookHeart className="size-6 text-primary" />
-              <h2 className="text-xl font-extrabold text-ink">
+              <h2 className="text-xl font-semibold text-ink">
                 Sách yêu thích và danh sách muốn đọc
               </h2>
             </div>
@@ -1078,7 +1076,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 },
               ].map((group) => (
                 <div key={group.type} className="rounded-card bg-canvas p-4">
-                  <h3 className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+                  <h3 className="mb-3 flex items-center gap-2 font-semibold text-ink">
                     {group.icon}
                     {group.title}{" "}
                     <span className="text-label font-normal text-muted">
@@ -1097,7 +1095,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           className="flex items-center justify-between gap-3 rounded-control bg-white p-3"
                         >
                           <div className="min-w-0">
-                            <p className="truncate font-bold text-ink">
+                            <p className="truncate font-semibold text-ink">
                               {entry.book.title}
                             </p>
                             <p className="text-label text-muted">
@@ -1130,7 +1128,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 </div>
               ))}
             </div>
-            <h3 className="mb-3 mt-6 font-extrabold text-ink">
+            <h3 className="mb-3 mt-6 font-semibold text-ink">
               Thêm từ thư viện sách đã xác minh
             </h3>
             {books.length === 0 ? (
@@ -1155,7 +1153,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       key={book.id}
                       className="flex flex-col gap-2 rounded-card border border-border p-4"
                     >
-                      <h4 className="font-extrabold text-ink">{book.title}</h4>
+                      <h4 className="font-semibold text-ink">{book.title}</h4>
                       <p className="text-label text-muted">
                         {book.author ?? "Chưa cập nhật tác giả"} · Lớp{" "}
                         {book.min_grade}–{book.max_grade}
@@ -1217,7 +1215,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           <section className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex items-center gap-3">
               <CalendarClock className="size-6 text-primary" />
-              <h2 className="text-xl font-extrabold text-ink">Lịch nhắc đọc</h2>
+              <h2 className="text-xl font-semibold text-ink">Lịch nhắc đọc</h2>
             </div>
             <p className="mb-4 text-label text-muted">
               Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy chủ sẽ gửi
@@ -1227,7 +1225,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"
               onSubmit={submitReminder}
             >
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Giờ địa phương
                 <input
                   className={inputClass}
@@ -1237,7 +1235,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setReminderTime(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-label font-bold text-ink">
+              <label className="flex flex-col gap-1 text-label font-semibold text-ink">
                 Timezone IANA
                 <input
                   className={inputClass}
@@ -1255,7 +1253,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 </datalist>
               </label>
               <fieldset className="md:col-span-2">
-                <legend className="mb-2 text-label font-bold text-ink">
+                <legend className="mb-2 text-label font-semibold text-ink">
                   Lặp vào ngày
                 </legend>
                 <div className="flex flex-wrap gap-2">
@@ -1287,7 +1285,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 </div>
               </fieldset>
               <fieldset className="rounded-control border border-border bg-canvas p-3 md:col-span-2 lg:col-span-4">
-                <legend className="px-1 text-label font-bold text-ink">
+                <legend className="px-1 text-label font-semibold text-ink">
                   Email nhắc đọc
                 </legend>
                 <label className="flex cursor-pointer items-start gap-3">
@@ -1300,7 +1298,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     }
                   />
                   <span>
-                    <span className="flex items-center gap-2 font-bold text-ink">
+                    <span className="flex items-center gap-2 font-semibold text-ink">
                       <Mail className="size-4 text-primary" /> Gửi email cho phụ
                       huynh khi đến giờ
                     </span>
@@ -1328,7 +1326,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             </form>
             {due.length > 0 ? (
               <div className="mt-5 rounded-card border border-border bg-cream p-4">
-                <h3 className="mb-3 flex items-center gap-2 font-extrabold text-ink">
+                <h3 className="mb-3 flex items-center gap-2 font-semibold text-ink">
                   <BellRing className="size-5" />
                   Đến giờ đọc sách
                 </h3>
@@ -1349,7 +1347,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         · {item.scheduled_local_date}
                       </span>
                       {item.email_status !== "NOT_REQUESTED" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-3 py-1 text-sm font-bold text-primary">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-primary">
                           <Mail className="size-4" />{" "}
                           {item.email_error_code === "PARENT_EMAIL_UNVERIFIED"
                             ? "Email phụ huynh chưa xác minh"
@@ -1389,7 +1387,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="flex items-center gap-2 font-extrabold text-ink">
+                        <h3 className="flex items-center gap-2 font-semibold text-ink">
                           <Clock3 className="size-5 text-primary" />
                           {clock(reminder.remind_at)}
                         </h3>
@@ -1404,14 +1402,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             .join(", ")}{" "}
                           · {reminder.timezone}
                         </p>
-                        <p className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-primary">
+                        <p className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-primary">
                           <Mail className="size-4" />
                           {reminder.email_enabled
                             ? "Có gửi email nhắc"
                             : "Chỉ nhắc trong ứng dụng"}
                         </p>
                       </div>
-                      <label className="flex items-center gap-2 text-label font-bold">
+                      <label className="flex items-center gap-2 text-label font-semibold">
                         <input
                           type="checkbox"
                           checked={reminder.is_active}

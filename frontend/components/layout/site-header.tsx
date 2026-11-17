@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
 
@@ -31,33 +29,15 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             size="md"
           />
           {isAdminLogin ? (
-            <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold tracking-wide text-primary-hover">
+            <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold tracking-wide text-primary-hover">
               ADMIN
             </span>
           ) : null}
         </div>
 
         {isAdminLogin ? (
-          <p className="text-label font-bold text-muted">Khu vực quản trị</p>
-        ) : (
-          <nav
-            aria-label="Điều hướng tài khoản"
-            className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:flex-wrap"
-          >
-            <Link
-              className="inline-flex min-h-11 items-center justify-center rounded-control border border-border bg-white px-4 py-3 text-center text-label font-bold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-              href="/login"
-            >
-              Đăng nhập
-            </Link>
-            <Link
-              className="inline-flex min-h-11 items-center justify-center rounded-control bg-primary px-4 py-3 text-center text-label font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-              href="/register"
-            >
-              Đăng ký
-            </Link>
-          </nav>
-        )}
+          <p className="text-label font-medium text-muted">Khu vực quản trị</p>
+        ) : null}
       </div>
     </header>
   );

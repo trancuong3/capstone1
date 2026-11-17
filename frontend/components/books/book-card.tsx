@@ -25,17 +25,17 @@ export function BookCard({
   collectionBusy = false,
 }: BookCardProps) {
   return (
-    <article className="flex min-h-[432px] w-full flex-col items-center gap-3 rounded-card bg-white p-4 shadow-[0_6px_24px_rgba(33,61,66,0.08)] sm:w-64 sm:items-start">
+    <article className="flex h-full w-full flex-col items-start gap-3 rounded-card border border-border bg-white p-4">
       <BookCover book={book} titleAsHeading />
-      <p className="w-full truncate text-label font-bold text-muted">
+      <p className="w-full truncate text-label font-semibold text-muted">
         {book.author ?? "Tác giả đang cập nhật"}
       </p>
-      <p className="w-full text-label font-bold text-primary">
+      <p className="w-full text-label font-semibold text-primary">
         {formatGradeRange(book)}
       </p>
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
-        className="mt-auto max-w-56"
+        className="mt-auto w-full"
         href={`/books/${encodeURIComponent(book.id)}`}
       >
         Đọc sách
@@ -58,7 +58,7 @@ export function BookCard({
                 }
                 aria-pressed={saved}
                 className={
-                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-bold " +
+                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-semibold " +
                   (saved
                     ? "bg-sky text-primary"
                     : "border border-border text-ink hover:bg-canvas")

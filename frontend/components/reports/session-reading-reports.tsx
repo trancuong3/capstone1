@@ -145,7 +145,7 @@ function ReportCard({
     <article className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-xl font-extrabold text-ink">
+          <h3 className="text-xl font-semibold text-ink">
             {page ? `Trang ${page.page_number}` : "Báo cáo trang"}
           </h3>
           <p className="text-sm text-muted">
@@ -206,7 +206,7 @@ function ReportCard({
       </div>
 
       <div className="rounded-control border border-border bg-white p-4">
-        <p className="text-sm font-bold text-muted">Lời đọc đã lưu</p>
+        <p className="text-sm font-semibold text-muted">Lời đọc đã lưu</p>
         <p className="mt-1 text-base text-ink">
           {report.transcript.trim() || "Chưa ghi nhận"}
         </p>
@@ -228,7 +228,7 @@ function ReportCard({
             <span className={`block text-sm font-semibold ${metric.color}`}>
               {metric.label}
             </span>
-            <span className="mt-1 block text-2xl font-extrabold text-ink">
+            <span className="mt-1 block text-2xl font-semibold text-ink">
               {metric.count}
             </span>
           </button>
@@ -240,7 +240,7 @@ function ReportCard({
           aria-live="polite"
           className="rounded-card border border-border bg-white p-4"
         >
-          <h4 className={`font-extrabold ${activeMetric.color}`}>
+          <h4 className={`font-semibold ${activeMetric.color}`}>
             {activeMetric.label} · {activeMetric.count}
           </h4>
           {activeMetric.words.length > 0 ? (
@@ -396,7 +396,7 @@ export function SessionReadingReports({
       className="flex flex-col gap-4"
     >
       <h2
-        className="text-2xl font-extrabold text-ink"
+        className="text-2xl font-semibold text-ink"
         id="session-reading-reports-title"
       >
         Báo cáo đọc

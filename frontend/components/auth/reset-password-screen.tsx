@@ -51,14 +51,14 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
     return (
       <AuthShell>
         <Card
-          className="mx-auto max-w-[560px] border border-border shadow-sm"
+          className="mx-auto max-w-[440px] border border-border"
           tone="success"
         >
           <div>
-            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-success-ink">
+            <p className="text-sm font-semibold text-success-ink">
               Tài khoản ViRead
             </p>
-            <h1 className="mt-2 text-heading font-extrabold text-success-ink">
+            <h1 className="mt-2 text-heading font-semibold text-success-ink">
               Đã đổi mật khẩu
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
@@ -80,12 +80,12 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
     return (
       <AuthShell>
-        <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+        <Card className="mx-auto max-w-[440px] border border-border bg-white">
           <div>
-            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
             </p>
-            <h1 className="mt-2 text-heading font-extrabold text-ink">
+            <h1 className="mt-2 text-heading font-semibold text-ink">
               {isExpired ? "Liên kết đã hết hạn" : "Liên kết không hợp lệ"}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
@@ -111,12 +111,12 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+      <Card className="mx-auto max-w-[440px] border border-border bg-white">
         <div>
-          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+          <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
           </p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
+          <h1 className="mt-2 text-heading font-semibold text-ink">
             Đặt mật khẩu mới
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">

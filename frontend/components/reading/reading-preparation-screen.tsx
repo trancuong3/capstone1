@@ -530,10 +530,8 @@ export function ReadingPreparationScreen({
       <SelectedChildIdentity child={data.child} />
 
       <header className="flex flex-col gap-2">
-        <p className="text-label font-bold uppercase tracking-wide text-primary">
-          ViRead · Bước cuối trước khi đọc
-        </p>
-        <h1 className="text-heading font-extrabold text-ink">
+        <p className="text-sm font-semibold text-primary">Trước khi đọc</p>
+        <h1 className="text-heading font-semibold text-ink">
           Chuẩn bị đọc sách
         </h1>
         <p className="max-w-[760px] text-body leading-7 text-muted">
@@ -541,11 +539,11 @@ export function ReadingPreparationScreen({
         </p>
       </header>
 
-      <article className="grid gap-5 rounded-card border border-line bg-white p-4 shadow-[0_6px_24px_rgba(33,61,66,0.06)] sm:grid-cols-[220px_1fr] sm:items-center sm:gap-7 sm:p-6">
+      <article className="grid gap-5 rounded-card border border-border bg-white p-4 sm:grid-cols-[200px_1fr] sm:items-center sm:gap-6 sm:p-6">
         <BookCover book={data.book} className="mx-auto w-full max-w-[220px]" />
         <div className="flex flex-col gap-3">
           <div>
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               {data.book.title}
             </h2>
             {data.book.author ? (
@@ -553,7 +551,7 @@ export function ReadingPreparationScreen({
             ) : null}
           </div>
           {data.startPage && data.endPage && data.rangeValid ? (
-            <p className="font-bold text-primary">
+            <p className="font-semibold text-primary">
               Phạm vi đọc: Trang {data.startPage.page_number}–
               {data.endPage.page_number} ({data.rangePages.length} trang)
             </p>
@@ -593,12 +591,12 @@ export function ReadingPreparationScreen({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-xl font-semibold text-ink"
                 id="microphone-check-title"
               >
                 Microphone
               </h2>
-              <span className="rounded-control bg-white px-3 py-1 text-sm font-bold text-primary">
+              <span className="rounded-control bg-white px-3 py-1 text-sm font-semibold text-primary">
                 {isVerifying
                   ? "Đang kiểm tra"
                   : microphoneVerified

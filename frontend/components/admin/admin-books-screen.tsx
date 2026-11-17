@@ -237,7 +237,7 @@ export function AdminBooksScreen() {
             </Button>
           ) : (
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
               Đến trang đăng nhập
@@ -267,7 +267,7 @@ export function AdminBooksScreen() {
                       <div className="mb-2 flex flex-wrap gap-2">
                         <AdminStatusBadge status={book.lifecycle_status} />
                         {item.parent_catalog_eligible ? (
-                          <span className="rounded-full bg-sky px-3 py-1 text-sm font-extrabold text-primary-hover">
+                          <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
                             Có trong thư viện ba mẹ
                           </span>
                         ) : null}
@@ -280,7 +280,7 @@ export function AdminBooksScreen() {
                         className="inline-block rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
                         href={`/admin/books/${encodeURIComponent(book.id)}`}
                       >
-                        <h2 className="text-2xl font-black">
+                        <h2 className="text-2xl font-semibold">
                           {missingTitle ? "Chưa có tiêu đề" : book.title}
                         </h2>
                       </Link>
@@ -302,7 +302,7 @@ export function AdminBooksScreen() {
 
                   <div className="flex flex-wrap gap-2 border-t border-border pt-4">
                     <Link
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control border border-border px-3 py-2 text-sm font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control border border-border px-3 py-2 text-sm font-semibold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
                       href={editHref}
                     >
                       <PencilLine aria-hidden className="size-4" />
@@ -327,7 +327,7 @@ export function AdminBooksScreen() {
                           : "Kích hoạt lại"}
                     </Button>
                     <Link
-                      className="inline-flex min-h-11 items-center justify-center rounded-control px-3 py-2 text-sm font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                      className="inline-flex min-h-11 items-center justify-center rounded-control px-3 py-2 text-sm font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                       href={`/admin/books/${encodeURIComponent(book.id)}`}
                     >
                       Xem chi tiết / trang sách
@@ -346,8 +346,8 @@ export function AdminBooksScreen() {
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-control bg-canvas px-3 py-2">
-      <dt className="text-xs font-bold text-muted">{label}</dt>
-      <dd className="text-xl font-black">{value}</dd>
+      <dt className="text-xs font-semibold text-muted">{label}</dt>
+      <dd className="text-xl font-semibold">{value}</dd>
     </div>
   );
 }

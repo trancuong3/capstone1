@@ -27,7 +27,6 @@ export function ChildSelector({
       <div className="min-w-0 flex-1">
         <SelectField
           aria-label="Chọn hồ sơ bé để xem dữ liệu"
-          className="sm:min-h-[88px]"
           label="Hồ sơ của bé"
           onChange={(event) => {
             const next = new URLSearchParams(searchParams.toString());

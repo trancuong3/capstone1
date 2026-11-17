@@ -309,7 +309,7 @@ test("Phase 3: selecting a second word keeps the newest word sample active", asy
   expect(await page.evaluate(() => window.__ttsProbe.audios[0].paused)).toBe(
     true,
   );
-  await expect(page.getByText("Đọc mẫu 1 chữ:")).toBeVisible();
+  await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
   expect(fixture.prompts.map((prompt) => prompt.text)).toEqual(["Bé", "mèo"]);
   expect(fixture.prompts.every((prompt) => prompt.speed === 0.9)).toBe(true);
   expect(fixture.writes).toEqual([]);

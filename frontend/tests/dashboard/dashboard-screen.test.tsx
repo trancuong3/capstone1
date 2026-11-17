@@ -100,7 +100,7 @@ describe("DashboardScreen with real API adapters", () => {
     const user = userEvent.setup();
     renderDashboard();
     expect(
-      await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i }),
+      await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
     ).toBeInTheDocument();
 
     const firstProfile = screen.getByRole("button", {
@@ -146,7 +146,7 @@ describe("DashboardScreen with real API adapters", () => {
     apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
     const user = userEvent.setup();
     renderDashboard();
-    await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i });
+    await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" });
 
     await user.click(screen.getByRole("button", { name: "Quét sách" }));
     expect(
@@ -197,7 +197,7 @@ describe("DashboardScreen with real API adapters", () => {
         </AppServicesProvider>
       </AppStoreProvider>,
     );
-    await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i });
+    await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" });
     expect(
       await screen.findByText(/Hồ sơ đã thay đổi hoặc không còn khả dụng/),
     ).toBeInTheDocument();
@@ -232,7 +232,7 @@ describe("DashboardScreen with real API adapters", () => {
     await waitFor(() => expect(apiFetchFixture).toHaveBeenCalledTimes(2));
     await act(async () => release());
     expect(
-      await screen.findByRole("heading", { name: /Chào Ba mẹ kiểm thử/i }),
+      await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
     ).toBeInTheDocument();
   });
 });

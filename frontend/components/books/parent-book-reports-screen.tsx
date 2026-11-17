@@ -83,8 +83,10 @@ export function ParentBookReportsScreen() {
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 px-4 py-8 sm:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-bold text-primary">ViRead · Phụ huynh</p>
-          <h1 className="mt-1 text-heading font-extrabold text-ink">
+          <p className="text-sm font-semibold text-primary">
+            ViRead · Phụ huynh
+          </p>
+          <h1 className="mt-1 text-heading font-semibold text-ink">
             Báo cáo chất lượng sách
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-muted">
@@ -97,7 +99,7 @@ export function ParentBookReportsScreen() {
             Tải lại
           </Button>
           <Link
-            className="inline-flex min-h-12 items-center rounded-control bg-primary px-4 font-bold text-white hover:bg-primary-hover"
+            className="inline-flex min-h-12 items-center rounded-control bg-primary px-4 font-semibold text-white hover:bg-primary-hover"
             href="/books"
           >
             Thư viện sách
@@ -134,7 +136,7 @@ export function ParentBookReportsScreen() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-bold text-ink">{item.book_title}</h2>
+                  <h2 className="font-semibold text-ink">{item.book_title}</h2>
                   <p className="mt-1 text-sm text-muted">
                     {issueLabels[item.issue_type]}
                     {item.page_number !== null
@@ -142,7 +144,7 @@ export function ParentBookReportsScreen() {
                       : " · Toàn bộ sách"}
                   </p>
                 </div>
-                <span className="rounded-full bg-sky px-3 py-1 text-sm font-bold text-primary-hover">
+                <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
                   {statusLabels[item.status]}
                 </span>
               </div>

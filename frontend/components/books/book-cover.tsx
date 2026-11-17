@@ -82,11 +82,11 @@ export function BookCover({
       )}
     >
       {titleAsHeading ? (
-        <h2 className="line-clamp-2 text-[26px] font-bold leading-[1.4] text-ink">
+        <h2 className="line-clamp-2 text-xl font-semibold leading-snug text-ink">
           {book.title}
         </h2>
       ) : (
-        <p className="line-clamp-2 text-[26px] font-bold leading-[1.4] text-ink">
+        <p className="line-clamp-2 text-xl font-semibold leading-snug text-ink">
           {book.title}
         </p>
       )}
@@ -99,7 +99,6 @@ export function BookCover({
           src={artworkByVariant[artwork]}
         />
       </div>
-      <p className="text-[14px] leading-[1.4] text-muted">MỘT CÂU CHUYỆN NHỎ</p>
     </div>
   );
 }

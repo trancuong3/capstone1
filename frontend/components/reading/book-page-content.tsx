@@ -89,7 +89,7 @@ export function BookPageContent({
       className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-3 shadow-inner sm:mt-6 sm:p-6"
     >
       {hasWords ? (
-        <p className="text-[22px] font-extrabold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
+        <p className="text-[22px] font-semibold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
           {page.words.map((word, index) => {
             const wordIndex = word.word_index ?? index;
 
@@ -236,7 +236,7 @@ export function BookPageContent({
 
             const currentClass = isCurrent
               ? cn(
-                  "scale-105 font-black shadow-sm",
+                  "scale-105 font-semibold shadow-sm",
                   hasConfirmedStatus
                     ? "ring-2 ring-current"
                     : "bg-yellow-300 text-primary ring-2 ring-yellow-500",
@@ -281,18 +281,18 @@ export function BookPageContent({
 
                 <span
                   className={cn(
-                    "mr-2 inline-block scroll-mt-24 scroll-mb-40 rounded-[10px] px-2 py-0.5 transition-all duration-150",
+                    "mr-2 inline-block scroll-mt-24 scroll-mb-40 rounded-control px-2 py-0.5 transition-colors duration-150",
                     !readOnly &&
                       "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
-                    !readOnly && "cursor-pointer select-none active:scale-95",
+                    !readOnly && "cursor-pointer select-none",
                     statusClass,
                     currentClass,
                     !isCurrent &&
                       isMispronounced &&
-                      "font-bold border-b-2 border-orange-500",
+                      "font-semibold border-b-2 border-orange-500",
                     !isCurrent &&
                       isCorrect &&
-                      "font-bold border-b-2 border-emerald-400",
+                      "font-semibold border-b-2 border-emerald-400",
                     !isCurrent &&
                       !hasConfirmedStatus &&
                       !readOnly &&
@@ -317,7 +317,7 @@ export function BookPageContent({
                     readOnly
                       ? undefined
                       : isCurrent && isMispronounced
-                        ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé!`
+                        ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé.`
                         : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }
                   onKeyDown={
@@ -361,7 +361,7 @@ export function BookPageContent({
           })}
         </p>
       ) : page.text ? (
-        <p className="whitespace-pre-wrap text-[22px] font-bold leading-[1.8] text-ink sm:text-[26px]">
+        <p className="whitespace-pre-wrap text-[22px] font-semibold leading-[1.8] text-ink sm:text-[26px]">
           {page.text}
         </p>
       ) : (

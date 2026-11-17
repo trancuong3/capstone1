@@ -20,7 +20,7 @@ export function ReadingAssessmentSummary({
       aria-label="Kết quả lượt đầu và luyện lại"
       className="rounded-card border border-border bg-white p-4"
     >
-      <h3 className="font-extrabold text-ink">
+      <h3 className="font-semibold text-ink">
         Lượt đọc đầu và phần luyện thêm
       </h3>
       <p className="mt-1 text-sm text-muted">
@@ -30,7 +30,7 @@ export function ReadingAssessmentSummary({
         {metrics.map(([label, value]) => (
           <div key={label}>
             <dt className="text-sm text-muted">{label}</dt>
-            <dd className="text-xl font-extrabold text-ink">{value}</dd>
+            <dd className="text-xl font-semibold text-ink">{value}</dd>
           </div>
         ))}
       </dl>

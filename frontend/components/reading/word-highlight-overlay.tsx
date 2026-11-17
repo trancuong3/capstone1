@@ -75,7 +75,7 @@ function getWordStatus(
 function getWordColor(status: string): string {
   switch (status) {
     case "current":
-      return "border-yellow-500 bg-yellow-300 scale-105 font-black text-primary shadow-sm ring-2 ring-primary";
+      return "border-yellow-500 bg-yellow-300 scale-105 font-semibold text-primary shadow-sm ring-2 ring-primary";
 
     case "correct":
       return "border-green-500 bg-green-100";

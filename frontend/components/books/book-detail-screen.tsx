@@ -39,10 +39,10 @@ interface BookDetailScreenProps {
 
 function invitationFor(book: BookDetailDTO): string {
   if (book.title === "Chú Mèo Nhỏ") {
-    return "Cùng chú mèo nhỏ khám phá một ngày thật vui nhé!";
+    return "Cùng chú mèo nhỏ khám phá câu chuyện.";
   }
 
-  return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")} nhé!`;
+  return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")}.`;
 }
 
 export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
@@ -344,18 +344,18 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
       </div>
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:items-start sm:gap-12">
-        <article className="hidden h-[518px] w-[307px] shrink-0 flex-col gap-[14px] rounded-card bg-white p-[19px] shadow-[0_7px_24px_rgba(33,61,66,0.08)] sm:flex">
-          <BookCover book={book} className="h-72 max-w-none p-[19px]" />
-          <p className="text-[19px] font-bold text-muted">
+        <article className="hidden w-[280px] shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:flex">
+          <BookCover book={book} className="h-64 max-w-none p-4" />
+          <p className="text-sm font-medium text-muted">
             {book.author ?? "Tác giả đang cập nhật"}
           </p>
-          <p className="text-[19px] font-bold text-primary">
+          <p className="text-sm font-semibold text-primary">
             {formatGradeRange(book)}
           </p>
         </article>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <h1 className="text-heading font-extrabold text-ink sm:text-[44px] sm:leading-[1.4]">
+          <h1 className="text-heading font-semibold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
           <div className="flex flex-wrap gap-3">
@@ -390,7 +390,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <p className="text-body text-muted">
             {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
           </p>
-          <p className="text-[26px] font-bold leading-[1.4] text-ink">
+          <p className="text-xl font-medium leading-7 text-ink">
             {invitationFor(book)}
           </p>
 
@@ -398,7 +398,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           targetConfidence !== null &&
           targetConfidence >= 0 &&
           targetConfidence <= 1 ? (
-            <p className="text-sm font-bold text-primary">
+            <p className="text-sm font-semibold text-primary">
               Trang nhận diện:{" "}
               {selectedPage
                 ? `Trang ${selectedPage.page_number}`
@@ -420,7 +420,9 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
           <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-bold text-ink">Trang bắt đầu</span>
+              <span className="text-sm font-semibold text-ink">
+                Trang bắt đầu
+              </span>
               <span className="text-body text-primary">
                 {selectedPage
                   ? `Trang ${selectedPage.page_number}`
@@ -432,7 +434,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </div>
             <div className="flex flex-col gap-1">
               <label
-                className="text-sm font-bold text-ink"
+                className="text-sm font-semibold text-ink"
                 htmlFor="reading-end-page"
               >
                 Trang kết thúc
@@ -519,7 +521,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 </Button>
               </div>
             ) : null}
-            <p className="mb-4 hidden text-label font-bold text-ink sm:block">
+            <p className="mb-4 hidden text-label font-semibold text-ink sm:block">
               Chọn trang bé muốn đọc
             </p>
             <div

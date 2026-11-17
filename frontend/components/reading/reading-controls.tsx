@@ -49,7 +49,7 @@ export function ReadingControls({
       >
         <Button
           aria-label="Tạm dừng buổi đọc"
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
           variant="quiet"
@@ -68,7 +68,7 @@ export function ReadingControls({
                 ? "Nghe mẫu từ cần đọc lại"
                 : "Nghe đọc mẫu cả trang"
           }
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
           disabled={disabled}
           onClick={onReadSample ?? onHelp}
           variant="secondary"
@@ -76,7 +76,7 @@ export function ReadingControls({
           {isPlayingSample ? (
             <VolumeX
               aria-hidden="true"
-              className="size-6 shrink-0 text-primary animate-pulse"
+              className="size-5 shrink-0 text-primary"
             />
           ) : (
             <Volume2 aria-hidden="true" className="size-6 shrink-0" />
@@ -99,14 +99,14 @@ export function ReadingControls({
                 ? "Bật mic"
                 : "Bé đọc với nhận diện giọng nói"
           }
-          className="order-first h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="order-first h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
           disabled={disabled}
           onClick={onToggleListening ?? onPause}
           variant="primary"
         >
           {isListening ? (
             <span className="relative flex size-6 items-center justify-center shrink-0">
-              <span className="absolute inline-flex size-4 animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="absolute size-2 rounded-full bg-red-300" />
               <Mic aria-hidden="true" className="relative size-6 text-white" />
             </span>
           ) : (
@@ -120,7 +120,7 @@ export function ReadingControls({
 
         <Button
           aria-label="Nhờ gia sư giúp đọc"
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
           disabled={disabled || retryMode}
           onClick={onHelp}
           variant="quiet"
@@ -133,7 +133,7 @@ export function ReadingControls({
 
         <Button
           aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-bold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
           disabled={finishDisabled}
           onClick={onFinish}
           variant="quiet"

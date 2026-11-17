@@ -93,7 +93,7 @@ export function SessionDetailScreen({
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-extrabold text-ink">
+        <h1 className="text-heading font-semibold text-ink">
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">
@@ -119,7 +119,7 @@ export function SessionDetailScreen({
   if (state.status === "not-found")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
-        <h1 className="text-heading font-extrabold text-ink">
+        <h1 className="text-heading font-semibold text-ink">
           Không tìm thấy buổi đọc
         </h1>
         <StatusMessage tone="error">
@@ -213,11 +213,11 @@ export function SessionDetailScreen({
       ) : null}
       <dl className="grid gap-3 text-label text-muted sm:grid-cols-2">
         <div>
-          <dt className="font-bold">Bắt đầu (giờ Việt Nam)</dt>
+          <dt className="font-semibold">Bắt đầu (giờ Việt Nam)</dt>
           <dd>{formatHistoryDateTime(detail.started_at)}</dd>
         </div>
         <div>
-          <dt className="font-bold">Kết thúc (giờ Việt Nam)</dt>
+          <dt className="font-semibold">Kết thúc (giờ Việt Nam)</dt>
           <dd>
             {detail.ended_at === null
               ? "Chưa lưu giờ kết thúc"
@@ -268,8 +268,8 @@ export function SessionDetailScreen({
           ],
         ].map(([label, value]) => (
           <Card className="gap-2 bg-white p-5 sm:p-6" key={label}>
-            <p className="text-label font-bold text-muted">{label}</p>
-            <p className="text-2xl font-extrabold text-ink">{value}</p>
+            <p className="text-label font-semibold text-muted">{label}</p>
+            <p className="text-2xl font-semibold text-ink">{value}</p>
           </Card>
         ))}
       </div>
@@ -277,12 +277,12 @@ export function SessionDetailScreen({
         <SessionReadingReports sessionId={sessionId} />
       </Card>
       <details className="rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="cursor-pointer font-extrabold text-primary">
+        <summary className="cursor-pointer font-semibold text-primary">
           Thông tin khác của buổi đọc
         </summary>
         <div className="mt-4 flex flex-col gap-4">
           <Card className="bg-white">
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               Sự kiện trong buổi đọc
             </h2>
             {availability.events === "unsupported" ||
@@ -298,7 +298,7 @@ export function SessionDetailScreen({
             ) : null}
           </Card>
           <Card className="bg-white">
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               Câu hỏi đọc hiểu
             </h2>
             {availability.comprehension === "unsupported" ||
@@ -323,7 +323,7 @@ export function SessionDetailScreen({
                     className="rounded-control border border-border p-4"
                     key={question.id}
                   >
-                    <p className="font-extrabold text-ink">{question.prompt}</p>
+                    <p className="font-semibold text-ink">{question.prompt}</p>
                     <p className="mt-2 text-label text-muted">
                       Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
                     </p>

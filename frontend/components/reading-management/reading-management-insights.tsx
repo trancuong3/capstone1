@@ -175,7 +175,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
       aria-label="Hôm nay"
       className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6"
     >
-      <h2 className="text-xl font-extrabold text-ink">
+      <h2 className="text-xl font-semibold text-ink">
         Hôm nay {childName} cần đọc gì?
       </h2>
       {todayPlans.length === 0 && dailyGoals.length === 0 ? (
@@ -194,7 +194,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
             );
             return (
               <li key={plan.id} className="rounded-control bg-canvas p-3">
-                <p className="font-bold text-ink">{plan.title}</p>
+                <p className="font-semibold text-ink">{plan.title}</p>
                 {plan.book_title ? (
                   <p className="text-sm text-muted">Sách: {plan.book_title}</p>
                 ) : null}
@@ -220,7 +220,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
           })}
           {dailyGoals.map((goal) => (
             <li key={goal.id} className="rounded-control bg-canvas p-3">
-              <p className="font-bold text-ink">
+              <p className="font-semibold text-ink">
                 Mục tiêu {goal.target_value}{" "}
                 {goal.metric === "MINUTES" ? "phút" : "buổi"} mỗi ngày
               </p>

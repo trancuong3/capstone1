@@ -121,7 +121,7 @@ export function AdminAuditScreen() {
               <Card className="bg-white" key={item.id}>
                 <div className="flex flex-col justify-between gap-3 md:flex-row">
                   <div>
-                    <p className="font-black text-primary">{item.action}</p>
+                    <p className="font-semibold text-primary">{item.action}</p>
                     <p className="text-muted">
                       {item.resource_type} ·{" "}
                       {item.resource_id ?? "Không có resource ID"}
@@ -136,19 +136,19 @@ export function AdminAuditScreen() {
                 </div>
                 <dl className="grid gap-2 text-sm sm:grid-cols-3">
                   <div>
-                    <dt className="font-bold">Actor</dt>
+                    <dt className="font-semibold">Actor</dt>
                     <dd className="break-all text-muted">
                       {item.actor_id ?? "Hệ thống"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="font-bold">Request</dt>
+                    <dt className="font-semibold">Request</dt>
                     <dd className="break-all text-muted">
                       {item.request_id ?? "—"}
                     </dd>
                   </div>
                   <div>
-                    <dt className="font-bold">Metadata an toàn</dt>
+                    <dt className="font-semibold">Metadata an toàn</dt>
                     <dd className="break-all text-muted">
                       {JSON.stringify(item.metadata)}
                     </dd>

@@ -113,7 +113,7 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   return (
     <div className="space-y-5 rounded-xl border p-4">
-      <h2 className="text-xl font-bold">Báo cáo đọc</h2>
+      <h2 className="text-xl font-semibold">Báo cáo đọc</h2>
 
       {/* Nội dung bài đọc */}
       <div className="space-y-3 border-t pt-3">
@@ -125,7 +125,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           <p className="text-sm text-muted">Đang tải nội dung bài đọc...</p>
         ) : (
           <article
-            className="relative min-h-[552px] w-full overflow-hidden rounded-[8px] bg-cream p-4 shadow-[0_8px_24px_rgba(33,61,66,0.06)] sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-8"
+            className="relative min-h-[360px] w-full overflow-hidden rounded-card border border-border bg-cream p-4 sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-6"
             data-page-id={page.page_id}
             data-page-revision-id={page.page_revision_id}
           >
@@ -155,32 +155,32 @@ export function ReadingReport({ result, sessionId }: Props) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <p className="text-green-700">Từ đọc đúng</p>
-          <p className="text-2xl font-bold">{correctCount}</p>
+          <p className="text-2xl font-semibold">{correctCount}</p>
         </div>
 
         <div>
           <p className="text-red-600">Từ bỏ</p>
-          <p className="text-2xl font-bold">{missingCount}</p>
+          <p className="text-2xl font-semibold">{missingCount}</p>
         </div>
 
         <div>
           <p className="text-orange-600">Từ đọc nhầm</p>
-          <p className="text-2xl font-bold">{wrongCount}</p>
+          <p className="text-2xl font-semibold">{wrongCount}</p>
         </div>
 
         <div>
           <p className="text-purple-700">Từ đọc thêm</p>
-          <p className="text-2xl font-bold">{extraCount}</p>
+          <p className="text-2xl font-semibold">{extraCount}</p>
         </div>
 
         <div>
           <p className="text-purple-700">Lặp từ</p>
-          <p className="text-2xl font-bold">{repeatedCount}</p>
+          <p className="text-2xl font-semibold">{repeatedCount}</p>
         </div>
 
         <div>
           <p className="text-blue-700">Khoảng ngập ngừng</p>
-          <p className="text-2xl font-bold">{hesitations.length}</p>
+          <p className="text-2xl font-semibold">{hesitations.length}</p>
         </div>
       </div>
 

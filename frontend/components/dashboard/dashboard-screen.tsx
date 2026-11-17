@@ -191,26 +191,22 @@ export function DashboardScreen() {
     );
   }
 
-  const parentName = state.profile.display_name?.trim() || "ba mẹ";
   const selectedChild = state.children.find(
     (child) => child.id === selectedChildId,
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
-      <Card className="mx-auto max-w-[744px] items-start text-left sm:flex-row sm:items-center sm:p-6">
-        <div className="hidden size-24 shrink-0 items-center justify-center rounded-card bg-sky text-primary sm:flex">
-          <BookOpenText aria-hidden="true" className="size-12" />
+    <section className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 sm:gap-8">
+      <Card className="items-start text-left sm:flex-row sm:items-center sm:p-6">
+        <div className="hidden size-16 shrink-0 items-center justify-center rounded-control bg-sky text-primary sm:flex">
+          <BookOpenText aria-hidden="true" className="size-8" />
         </div>
         <div className="max-w-[720px]">
-          <p className="hidden text-label font-bold text-primary sm:block">
-            TỔNG QUAN
+          <p className="hidden text-label font-semibold text-primary sm:block">
+            Tổng quan
           </p>
-          <h1 className="text-heading font-extrabold text-ink">
-            <span className="sm:hidden">Hôm nay mình cùng đọc nhé!</span>
-            <span className="hidden sm:inline">
-              Chào {parentName}, hôm nay mình đọc gì cùng bé?
-            </span>
+          <h1 className="text-heading font-semibold text-ink">
+            Hôm nay cùng bé đọc gì?
           </h1>
           <p className="mt-3 text-body text-muted">
             <span className="sm:hidden">Ba mẹ chọn hồ sơ của bé.</span>
@@ -240,10 +236,8 @@ export function DashboardScreen() {
           <section
             aria-labelledby="child-selection-title"
             className={
-              "mx-auto flex w-full max-w-[744px] scroll-mt-8 flex-col gap-4 rounded-card p-2 transition-shadow focus:outline-none " +
-              (selectionRequired
-                ? "ring-4 ring-warning motion-safe:animate-pulse"
-                : "")
+              "flex w-full scroll-mt-8 flex-col gap-4 rounded-card p-2 transition-shadow focus:outline-none " +
+              (selectionRequired ? "ring-4 ring-warning" : "")
             }
             id="child-selection"
             ref={selectionSectionRef}
@@ -252,7 +246,7 @@ export function DashboardScreen() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2
-                  className="text-2xl font-extrabold leading-[1.4] text-ink"
+                  className="text-2xl font-semibold leading-[1.4] text-ink"
                   id="child-selection-title"
                 >
                   Chọn hồ sơ trẻ
@@ -262,7 +256,7 @@ export function DashboardScreen() {
                 </p>
               </div>
               <Link
-                className="inline-flex min-h-11 w-fit items-center rounded-md px-1 text-label font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                className="inline-flex min-h-11 w-fit items-center rounded-md px-1 text-label font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
                 href="/children"
               >
                 Quản lý hồ sơ
@@ -279,7 +273,7 @@ export function DashboardScreen() {
                   className="mt-1 size-5 shrink-0 text-warning"
                 />
                 <div>
-                  <p className="font-extrabold text-warning-ink">
+                  <p className="font-semibold text-warning-ink">
                     {invalidSelection
                       ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
                       : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."}
@@ -291,7 +285,7 @@ export function DashboardScreen() {
               </div>
             ) : null}
 
-            <div className="grid w-full gap-6 sm:grid-cols-2">
+            <div className="grid w-full gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {state.children.map((child) => (
                 <ChildProfileCard
                   child={child}
@@ -318,18 +312,18 @@ export function DashboardScreen() {
 
           <section
             aria-labelledby="reading-actions-title"
-            className="mx-auto flex w-full max-w-[744px] flex-col gap-4 rounded-card border border-line bg-cream p-4 sm:p-6"
+            className="flex w-full flex-col gap-4 rounded-card border border-border bg-white p-4 sm:p-6"
           >
             <div>
               <h2
-                className="text-2xl font-extrabold leading-[1.4] text-ink"
+                className="text-2xl font-semibold leading-[1.4] text-ink"
                 id="reading-actions-title"
               >
                 Hoạt động đọc sách
               </h2>
               {selectedChild ? (
                 <>
-                  <p className="mt-1 text-body font-bold text-primary">
+                  <p className="mt-1 text-body font-semibold text-primary">
                     Đang chọn: {selectedChild.alias} – Lớp {selectedChild.grade}
                   </p>
                   <p className="mt-2 text-body text-muted">
@@ -361,7 +355,7 @@ export function DashboardScreen() {
             </div>
           </section>
 
-          <div className="mx-auto grid w-full max-w-[744px] gap-3 sm:grid-cols-2">
+          <div className="grid w-full gap-3 sm:grid-cols-2">
             <ButtonLink
               href={
                 selectedChildId

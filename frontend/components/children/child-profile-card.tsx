@@ -27,11 +27,13 @@ export function ChildProfileCard({
         imageUrl={child.avatar_url}
         size="card"
       />
-      <span className="text-[26px] font-bold leading-[1.4] text-ink">
+      <span className="text-[26px] font-semibold leading-[1.4] text-ink">
         {child.alias}
       </span>
-      <span className="text-label font-bold text-muted">Lớp {child.grade}</span>
-      <span className="text-label font-bold text-primary">
+      <span className="text-label font-semibold text-muted">
+        Lớp {child.grade}
+      </span>
+      <span className="text-label font-semibold text-primary">
         {showEditAction ? (
           <span className="inline-flex items-center gap-2">
             <Pencil aria-hidden="true" className="size-4" />

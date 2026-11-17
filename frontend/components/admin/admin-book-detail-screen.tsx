@@ -142,7 +142,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               Thử lại
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
               Quay lại kho sách
@@ -160,7 +160,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         description={`Tên sách: ${book.name?.trim() ? book.name : "Chưa có tên sách"} · ${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
       />
       <Link
-        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href="/admin/books"
       >
         <ArrowLeft aria-hidden className="size-5" /> Kho sách
@@ -169,7 +169,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         <AdminStatusBadge status={book.lifecycle_status} />
         <span className="text-sm text-muted">ID: {book.id}</span>
         <Link
-          className="inline-flex min-h-11 items-center rounded-control border border-border px-4 font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
+          className="inline-flex min-h-11 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
           href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
         >
           Chỉnh sửa metadata / vòng đời
@@ -178,7 +178,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
       <section className="mt-8" aria-labelledby="pages-title">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-2xl font-black" id="pages-title">
+          <h2 className="text-2xl font-semibold" id="pages-title">
             Trang sách
           </h2>
           <Button
@@ -247,7 +247,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                       />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black">
+                      <h3 className="text-xl font-semibold">
                         Trang {item.page_number}
                       </h3>
                       <p className="mt-1 text-sm text-muted">
@@ -261,7 +261,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                     </div>
                     <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-3">
                       <Link
-                        className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                        className="inline-flex min-h-10 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                         href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                       >
                         {active
@@ -301,7 +301,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             className="w-full max-w-lg rounded-card bg-white p-6 shadow-2xl"
             role="alertdialog"
           >
-            <h2 className="text-xl font-black" id="retire-page-title">
+            <h2 className="text-xl font-semibold" id="retire-page-title">
               Xóa Trang {pendingRetire.page_number}?
             </h2>
             <p className="mt-3 text-sm leading-6 text-muted">

@@ -50,7 +50,7 @@ export function AdminStatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
-        "inline-flex rounded-full px-3 py-1 text-sm font-extrabold",
+        "inline-flex rounded-full px-3 py-1 text-sm font-semibold",
         tone,
       )}
     >
@@ -71,7 +71,7 @@ export function AdminLoading({
     >
       <div>
         <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-sky border-t-primary" />
-        <p className="font-bold text-muted">{label}</p>
+        <p className="font-semibold text-muted">{label}</p>
       </div>
     </div>
   );

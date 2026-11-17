@@ -234,7 +234,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex min-h-dvh flex-col bg-canvas">
       <a
-        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-primary focus:shadow-lg"
+        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
         href="#main-content"
       >
         Bỏ qua điều hướng, đến nội dung
@@ -256,9 +256,9 @@ export function AppShell({ children }: AppShellProps) {
             size="md"
           />
 
-          <div className="flex w-full min-w-0 items-start gap-2 sm:w-auto sm:items-center sm:gap-3">
+          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-3">
             {!isChildOnboarding ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:flex-none sm:justify-end sm:gap-2">
+              <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain py-1 sm:flex-none sm:justify-end sm:gap-2 sm:overflow-visible">
                 {navigationItems.map(({ href, icon: Icon, label }) => {
                   const isActive = routeIsActive(pathname, href);
 
@@ -266,7 +266,7 @@ export function AppShell({ children }: AppShellProps) {
                     <Link
                       aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-control px-2.5 text-center text-[13px] font-bold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-12 sm:gap-2 sm:px-3 sm:text-label",
+                        "flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-control px-2.5 text-center text-[13px] font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-12 sm:gap-2 sm:px-3 sm:text-label",
                         isActive
                           ? "bg-sky text-primary-hover"
                           : "bg-white hover:bg-sky",
@@ -346,7 +346,7 @@ export function AppShell({ children }: AppShellProps) {
                     imageUrl={profile?.avatar_url}
                     size="lg"
                   />
-                  <p className="max-w-full break-words text-label font-extrabold text-ink">
+                  <p className="max-w-full break-words text-label font-semibold text-ink">
                     {displayName ?? "Tài khoản ViRead"}
                   </p>
                   {roleLabel(profile?.role) ? (
@@ -367,7 +367,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/profile") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/profile")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -390,7 +390,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/children") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/children")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -415,7 +415,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/settings") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/settings")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -437,7 +437,7 @@ export function AppShell({ children }: AppShellProps) {
                       : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/help-support")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -455,7 +455,7 @@ export function AppShell({ children }: AppShellProps) {
 
                 <div className="my-2 border-t border-border" />
                 <button
-                  className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-bold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                  className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
                   disabled={isSigningOut}
                   onClick={() => void handleSignOut()}
                   role="menuitem"
@@ -471,7 +471,7 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
         {hasSignOutError ? (
           <p
-            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-bold text-danger"
+            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-semibold text-danger"
             role="alert"
           >
             Chưa thể đăng xuất lúc này. Ba mẹ vui lòng thử lại.

@@ -195,7 +195,7 @@ export function AdminPageUploader({
       aria-labelledby="upload-title"
       className="mb-8 rounded-card bg-sky p-4 sm:p-6"
     >
-      <h2 className="mb-4 text-2xl font-black" id="upload-title">
+      <h2 className="mb-4 text-2xl font-semibold" id="upload-title">
         Tải ảnh trang sách và chạy OCR
       </h2>
       <p className="mb-4 text-sm text-muted">
@@ -214,7 +214,7 @@ export function AdminPageUploader({
         </p>
         <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />
-          <span className="font-extrabold">
+          <span className="font-semibold">
             Chọn một hoặc nhiều ảnh trang sách
           </span>
           <span className="mt-1 text-sm text-muted">
@@ -255,8 +255,8 @@ export function AdminPageUploader({
               <span
                 className={
                   item.status === "FAILED"
-                    ? "text-sm font-bold text-red-700"
-                    : "text-sm font-bold"
+                    ? "text-sm font-semibold text-red-700"
+                    : "text-sm font-semibold"
                 }
               >
                 {item.status === "FAILED"
