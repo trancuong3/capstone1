@@ -714,7 +714,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     expect(await screen.findByText("book.read")).toBeInTheDocument();
     expect(screen.getByText(actorId)).toBeInTheDocument();
-    expect(screen.getByText(`book · ${resourceId}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`book · ${resourceId}`)),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Không thể tải nhật ký/)).not.toBeInTheDocument();
     expect(screen.getByText("{}")).toBeInTheDocument();
   });

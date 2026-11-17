@@ -184,10 +184,10 @@ export function AdminBookEditorScreen({
   };
 
   return (
-    <>
+    <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
         eyebrow="Kho sách · Metadata"
-        title="Chỉnh sửa metadata sách"
+        title="Chỉnh sửa thông tin sách"
         description="Chỉnh sửa đầu sách hiện có. Thay đổi này không sửa hoặc xóa trang sách, revision hay lịch sử đọc."
       />
       <Link
@@ -232,7 +232,7 @@ export function AdminBookEditorScreen({
           {notice.message}
         </StatusMessage>
       ) : null}
-      <Card className="max-w-3xl bg-white">
+      <Card className="w-full bg-white">
         <h2 className="mb-5 text-xl font-semibold">Thông tin sách</h2>
         <AdminBookForm
           initial={initial}
@@ -240,6 +240,6 @@ export function AdminBookEditorScreen({
           submitLabel="Lưu metadata"
         />
       </Card>
-    </>
+    </section>
   );
 }

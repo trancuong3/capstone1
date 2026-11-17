@@ -25,24 +25,24 @@ export function BookCard({
   collectionBusy = false,
 }: BookCardProps) {
   return (
-    <article className="flex h-full w-full flex-col items-start gap-3 rounded-card border border-border bg-white p-4">
-      <BookCover book={book} titleAsHeading />
+    <article className="group flex h-full w-full flex-col items-start gap-4 rounded-card border border-border bg-white p-4 transition-colors hover:border-primary/40 sm:p-6">
+      <BookCover book={book} />
+      <h2 className="text-2xl font-extrabold leading-snug text-ink">
+        {book.title}
+      </h2>
       <p className="w-full truncate text-label font-semibold text-muted">
-        {book.author ?? "Tác giả đang cập nhật"}
-      </p>
-      <p className="w-full text-label font-semibold text-primary">
-        {formatGradeRange(book)}
+        {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
       </p>
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
-        className="mt-auto w-full"
+        className="order-last mt-auto w-full"
         href={`/books/${encodeURIComponent(book.id)}`}
       >
-        Đọc sách
+        Xem sách
         <ArrowRight aria-hidden="true" className="size-5" />
       </ButtonLink>
       {onToggleCollection ? (
-        <div className="flex w-full flex-wrap gap-2">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
           {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
             const saved = savedTypes.includes(type);
             const label = type === "FAVORITE" ? "Yêu thích" : "Muốn đọc";

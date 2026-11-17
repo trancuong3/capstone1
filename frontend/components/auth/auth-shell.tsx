@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
+import { ButtonSizeProvider } from "@/components/common/button";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -12,9 +14,14 @@ export function AuthShell({ children }: AuthShellProps) {
   return (
     <div className="flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 flex-col items-center justify-center px-4 py-8 sm:px-8 sm:py-10">
-        <div className="w-full max-w-[440px]">{children}</div>
+      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[774px] sm:px-12 sm:py-12">
+        <ButtonSizeProvider size="compact">
+          <div className="w-full max-w-[560px] [&_h1]:text-[32px] [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
+            {children}
+          </div>
+        </ButtonSizeProvider>
       </main>
+      <SiteFooter variant="public" />
     </div>
   );
 }

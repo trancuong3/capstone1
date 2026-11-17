@@ -20,17 +20,12 @@ export function PageHeader({
   title,
 }: PageHeaderProps) {
   return (
-    <header
-      className={cn(
-        "mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end",
-        className,
-      )}
-    >
+    <header className={cn("flex flex-col justify-between gap-4", className)}>
       <div className="min-w-0 max-w-3xl">
         {eyebrow ? (
-          <p className="text-sm font-semibold text-primary">{eyebrow}</p>
+          <p className="text-label font-bold text-primary">{eyebrow}</p>
         ) : null}
-        <h1 className="mt-1 text-heading font-semibold leading-tight text-ink">
+        <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
           {title}
         </h1>
         {description ? (

@@ -188,6 +188,7 @@ export function AdminParentFormModal({
       isOpen={isOpen}
       onClose={close}
       title={mode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
+      tone="paper"
     >
       {isLoading ? (
         <div
@@ -249,9 +250,9 @@ export function AdminParentFormModal({
               API hiện không hỗ trợ xóa trống hai trường này.
             </p>
           )}
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <div className="flex flex-col gap-4">
             <Button
-              className="sm:w-auto"
+              className="order-last"
               disabled={saving}
               onClick={close}
               type="button"
@@ -259,12 +260,7 @@ export function AdminParentFormModal({
             >
               Hủy
             </Button>
-            <Button
-              className="sm:w-auto"
-              disabled={isLoading}
-              isLoading={saving}
-              type="submit"
-            >
+            <Button disabled={isLoading} isLoading={saving} type="submit">
               {mode === "create" ? "Tạo Parent" : "Lưu thay đổi"}
             </Button>
           </div>

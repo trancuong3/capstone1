@@ -58,7 +58,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
             <p className="text-sm font-semibold text-success-ink">
               Tài khoản ViRead
             </p>
-            <h1 className="mt-2 text-heading font-semibold text-success-ink">
+            <h1 className="mt-2 text-heading font-extrabold text-success-ink">
               Đã đổi mật khẩu
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
@@ -85,7 +85,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
             <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
             </p>
-            <h1 className="mt-2 text-heading font-semibold text-ink">
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
               {isExpired ? "Liên kết đã hết hạn" : "Liên kết không hợp lệ"}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
@@ -116,7 +116,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
           <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
           </p>
-          <h1 className="mt-2 text-heading font-semibold text-ink">
+          <h1 className="mt-2 text-heading font-extrabold text-ink">
             Đặt mật khẩu mới
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">

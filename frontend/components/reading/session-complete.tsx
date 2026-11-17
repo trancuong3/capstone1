@@ -89,7 +89,7 @@ export function SessionComplete({
             width={96}
           />
           <div>
-            <h1 className="text-heading font-semibold text-ink">
+            <h1 className="text-heading font-extrabold text-ink">
               {rangeWasPartial
                 ? "Đã lưu tiến độ đọc"
                 : "Buổi đọc đã hoàn thành"}
@@ -251,7 +251,7 @@ export function SessionComplete({
           </button>
         </div>
 
-        <div className="rounded-card border border-line bg-white p-4 shadow-sm sm:p-5">
+        <div className="rounded-card border border-border bg-white p-4 shadow-sm sm:p-5">
           <SessionReadingReports
             sessionId={sessionId}
             showAssessment={!summary.assessment}

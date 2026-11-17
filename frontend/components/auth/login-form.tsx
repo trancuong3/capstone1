@@ -234,11 +234,7 @@ export function LoginForm({
   });
 
   return (
-    <form
-      className="flex w-full flex-col gap-4 sm:gap-6"
-      noValidate
-      onSubmit={onSubmit}
-    >
+    <form className="flex w-full flex-col gap-4" noValidate onSubmit={onSubmit}>
       {notice ? (
         <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage>
       ) : null}

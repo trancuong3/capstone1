@@ -75,11 +75,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const child = childState.child;
 
   return (
-    <section className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-[1100px] flex-col gap-5 px-4 py-6 sm:py-8">
+    <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-primary">Quét trang sách</p>
-          <h1 className="mt-1 text-heading font-semibold text-ink">
+          <h1 className="mt-1 text-heading font-extrabold text-ink">
             Đưa trang sách vào khung camera
           </h1>
           <p className="mt-2 max-w-[720px] text-body leading-7 text-muted">
@@ -110,8 +110,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           onBookPageDetected={handleBookPageDetected}
         />
       ) : (
-        <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-6 text-center">
-          <span className="flex size-16 items-center justify-center rounded-full bg-white text-primary">
+        <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-card border border-border bg-cream p-6 text-center shadow-sm">
+          <span className="flex size-16 items-center justify-center rounded-full bg-white text-primary shadow-sm">
             <Camera aria-hidden="true" className="size-8" />
           </span>
           <div>

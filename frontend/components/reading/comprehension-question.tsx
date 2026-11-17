@@ -116,7 +116,7 @@ export function ComprehensionQuestion({
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
       <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4">
-        <h1 className="text-heading font-semibold text-ink sm:text-center">
+        <h1 className="text-heading font-extrabold text-ink sm:text-center">
           Mình cùng trả lời nhé
         </h1>
         <div

@@ -5,7 +5,7 @@ import { ProfileAvatar } from "@/components/common/profile-avatar";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildProfileCardProps {
-  child: ChildProfileDTO;
+  child: Pick<ChildProfileDTO, "id" | "alias" | "grade" | "avatar_url">;
   href?: string;
   showEditAction?: boolean;
   onSelect?: () => void;
@@ -27,14 +27,19 @@ export function ChildProfileCard({
         imageUrl={child.avatar_url}
         size="card"
       />
-      <span className="text-[26px] font-semibold leading-[1.4] text-ink">
+      <span className="text-2xl font-extrabold leading-[1.4] text-ink">
         {child.alias}
       </span>
       <span className="text-label font-semibold text-muted">
         Lớp {child.grade}
       </span>
       <span className="text-label font-semibold text-primary">
-        {showEditAction ? (
+        {selected ? (
+          <span className="inline-flex items-center gap-2">
+            <Check aria-hidden="true" className="size-4" />
+            Đang chọn
+          </span>
+        ) : showEditAction ? (
           <span className="inline-flex items-center gap-2">
             <Pencil aria-hidden="true" className="size-4" />
             Xem và chỉnh sửa
@@ -47,10 +52,10 @@ export function ChildProfileCard({
   );
 
   const className =
-    "relative flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-card border p-6 text-center transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
+    "group relative flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-card border p-6 text-center transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
     (selected
       ? "border-primary bg-sky ring-2 ring-primary"
-      : "border-border bg-white hover:border-primary");
+      : "border-border bg-white hover:border-primary/60");
 
   if (onSelect) {
     return (
@@ -61,11 +66,6 @@ export function ChildProfileCard({
         onClick={onSelect}
         type="button"
       >
-        {selected ? (
-          <span className="absolute right-4 top-4 flex size-9 items-center justify-center rounded-full bg-primary text-white">
-            <Check aria-hidden="true" className="size-5" />
-          </span>
-        ) : null}
         {content}
       </button>
     );

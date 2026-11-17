@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
@@ -189,7 +188,7 @@ export function BookLibraryScreen() {
     return (
       <section
         aria-busy="true"
-        className="mx-auto w-full max-w-[1130px] px-4 py-8"
+        className="mx-auto w-full max-w-[1280px] px-4 py-8"
       >
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
@@ -217,11 +216,6 @@ export function BookLibraryScreen() {
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader child={child} />
-      {child ? (
-        <div className="mx-auto w-full max-w-[1130px]">
-          <SelectedChildIdentity child={child} />
-        </div>
-      ) : null}
 
       {collectionNotice ? (
         <StatusMessage
@@ -236,8 +230,8 @@ export function BookLibraryScreen() {
         </StatusMessage>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:gap-6">
-        <div className="flex flex-col gap-4 lg:min-h-16 lg:flex-row lg:items-center lg:gap-6">
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
+        <div className="flex flex-col gap-6">
           <h1
             aria-label={
               child
@@ -253,7 +247,10 @@ export function BookLibraryScreen() {
             </span>
             <span className="sm:hidden">Bé muốn đọc gì hôm nay?</span>
           </h1>
-          <div className="w-full lg:w-[486px]">
+          <p className="text-body text-muted">
+            Mỗi câu chuyện là một điều mới để khám phá.
+          </p>
+          <div className="w-full">
             <TextField
               aria-label="Tìm theo tên sách hoặc tác giả"
               label="Tìm cuốn sách bé thích…"
@@ -266,7 +263,7 @@ export function BookLibraryScreen() {
 
         <fieldset className="min-w-0">
           <legend className="sr-only">Lọc sách theo lớp</legend>
-          <div className="flex gap-3 overflow-x-auto pb-1 sm:flex-wrap">
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -274,9 +271,9 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex h-16 min-w-[132px] shrink-0 items-center justify-center gap-2 rounded-control px-4 text-button font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-control px-2 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                     isSelected
-                      ? "bg-sky text-primary-hover ring-2 ring-primary"
+                      ? "bg-sky text-primary-hover"
                       : "bg-white text-ink hover:bg-sky",
                   )}
                   key={grade ?? "all"}
@@ -301,7 +298,7 @@ export function BookLibraryScreen() {
           <div
             aria-busy="true"
             aria-label="Đang tải thư viện sách"
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
               Đang tải sách…
@@ -374,7 +371,7 @@ export function BookLibraryScreen() {
         ) : null}
 
         {catalogState.status === "ready" && catalogState.books.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {catalogState.books.map((book) => (
               <BookCard
                 book={book}
@@ -391,10 +388,6 @@ export function BookLibraryScreen() {
           </div>
         ) : null}
       </div>
-
-      <p className="mt-auto text-center text-body text-muted">
-        Mỗi câu chuyện là một điều mới để khám phá.
-      </p>
     </section>
   );
 }

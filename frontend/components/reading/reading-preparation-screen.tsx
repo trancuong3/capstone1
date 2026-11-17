@@ -521,7 +521,7 @@ export function ReadingPreparationScreen({
     !data.explicitPageInvalid;
 
   return (
-    <section className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-[1120px] flex-col gap-5 px-4 py-6 sm:gap-7 sm:px-8 sm:py-8">
+    <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
       <BookChildHeader
         child={data.child}
         backHref={detailHref}
@@ -530,8 +530,10 @@ export function ReadingPreparationScreen({
       <SelectedChildIdentity child={data.child} />
 
       <header className="flex flex-col gap-2">
-        <p className="text-sm font-semibold text-primary">Trước khi đọc</p>
-        <h1 className="text-heading font-semibold text-ink">
+        <p className="text-label font-extrabold uppercase tracking-[0.12em] text-primary">
+          Trước khi đọc
+        </p>
+        <h1 className="text-heading font-extrabold leading-tight text-ink">
           Chuẩn bị đọc sách
         </h1>
         <p className="max-w-[760px] text-body leading-7 text-muted">
@@ -539,11 +541,11 @@ export function ReadingPreparationScreen({
         </p>
       </header>
 
-      <article className="grid gap-5 rounded-card border border-border bg-white p-4 sm:grid-cols-[200px_1fr] sm:items-center sm:gap-6 sm:p-6">
+      <article className="grid gap-5 rounded-card border border-border bg-white p-5 shadow-[0_2px_10px_rgba(33,60,66,0.06)] sm:grid-cols-[240px_1fr] sm:items-center sm:gap-8 sm:p-8">
         <BookCover book={data.book} className="mx-auto w-full max-w-[220px]" />
         <div className="flex flex-col gap-3">
           <div>
-            <h2 className="text-2xl font-semibold text-ink">
+            <h2 className="text-2xl font-extrabold text-ink">
               {data.book.title}
             </h2>
             {data.book.author ? (
@@ -582,7 +584,7 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-primary/20 bg-sky p-4 sm:p-6"
+        className="rounded-card border border-primary/20 bg-sky p-5 sm:p-8"
       >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           <span className="flex size-14 shrink-0 items-center justify-center rounded-card bg-white text-primary">
@@ -591,7 +593,7 @@ export function ReadingPreparationScreen({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2
-                className="text-xl font-semibold text-ink"
+                className="text-xl font-extrabold text-ink"
                 id="microphone-check-title"
               >
                 Microphone

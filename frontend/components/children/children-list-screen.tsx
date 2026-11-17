@@ -47,7 +47,7 @@ export function ChildrenListScreen() {
   }, [childService, requestKey]);
 
   return (
-    <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
       <PageHeader
         action={
           <ButtonLink className="sm:min-w-60" href="/children/new">
@@ -57,15 +57,15 @@ export function ChildrenListScreen() {
         }
         className="mb-0"
         description="Ba mẹ có thể tạo và chỉnh sửa những hồ sơ thuộc tài khoản này."
-        eyebrow="Hồ sơ bé"
-        title="Các bạn nhỏ của gia đình"
+        eyebrow="GIA ĐÌNH MÌNH"
+        title="Hồ sơ của các bé"
       />
 
       {state.status === "loading" ? (
         <div
           aria-busy="true"
           aria-label="Đang tải hồ sơ bé"
-          className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid gap-6 sm:grid-cols-2"
         >
           <span className="sr-only" role="status">
             Đang tải…
@@ -109,7 +109,7 @@ export function ChildrenListScreen() {
       ) : null}
 
       {state.status === "ready" && state.children.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2">
           {state.children.map((child) => (
             <ChildProfileCard
               child={child}

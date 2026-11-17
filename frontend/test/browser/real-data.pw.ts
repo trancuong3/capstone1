@@ -7,6 +7,7 @@ import {
   setRole,
 } from "./real-data-fixture";
 import { installReadingExperience } from "./reading-experience-fixture";
+import { songDetail, songId } from "../karaoke-fixtures";
 
 async function assertLayout(page: Page) {
   const dimensions = await page.evaluate(() => {
@@ -144,7 +145,7 @@ test("Parent empty catalog and detail route require a selected child", async ({
     /\/dashboard\?focus=child-selection&reason=missing$/,
   );
   await expect(
-    page.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."),
+    page.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
@@ -438,7 +439,9 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
     ).toBe(1);
     await page.getByRole("link", { name: "Về tổng quan", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
+      page.getByRole("heading", {
+        name: "Chào Ba mẹ API, hôm nay mình đọc gì cùng bé?",
+      }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Chọn sách" }).click();
     await expect(
@@ -497,8 +500,157 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
   }
 });
 
-for (const width of [390, 768, 1024, 1440]) {
-  test(`read-route matrix, headings, console and overflow at ${width}px`, async ({
+test("Reading management editor pages keep fields readable at all requested widths", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "This interaction checks all four requested widths.",
+  );
+  test.setTimeout(120_000);
+  const api = await installApiFixture(page);
+  await page.goto("/reading-management", { waitUntil: "domcontentloaded" });
+  await expect(
+    page.getByRole("button", { name: "Thêm lịch nhắc" }),
+  ).toBeVisible();
+  for (const width of [390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    for (const [action, title] of [
+      ["Thêm kế hoạch", "Thiết lập kế hoạch đọc"],
+      ["Thêm mục tiêu", "Thiết lập mục tiêu"],
+      ["Thêm lịch nhắc", "Thiết lập lịch nhắc"],
+    ]) {
+      await page.getByRole("button", { name: action, exact: true }).click();
+      const dialog = page.locator(".figma-form-page");
+      await expect(
+        page.getByRole("heading", { name: title, exact: true }),
+      ).toBeFocused();
+      await expect(dialog).toBeVisible();
+      const fields = await dialog
+        .locator('input:not([type="checkbox"]), select')
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            const parent = element
+              .closest(".figma-form-page")!
+              .getBoundingClientRect();
+            return {
+              width: rect.width,
+              fits: rect.left >= parent.left && rect.right <= parent.right,
+            };
+          }),
+        );
+      expect(fields.length).toBeGreaterThan(0);
+      for (const field of fields) {
+        expect(field.width, `${title} at ${width}px`).toBeGreaterThanOrEqual(
+          120,
+        );
+        expect(field.fits, `${title} at ${width}px`).toBe(true);
+      }
+      await assertLayout(page);
+      await dialog.screenshot({
+        path: testInfo.outputPath(`editor-${action}-${width}.png`),
+      });
+      await page.getByRole("button", { name: "Quay lại", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: action, exact: true }),
+      ).toBeVisible();
+    }
+  }
+  expect(api.unexpected).toEqual([]);
+});
+
+test("Parent account editor pages retain cancel and validation at all requested widths", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "This interaction checks all four requested widths.",
+  );
+  test.setTimeout(120_000);
+  const api = await installApiFixture(page);
+  for (const width of [390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    await page.goto("/profile");
+    await page
+      .getByRole("button", { name: "Chỉnh sửa hồ sơ", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Thông tin cá nhân" }),
+    ).toBeVisible();
+    await page.getByLabel("Họ và tên", { exact: true }).fill("Tên chưa lưu");
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`parent-profile-edit-${width}.png`),
+      fullPage: true,
+      style: "nextjs-portal { display: none !important; }",
+    });
+    await page.getByRole("button", { name: "Hủy", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Ba mẹ API", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Tên chưa lưu", { exact: true })).toHaveCount(
+      0,
+    );
+    await page.goto("/settings");
+    await page
+      .getByRole("button", { name: "Đổi mật khẩu", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Đổi mật khẩu", exact: true }),
+    ).toBeFocused();
+    await expect(
+      page.getByLabel("Mật khẩu hiện tại", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("Mật khẩu mới", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("Xác nhận mật khẩu mới", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Lưu mật khẩu mới", exact: true })
+      .click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+      "nhập mật khẩu hiện tại",
+    );
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`parent-password-edit-${width}.png`),
+      fullPage: true,
+      style: "nextjs-portal { display: none !important; }",
+    });
+    await page.getByRole("button", { name: "Hủy", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Cài đặt tài khoản" }),
+    ).toBeVisible();
+    await page.goto("/help-support");
+    await page
+      .getByRole("button", { name: "Gửi phản hồi", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Gửi phản hồi", exact: true })
+      .click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+      "điền tiêu đề",
+    );
+    await assertLayout(page);
+    await page.screenshot({
+      path: testInfo.outputPath(`parent-feedback-edit-${width}.png`),
+      fullPage: true,
+      style: "nextjs-portal { display: none !important; }",
+    });
+    await page.getByRole("button", { name: "Quay lại", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Câu hỏi thường gặp" }),
+    ).toBeVisible();
+  }
+  expect(api.unexpected).toEqual([]);
+});
+
+for (const routeGroup of ["parent", "admin"] as const) {
+  test(`read-route matrix ${routeGroup}, headings, console and overflow at all requested widths`, async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -508,7 +660,62 @@ for (const width of [390, 768, 1024, 1440]) {
     test.setTimeout(360_000);
     const readingFixture = await installReadingExperience(page);
     const api = readingFixture.api;
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
+    const adminSong = songDetail();
+    const adminDraft = adminSong.draft!;
+    await page
+      .context()
+      .route("http://127.0.0.1:8000/karaoke/admin/songs**", async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const pathname = url.pathname;
+        const headers = {
+          "access-control-allow-origin": "http://127.0.0.1:3106",
+          "access-control-allow-headers": "authorization,content-type,accept",
+          "access-control-allow-methods": "GET,OPTIONS",
+        };
+        if (request.method() === "OPTIONS")
+          return route.fulfill({ status: 204, headers });
+        if (request.method() !== "GET")
+          return route.fulfill({ status: 405, headers });
+        const body =
+          pathname === "/karaoke/admin/songs"
+            ? {
+                items: [
+                  {
+                    song_id: songId,
+                    status: adminSong.status,
+                    revision: adminSong.revision,
+                    title: adminDraft.title,
+                    author: adminDraft.author,
+                    min_grade: adminDraft.min_grade,
+                    max_grade: adminDraft.max_grade,
+                    duration_ms: adminDraft.duration_ms,
+                    draft_version_id: adminDraft.id,
+                    published_version_id: null,
+                    has_audio: adminDraft.has_audio,
+                    has_cover: adminDraft.has_cover,
+                    created_at: adminSong.created_at,
+                    updated_at: adminSong.updated_at,
+                  },
+                ],
+                total: 1,
+                limit: 12,
+                offset: 0,
+              }
+            : pathname === `/karaoke/admin/songs/${songId}`
+              ? adminSong
+              : { detail: "Not found" };
+        return route.fulfill({
+          status:
+            pathname.startsWith(`/karaoke/admin/songs/${songId}`) ||
+            pathname === "/karaoke/admin/songs"
+              ? 200
+              : 404,
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      });
+    await page.setViewportSize({ width: 1440, height: 1000 });
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
     const resourceFailures: string[] = [];
@@ -552,6 +759,11 @@ for (const width of [390, 768, 1024, 1440]) {
       "/settings",
       "/help-support",
       "/device-permissions",
+      "/entertainment",
+      "/entertainment/picture-description",
+      "/entertainment/sentence-shooter",
+      "/karaoke",
+      `/karaoke/${songId}`,
       "/children",
       "/children/new",
       `/children/${ids.child}`,
@@ -579,23 +791,44 @@ for (const width of [390, 768, 1024, 1440]) {
       "/admin/health",
       "/admin/metadata-quality",
       "/admin/viread-training",
+      "/admin/karaoke",
+      "/admin/karaoke/new",
+      `/admin/karaoke/${songId}/edit`,
     ];
     const screenshotNames: Record<string, string> = {
       "/login": "auth-login",
+      "/register": "auth-register",
+      "/profile": "parent-profile",
+      "/settings": "parent-settings",
+      "/help-support": "parent-support",
       "/dashboard": "parent-dashboard",
+      "/entertainment": "parent-entertainment",
+      "/admin/karaoke": "admin-karaoke",
       [`/reading/${ids.session}?state=reading`]: "reading-session",
+      [`/sessions/${ids.session}`]: "session-detail",
       "/reports": "parent-reports",
+      "/reports/difficult-words": "difficult-words",
       "/sessions": "reading-history",
+      "/reading-management": "reading-management",
+      "/admin/parents": "admin-parents",
+      [`/admin/parents/${ids.parent}`]: "admin-parent-detail",
       "/admin/books": "admin-books",
       [`/admin/books/${ids.book}/pages/${ids.page}`]: "admin-ocr",
+      "/admin/audit-logs": "admin-audit",
+      "/admin/health": "admin-health",
+      "/admin/metadata-quality": "admin-metadata",
+      "/admin/viread-training": "admin-training",
     };
     const routeFilter = process.env.PLAYWRIGHT_ROUTE_FILTER;
     const routeFilters = new Set(
       routeFilter?.split(",").map((path) => path.trim()),
     );
-    const routesToVisit = routeFilter
+    const requestedRoutes = routeFilter
       ? paths.filter((path) => routeFilters.has(path))
       : paths;
+    const routesToVisit = requestedRoutes.filter(
+      (path) => path.startsWith("/admin") === (routeGroup === "admin"),
+    );
     expect(
       routesToVisit.length,
       `route filter did not match: ${routeFilter}`,
@@ -603,8 +836,36 @@ for (const width of [390, 768, 1024, 1440]) {
     for (const path of routesToVisit) {
       activePath = path;
       await setRole(page, path.startsWith("/admin") ? "admin" : "parent");
-      const response = await page.goto(path);
+      const response = await page.goto(path, { waitUntil: "domcontentloaded" });
       expect(response?.status(), path).toBe(200);
+      const expectedPath = new URL(path, "http://localhost").pathname;
+      const finalUrl = new URL(page.url());
+      const childGatedRoute =
+        /^\/books(?:\/|$)/.test(expectedPath) ||
+        /^\/karaoke(?:\/|$)/.test(expectedPath) ||
+        expectedPath === "/entertainment/picture-description" ||
+        expectedPath === "/entertainment/sentence-shooter" ||
+        expectedPath === "/book-scanner" ||
+        expectedPath === "/reading-preparation";
+      if (expectedPath === "/") {
+        expect(finalUrl.pathname, path).toBe("/login");
+      } else if (
+        expectedPath === "/device-permissions" &&
+        finalUrl.pathname === "/dashboard"
+      ) {
+        expect(finalUrl.searchParams.get("focus"), path).toBe(
+          "child-selection",
+        );
+      } else if (childGatedRoute && finalUrl.pathname === "/dashboard") {
+        expect(finalUrl.searchParams.get("focus"), path).toBe(
+          "child-selection",
+        );
+        expect(finalUrl.searchParams.get("reason"), path).toBe("missing");
+      } else {
+        expect(finalUrl.pathname, path).toBe(
+          expectedPath === "/admin" ? "/admin/parents" : expectedPath,
+        );
+      }
       if (path === `/reading/${ids.session}?state=reading`)
         expect(
           await page.evaluate(
@@ -624,6 +885,10 @@ for (const width of [390, 768, 1024, 1440]) {
         await expect(
           page.getByRole("link", { name: new RegExp(book.title) }),
         ).toBeVisible();
+      if (path === "/entertainment")
+        await expect(
+          page.getByRole("link", { name: "Mở thư viện bài hát" }),
+        ).toHaveAttribute("href", "/karaoke");
       if (path === `/admin/books/${ids.book}`)
         await expect(
           page.getByRole("heading", { name: "Trang 2" }),
@@ -640,16 +905,26 @@ for (const width of [390, 768, 1024, 1440]) {
         await expect(
           page.getByRole("heading", { name: "Database" }),
         ).toBeVisible();
-      await assertLayout(page);
-      const screenshotName = screenshotNames[path];
-      if (screenshotName)
-        await page.screenshot({
-          path: testInfo.outputPath(`after-${screenshotName}-${width}.png`),
-          fullPage: true,
-          // Do not mutate input styles while React is hydrating the page.
-          caret: "initial",
-          style: "nextjs-portal { display: none !important; }",
+      for (const width of [1440, 1024, 768, 390]) {
+        await page.setViewportSize({
+          width,
+          height: width === 390 ? 844 : 1000,
         });
+        await expect(
+          page.locator("h1").first(),
+          `${path} at ${width}px`,
+        ).toBeVisible();
+        await assertLayout(page);
+        const screenshotName = screenshotNames[path];
+        if (screenshotName && finalUrl.pathname === expectedPath)
+          await page.screenshot({
+            path: testInfo.outputPath(`after-${screenshotName}-${width}.png`),
+            fullPage: true,
+            // Do not mutate input styles while React is hydrating the page.
+            caret: "initial",
+            style: "nextjs-portal { display: none !important; }",
+          });
+      }
     }
     expect(pageErrors).toEqual([]);
     expect(

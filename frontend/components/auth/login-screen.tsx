@@ -22,14 +22,13 @@ export function LoginScreen({
     <AuthShell>
       <Card className="mx-auto max-w-[440px] border border-border bg-white">
         <div>
-          <p className="text-sm font-semibold text-primary">
-            Tài khoản phụ huynh
-          </p>
-          <h1 className="mt-1 text-heading font-semibold leading-tight text-ink">
-            Đăng nhập
+          <p className="text-sm font-semibold text-primary">DÀNH CHO BA MẸ</p>
+          <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
+            Chào mừng trở lại
           </h1>
           <p className="mt-2 text-body leading-6 text-muted">
-            Truy cập hồ sơ bé và tiến độ đọc sách.
+            Đăng nhập ViRead để cùng bé đọc sách và theo dõi hành trình tiến bộ
+            mỗi ngày.
           </p>
         </div>
         <LoginForm

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
+import { InformationField } from "@/components/common/information-field";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
@@ -72,11 +73,11 @@ export function AdminAuditScreen() {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Operational review"
+        eyebrow="Vận hành ViRead"
         title="Nhật ký kiểm toán"
-        description="Nhật ký từ database. Backend không trả về metadata JSON thô để tránh lộ dữ liệu nhạy cảm."
+        description="Xem các sự kiện quản trị và metadata an toàn."
       />
-      <Card className="mb-6 bg-white">
+      <div className="mb-4">
         <div className="grid gap-4 md:grid-cols-2">
           <TextField
             label="Lọc theo action chính xác"
@@ -89,7 +90,7 @@ export function AdminAuditScreen() {
             value={resource}
           />
         </div>
-      </Card>
+      </div>
       {items === null ? (
         <AdminLoading />
       ) : error ? (
@@ -118,42 +119,33 @@ export function AdminAuditScreen() {
         <>
           <div className="grid gap-4">
             {items.map((item) => (
-              <Card className="bg-white" key={item.id}>
-                <div className="flex flex-col justify-between gap-3 md:flex-row">
-                  <div>
-                    <p className="font-semibold text-primary">{item.action}</p>
-                    <p className="text-muted">
-                      {item.resource_type} ·{" "}
-                      {item.resource_id ?? "Không có resource ID"}
-                    </p>
-                  </div>
-                  <time
-                    className="text-sm text-muted"
-                    dateTime={item.created_at}
-                  >
+              <Card className="gap-4 bg-white sm:px-8 sm:py-6" key={item.id}>
+                <h2 className="break-words text-2xl font-extrabold text-ink">
+                  {item.action}
+                </h2>
+                <p className="break-words text-body text-muted">
+                  <time dateTime={item.created_at}>
                     {new Date(item.created_at).toLocaleString("vi-VN")}
-                  </time>
-                </div>
-                <dl className="grid gap-2 text-sm sm:grid-cols-3">
-                  <div>
-                    <dt className="font-semibold">Actor</dt>
-                    <dd className="break-all text-muted">
-                      {item.actor_id ?? "Hệ thống"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold">Request</dt>
-                    <dd className="break-all text-muted">
-                      {item.request_id ?? "—"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="font-semibold">Metadata an toàn</dt>
-                    <dd className="break-all text-muted">
-                      {JSON.stringify(item.metadata)}
-                    </dd>
-                  </div>
+                  </time>{" "}
+                  · {item.resource_type} ·{" "}
+                  {item.resource_id ?? "Không có mã dữ liệu"}
+                </p>
+                <dl className="grid gap-4 sm:grid-cols-2">
+                  <InformationField label="Người thực hiện">
+                    {item.actor_id ?? "Hệ thống"}
+                  </InformationField>
+                  <InformationField label="Mã yêu cầu">
+                    {item.request_id ?? "—"}
+                  </InformationField>
                 </dl>
+                <section className="rounded-card bg-sky p-4">
+                  <h3 className="text-xl font-extrabold text-ink">
+                    Metadata an toàn
+                  </h3>
+                  <p className="mt-2 break-all text-label text-muted">
+                    {JSON.stringify(item.metadata)}
+                  </p>
+                </section>
               </Card>
             ))}
           </div>

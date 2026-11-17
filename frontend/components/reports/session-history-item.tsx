@@ -1,4 +1,4 @@
-import { BookOpenText, CalendarDays, Clock3 } from "lucide-react";
+import { CalendarDays, Clock3 } from "lucide-react";
 import Link from "next/link";
 
 import type { SessionHistoryItemViewModelUI } from "@/types/reports";
@@ -14,11 +14,8 @@ export function SessionHistoryItem({
 }: SessionHistoryItemProps) {
   return (
     <article className="rounded-card border border-border bg-white p-5 sm:p-6">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-control bg-sky text-primary">
-          <BookOpenText aria-hidden="true" className="size-6" />
-        </div>
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col items-start gap-4">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="break-words text-2xl font-semibold leading-tight text-ink">
               {item.book.title}
@@ -42,7 +39,7 @@ export function SessionHistoryItem({
           </dl>
         </div>
         <Link
-          className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-5 text-label font-semibold text-primary-hover hover:bg-border focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+          className="inline-flex w-full sm:max-w-[280px] min-h-12 items-center justify-center rounded-control bg-sky px-5 text-label font-semibold text-primary-hover hover:bg-border focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
           href={`/sessions/${item.session.id}?childId=${encodeURIComponent(item.child.id)}&page=${page}`}
         >
           Xem chi tiết

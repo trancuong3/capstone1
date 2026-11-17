@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --ra-color-primary: #176c68;
-  --ra-color-primary-hover: #105954;
-  --ra-color-ink: #263a38;
-  --ra-color-muted: #596b67;
-  --ra-color-canvas: #f7f7f3;
-  --ra-color-cream: #f4f0e6;
-  --ra-color-sky: #e4efeb;
+  --ra-color-primary: #147d87;
+  --ra-color-primary-hover: #0e6d76;
+  --ra-color-ink: #213c42;
+  --ra-color-muted: #526970;
+  --ra-color-canvas: #f6faf8;
+  --ra-color-cream: #fff8eb;
+  --ra-color-sky: #ddf3f5;
   --ra-color-white: #ffffff;
-  --ra-color-border: #d8dfda;
+  --ra-color-border: #d5e3de;
   --ra-color-green: #e5f2dc;
   --ra-color-orange: #fbe5cb;
   --ra-color-green-ink: #3b6a46;
@@ -19,7 +19,7 @@
   --ra-color-danger-surface: #fdebec;
   --ra-color-warning: #765b12;
   --ra-color-warning-surface: #fff3c4;
-  --ra-color-desk: #e7e5dc;
+  --ra-color-desk: #dce8e4;
   --ra-color-highlight: #ffd766;
   --ra-gap-4: 4px;
   --ra-gap-8: 8px;
@@ -27,11 +27,11 @@
   --ra-gap-16: 16px;
   --ra-gap-24: 24px;
   --ra-gap-32: 32px;
-  --ra-radius-12: 12px;
   --ra-radius-16: 16px;
-  --ra-font-size-heading: 30px;
+  --ra-radius-24: 24px;
+  --ra-font-size-heading: 32px;
   --ra-font-size-body: 16px;
-  --ra-font-size-label: 14px;
+  --ra-font-size-label: 16px;
   --ra-line-height-copy: 1.4;
 }
 
@@ -66,8 +66,44 @@
   --color-warning-surface: var(--ra-color-warning-surface);
   --color-desk: var(--ra-color-desk);
   --color-highlight: var(--ra-color-highlight);
-  --radius-control: var(--ra-radius-12);
-  --radius-card: var(--ra-radius-16);
+  --radius-control: var(--ra-radius-16);
+  --radius-card: var(--ra-radius-24);
+}
+
+.text-heading {
+  font-weight: 800;
+}
+
+.figma-form-page
+  form
+  label:has(> input:not([type="checkbox"]):not([type="file"])),
+.figma-form-page form label:has(> select) {
+  min-width: 0;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--ra-color-border);
+  border-radius: var(--ra-radius-16);
+  background: white;
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--ra-color-muted);
+}
+
+.figma-form-page form label > input:not([type="checkbox"]):not([type="file"]),
+.figma-form-page form label > select {
+  min-height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 0;
+  font-size: 16px;
+  color: var(--ra-color-ink);
+}
+
+.figma-form-page button[type="submit"] {
+  max-width: 320px;
 }
 
 * {
@@ -93,11 +129,19 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+@media (max-width: 639px) {
+  :root {
+    --ra-font-size-heading: 26px;
+    --ra-font-size-body: 16px;
+    --ra-font-size-label: 14px;
+  }
+}
+
 button,
 input,
 textarea,
 select {
-  font: inherit;
+  font-family: inherit;
 }
 
 button,

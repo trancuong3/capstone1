@@ -18,6 +18,7 @@ interface ModalProps {
   onClose: () => void;
   showCloseButton?: boolean;
   title: string;
+  tone?: "cream" | "paper";
 }
 
 export function Modal({
@@ -27,6 +28,7 @@ export function Modal({
   onClose,
   showCloseButton = true,
   title,
+  tone = "cream",
 }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -90,14 +92,21 @@ export function Modal({
       <div
         aria-labelledby={titleId}
         aria-modal="true"
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-[620px] overflow-y-auto rounded-card bg-cream p-4 outline-none sm:p-8"
+        className={`max-h-[calc(100dvh-2rem)] w-full max-w-[640px] overflow-y-auto rounded-card p-4 outline-none sm:p-8 ${tone === "paper" ? "bg-white" : "bg-cream"}`}
         onKeyDown={handleKeyDown}
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}
       >
         <div className="mb-6 flex items-start justify-between gap-4">
-          <h2 className="text-heading font-semibold text-ink" id={titleId}>
+          <h2
+            className={
+              tone === "paper"
+                ? "text-2xl font-extrabold text-ink"
+                : "text-heading font-semibold text-ink"
+            }
+            id={titleId}
+          >
             {title}
           </h2>
           {showCloseButton ? (

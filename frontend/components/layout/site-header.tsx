@@ -1,5 +1,6 @@
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
+import { ButtonLink } from "@/components/common/button";
 
 interface SiteHeaderProps {
   readonly className?: string;
@@ -17,7 +18,7 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
         className,
       )}
     >
-      <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
+      <div className="mx-auto flex min-h-24 w-full max-w-[1376px] flex-col items-start justify-between gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-6 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <ViReadLogo
             ariaLabel={
@@ -37,7 +38,28 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
 
         {isAdminLogin ? (
           <p className="text-label font-medium text-muted">Khu vực quản trị</p>
-        ) : null}
+        ) : (
+          <nav
+            aria-label="Tài khoản ViRead"
+            className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto"
+          >
+            <ButtonLink
+              href="/login"
+              size="compact"
+              variant="quiet"
+              className="whitespace-nowrap border border-border sm:min-w-32"
+            >
+              Đăng nhập
+            </ButtonLink>
+            <ButtonLink
+              href="/register"
+              size="compact"
+              className="whitespace-nowrap sm:min-w-32"
+            >
+              Đăng ký
+            </ButtonLink>
+          </nav>
+        )}
       </div>
     </header>
   );

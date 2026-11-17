@@ -6,17 +6,15 @@ interface MetricCardProps {
 
 export function MetricCard({ metric }: MetricCardProps) {
   return (
-    <article className="flex min-h-40 flex-col rounded-card border border-border bg-white p-5">
-      <h2 className="text-body font-semibold text-muted">{metric.label}</h2>
+    <article className="flex min-w-0 flex-col gap-2 rounded-card border border-border bg-white p-4">
+      <h2 className="text-label font-bold text-muted">{metric.label}</h2>
       <p
-        className="mt-3 text-[32px] font-semibold leading-tight text-ink"
+        className="break-words text-3xl font-extrabold leading-[1.4] text-primary"
         data-unavailable={metric.unavailable || undefined}
       >
         {metric.value}
       </p>
-      <p className="mt-auto pt-3 text-sm font-medium text-primary">
-        {metric.hint}
-      </p>
+      <p className="text-sm text-muted">{metric.hint}</p>
     </article>
   );
 }

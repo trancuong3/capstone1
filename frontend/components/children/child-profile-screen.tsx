@@ -256,7 +256,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "loading") {
     return (
-      <section className="mx-auto w-full max-w-[640px]">
+      <section className="mx-auto w-full max-w-[744px]">
         <Card aria-busy="true" aria-label="Đang tải hồ sơ bé">
           <span className="sr-only" role="status">
             Đang tải…
@@ -332,14 +332,14 @@ export function ChildProfileScreen({
 
   return (
     <>
-      <section className="mx-auto w-full max-w-[640px]">
-        <Card>
-          <div>
-            <h1 className="text-heading font-semibold text-ink">{title}</h1>
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+        <div>
+          <h1 className="text-heading font-extrabold text-ink">{title}</h1>
 
-            <p className="mt-4 text-body text-muted sm:mt-6">{description}</p>
-          </div>
-
+          <p className="mt-2 text-body text-muted">{description}</p>
+        </div>
+        <Card className="gap-4 sm:px-8 sm:py-6">
+          <h2 className="text-2xl font-extrabold text-ink">Thông tin của bé</h2>
           {saveNotice === "created" ? (
             <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
           ) : null}
@@ -423,14 +423,13 @@ export function ChildProfileScreen({
               </Button>
             </>
           ) : null}
-
-          {!fromRegistration ? (
-            <ButtonLink href="/children" variant="quiet">
-              <ArrowLeft aria-hidden="true" className="size-5" />
-              Về danh sách hồ sơ
-            </ButtonLink>
-          ) : null}
         </Card>
+        {!fromRegistration ? (
+          <ButtonLink href="/children" variant="quiet">
+            <ArrowLeft aria-hidden="true" className="size-5" />
+            Về danh sách hồ sơ
+          </ButtonLink>
+        ) : null}
       </section>
 
       {child ? (

@@ -11,7 +11,7 @@ import {
   RefreshCw,
   UsersRound,
 } from "lucide-react";
-import Link from "next/link";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -41,7 +41,7 @@ function DashboardLoadingState() {
     <section
       aria-busy="true"
       aria-label="Đang tải tổng quan"
-      className="mx-auto flex w-full max-w-[1120px] flex-col gap-6"
+      className="mx-auto flex w-full max-w-[744px] flex-col gap-4"
     >
       <span className="sr-only" role="status">
         Đang tải…
@@ -161,7 +161,7 @@ export function DashboardScreen() {
   }, [focusSelectionSection, searchParams, selectedChildId, state.status]);
 
   const handleReadingAction = useCallback(
-    (destination: "/books" | "/book-scanner" | "/karaoke") => {
+    (destination: "/books" | "/book-scanner" | "/entertainment") => {
       if (!selectedChildId) {
         setSelectionPrompt(true);
         focusSelectionSection();
@@ -197,23 +197,26 @@ export function DashboardScreen() {
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 sm:gap-8">
-      <Card className="items-start text-left sm:flex-row sm:items-center sm:p-6">
-        <div className="hidden size-16 shrink-0 items-center justify-center rounded-control bg-sky text-primary sm:flex">
-          <BookOpenText aria-hidden="true" className="size-8" />
+    <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+      <Card className="items-start text-left sm:flex-row sm:gap-6 sm:p-6">
+        <div className="hidden shrink-0 sm:block">
+          <Image
+            alt=""
+            aria-hidden="true"
+            height={96}
+            src="/images/figma/dashboard-book.svg"
+            width={96}
+          />
         </div>
         <div className="max-w-[720px]">
-          <p className="hidden text-label font-semibold text-primary sm:block">
-            Tổng quan
-          </p>
-          <h1 className="text-heading font-semibold text-ink">
-            Hôm nay cùng bé đọc gì?
+          <p className="text-label font-bold text-primary">TỔNG QUAN</p>
+          <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
+            {state.profile.display_name
+              ? `Chào ${state.profile.display_name}, hôm nay mình đọc gì cùng bé?`
+              : "Hôm nay cùng bé đọc gì?"}
           </h1>
-          <p className="mt-3 text-body text-muted">
-            <span className="sm:hidden">Ba mẹ chọn hồ sơ của bé.</span>
-            <span className="hidden sm:inline">
-              Chọn một hồ sơ để tiếp tục hành trình đọc sách của gia đình.
-            </span>
+          <p className="mt-2 text-body leading-6 text-muted">
+            Chọn một hồ sơ để tiếp tục hành trình đọc sách của gia đình.
           </p>
         </div>
       </Card>
@@ -233,11 +236,11 @@ export function DashboardScreen() {
           title="Gia đình mình chưa có hồ sơ bé"
         />
       ) : (
-        <div className="flex flex-col gap-7">
+        <div className="flex flex-col gap-4">
           <section
             aria-labelledby="child-selection-title"
             className={
-              "flex w-full scroll-mt-8 flex-col gap-4 rounded-card p-2 transition-shadow focus:outline-none " +
+              "flex w-full scroll-mt-8 flex-col gap-4 rounded-card transition-shadow focus:outline-none " +
               (selectionRequired ? "ring-4 ring-warning" : "")
             }
             id="child-selection"
@@ -256,12 +259,6 @@ export function DashboardScreen() {
                   Chỉ hiển thị hồ sơ thuộc tài khoản hiện tại.
                 </p>
               </div>
-              <Link
-                className="inline-flex min-h-11 w-fit items-center rounded-md px-1 text-label font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-                href="/children"
-              >
-                Quản lý hồ sơ
-              </Link>
             </div>
 
             {selectionRequired ? (
@@ -277,16 +274,17 @@ export function DashboardScreen() {
                   <p className="font-semibold text-warning-ink">
                     {invalidSelection
                       ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
-                      : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."}
+                      : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
                   </p>
                   <p className="mt-1 text-sm text-ink">
-                    Chạm vào hồ sơ của bé bên dưới để chọn người sẽ đọc.
+                    Chạm vào hồ sơ của bé bên dưới để chọn người sẽ đọc hoặc
+                    chơi.
                   </p>
                 </div>
               </div>
             ) : null}
 
-            <div className="grid w-full gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid w-full gap-4 sm:grid-cols-2">
               {state.children.map((child) => (
                 <ChildProfileCard
                   child={child}
@@ -294,21 +292,22 @@ export function DashboardScreen() {
                   onSelect={() => {
                     selectChild(child.id);
                     setSelectionPrompt(false);
-                    replace("/dashboard");
+                    if (searchParams.toString()) replace("/dashboard");
                   }}
                   selected={selectedChildId === child.id}
                 />
               ))}
             </div>
 
-            <ButtonLink
-              className="sm:max-w-72"
-              href="/children/new"
-              variant="secondary"
-            >
-              <Plus aria-hidden="true" className="size-5" />
-              Tạo hồ sơ bé
-            </ButtonLink>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ButtonLink href="/children/new" variant="secondary">
+                <Plus aria-hidden="true" className="size-5" />
+                Tạo hồ sơ bé
+              </ButtonLink>
+              <ButtonLink href="/children" variant="quiet">
+                Quản lý hồ sơ
+              </ButtonLink>
+            </div>
           </section>
 
           <section
@@ -333,7 +332,7 @@ export function DashboardScreen() {
                 </>
               ) : (
                 <p className="mt-2 text-body text-muted">
-                  Chọn hồ sơ trẻ trước khi mở sách hoặc quét trang sách.
+                  Chọn hồ sơ trẻ trước khi mở sách, quét trang hoặc vào Hát vui.
                 </p>
               )}
             </div>
@@ -356,7 +355,7 @@ export function DashboardScreen() {
               <Button
                 className="w-full sm:col-span-2"
                 variant="secondary"
-                onClick={() => handleReadingAction("/karaoke")}
+                onClick={() => handleReadingAction("/entertainment")}
               >
                 <Music2 aria-hidden="true" className="size-5" />
                 Hát vui
@@ -364,14 +363,14 @@ export function DashboardScreen() {
             </div>
           </section>
 
-          <div className="grid w-full gap-3 sm:grid-cols-2">
+          <div className="grid w-full gap-4 sm:grid-cols-2">
             <ButtonLink
               href={
                 selectedChildId
                   ? `/reports?childId=${encodeURIComponent(selectedChildId)}`
                   : "/reports"
               }
-              variant="secondary"
+              variant="quiet"
             >
               <BarChart3 aria-hidden="true" className="size-5" />
               Xem tiến bộ
@@ -382,7 +381,7 @@ export function DashboardScreen() {
                   ? `/sessions?childId=${encodeURIComponent(selectedChildId)}`
                   : "/sessions"
               }
-              variant="secondary"
+              variant="quiet"
             >
               <History aria-hidden="true" className="size-5" />
               Lịch sử đọc

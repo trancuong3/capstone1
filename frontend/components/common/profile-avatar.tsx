@@ -10,7 +10,7 @@ const avatarSizes = {
   md: "size-12 text-lg",
   lg: "size-24 text-3xl",
   xl: "size-32 text-4xl",
-  card: "size-[104px] text-4xl",
+  card: "size-[88px] text-2xl",
 } as const;
 
 export type ProfileAvatarSize = keyof typeof avatarSizes;

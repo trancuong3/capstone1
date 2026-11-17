@@ -100,7 +100,9 @@ describe("DashboardScreen with real API adapters", () => {
     const user = userEvent.setup();
     renderDashboard();
     expect(
-      await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
+      await screen.findByRole("heading", {
+        name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+      }),
     ).toBeInTheDocument();
 
     const firstProfile = screen.getByRole("button", {
@@ -137,7 +139,7 @@ describe("DashboardScreen with real API adapters", () => {
     expect(routerPushMock).toHaveBeenNthCalledWith(1, "/book-scanner");
     expect(routerPushMock).toHaveBeenNthCalledWith(2, "/books");
     await user.click(screen.getByRole("button", { name: "Hát vui" }));
-    expect(routerPushMock).toHaveBeenNthCalledWith(3, "/karaoke");
+    expect(routerPushMock).toHaveBeenNthCalledWith(3, "/entertainment");
     expect(screen.getByRole("link", { name: "Tạo hồ sơ bé" })).toHaveAttribute(
       "href",
       "/children/new",
@@ -148,14 +150,20 @@ describe("DashboardScreen with real API adapters", () => {
     apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
     const user = userEvent.setup();
     renderDashboard();
-    await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" });
+    await screen.findByRole("heading", {
+      name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+    });
 
     await user.click(screen.getByRole("button", { name: "Quét sách" }));
     expect(
-      screen.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."),
+      screen.getByText(
+        "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi.",
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Chạm vào hồ sơ của bé bên dưới để chọn người sẽ đọc."),
+      screen.getByText(
+        "Chạm vào hồ sơ của bé bên dưới để chọn người sẽ đọc hoặc chơi.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Chọn hồ sơ trẻ" })).toHaveClass(
       "ring-4",
@@ -167,7 +175,9 @@ describe("DashboardScreen with real API adapters", () => {
     await user.click(screen.getByRole("button", { name: "Hát vui" }));
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc sách."),
+      screen.getByText(
+        "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -201,7 +211,9 @@ describe("DashboardScreen with real API adapters", () => {
         </AppServicesProvider>
       </AppStoreProvider>,
     );
-    await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" });
+    await screen.findByRole("heading", {
+      name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+    });
     expect(
       await screen.findByText(/Hồ sơ đã thay đổi hoặc không còn khả dụng/),
     ).toBeInTheDocument();
@@ -236,7 +248,9 @@ describe("DashboardScreen with real API adapters", () => {
     await waitFor(() => expect(apiFetchFixture).toHaveBeenCalledTimes(2));
     await act(async () => release());
     expect(
-      await screen.findByRole("heading", { name: "Hôm nay cùng bé đọc gì?" }),
+      await screen.findByRole("heading", {
+        name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+      }),
     ).toBeInTheDocument();
   });
 });
