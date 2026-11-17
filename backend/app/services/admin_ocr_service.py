@@ -1529,11 +1529,10 @@ class AdminOcrService:
                     DraftText=text_value,
                     ContentHash=content_hash,
                     ProcessingMeta=metadata,
+                    CreatedAt=datetime.now(timezone.utc),
                 )
                 self.repo.stage_page_revision_bundle(page, revision, words)
                 await self.repo.flush()
-                await self.db.refresh(page)
-                await self.db.refresh(revision)
                 result = await self.revision_detail(page, revision)
                 await self.db.commit()
                 return result
@@ -1806,11 +1805,10 @@ class AdminOcrService:
                 DraftText=text_value,
                 ContentHash=content_hash,
                 ProcessingMeta=processing_meta,
+                CreatedAt=datetime.now(timezone.utc),
             )
             self.repo.stage_revision_bundle(revision, words)
             await self.repo.flush()
-            await self.db.refresh(revision)
-            await self.db.refresh(current_page)
             result = await self.revision_detail(current_page, revision)
 
             commit_started = True
@@ -2302,12 +2300,13 @@ class AdminOcrService:
                 "word_evidence_v2_authoritative": True,
                 "ocr_score_contract": score_contract,
             },
+            CreatedAt=datetime.now(timezone.utc),
         )
         try:
             self.repo.stage_revision_bundle(revision, words)
+            if isinstance(self.db, AsyncSession):
+                await self.repo.flush()
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except IntegrityError as exc:
             await self.db.rollback()
             raise HTTPException(status_code=409, detail="A concurrent edit created this revision number; retry") from exc
@@ -2354,8 +2353,6 @@ class AdminOcrService:
                 content_hash=content_hash,
             )
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except Exception:
             await self.db.rollback()
             raise
@@ -2494,8 +2491,6 @@ class AdminOcrService:
                 },
             )
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except Exception:
             await self.db.rollback()
             raise
@@ -2650,11 +2645,10 @@ class AdminOcrService:
                 DraftText=text_value,
                 ContentHash=content_hash,
                 ProcessingMeta=processing_meta,
+                CreatedAt=datetime.now(timezone.utc),
             )
             self.repo.stage_revision_bundle(revision, words)
             await self.repo.flush()
-            await self.db.refresh(revision)
-            await self.db.refresh(current_page)
             result = await self.revision_detail(current_page, revision)
             await self.db.commit()
             return result

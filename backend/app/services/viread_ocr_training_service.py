@@ -463,14 +463,20 @@ class VireadOcrTrainingService:
               AND NOT EXISTS (
                   SELECT 1
                   FROM public.viread_ocr_samples test_sample
-                  LEFT JOIN public.bookpages test_page ON test_page.id=test_sample.source_page_id
+                  JOIN public.viread_ocr_samples used
+                    ON used.split IN ('train','validation')
+                   AND used.image_sha256 = test_sample.image_sha256
+                  WHERE test_sample.dataset_version_id = locked.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.viread_ocr_samples test_sample
+                  LEFT JOIN public.bookpages test_page ON test_page.id = test_sample.source_page_id
                   JOIN public.viread_ocr_samples used ON used.split IN ('train','validation')
-                  LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
-                  WHERE test_sample.dataset_version_id=locked.id
-                    AND used.id IS NOT NULL
-                    AND (used.image_sha256=test_sample.image_sha256
-                         OR COALESCE(used_page.bookid::text, used.source_group_id)
-                            = COALESCE(test_page.bookid::text, test_sample.source_group_id))
+                  LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
+                  WHERE test_sample.dataset_version_id = locked.id
+                    AND COALESCE(used_page.bookid::text, used.source_group_id)
+                        = COALESCE(test_page.bookid::text, test_sample.source_group_id)
               )
             ORDER BY locked.created_at, locked.id LIMIT 1
         """, {"minimum_samples": MIN_LOCKED_PAIRS, "minimum_groups": MIN_LOCKED_GROUPS})
@@ -519,17 +525,25 @@ class VireadOcrTrainingService:
                 FROM verified_holdout holdout
                 WHERE NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_samples used
-                    LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                     WHERE used.split IN ('train','validation')
-                      AND (used.image_sha256=holdout.image_sha256
-                           OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
+                      AND used.image_sha256 = holdout.image_sha256
+                )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM public.viread_ocr_samples used
+                    LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
+                    WHERE used.split IN ('train','validation')
+                      AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
                 )
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_samples locked
-                    LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
-                    WHERE locked.source_flow='LOCKED_TEST'
-                      AND (locked.image_sha256=holdout.image_sha256
-                           OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
+                    WHERE locked.source_flow = 'LOCKED_TEST'
+                      AND locked.image_sha256 = holdout.image_sha256
+                )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM public.viread_ocr_samples locked
+                    LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
+                    WHERE locked.source_flow = 'LOCKED_TEST'
+                      AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
                 )
                 ORDER BY holdout.image_sha256, holdout.group_id
             )
@@ -637,17 +651,25 @@ class VireadOcrTrainingService:
             SELECT holdout.* FROM verified_holdout holdout
             WHERE NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples used
-                LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                 WHERE used.split IN ('train','validation')
-                  AND (used.image_sha256=holdout.image_sha256
-                       OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
+                  AND used.image_sha256 = holdout.image_sha256
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples used
+                LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
+                WHERE used.split IN ('train','validation')
+                  AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
             )
               AND NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples locked
-                LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
-                WHERE locked.source_flow='LOCKED_TEST'
-                  AND (locked.image_sha256=holdout.image_sha256
-                       OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
+                WHERE locked.source_flow = 'LOCKED_TEST'
+                  AND locked.image_sha256 = holdout.image_sha256
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples locked
+                LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
+                WHERE locked.source_flow = 'LOCKED_TEST'
+                  AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
             )
             ORDER BY holdout.group_id, holdout.image_sha256, holdout.sample_id
         """)
@@ -787,18 +809,26 @@ class VireadOcrTrainingService:
             FROM verified_holdout holdout
             WHERE NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples used
-                LEFT JOIN public.bookpages used_page ON used_page.id=used.source_page_id
                 WHERE used.split IN ('train','validation')
-                  AND (used.image_sha256=holdout.image_sha256
-                       OR COALESCE(used_page.bookid::text, used.source_group_id)=holdout.group_id)
+                  AND used.image_sha256 = holdout.image_sha256
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples used
+                LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
+                WHERE used.split IN ('train','validation')
+                  AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
             )
               AND NOT EXISTS (
                 SELECT 1 FROM public.viread_ocr_samples locked
-                LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
-                WHERE locked.source_flow='LOCKED_TEST'
-                  AND (locked.image_sha256=holdout.image_sha256
-                       OR COALESCE(locked_page.bookid::text, locked.source_group_id)=holdout.group_id)
-              )
+                WHERE locked.source_flow = 'LOCKED_TEST'
+                  AND locked.image_sha256 = holdout.image_sha256
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples locked
+                LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
+                WHERE locked.source_flow = 'LOCKED_TEST'
+                  AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
+            )
             ORDER BY holdout.source_flow, holdout.group_id, holdout.image_sha256, holdout.sample_id
         """)
         by_hash: dict[str, dict[str, Any]] = {}
@@ -1669,6 +1699,12 @@ class VireadOcrTrainingService:
                 WHERE singleton=TRUE
             """, {"sha": next_sha, "path": next_path, "profile": next_profile, "decision_id": decision_id})
             await self.repo.commit()
+            from app.services.ocr_engine import set_active_viread_model_cache
+            set_active_viread_model_cache({
+                "checkpoint_sha256": next_sha,
+                "storage_path": next_path,
+                "profile": next_profile,
+            })
         except Exception:
             await self.repo.rollback()
             raise

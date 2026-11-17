@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.database.role_cache import get_cached_profile_role, invalidate_cached_role
 from app.models import Profile
 
 
@@ -25,9 +26,7 @@ class ProfileRepository:
 
     async def get_role(self, profile_id: UUID) -> str | None:
         """Return an actor's persisted application role for authorization."""
-        return await self.db.scalar(
-            select(Profile.Role).where(Profile.Id == profile_id)
-        )
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def list_all_profiles(self) -> list[Profile]:
         """List profiles with children; the service restricts this to Admin users."""
@@ -44,6 +43,7 @@ class ProfileRepository:
         profile = Profile(Role=role, DisplayName=display_name)
         self.db.add(profile)
         await self.db.commit()
+        invalidate_cached_role(profile.Id)
         return await self.get_by_id(profile.Id)  # type: ignore[return-value]
 
     async def update_display_name(
@@ -97,4 +97,5 @@ class ProfileRepository:
 
         await self.db.delete(profile)
         await self.db.commit()
+        invalidate_cached_role(profile_id)
         return True
