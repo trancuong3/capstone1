@@ -268,7 +268,7 @@ export function ParentProfileForm({
           value={email}
         />
         {profile.pending_email ? (
-          <p className="text-sm text-amber-800">
+          <p className="text-sm text-warning">
             Đang chờ xác minh email mới:{" "}
             <strong>{profile.pending_email}</strong>
           </p>

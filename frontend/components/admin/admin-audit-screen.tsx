@@ -120,16 +120,18 @@ export function AdminAuditScreen() {
           <div className="grid gap-4">
             {items.map((item) => (
               <Card className="gap-4 bg-white sm:px-8 sm:py-6" key={item.id}>
-                <h2 className="break-words text-2xl font-extrabold text-ink">
-                  {item.action}
-                </h2>
-                <p className="break-words text-body text-muted">
-                  <time dateTime={item.created_at}>
-                    {new Date(item.created_at).toLocaleString("vi-VN")}
-                  </time>{" "}
-                  · {item.resource_type} ·{" "}
-                  {item.resource_id ?? "Không có mã dữ liệu"}
-                </p>
+                <div>
+                  <h2 className="break-words text-xl font-extrabold text-ink">
+                    {item.action}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    <time dateTime={item.created_at}>
+                      {new Date(item.created_at).toLocaleString("vi-VN")}
+                    </time>{" "}
+                    · {item.resource_type} ·{" "}
+                    {item.resource_id ?? "Không có mã dữ liệu"}
+                  </p>
+                </div>
                 <dl className="grid gap-4 sm:grid-cols-2">
                   <InformationField label="Người thực hiện">
                     {item.actor_id ?? "Hệ thống"}
@@ -138,11 +140,11 @@ export function AdminAuditScreen() {
                     {item.request_id ?? "—"}
                   </InformationField>
                 </dl>
-                <section className="rounded-card bg-sky p-4">
-                  <h3 className="text-xl font-extrabold text-ink">
+                <section className="rounded-card border border-border bg-canvas p-4">
+                  <h3 className="text-sm font-bold text-muted">
                     Metadata an toàn
                   </h3>
-                  <p className="mt-2 break-all text-label text-muted">
+                  <p className="mt-2 break-all text-sm text-ink">
                     {JSON.stringify(item.metadata)}
                   </p>
                 </section>

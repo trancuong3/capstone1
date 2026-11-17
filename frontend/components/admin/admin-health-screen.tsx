@@ -69,11 +69,11 @@ export function AdminHealthScreen() {
                 <p className="text-sm font-semibold text-muted">
                   Trạng thái các dịch vụ đã kiểm tra
                 </p>
-                <h2 className="text-2xl font-semibold">ViRead</h2>
+                <h2 className="mt-1 text-xl font-bold text-ink">ViRead</h2>
               </div>
               <AdminStatusBadge status={snapshot.overall_status} />
             </div>
-            <p className="text-sm text-muted">
+            <p className="text-xs text-muted">
               Kiểm tra lúc{" "}
               {new Date(snapshot.checked_at).toLocaleString("vi-VN")}
             </p>
@@ -81,11 +81,11 @@ export function AdminHealthScreen() {
           <div className="grid gap-4 md:grid-cols-2">
             {snapshot.services.map((service) => (
               <Card className="bg-white" key={service.id}>
-                <div className="flex flex-col items-start gap-4">
-                  <h2 className="text-2xl font-extrabold">{service.label}</h2>
+                <div className="flex items-start justify-between gap-4">
+                  <h2 className="text-lg font-bold text-ink">{service.label}</h2>
                   <AdminStatusBadge status={service.status} />
                 </div>
-                <p className="text-muted">{service.safe_message}</p>
+                <p className="text-sm text-muted">{service.safe_message}</p>
                 <p className="text-xs text-muted">
                   {new Date(service.checked_at).toLocaleString("vi-VN")}
                 </p>

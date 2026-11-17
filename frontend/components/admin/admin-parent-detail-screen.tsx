@@ -240,7 +240,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       ) : parent ? (
         <div className="grid gap-6">
           <Card className="bg-white">
-            <h2 className="text-xl font-bold text-ink">Thông tin Parent</h2>
+            <h2 className="text-lg font-bold text-ink">Thông tin Parent</h2>
 
             <dl className="grid gap-4 sm:grid-cols-2">
               <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
@@ -293,7 +293,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
               <div>
                 <h2
                   id="children-heading"
-                  className="text-xl font-semibold text-ink"
+                  className="text-lg font-bold text-ink"
                 >
                   Hồ sơ trẻ em liên kết
                 </h2>

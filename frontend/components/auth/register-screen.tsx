@@ -21,7 +21,7 @@ function RegisterLoadingState() {
       <Card
         aria-busy="true"
         aria-label="Đang tải nội dung đăng ký"
-        className="mx-auto max-w-[440px] border border-border bg-white"
+        className="border border-border bg-white"
       >
         <span className="sr-only" role="status">
           Đang tải…
@@ -50,7 +50,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
     return (
       <AuthShell>
         <Card
-          className="mx-auto max-w-[440px] border border-border"
+          className="border border-border"
           tone="success"
         >
           <div>
@@ -77,7 +77,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[440px] border border-border bg-white">
+      <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
             BẮT ĐẦU CÙNG VIREAD

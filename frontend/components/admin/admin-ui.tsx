@@ -20,7 +20,7 @@ export function AdminPageHeader({
 }) {
   return (
     <PageHeader
-      className="mb-4"
+      className="mb-6"
       action={actions}
       description={description}
       eyebrow={eyebrow}
@@ -101,7 +101,7 @@ export function AdminResultsPagination({
   return (
     <nav
       aria-label={`Điều hướng danh sách ${itemLabel}`}
-      className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-white px-4 py-3"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white px-5 py-3"
     >
       <p className="text-sm text-muted">
         Đang xem {firstItem}–{lastItem} / {total} {itemLabel}

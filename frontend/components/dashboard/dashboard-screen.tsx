@@ -176,7 +176,7 @@ export function DashboardScreen() {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
         <StatusMessage title="Chưa tải được tổng quan" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>

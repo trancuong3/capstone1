@@ -130,14 +130,14 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         </header>
         {hasSignOutError ? (
           <p
-            className="mx-auto mt-4 w-full max-w-[1360px] px-4 font-semibold text-danger sm:px-6 xl:px-10"
+            className="mx-auto mt-4 w-full max-w-[1280px] px-4 font-semibold text-danger sm:px-6 xl:px-10"
             role="alert"
           >
             Chưa thể đăng xuất lúc này. Vui lòng thử lại.
           </p>
         ) : null}
         <main
-          className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 px-4 py-8 sm:px-6 sm:py-10 xl:px-10"
+          className="mx-auto w-full min-w-0 max-w-[1280px] flex-1 px-4 py-8 sm:px-6 sm:py-10 xl:px-10"
           id="admin-main-content"
           tabIndex={-1}
         >

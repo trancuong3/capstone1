@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CircleCheck, ClipboardCheck } from "lucide-react";
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -171,44 +171,14 @@ export function AdminBooksScreen() {
         metadata hoặc vòng đời sách; trang sách, revision và lịch sử đọc được
         giữ nguyên.
       </StatusMessage>
-      <section
+      <p
         aria-label="Tổng quan kho sách"
-        className="mb-4 flex flex-wrap gap-x-6 gap-y-2"
+        className="mb-4 text-sm text-muted"
       >
-        {[
-          {
-            label: "Tổng số sách",
-            value: items?.length,
-            detail: "Đang có trong danh mục",
-            Icon: BookOpen,
-            tone: "bg-sky text-primary",
-          },
-          {
-            label: "Sách đang hoạt động",
-            value: items?.filter(
-              (item) => item.book.lifecycle_status === "ACTIVE",
-            ).length,
-            detail: "Có thể xuất hiện trong thư viện",
-            Icon: CircleCheck,
-            tone: "bg-success-surface text-success-ink",
-          },
-          {
-            label: "Cần kiểm tra OCR",
-            value: items?.reduce(
-              (total, item) => total + item.needs_review_count,
-              0,
-            ),
-            detail: "Trang sách đang chờ duyệt",
-            Icon: ClipboardCheck,
-            tone: "bg-warning-surface text-warning",
-          },
-        ].map(({ label, value, detail }) => (
-          <p key={label} title={detail} className="text-sm text-muted">
-            {label}:{" "}
-            <strong className="font-bold text-ink">{value ?? "—"}</strong>
-          </p>
-        ))}
-      </section>
+        {items
+          ? `${items.length} sách · ${items.filter((i) => i.book.lifecycle_status === "ACTIVE").length} đang hoạt động · ${items.reduce((t, i) => t + i.needs_review_count, 0)} trang cần duyệt OCR`
+          : "Đang tải…"}
+      </p>
       <div className="mb-4">
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="relative">
@@ -293,7 +263,7 @@ export function AdminBooksScreen() {
           title="Không tìm thấy sách"
         />
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-5">
           <AdminResultsPagination
             itemLabel="sách"
             onPageChange={setPageNumber}
@@ -310,7 +280,7 @@ export function AdminBooksScreen() {
               : `/admin/books/${encodeURIComponent(book.id)}/edit`;
 
             return (
-              <Card className="gap-4 bg-white sm:px-8 sm:py-6" key={book.id}>
+              <Card className="gap-3 bg-white sm:px-8 sm:py-6" key={book.id}>
                 <Link
                   className="w-fit rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
                   href={`/admin/books/${encodeURIComponent(book.id)}`}
@@ -340,7 +310,7 @@ export function AdminBooksScreen() {
                   Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
                   {item.verified_count}
                 </p>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="flex flex-wrap gap-3 border-t border-border pt-4">
                   <ButtonLink
                     variant="secondary"
                     href={`/admin/books/${encodeURIComponent(book.id)}`}

@@ -254,7 +254,7 @@ export function AdminMetadataQualityScreen() {
                 <p className="text-sm font-semibold text-muted">
                   {metric.label}
                 </p>
-                <p className="mt-2 text-[32px] font-extrabold tabular-nums text-primary">
+                <p className="mt-2 text-2xl font-extrabold tabular-nums text-primary">
                   {metric.value.toLocaleString("vi-VN")}
                 </p>
                 <p className="sr-only">{metric.detail}</p>
@@ -265,7 +265,7 @@ export function AdminMetadataQualityScreen() {
           <section className="rounded-card border border-border bg-white p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-2xl font-extrabold text-ink">
+                <h2 className="text-xl font-extrabold text-ink">
                   Sách cần kiểm tra
                 </h2>
                 <p className="mt-1 text-sm text-muted">

@@ -99,7 +99,7 @@ export function AdminNewBookScreen() {
             {error}
           </StatusMessage>
         ) : null}
-        <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
+        <h2 className="text-xl font-bold text-ink">Thông tin sách</h2>
         <form className="grid gap-4" noValidate onSubmit={submit}>
           <label className="grid gap-2 font-semibold" htmlFor="book-name">
             Tên sách *

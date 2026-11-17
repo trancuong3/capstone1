@@ -16,7 +16,7 @@ export function AuthShell({ children }: AuthShellProps) {
       <SiteHeader />
       <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[774px] sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
-          <div className="w-full max-w-[560px] [&_h1]:text-[32px] [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
+          <div className="w-full max-w-[560px] [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
             {children}
           </div>
         </ButtonSizeProvider>
@@ -32,7 +32,7 @@ export function AuthLoadingState() {
       <Card
         aria-busy="true"
         aria-label="Đang tải nội dung"
-        className="mx-auto max-w-[440px] border border-border bg-white"
+        className="border border-border bg-white"
       >
         <span className="sr-only" role="status">
           Đang tải…
