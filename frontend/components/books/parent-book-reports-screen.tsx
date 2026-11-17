@@ -80,7 +80,7 @@ export function ParentBookReportsScreen() {
   const last = Math.min(offset + limit, total);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 px-4 py-8 sm:px-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-label font-bold text-primary">
@@ -93,12 +93,17 @@ export function ParentBookReportsScreen() {
             Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => void load()} variant="secondary">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            className="w-auto"
+            onClick={() => void load()}
+            size="compact"
+            variant="secondary"
+          >
             <RefreshCw aria-hidden className="size-4" />
             Tải lại
           </Button>
-          <ButtonLink href="/books" size="compact">
+          <ButtonLink className="w-auto" href="/books" size="compact">
             Thư viện sách
           </ButtonLink>
         </div>

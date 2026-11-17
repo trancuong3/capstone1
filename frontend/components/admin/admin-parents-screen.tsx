@@ -263,7 +263,7 @@ export function AdminParentsScreen() {
         </div>
       ) : null}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
           <p className="text-sm font-semibold text-muted">Tổng Parent</p>
           <div className="flex items-center gap-3">
@@ -382,7 +382,7 @@ export function AdminParentsScreen() {
               <Card className="bg-white" key={parent.id}>
                 <div className="flex min-w-0 flex-col gap-4">
                   <div className="min-w-0 flex-1">
-                    <h2 className="break-words text-lg font-bold text-ink">
+                    <h2 className="break-words text-xl font-semibold text-ink">
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
                     </h2>
                     <p className="mt-1 break-all text-xs text-muted">

@@ -306,7 +306,7 @@ export function AdminBooksScreen() {
                   Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
                   {item.verified_count}
                 </p>
-                <div className="flex flex-wrap gap-3 border-t border-border pt-4">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <ButtonLink
                     variant="secondary"
                     href={`/admin/books/${encodeURIComponent(book.id)}`}

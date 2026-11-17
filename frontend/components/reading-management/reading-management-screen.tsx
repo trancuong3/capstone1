@@ -940,7 +940,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <CalendarDays className="size-6" />
                 </div>
                 <div>
-                  <h2 className="text-heading font-extrabold text-ink">
+                  <h2 className="text-2xl font-extrabold text-ink">
                     Kế hoạch đọc trong tuần
                   </h2>
                   <p className="mt-1 text-label text-muted">
@@ -1097,7 +1097,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <Target className="size-6 text-primary" />
-                <h2 className="text-heading font-extrabold text-ink">
+                <h2 className="text-2xl font-extrabold text-ink">
                   Mục tiêu đọc
                 </h2>
               </div>
@@ -1238,7 +1238,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <BookHeart className="size-6 text-primary" />
-                <h2 className="text-heading font-extrabold text-ink">
+                <h2 className="text-2xl font-extrabold text-ink">
                   Sách yêu thích và danh sách muốn đọc
                 </h2>
               </div>
@@ -1418,7 +1418,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <CalendarClock className="size-6 text-primary" />
-                <h2 className="text-heading font-extrabold text-ink">
+                <h2 className="text-2xl font-extrabold text-ink">
                   Lịch nhắc đọc
                 </h2>
               </div>

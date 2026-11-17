@@ -263,14 +263,14 @@ export function SessionComplete({
             className="rounded-card border border-border bg-white p-5 sm:p-6"
             data-testid="spoken-words-container"
           >
-            <div className="flex items-center justify-between mb-4 border-b border-cream-dark pb-3">
+            <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2">
                 <Mic aria-hidden="true" className="size-5 text-purple-ink" />
                 <h2 className="text-lg font-semibold text-ink">
                   Kết quả nhận diện giọng nói của bé (STT)
                 </h2>
               </div>
-              <span className="rounded-full bg-purple-surface px-3 py-0.5 text-xs font-semibold text-purple-ink border border-purple-border/40">
+              <span className="rounded-full border border-purple/50 bg-purple px-3 py-0.5 text-xs font-semibold text-purple-ink">
                 {spokenWords.length} từ nhận diện
               </span>
             </div>
@@ -315,7 +315,7 @@ export function SessionComplete({
                         >
                           <CheckCircle2
                             aria-hidden="true"
-                            className="size-4 text-leaf-green flex-shrink-0"
+                            className="size-4 flex-shrink-0 text-success-ink"
                           />
                           {word}
                         </span>
@@ -384,7 +384,7 @@ export function SessionComplete({
                       {transcripts.map((t, idx) => (
                         <div
                           key={idx}
-                          className="rounded-lg bg-white/80 px-3.5 py-2 text-sm text-ink italic border border-cream-dark"
+                          className="rounded-lg border border-border bg-white/80 px-3.5 py-2 text-sm text-ink italic"
                         >
                           &ldquo;{t}&rdquo;
                         </div>

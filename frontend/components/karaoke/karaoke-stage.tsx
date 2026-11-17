@@ -253,7 +253,7 @@ export function KaraokeStage({
             </h1>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           {scoring.supported && (
             <button
               type="button"
@@ -270,7 +270,7 @@ export function KaraokeStage({
               ) : (
                 <MicOff aria-hidden className="size-5" />
               )}
-              {scoring.enabled ? "Chấm điểm" : "Chấm điểm"}
+              Chấm điểm
             </button>
           )}
           <button

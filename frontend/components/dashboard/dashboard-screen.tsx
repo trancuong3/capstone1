@@ -271,7 +271,7 @@ export function DashboardScreen() {
                   className="mt-1 size-5 shrink-0 text-warning"
                 />
                 <div>
-                  <p className="font-semibold text-warning-ink">
+                  <p className="font-semibold text-warning">
                     {invalidSelection
                       ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
                       : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
