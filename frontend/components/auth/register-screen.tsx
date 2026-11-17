@@ -49,10 +49,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
   if (requiresEmailConfirmation) {
     return (
       <AuthShell>
-        <Card
-          className="border border-border"
-          tone="success"
-        >
+        <Card className="border border-border" tone="success">
           <div>
             <h1 className="text-heading font-extrabold text-success-ink">
               Kiểm tra email nhé

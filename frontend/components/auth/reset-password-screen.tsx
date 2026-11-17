@@ -50,10 +50,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
   if (isSuccessful) {
     return (
       <AuthShell>
-        <Card
-          className="border border-border"
-          tone="success"
-        >
+        <Card className="border border-border" tone="success">
           <div>
             <p className="text-sm font-semibold text-success-ink">
               Tài khoản ViRead

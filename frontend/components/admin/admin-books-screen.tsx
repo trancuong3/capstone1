@@ -1,6 +1,5 @@
 "use client";
 
-
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -171,10 +170,7 @@ export function AdminBooksScreen() {
         metadata hoặc vòng đời sách; trang sách, revision và lịch sử đọc được
         giữ nguyên.
       </StatusMessage>
-      <p
-        aria-label="Tổng quan kho sách"
-        className="mb-4 text-sm text-muted"
-      >
+      <p aria-label="Tổng quan kho sách" className="mb-4 text-sm text-muted">
         {items
           ? `${items.length} sách · ${items.filter((i) => i.book.lifecycle_status === "ACTIVE").length} đang hoạt động · ${items.reduce((t, i) => t + i.needs_review_count, 0)} trang cần duyệt OCR`
           : "Đang tải…"}

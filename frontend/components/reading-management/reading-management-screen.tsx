@@ -62,6 +62,8 @@ const weekdayOptions = [
 ];
 const inputClass =
   "min-h-12 min-w-0 w-full rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
+const labelClass =
+  "flex min-w-0 flex-col gap-1 text-label font-semibold text-ink";
 const actionClass =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
 
@@ -474,7 +476,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </StatusMessage>
             ) : null}
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitPlan}>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Tên kế hoạch
                 <input
                   className={inputClass}
@@ -485,7 +487,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   placeholder="Ví dụ: Đọc cùng bé sau bữa tối"
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Sách dự định đọc
                 <select
                   className={inputClass}
@@ -500,7 +502,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </select>
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Thời lượng mỗi buổi (phút)
                 <input
                   className={inputClass}
@@ -513,7 +515,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanMinutes(event.target.value)}
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Múi giờ
                 <input
                   className={inputClass}
@@ -555,7 +557,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Bắt đầu từ
                 <input
                   className={inputClass}
@@ -566,7 +568,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanStart(event.target.value)}
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -600,7 +602,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </StatusMessage>
             ) : null}
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitGoal}>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Đo lường
                 <select
                   className={inputClass}
@@ -613,7 +615,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="SESSIONS">Buổi đọc hoàn thành</option>
                 </select>
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Mục tiêu
                 <input
                   className={inputClass}
@@ -626,7 +628,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalTarget(e.target.value)}
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Chu kỳ
                 <select
                   className={inputClass}
@@ -639,7 +641,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="WEEKLY">Mỗi tuần</option>
                 </select>
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Bắt đầu
                 <input
                   className={inputClass}
@@ -649,7 +651,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setGoalStart(e.target.value)}
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Kết thúc (tùy chọn)
                 <input
                   className={inputClass}
@@ -677,7 +679,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               className="grid gap-4 sm:grid-cols-2"
               onSubmit={submitReminder}
             >
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Giờ địa phương
                 <input
                   className={inputClass}
@@ -687,7 +689,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(e) => setReminderTime(e.target.value)}
                 />
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-label font-semibold text-ink">
+              <label className={labelClass}>
                 Timezone IANA
                 <input
                   className={inputClass}
@@ -784,7 +786,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
   if (loadingChildren)
     return (
-      <section className="mx-auto max-w-7xl p-6" aria-busy="true">
+      <section className="mx-auto max-w-[1120px] p-6 text-body text-muted" aria-busy="true">
         Đang tải hồ sơ bé…
       </section>
     );
@@ -907,11 +909,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <p className="text-label font-bold text-muted">
                     {item.label}
                   </p>
+                  <span className="text-primary">{item.icon}</span>
                 </div>
-                <p className="mt-2 text-3xl font-extrabold text-primary">
+                <p className="mt-2 text-heading font-extrabold text-primary">
                   {item.value}
                 </p>
-                <p className="mt-1 text-sm text-muted">{item.detail}</p>
+                <p className="mt-1 text-label text-muted">{item.detail}</p>
               </article>
             ))}
           </section>
@@ -934,7 +937,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <CalendarDays className="size-6" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-extrabold text-ink">
+                  <h2 className="text-heading font-extrabold text-ink">
                     Kế hoạch đọc trong tuần
                   </h2>
                   <p className="mt-1 text-label text-muted">
@@ -1017,11 +1020,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       <PlanInsights plan={plan} />
                       {plan.status === "ACTIVE" || plan.status === "PAUSED" ? (
                         <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            className={
-                              actionClass + " border border-border bg-white"
-                            }
-                            type="button"
+                          <Button
+                            variant="quiet"
+                            size="compact"
+                            className="w-auto border border-border"
                             onClick={() => {
                               setActiveForm("plan");
                               setEditingPlanId(plan.id);
@@ -1035,51 +1037,52 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             }}
                           >
                             Chỉnh sửa
-                          </button>
+                          </Button>
                           {plan.status === "ACTIVE" ? (
-                            <button
-                              className={actionClass + " bg-cream text-ink"}
-                              type="button"
+                            <Button
+                              variant="quiet"
+                              size="compact"
+                              className="w-auto bg-cream"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void transitionPlan(plan, "PAUSED")
                               }
                             >
                               Tạm dừng
-                            </button>
+                            </Button>
                           ) : (
-                            <button
-                              className={actionClass + " bg-sky text-primary"}
-                              type="button"
+                            <Button
+                              variant="secondary"
+                              size="compact"
+                              className="w-auto"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void transitionPlan(plan, "ACTIVE")
                               }
                             >
                               Tiếp tục
-                            </button>
+                            </Button>
                           )}
-                          <button
-                            className={actionClass + " bg-sky text-primary"}
-                            type="button"
+                          <Button
+                            variant="secondary"
+                            size="compact"
+                            className="w-auto"
                             disabled={Boolean(busyKey)}
                             onClick={() =>
                               void transitionPlan(plan, "COMPLETED")
                             }
                           >
                             <CheckCircle2 className="size-4" /> Hoàn thành
-                          </button>
-                          <button
-                            className={
-                              actionClass +
-                              " border border-border bg-white text-muted"
-                            }
-                            type="button"
+                          </Button>
+                          <Button
+                            variant="quiet"
+                            size="compact"
+                            className="w-auto border border-border text-muted"
                             disabled={Boolean(busyKey)}
                             onClick={() => void transitionPlan(plan, "ENDED")}
                           >
                             Kết thúc
-                          </button>
+                          </Button>
                         </div>
                       ) : null}
                     </article>
@@ -1091,7 +1094,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <Target className="size-6 text-primary" />
-                <h2 className="text-2xl font-extrabold text-ink">
+                <h2 className="text-heading font-extrabold text-ink">
                   Mục tiêu đọc
                 </h2>
               </div>
@@ -1167,56 +1170,56 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       ) : null}
                       {goal.status === "ACTIVE" || goal.status === "PAUSED" ? (
                         <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            className={
-                              actionClass +
-                              " border border-border hover:bg-canvas"
-                            }
+                          <Button
+                            variant="quiet"
+                            size="compact"
+                            className="w-auto border border-border"
                             onClick={() => {
                               setEditingGoalId(goal.id);
                               setEditingTarget(String(goal.target_value));
                             }}
-                            type="button"
                           >
                             Sửa mục tiêu
-                          </button>
+                          </Button>
                           {goal.status === "ACTIVE" ? (
-                            <button
-                              className={actionClass + " bg-cream text-ink"}
+                            <Button
+                              variant="quiet"
+                              size="compact"
+                              className="w-auto bg-cream"
                               disabled={Boolean(busyKey)}
                               onClick={() => void transition(goal, "PAUSED")}
-                              type="button"
                             >
                               Tạm dừng
-                            </button>
+                            </Button>
                           ) : (
-                            <button
-                              className={actionClass + " bg-sky text-primary"}
+                            <Button
+                              variant="secondary"
+                              size="compact"
+                              className="w-auto"
                               disabled={Boolean(busyKey)}
                               onClick={() => void transition(goal, "ACTIVE")}
-                              type="button"
                             >
                               Tiếp tục
-                            </button>
+                            </Button>
                           )}
-                          <button
-                            className={actionClass + " bg-sky text-primary"}
+                          <Button
+                            variant="secondary"
+                            size="compact"
+                            className="w-auto"
                             disabled={Boolean(busyKey)}
                             onClick={() => void transition(goal, "COMPLETED")}
-                            type="button"
                           >
                             Hoàn thành
-                          </button>
-                          <button
-                            className={
-                              actionClass + " border border-border text-muted"
-                            }
+                          </Button>
+                          <Button
+                            variant="quiet"
+                            size="compact"
+                            className="w-auto border border-border text-muted"
                             disabled={Boolean(busyKey)}
                             onClick={() => void transition(goal, "ENDED")}
-                            type="button"
                           >
                             Kết thúc
-                          </button>
+                          </Button>
                         </div>
                       ) : null}
                     </article>
@@ -1232,7 +1235,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <BookHeart className="size-6 text-primary" />
-                <h2 className="text-2xl font-extrabold text-ink">
+                <h2 className="text-heading font-extrabold text-ink">
                   Sách yêu thích và danh sách muốn đọc
                 </h2>
               </div>
@@ -1287,9 +1290,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 Mở sách
                               </Link>
                             ) : null}
-                            <button
-                              className={actionClass + " text-primary"}
-                              type="button"
+                            <Button
+                              variant="quiet"
+                              size="compact"
+                              className="w-auto text-primary"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void toggleCollection(
@@ -1300,7 +1304,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             >
                               <Trash2 aria-hidden="true" className="size-4" />
                               Bỏ lưu
-                            </button>
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -1411,7 +1415,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">
               <div className="mb-4 flex items-center gap-3">
                 <CalendarClock className="size-6 text-primary" />
-                <h2 className="text-2xl font-extrabold text-ink">
+                <h2 className="text-heading font-extrabold text-ink">
                   Lịch nhắc đọc
                 </h2>
               </div>
@@ -1459,9 +1463,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               : emailStatusText(item.email_status)}
                           </span>
                         ) : null}
-                        <button
-                          className={actionClass + " bg-sky text-primary"}
-                          type="button"
+                        <Button
+                          variant="secondary"
+                          size="compact"
+                          className="w-auto"
                           disabled={Boolean(busyKey)}
                           onClick={() =>
                             void runAction(
@@ -1473,7 +1478,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         >
                           <Check className="size-4" />
                           Đã xem
-                        </button>
+                        </Button>
                       </li>
                     ))}
                   </ul>
@@ -1536,9 +1541,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         </label>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          className={actionClass + " border border-border"}
-                          type="button"
+                        <Button
+                          variant="quiet"
+                          size="compact"
+                          className="w-auto border border-border"
                           onClick={() => {
                             setEditingReminderId(reminder.id);
                             setActiveForm("reminder");
@@ -1549,12 +1555,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           }}
                         >
                           Chỉnh sửa
-                        </button>
-                        <button
-                          className={
-                            actionClass + " border border-border text-danger"
-                          }
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="quiet"
+                          size="compact"
+                          className="w-auto border border-border text-danger"
                           disabled={Boolean(busyKey)}
                           onClick={() =>
                             void (
@@ -1571,7 +1576,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         >
                           <Trash2 className="size-4" />
                           Xóa
-                        </button>
+                        </Button>
                       </div>
                     </article>
                   ))}

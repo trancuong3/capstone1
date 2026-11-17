@@ -82,7 +82,9 @@ export function AdminHealthScreen() {
             {snapshot.services.map((service) => (
               <Card className="bg-white" key={service.id}>
                 <div className="flex items-start justify-between gap-4">
-                  <h2 className="text-lg font-bold text-ink">{service.label}</h2>
+                  <h2 className="text-lg font-bold text-ink">
+                    {service.label}
+                  </h2>
                   <AdminStatusBadge status={service.status} />
                 </div>
                 <p className="text-sm text-muted">{service.safe_message}</p>

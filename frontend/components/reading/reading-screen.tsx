@@ -15,6 +15,7 @@ import { hasUnusableAudio } from "@/lib/reading/audio-quality";
 import {
   hasUsableTranscript,
   hasUsableBrowserConfidence,
+  hasHighConfidenceKeytermResult,
 } from "@/lib/reading/recognition-evidence";
 import type { WordTimestamp } from "@/lib/api/speech-service";
 import {
@@ -2845,15 +2846,19 @@ function ReadingSessionScreen({
 
           transcript = transcription.text?.trim() ?? "";
           // This branch is reached only when the unprompted result could not
-          // establish correctness. Its raw text cannot corroborate a prompted
-          // target after failing the evidence gate. Only a separately accepted
-          // browser final can corroborate this fallback.
+          // establish correctness. Accept the keyterm-biased result when
+          // either (a) the browser transcript independently confirms the word,
+          // or (b) the keyterm-biased STT has high word-level confidence
+          // (logprob >= −0.5), indicating a clear pronunciation even though
+          // the browser recognizer missed it.
           const corroborated =
             classifyRetryTranscript(candidate.text, browserTranscript) ===
             "CORRECT";
+          const highConfidenceKeyterm =
+            hasHighConfidenceKeytermResult(transcription);
           status =
             hasUsableTranscript(transcription, speechRecorder.getQuality?.()) &&
-            corroborated
+            (corroborated || highConfidenceKeyterm)
               ? classifyRetryTranscript(candidate.text, transcript)
               : "UNCERTAIN";
         } catch (fallbackError) {
