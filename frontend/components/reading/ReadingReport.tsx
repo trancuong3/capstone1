@@ -112,17 +112,17 @@ export function ReadingReport({ result, sessionId }: Props) {
   const hesitationSeconds = result.summary.hesitation_seconds;
 
   return (
-    <div className="space-y-5 rounded-xl border p-4">
+    <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
       <h2 className="text-xl font-semibold">Báo cáo đọc</h2>
 
       {/* Nội dung bài đọc */}
-      <div className="space-y-3 border-t pt-3">
+      <div className="space-y-3 border-t border-border pt-3">
         <h3 className="font-semibold">Nội dung bài đọc</h3>
 
         {pageError ? (
-          <p className="text-sm text-red-600">{pageError}</p>
+          <p className="text-label text-danger">{pageError}</p>
         ) : !page ? (
-          <p className="text-sm text-muted">Đang tải nội dung bài đọc...</p>
+          <p className="text-label text-muted">Đang tải nội dung bài đọc...</p>
         ) : (
           <article
             className="relative min-h-[360px] w-full overflow-hidden rounded-card border border-border bg-cream p-4 sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-6"
@@ -131,8 +131,8 @@ export function ReadingReport({ result, sessionId }: Props) {
           >
             <div className="relative z-10 flex h-full flex-col">
               <header className="mb-2 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                  <span className="size-2 rounded-full bg-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-success-surface px-3 py-1 text-xs font-semibold text-success-ink">
+                  <span className="size-2 rounded-full bg-success-ink" />
                   Nội dung OCR đã xác minh
                 </span>
 
@@ -185,7 +185,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Chú giải màu */}
-      <div className="flex flex-wrap gap-2 border-t pt-3 text-sm">
+      <div className="flex flex-wrap gap-2 border-t border-border pt-3 text-sm">
         {[
           ["Đọc đúng", COLORS.correct],
           ["Bỏ từ", COLORS.missing],
@@ -200,7 +200,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Chi tiết lặp từ */}
-      <div className="space-y-2 border-t pt-3">
+      <div className="space-y-2 border-t border-border pt-3">
         <h3 className="font-semibold">Tình trạng lặp từ</h3>
 
         <p>
@@ -224,7 +224,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Chi tiết ngập ngừng */}
-      <div className="space-y-2 border-t pt-3">
+      <div className="space-y-2 border-t border-border pt-3">
         <h3 className="font-semibold">Tình trạng ngập ngừng</h3>
 
         <p>

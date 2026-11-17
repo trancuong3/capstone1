@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+
 import { RefreshCw } from "lucide-react";
 
 import { AdminLoading } from "@/components/admin/admin-ui";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
@@ -83,13 +83,13 @@ export function ParentBookReportsScreen() {
     <section className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 px-4 py-8 sm:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold text-primary">
+          <p className="text-label font-bold text-primary">
             ViRead · Phụ huynh
           </p>
           <h1 className="mt-1 text-heading font-extrabold text-ink">
             Báo cáo chất lượng sách
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted">
+          <p className="mt-2 max-w-2xl text-body text-muted">
             Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
           </p>
         </div>
@@ -98,12 +98,9 @@ export function ParentBookReportsScreen() {
             <RefreshCw aria-hidden className="size-4" />
             Tải lại
           </Button>
-          <Link
-            className="inline-flex min-h-12 items-center rounded-control bg-primary px-4 font-semibold text-white hover:bg-primary-hover"
-            href="/books"
-          >
+          <ButtonLink href="/books" size="compact">
             Thư viện sách
-          </Link>
+          </ButtonLink>
         </div>
       </header>
 

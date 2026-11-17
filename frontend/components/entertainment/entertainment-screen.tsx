@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { ArrowRight, BookOpenText, Camera, Mic, Music2 } from "lucide-react";
-import Link from "next/link";
 
+import { ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 
 export function EntertainmentScreen() {
@@ -41,12 +41,13 @@ export function EntertainmentScreen() {
             <BookOpenText aria-hidden="true" className="size-4 text-primary" />{" "}
             Luyện sắp xếp từ · Nhận sao sau mỗi câu
           </p>
-          <Link
-            className="mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-primary px-4 font-bold text-white hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+          <ButtonLink
             href="/entertainment/sentence-shooter"
+            size="compact"
+            className="mt-auto"
           >
             Bắt đầu chơi <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
+          </ButtonLink>
         </article>
         <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 sm:p-8">
           <div className="relative min-h-52 overflow-hidden rounded-card bg-cream">
@@ -75,12 +76,13 @@ export function EntertainmentScreen() {
               tranh sách hoặc tải ảnh
             </span>
           </div>
-          <Link
-            className="mt-auto inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-primary px-4 font-bold text-white hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+          <ButtonLink
             href="/entertainment/picture-description"
+            size="compact"
+            className="mt-auto"
           >
             Khám phá ngay <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
+          </ButtonLink>
         </article>
       </div>
       <article className="flex flex-col items-start gap-4 rounded-card border border-border bg-cream p-6 sm:flex-row sm:items-center sm:p-8">
@@ -97,13 +99,10 @@ export function EntertainmentScreen() {
             hình.
           </p>
         </div>
-        <Link
-          className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control bg-primary px-5 font-bold text-white hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:w-auto"
-          href="/karaoke"
-        >
+        <ButtonLink href="/karaoke" size="compact" className="w-full sm:w-auto">
           Mở thư viện bài hát{" "}
           <ArrowRight aria-hidden="true" className="size-4" />
-        </Link>
+        </ButtonLink>
       </article>
       <p className="text-label text-muted">
         Mỗi lượt chơi dùng các câu đã xác minh trong sách của ViRead.
