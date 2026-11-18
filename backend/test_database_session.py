@@ -31,6 +31,7 @@ from app.database.session import (
     database_concurrency_limiter,
     engine,
     get_db,
+    probe_database_connection,
 )
 
 
@@ -158,6 +159,49 @@ class RequestScopedSessionDependencyTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await first.close()
             await second.close()
+
+
+class DatabaseConnectionProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_probe_database_connection_runs_select_1_without_exposing_secrets(self):
+        class FakeProbeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def scalar(self, statement):
+                assert str(statement) == "SELECT 1"
+                return 1
+
+        with patch(
+            "app.database.session.AsyncSessionLocal",
+            return_value=FakeProbeSession(),
+        ):
+            result = await probe_database_connection(timeout=1.0)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dns_resolved"])
+        self.assertEqual(result["pool_class"], "NullPool")
+        self.assertIsNone(result["error_type"])
+        serialized = str(result)
+        self.assertNotIn("postgresql+asyncpg://", serialized)
+        self.assertNotIn("test:test@", serialized)
+
+    async def test_probe_database_connection_reports_dns_failure_safely(self):
+        import socket
+
+        loop = asyncio.get_running_loop()
+        with patch.object(
+            loop,
+            "getaddrinfo",
+            side_effect=socket.gaierror(-2, "Name or service not known"),
+        ):
+            result = await probe_database_connection(timeout=1.0)
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["dns_resolved"])
+        self.assertEqual(result["error_type"], "gaierror")
 
 
 if __name__ == "__main__":

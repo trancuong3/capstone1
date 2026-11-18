@@ -157,16 +157,58 @@ def _stable_split(group_id: str) -> str:
     return "train" if value < 0.70 else "validation" if value < 0.85 else "holdout"
 
 
-async def _finish(event_id, *, status: str, error_code: str | None = None, delay_seconds: int = 0) -> None:
+async def _finish(
+    event_id,
+    *,
+    status: str,
+    expected_attempts: int | None = None,
+    error_code: str | None = None,
+    delay_seconds: int = 0,
+) -> bool:
+    async with AsyncSessionLocal() as db:
+        if expected_attempts is None:
+            result = await db.execute(text("""
+                UPDATE public.viread_ocr_outbox
+                SET status = :status, last_error_code = :error_code, locked_at = NULL,
+                    available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
+                WHERE id = :event_id AND status = 'PROCESSING'
+            """), {"event_id": event_id, "status": status, "error_code": error_code,
+                  "delay_seconds": delay_seconds})
+        else:
+            result = await db.execute(text("""
+                UPDATE public.viread_ocr_outbox
+                SET status = :status, last_error_code = :error_code, locked_at = NULL,
+                    available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
+                WHERE id = :event_id AND status = 'PROCESSING' AND attempts = :expected_attempts
+            """), {"event_id": event_id, "status": status, "expected_attempts": expected_attempts,
+                  "error_code": error_code, "delay_seconds": delay_seconds})
+        await db.commit()
+        return bool(result.rowcount)
+
+
+async def _release_claim_on_cancel(event_id, *, expected_attempts: int) -> None:
+    """Return an interrupted PROCESSING claim to the queue without burning an attempt."""
     async with AsyncSessionLocal() as db:
         await db.execute(text("""
             UPDATE public.viread_ocr_outbox
-            SET status = :status, last_error_code = :error_code, locked_at = NULL,
-                available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
-            WHERE id = :event_id
-        """), {"event_id": event_id, "status": status, "error_code": error_code,
-              "delay_seconds": delay_seconds})
+            SET status = CASE WHEN attempts <= 1 THEN 'PENDING' ELSE 'RETRY' END,
+                attempts = GREATEST(0, attempts - 1),
+                locked_at = NULL,
+                available_at = now(),
+                updated_at = now()
+            WHERE id = :event_id AND status = 'PROCESSING' AND attempts = :expected_attempts
+        """), {"event_id": event_id, "expected_attempts": expected_attempts})
         await db.commit()
+
+
+async def _wait_for_stop_or_timeout(stop: asyncio.Event, timeout_seconds: float) -> None:
+    """Sleep up to timeout_seconds while waking immediately when stop is signaled."""
+    if stop.is_set() or timeout_seconds <= 0:
+        return
+    try:
+        await asyncio.wait_for(stop.wait(), timeout=timeout_seconds)
+    except TimeoutError:
+        pass
 
 
 async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -> None:
@@ -179,25 +221,62 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
         except Exception as exc:
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_claim_failed",
                            stage="database_claim", exception=exc)
-            await asyncio.sleep(poll_seconds)
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
             continue
         if event is None:
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
-            except TimeoutError:
-                pass
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
             continue
+
+        attempts = int(event["attempts"])
+        process_completed = False
         try:
             await _process(event)
-            await _finish(event["id"], status="DONE")
+            process_completed = True
+            # Shield DONE finalization so cancellation arriving after all crops/samples
+            # were persisted does not leave a completed event in PROCESSING.
+            await asyncio.shield(
+                _finish(event["id"], status="DONE", expected_attempts=attempts)
+            )
         except asyncio.CancelledError:
+            if not process_completed:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(
+                            _release_claim_on_cancel(
+                                event["id"], expected_attempts=attempts
+                            )
+                        ),
+                        timeout=3.0,
+                    )
+                except (TimeoutError, asyncio.CancelledError, Exception):
+                    # If DB teardown is already underway, the 10-minute locked_at lease
+                    # guarantees another worker will safely reclaim the event later.
+                    pass
             raise
         except Exception as exc:
-            attempts = int(event["attempts"])
             terminal = attempts >= MAX_ATTEMPTS
             delay = min(3600, 2 ** min(attempts, 10))
-            await _finish(event["id"], status="DEAD" if terminal else "RETRY",
-                          error_code=type(exc).__name__[:64], delay_seconds=delay)
+            try:
+                await _finish(
+                    event["id"],
+                    status="DEAD" if terminal else "RETRY",
+                    expected_attempts=attempts,
+                    error_code=type(exc).__name__[:64],
+                    delay_seconds=delay,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as finish_exc:
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="viread_ocr_outbox_finish_failed",
+                    stage="database_finish",
+                    exception=finish_exc,
+                    outbox_id=str(event["id"]),
+                    attempt=attempts,
+                )
+                await _wait_for_stop_or_timeout(stop, poll_seconds)
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_processing_failed",
                            stage="line_crop_materialization", exception=exc,
                            outbox_id=str(event["id"]), attempt=attempts, terminal=terminal)
