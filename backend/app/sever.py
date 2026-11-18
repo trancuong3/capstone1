@@ -43,6 +43,68 @@ from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_oc
 logger = logging.getLogger(__name__)
 
 
+_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+async def _shutdown_worker_task(
+    task: asyncio.Task[object] | None,
+    stop_event: asyncio.Event,
+    *,
+    timeout: float | None = None,
+) -> None:
+    """Stop a background asyncio worker cleanly without propagating cancellation."""
+    stop_event.set()
+    if task is None:
+        return
+    effective_timeout = (
+        _WORKER_SHUTDOWN_TIMEOUT_SECONDS if timeout is None else timeout
+    )
+    try:
+        await asyncio.wait_for(task, timeout=effective_timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        if not task.done():
+            task.cancel()
+        try:
+            await asyncio.gather(task, return_exceptions=True)
+        except asyncio.CancelledError:
+            pass
+    except Exception:
+        logger.warning(
+            "Background worker %s failed during shutdown",
+            task.get_name(),
+            exc_info=True,
+        )
+
+
+async def _shutdown_subprocess(
+    process: asyncio.subprocess.Process | None,
+    *,
+    timeout: float | None = None,
+) -> None:
+    """Terminate a child worker process cleanly without propagating cancellation."""
+    if process is None or process.returncode is not None:
+        return
+    effective_timeout = (
+        _WORKER_SHUTDOWN_TIMEOUT_SECONDS if timeout is None else timeout
+    )
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), timeout=effective_timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                return
+            try:
+                await process.wait()
+            except asyncio.CancelledError:
+                pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
@@ -114,42 +176,48 @@ async def lifespan(_app: FastAPI):
 
     try:
         yield
+    except asyncio.CancelledError:
+        # Suppress runner/reloader task cancellation on Ctrl+C so Starlette
+        # completes ASGI lifespan shutdown cleanly instead of logging a traceback.
+        pass
     finally:
-        if local_trainer_process is not None and local_trainer_process.returncode is None:
-            local_trainer_process.terminate()
-            try:
-                await asyncio.wait_for(local_trainer_process.wait(), timeout=10)
-            except TimeoutError:
-                local_trainer_process.kill()
-                await local_trainer_process.wait()
+        stop_active_model_worker.set()
+        stop_viread_ocr_outbox.set()
+        stop_viread_training.set()
+        stop_book_quality_worker.set()
+
+        worker_tasks = (viread_outbox_task, viread_training_task, book_quality_task)
+        try:
+            # Book quality worker releases its lease on cancellation; an interrupted
+            # page is resumed from its durable per-page state on the next poll.
+            await asyncio.gather(
+                _shutdown_subprocess(local_trainer_process),
+                _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
+                _shutdown_worker_task(viread_training_task, stop_viread_training),
+                _shutdown_worker_task(book_quality_task, stop_book_quality_worker),
+            )
+        except asyncio.CancelledError:
+            for worker_task in worker_tasks:
+                if worker_task is not None and not worker_task.done():
+                    worker_task.cancel()
+            if local_trainer_process is not None and local_trainer_process.returncode is None:
+                try:
+                    local_trainer_process.kill()
+                except ProcessLookupError:
+                    pass
+
         if active_model_worker is not None:
-            stop_active_model_worker.set()
             active_model_worker.join(timeout=6)
-        if viread_outbox_task is not None:
-            stop_viread_ocr_outbox.set()
-            try:
-                await asyncio.wait_for(viread_outbox_task, timeout=10)
-            except TimeoutError:
-                viread_outbox_task.cancel()
-                await asyncio.gather(viread_outbox_task, return_exceptions=True)
-        if viread_training_task is not None:
-            stop_viread_training.set()
-            try:
-                await asyncio.wait_for(viread_training_task, timeout=10)
-            except TimeoutError:
-                viread_training_task.cancel()
-                await asyncio.gather(viread_training_task, return_exceptions=True)
-        if book_quality_task is not None:
-            stop_book_quality_worker.set()
-            try:
-                await asyncio.wait_for(book_quality_task, timeout=10)
-            except TimeoutError:
-                # The worker releases its lease on cancellation; an interrupted
-                # page is resumed from its durable per-page state on the next poll.
-                book_quality_task.cancel()
-                await asyncio.gather(book_quality_task, return_exceptions=True)
-        await admin_ocr_correction_jobs.shutdown()
-        await engine.dispose()
+
+        try:
+            await admin_ocr_correction_jobs.shutdown()
+        except asyncio.CancelledError:
+            pass
+
+        try:
+            await engine.dispose()
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="ReadAlong Vision API", version="1.0.0", lifespan=lifespan)

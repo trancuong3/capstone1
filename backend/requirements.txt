@@ -69,6 +69,8 @@ requests-toolbelt==1.0.0
 urllib3==2.6.0
 certifi==2025.11.12
 charset-normalizer==3.4.4
+# Khóa chardet < 6 để tương thích requests==2.32.5 khi premailer/cssutils kéo chardet
+chardet==5.2.0
 idna==3.11
 dnspython==2.8.0
 python-multipart==0.0.20
