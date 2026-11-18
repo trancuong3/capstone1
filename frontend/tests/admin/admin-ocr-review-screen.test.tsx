@@ -1413,7 +1413,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       }),
     );
 
-    expect(await screen.findByText(/Đã xác minh revision/)).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText(/Đã xác minh revision/)).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
       verified.draft_text,
@@ -1707,4 +1709,13 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(createButton).toBeDisabled();
     expect(services.revisions.createDraft).not.toHaveBeenCalled();
   });
+});
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+    useSearchParams: () => new URLSearchParams(),
+  };
 });

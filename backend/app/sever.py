@@ -51,7 +51,7 @@ from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_oc
 logger = logging.getLogger(__name__)
 
 
-_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 10.0
+_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 def _task_runtime_state(task: asyncio.Task[object] | None) -> str:
@@ -506,7 +506,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Resolved-Voice-Id", "X-Voice-Fallback"],
 )
 
 @app.get("/health", tags=["System"])

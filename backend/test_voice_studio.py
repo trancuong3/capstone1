@@ -318,6 +318,96 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(data["default_voice_id"], "v1")
         self.assertEqual(data["voices"][0]["gender"], "female")
 
+    def test_402_unavailable_voice_falls_back_to_default_voice_and_sets_headers(self):
+        from app.api.routes import voice as voice_routes
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+        )
+
+        studio.clear_caches()
+        calls = []
+        body_ok = {
+            "audio_base64": base64.b64encode(b"ok-mp3").decode(),
+            "alignment": alignment_for(TEXT),
+        }
+        responses = [
+            httpx.Response(402, json={"detail": {"status": "paid_plan_required"}}),
+            json_response(body_ok),
+        ]
+        with patch.object(studio.httpx, "AsyncClient", fake_client(responses, calls)):
+            res = run(
+                ElevenLabsStudioProvider(api_key="fallback-key").synthesize_timed(
+                    words=WORDS,
+                    requested_voice_id="xeRzNgA5BGMAmllSnOuF",
+                    speed=0.8,
+                )
+            )
+            self.assertEqual(res.resolved_voice_id, DEFAULT_VOICE_ID)
+            self.assertTrue(res.used_fallback_voice)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(calls[1][1].endswith(f"/{DEFAULT_VOICE_ID}/with-timestamps"))
+
+            # Subsequent short TTS for the same unavailable voice skips the 402 request
+            app = FastAPI()
+            app.include_router(voice_routes.router, prefix="/voice")
+            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+            short_calls = []
+            short_responses = [
+                httpx.Response(200, content=b"short-mp3", headers={"content-type": "audio/mpeg"})
+            ]
+            with patch.object(
+                ElevenLabsVoiceProvider.__module__ and studio.httpx, "AsyncClient",
+                fake_client(short_responses, short_calls),
+            ):
+                pass
+
+        # Verify short synthesize fallback + X-Voice-Fallback header directly
+        studio.clear_caches()
+        short_calls = []
+        short_responses = [
+            httpx.Response(402, json={"detail": {"status": "paid_plan_required"}}),
+            httpx.Response(200, content=b"mp3-ok", headers={"content-type": "audio/mpeg"}),
+        ]
+        from app.providers import elevenlabs_voice_provider as base_provider
+        with patch.object(base_provider.httpx, "AsyncClient", fake_client(short_responses, short_calls)), patch.dict(
+            os.environ, {"ELEVENLABS_API_KEY": "short-fb-key"}, clear=False
+        ):
+            app = FastAPI()
+            app.include_router(voice_routes.router, prefix="/voice")
+            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+            client = TestClient(app)
+            r1 = client.post(
+                "/voice/text-to-speech",
+                json={"text": "Xin chào", "voice_id": "xeRzNgA5BGMAmllSnOuF", "speed": 1.1},
+            )
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r1.headers.get("X-Resolved-Voice-Id"), DEFAULT_VOICE_ID)
+        self.assertEqual(r1.headers.get("X-Voice-Fallback"), "1")
+        self.assertEqual(len(short_calls), 2)
+        self.assertEqual(short_calls[1][2]["json"]["voice_settings"]["speed"], 1.1)
+
+    def test_401_quota_exceeded_maps_to_503_without_default_voice_retry(self):
+        studio.clear_caches()
+        from app.providers import elevenlabs_voice_provider as base_provider
+        calls = []
+        responses = [
+            httpx.Response(
+                401,
+                json={"detail": {"code": "quota_exceeded", "message": "secret 6 credits remaining"}},
+            )
+        ]
+        with patch.object(base_provider.httpx, "AsyncClient", fake_client(responses, calls)):
+            with self.assertRaises(VoiceProviderError) as ctx:
+                run(
+                    base_provider.ElevenLabsVoiceProvider(api_key="q-key").synthesize(
+                        text="Xin chào", requested_voice_id="xeRzNgA5BGMAmllSnOuF", speed=1.0
+                    )
+                )
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("secret", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

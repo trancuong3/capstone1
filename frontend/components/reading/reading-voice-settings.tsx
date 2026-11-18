@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
+import { RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
@@ -37,6 +37,7 @@ type LoadState =
 interface ReadingVoiceSettingsProps {
   disabled?: boolean;
   isPreviewing?: boolean;
+  fallbackNotice?: string | null;
   /** Speaks a short sample with the currently chosen voice and speed. */
   onPreview: (sample: string) => void | Promise<void>;
   onStopPreview: () => void;
@@ -57,7 +58,17 @@ function voiceDetails(voice: VoiceOption): string {
   };
   return [
     voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : null,
-    voice.accent,
+    voice.accent
+      ? ((
+          {
+            northern: "Giọng Bắc",
+            southern: "Giọng Nam",
+            central: "Giọng Trung",
+            american: "Giọng Mỹ",
+            british: "Giọng Anh",
+          } as Record<string, string>
+        )[voice.accent.toLowerCase()] ?? voice.accent)
+      : null,
     voice.age
       ? (ages[voice.age.toLowerCase()] ?? voice.age.replaceAll("_", " "))
       : null,
@@ -73,6 +84,7 @@ function formatSpeed(speed: number): string {
 export function ReadingVoiceSettings({
   disabled = false,
   isPreviewing = false,
+  fallbackNotice = null,
   onPreview,
   onStopPreview,
 }: ReadingVoiceSettingsProps) {
@@ -153,11 +165,21 @@ export function ReadingVoiceSettings({
       ? isYouthful(voice)
       : voice.gender?.toLowerCase() === filter);
 
+  const selectedVoice =
+    loadState.status === "ready"
+      ? loadState.data.voices.find(
+          (voice) => voice.voice_id === selectedVoiceId,
+        )
+      : undefined;
+  const filteredVoices =
+    loadState.status === "ready"
+      ? loadState.data.voices.filter(matchesFilter)
+      : [];
   return (
     <>
       <Button
         aria-haspopup="dialog"
-        className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+        className="min-h-14 min-w-0 gap-2 px-3 text-base"
         disabled={disabled}
         onClick={open}
         variant="quiet"
@@ -169,7 +191,18 @@ export function ReadingVoiceSettings({
       </Button>
 
       <Modal isOpen={isOpen} onClose={close} title="Giọng đọc mẫu">
-        <div className="space-y-5">
+        <div className="space-y-4">
+          <div
+            className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
+            aria-live="polite"
+          >
+            {selectedVoice
+              ? voiceTitle(selectedVoice)
+              : preferences.voiceId
+                ? "Giọng đã lưu"
+                : "Giọng mặc định"}{" "}
+            · {formatSpeed(preferences.speed)}
+          </div>
           <section aria-labelledby="voice-speed-heading" className="space-y-3">
             <div className="flex items-baseline justify-between gap-3">
               <h3
@@ -274,93 +307,101 @@ export function ReadingVoiceSettings({
             ) : (
               <div
                 aria-labelledby="voice-choice-heading"
-                className="max-h-64 space-y-2 overflow-y-auto pr-1"
+                className="max-h-[min(24dvh,220px)] divide-y divide-border overflow-y-auto overscroll-contain rounded-control border border-border bg-white p-1"
                 role="radiogroup"
               >
-                {loadState.data.voices.filter(matchesFilter).map((voice) => {
+                {filteredVoices.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-muted">
+                    Không có giọng phù hợp với bộ lọc.
+                  </p>
+                ) : null}
+                {filteredVoices.map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
                   return (
-                    <button
-                      aria-checked={selected}
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-card border-2 p-3 text-left transition",
-                        selected
-                          ? "border-primary bg-cream font-semibold"
-                          : "border-border bg-white font-semibold hover:border-primary hover:bg-cream",
-                      )}
+                    <label
                       key={voice.voice_id}
-                      onClick={() =>
-                        change({
-                          voiceId:
-                            voice.voice_id === defaultVoiceId
-                              ? null
-                              : voice.voice_id,
-                        })
-                      }
-                      role="radio"
-                      type="button"
+                      className={cn(
+                        "flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2",
+                        selected ? "bg-sky" : "bg-white hover:bg-cream",
+                      )}
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-body text-ink">
+                        <span className="block break-words text-sm font-bold text-ink">
                           {voiceTitle(voice)}
                         </span>
                         {voiceDetails(voice) ? (
-                          <span className="block truncate text-label font-medium text-muted">
+                          <span className="block break-words text-sm text-muted">
                             {voiceDetails(voice)}
                           </span>
                         ) : null}
                       </span>
-                      {selected ? (
-                        <Check
-                          aria-hidden="true"
-                          className="size-5 shrink-0 text-primary"
-                        />
-                      ) : null}
-                    </button>
+                      <input
+                        type="radio"
+                        name="viread-voice"
+                        className="size-4 shrink-0 accent-primary"
+                        checked={selected}
+                        onChange={() =>
+                          change({
+                            voiceId:
+                              voice.voice_id === defaultVoiceId
+                                ? null
+                                : voice.voice_id,
+                          })
+                        }
+                      />
+                    </label>
                   );
                 })}
               </div>
             )}
-            {loadState.status === "ready" &&
-            !loadState.data.voices.some(isYouthful) ? (
-              <p className="text-label text-muted">
-                Chưa có giọng được xác nhận là trẻ trung trong danh sách hiện
-                tại.
-              </p>
-            ) : null}
-            <Button onClick={() => change({ voiceId: null })} variant="quiet">
-              Dùng giọng mặc định
-            </Button>
           </section>
 
-          <Button
-            className="w-full"
-            onClick={() => {
-              const generation = ++previewGenerationRef.current;
-              if (isPreviewing) {
-                onStopPreview();
-                return;
-              }
-              setPreviewError(false);
-              void Promise.resolve()
-                .then(() => onPreview(PREVIEW_TEXT))
-                .catch((error: unknown) => {
-                  if (
-                    mountedRef.current &&
-                    generation === previewGenerationRef.current &&
-                    !(error instanceof Error && error.name === "AbortError")
-                  )
-                    setPreviewError(true);
-                });
-            }}
-            variant="secondary"
-          >
-            <Volume2 aria-hidden="true" className="size-5" />
-            {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
-          </Button>
+          <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-cream pt-3">
+            <Button
+              className="w-auto!"
+              size="compact"
+              onClick={() => change({ voiceId: null })}
+              variant="quiet"
+            >
+              Dùng giọng mặc định
+            </Button>
+            <Button
+              className="w-auto!"
+              size="compact"
+              onClick={() => {
+                const generation = ++previewGenerationRef.current;
+                if (isPreviewing) {
+                  onStopPreview();
+                  return;
+                }
+                setPreviewError(false);
+                void Promise.resolve()
+                  .then(() => onPreview(PREVIEW_TEXT))
+                  .catch((error: unknown) => {
+                    if (
+                      mountedRef.current &&
+                      generation === previewGenerationRef.current &&
+                      !(error instanceof Error && error.name === "AbortError")
+                    )
+                      setPreviewError(true);
+                  });
+              }}
+              variant="primary"
+            >
+              <Volume2 aria-hidden="true" className="size-5" />
+              {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
+            </Button>
+          </footer>
           {previewError ? (
             <p role="alert" className="text-body text-muted">
               Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.
+            </p>
+          ) : fallbackNotice ? (
+            <p
+              role="status"
+              className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
+            >
+              {fallbackNotice}
             </p>
           ) : null}
         </div>

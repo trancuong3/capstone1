@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
+import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -44,6 +45,9 @@ export interface TextToSpeechOptions {
   readonly speed?: number;
   readonly timeoutMs?: number;
 }
+
+export { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+export type { SynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 
 export interface SpeechToTextOptions {
   readonly filename?: string;
@@ -276,6 +280,14 @@ export function createSpeechService(): SpeechService {
           const audio = await response.blob();
           signal.throwIfAborted();
           if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
+          const resolvedVoiceId =
+            response.headers.get("x-resolved-voice-id")?.trim() || null;
+          const usedFallbackVoice =
+            response.headers.get("x-voice-fallback") === "1";
+          setSynthesizedAudioMeta(audio, {
+            resolvedVoiceId,
+            usedFallbackVoice,
+          });
           return audio;
         },
         options.signal,

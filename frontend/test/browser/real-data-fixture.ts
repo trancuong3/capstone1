@@ -204,6 +204,18 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       verified_by: verified ? ids.parent : null,
     };
   }
+  const difficultPracticeAttempts: Record<string, unknown>[] = [];
+  const difficultWordState: {
+    normalized_word: string;
+    display_text: string;
+    practice_status?: string;
+    practice_attempts_count?: number;
+    practice_correct_count?: number;
+    consecutive_correct_count?: number;
+    last_practiced_at?: string | null;
+    last_practice_status?: string | null;
+    [key: string]: unknown;
+  } = { ...word };
   await page.context().route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -593,8 +605,115 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         },
         state.reportStatus,
       );
+    if (
+      path.startsWith(`/system/difficult-words/${ids.child}/practice/history`)
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      return respond(route, {
+        storage_ready: true,
+        items: difficultPracticeAttempts,
+      });
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/evaluate` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: difficultWordState.normalized_word,
+        display_text: difficultWordState.display_text,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "COMPLETED",
+        assessment_status: "CORRECT",
+        recognition_source: "SERVER_STT",
+        spoken_transcript: difficultWordState.display_text,
+        confidence: null,
+        audio_duration_ms: 820,
+        assessment_version: 1,
+        evidence_word_ids: [ids.revision],
+        persistence_backend: "READING_EVENT",
+        resolved_in_session: true,
+        started_at: timestamp,
+        completed_at: timestamp,
+        feedback_message: "Chính xác rồi! Con giỏi lắm!",
+        word_progress: {
+          normalized_word: difficultWordState.normalized_word,
+          practice_status: "COMPLETED",
+          practice_attempts_count: 1,
+          practice_correct_count: 1,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: 1,
+          required_consecutive_correct: 1,
+          last_practiced_at: timestamp,
+          last_practice_status: "CORRECT",
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultWordState.practice_status = "COMPLETED";
+      difficultWordState.practice_attempts_count = 1;
+      difficultWordState.practice_correct_count = 1;
+      difficultWordState.consecutive_correct_count = 1;
+      difficultWordState.last_practiced_at = timestamp;
+      difficultWordState.last_practice_status = "CORRECT";
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/start` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const body = route.request().postDataJSON() as {
+        normalized_word: string;
+        display_text?: string;
+        evidence_word_ids?: string[];
+      };
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: body.normalized_word,
+        display_text: body.display_text ?? body.normalized_word,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "STARTED",
+        assessment_status: null,
+        recognition_source: null,
+        spoken_transcript: null,
+        confidence: null,
+        audio_duration_ms: null,
+        assessment_version: 1,
+        evidence_word_ids: body.evidence_word_ids ?? [ids.revision],
+        started_at: timestamp,
+        completed_at: null,
+        feedback_message: null,
+        word_progress: {
+          normalized_word: body.normalized_word,
+          practice_status: "IN_PROGRESS",
+          practice_attempts_count: difficultPracticeAttempts.length,
+          practice_correct_count: difficultPracticeAttempts.length,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: difficultPracticeAttempts.length,
+          required_consecutive_correct: 2,
+          last_practiced_at: null,
+          last_practice_status: null,
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
     if (path.startsWith("/system/difficult-words/"))
-      return respond(route, [word], state.reportStatus);
+      return respond(route, [difficultWordState], state.reportStatus);
     if (path === "/books/admin/catalog")
       return respond(
         route,

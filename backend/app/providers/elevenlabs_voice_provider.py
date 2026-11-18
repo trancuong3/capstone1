@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import os
 import re
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -31,6 +32,8 @@ ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io/v1"
 # set ELEVENLABS_VOICE_ID to choose the product's intended voice.
 DEFAULT_VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 DEFAULT_MODEL_ID = "eleven_flash_v2_5"
+SHORT_TTS_CACHE_MAX_ENTRIES = 32
+SHORT_TTS_CACHE_MAX_BYTES = 8 * 1024 * 1024
 
 
 class VoiceProviderError(Exception):
@@ -55,6 +58,25 @@ class VoiceProviderUnavailable(VoiceProviderError):
 class SynthesizedAudio:
     content: bytes
     content_type: str
+    resolved_voice_id: str | None = None
+    used_fallback_voice: bool = False
+
+
+_unavailable_voices: set[tuple[str, str]] = set()
+_short_tts_cache: OrderedDict[str, SynthesizedAudio] = OrderedDict()
+_short_tts_cache_bytes = 0
+
+
+def clear_caches() -> None:
+    """Clear short-TTS cache and unavailable-voice fallback registry."""
+    global _short_tts_cache_bytes
+    _unavailable_voices.clear()
+    _short_tts_cache.clear()
+    _short_tts_cache_bytes = 0
+
+
+def is_voice_marked_unavailable(key_fingerprint: str | None, voice_id: str) -> bool:
+    return (key_fingerprint or "", voice_id) in _unavailable_voices
 
 
 @dataclass(frozen=True)
@@ -284,6 +306,65 @@ class ElevenLabsVoiceProvider:
             words=words,
         )
 
+    def _resolve_effective_voice(self, requested_voice_id: str | None) -> tuple[str, bool]:
+        requested = self._voice_id(requested_voice_id)
+        fp = self._key_fingerprint or ""
+        if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
+            return DEFAULT_VOICE_ID, True
+        return requested, False
+
+    def _mark_voice_unavailable(self, voice_id: str) -> None:
+        if voice_id != DEFAULT_VOICE_ID:
+            _unavailable_voices.add((self._key_fingerprint or "", voice_id))
+
+    @staticmethod
+    def _short_cache_put(cache_key: str, item: SynthesizedAudio) -> None:
+        global _short_tts_cache_bytes
+        size = len(item.content)
+        if size > SHORT_TTS_CACHE_MAX_BYTES // 2:
+            return
+        previous = _short_tts_cache.pop(cache_key, None)
+        if previous is not None:
+            _short_tts_cache_bytes -= len(previous.content)
+        _short_tts_cache[cache_key] = item
+        _short_tts_cache_bytes += size
+        while _short_tts_cache and (
+            len(_short_tts_cache) > SHORT_TTS_CACHE_MAX_ENTRIES
+            or _short_tts_cache_bytes > SHORT_TTS_CACHE_MAX_BYTES
+        ):
+            _, evicted = _short_tts_cache.popitem(last=False)
+            _short_tts_cache_bytes -= len(evicted.content)
+
+    def _tts_error_from_response(self, response: httpx.Response) -> VoiceProviderError:
+        if response.status_code == 429 or response.status_code >= 500:
+            logger.warning(
+                "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
+                response.status_code,
+                response.headers.get("request-id", "unavailable"),
+            )
+            return VoiceProviderUnavailable()
+        if response.status_code == 401:
+            try:
+                error_payload = response.json()
+            except ValueError:
+                error_payload = None
+            provider_code, provider_status, raw_message = self._provider_error_fields(error_payload)
+            classification = " ".join(
+                value or "" for value in (provider_code, provider_status, raw_message)
+            ).lower()
+            if any(marker in classification for marker in ("quota", "credit", "limit", "exceeded")):
+                logger.warning(
+                    "ElevenLabs TTS quota exceeded: status=401, request_id=%s",
+                    response.headers.get("request-id", "unavailable"),
+                )
+                return VoiceProviderUnavailable()
+        logger.error(
+            "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
+            response.status_code,
+            response.headers.get("request-id", "unavailable"),
+        )
+        return VoiceProviderError()
+
     async def synthesize(
         self,
         *,
@@ -291,55 +372,92 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None = None,
         speed: float = 1.0,
     ) -> SynthesizedAudio:
-        voice_id = quote(self._voice_id(requested_voice_id), safe="")
+        headers = self._headers()
         model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
+        settings = self._tts_voice_settings(model_id, speed)
+        normalized_speed = settings["speed"]
+        fp = self._key_fingerprint or ""
+
+        voice_id, used_fallback = self._resolve_effective_voice(requested_voice_id)
+        candidates = (
+            [(voice_id, used_fallback)]
+            if voice_id == DEFAULT_VOICE_ID
+            else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
+        )
+
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
-            "voice_settings": self._tts_voice_settings(model_id, speed),
+            "voice_settings": settings,
         }
         if "flash" in model_id or "turbo" in model_id:
             payload["language_code"] = "vi"
+
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0, connect=10.0)
             ) as client:
-                response = await client.post(
-                    f"{ELEVENLABS_API_BASE_URL}/text-to-speech/{voice_id}",
-                    headers={**self._headers(), "Accept": "audio/mpeg"},
-                    params={"output_format": "mp3_44100_128"},
-                    json=payload,
-                )
+                for idx, (candidate_voice, candidate_fallback) in enumerate(candidates):
+                    cache_key = hashlib.sha256(
+                        "\x1f".join(
+                            (fp, candidate_voice, model_id, f"{normalized_speed:.2f}", text)
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    cached = _short_tts_cache.get(cache_key)
+                    if cached is not None:
+                        _short_tts_cache.move_to_end(cache_key)
+                        return SynthesizedAudio(
+                            content=cached.content,
+                            content_type=cached.content_type,
+                            resolved_voice_id=candidate_voice,
+                            used_fallback_voice=candidate_fallback,
+                        )
+
+                    response = await client.post(
+                        f"{ELEVENLABS_API_BASE_URL}/text-to-speech/{quote(candidate_voice, safe='')}",
+                        headers={**headers, "Accept": "audio/mpeg"},
+                        params={"output_format": "mp3_44100_128"},
+                        json=payload,
+                    )
+                    if (
+                        response.status_code in {402, 404}
+                        and candidate_voice != DEFAULT_VOICE_ID
+                        and idx + 1 < len(candidates)
+                    ):
+                        logger.warning(
+                            "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                            response.status_code,
+                        )
+                        self._mark_voice_unavailable(candidate_voice)
+                        continue
+                    if response.is_error:
+                        raise self._tts_error_from_response(response)
+
+                    content_type = response.headers.get("content-type", "audio/mpeg").split(";", 1)[0]
+                    if not content_type.startswith("audio/") or not response.content:
+                        logger.warning(
+                            "ElevenLabs TTS returned unexpected response: content_type=%s, bytes=%d",
+                            content_type,
+                            len(response.content),
+                        )
+                        raise VoiceProviderError()
+                    item = SynthesizedAudio(
+                        content=response.content,
+                        content_type=content_type,
+                        resolved_voice_id=candidate_voice,
+                        used_fallback_voice=candidate_fallback,
+                    )
+                    self._short_cache_put(cache_key, item)
+                    return item
+        except VoiceProviderError:
+            raise
         except httpx.TimeoutException as error:
             raise VoiceProviderUnavailable() from error
         except httpx.HTTPError as error:
             logger.exception("ElevenLabs TTS network/HTTP client error")
             raise VoiceProviderError() from error
 
-        if response.status_code == 429 or response.status_code >= 500:
-            logger.warning(
-                "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
-                response.status_code,
-                response.headers.get("request-id", "unavailable"),
-            )
-            raise VoiceProviderUnavailable()
-        if response.is_error:
-            logger.error(
-                "ElevenLabs TTS HTTP error: status=%s, request_id=%s",
-                response.status_code,
-                response.headers.get("request-id", "unavailable"),
-            )
-            raise VoiceProviderError()
-
-        content_type = response.headers.get("content-type", "audio/mpeg").split(";", 1)[0]
-        if not content_type.startswith("audio/") or not response.content:
-            logger.warning(
-                "ElevenLabs TTS returned unexpected response: content_type=%s, bytes=%d",
-                content_type,
-                len(response.content),
-            )
-            raise VoiceProviderError()
-        return SynthesizedAudio(content=response.content, content_type=content_type)
+        raise VoiceProviderError()
 
     @staticmethod
     def _tts_voice_settings(model_id: str, speed: float) -> dict[str, float]:

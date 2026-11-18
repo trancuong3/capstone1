@@ -115,6 +115,12 @@ describe("Report components with typed data and real API adapters", () => {
   it("reports unavailable practice without audio playback, API writes or evidence claims", async () => {
     const user = userEvent.setup();
     const snapshot = structuredClone(difficultWordFixture);
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json(
+        { detail: "DIFFICULT_WORD_PRACTICE_STORAGE_UNAVAILABLE" },
+        { status: 503 },
+      ),
+    );
     render(
       <AppServicesProvider>
         <DifficultWordItem
@@ -126,11 +132,29 @@ describe("Report components with typed data and real API adapters", () => {
     await user.click(screen.getByRole("button", { name: "Luyện từ" }));
     expect(
       await screen.findByText(
-        "Chức năng luyện từ chưa sẵn sàng. Chưa phát âm thanh hoặc thêm bằng chứng.",
+        "Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ.",
       ),
     ).toBeInTheDocument();
-    expect(apiFetchFixture).not.toHaveBeenCalled();
+    expect(apiFetchFixture).toHaveBeenCalledTimes(1);
     expect(difficultWordFixture).toEqual(snapshot);
     expect(screen.getByRole("button", { name: "Luyện từ" })).toBeEnabled();
+  });
+
+  it("delegates practice action to onPractice handler when provided by difficult words screen", async () => {
+    const user = userEvent.setup();
+    const onPracticeSpy = vi.fn();
+    render(
+      <AppServicesProvider>
+        <DifficultWordItem
+          childId={TEST_CHILD_ID}
+          onPractice={onPracticeSpy}
+          word={difficultWordFixture}
+        />
+      </AppServicesProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Luyện từ" }));
+    expect(onPracticeSpy).toHaveBeenCalledTimes(1);
+    expect(onPracticeSpy).toHaveBeenCalledWith(difficultWordFixture);
+    expect(apiFetchFixture).not.toHaveBeenCalled();
   });
 });

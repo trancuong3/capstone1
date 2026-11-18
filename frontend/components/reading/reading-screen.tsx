@@ -1,8 +1,15 @@
 "use client";
 
-import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
+import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
@@ -11,7 +18,15 @@ import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { classifyRetryTranscript } from "@/lib/reading/retry-word-recognition";
-import { hasUnusableAudio } from "@/lib/reading/audio-quality";
+import {
+  hasShortWordBlockingAudioIssue,
+  hasUnusableAudio,
+} from "@/lib/reading/audio-quality";
+import {
+  SHORT_WORD_CAPTURE_CONFIG,
+  hasShortWordSpeechActivity,
+  shouldAutoStopShortWordCapture,
+} from "@/lib/reading/word-practice-engine";
 import {
   hasUsableTranscript,
   hasUsableBrowserConfidence,
@@ -157,10 +172,7 @@ interface FrozenPageAssessment extends PageTranscriptBucket {
 }
 type RetryWordItem = RetryWordRecord;
 
-const RETRY_CAPTURE_MAX_MS = 12_000;
-const RETRY_CAPTURE_MIN_MS = 3_500;
-const RETRY_CAPTURE_SILENCE_MS = 1_500;
-const RETRY_CAPTURE_POLL_MS = 200;
+const RETRY_CAPTURE_POLL_MS = SHORT_WORD_CAPTURE_CONFIG.pollIntervalMs;
 
 // Measure recorder duration with a monotonic clock from capture callbacks.
 function getRetryCaptureTimeMs(): number {
@@ -205,6 +217,8 @@ function ReadingSessionScreen({
         : "connected",
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const pickerShouldReturnToReading = useRef(false);
+  const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
   const tutorResumeListeningRef = useRef(false);
@@ -283,6 +297,7 @@ function ReadingSessionScreen({
   const retryCaptureAttemptRef = useRef(0);
   const retryCaptureStartedAtRef = useRef(0);
   const retrySpeechObservedRef = useRef(false);
+  const retryBrowserPulseRef = useRef(false);
   const retrySilenceStartedAtRef = useRef<number | null>(null);
   const pendingRetryEventRef = useRef<PendingRetryEvent | null>(null);
   const retryEvaluatedCountsRef = useRef(new Map<string, number>());
@@ -1423,10 +1438,9 @@ function ReadingSessionScreen({
         clearRetryCaptureTimeout();
         retryRecorderActiveRef.current = false;
         isUsingRecorderRef.current = false;
-        // A permission preflight can leave getUserMedia's stream open even
-        // before MediaRecorder starts. Release its tracks so the microphone is
-        // genuinely off for the whole sample, then reacquire after playback.
-        speechRecorder.cancel();
+        // Keep any permission-preflight stream warm in retry mode while stopping
+        // active recording so TTS never gets captured and subsequent mic start is instant.
+        speechRecorder.cancel({ retainStream: true });
         await stopBrowserRecognition();
         if (mountedRef.current) setIsMicRecording(false);
       } else if (
@@ -1839,7 +1853,34 @@ function ReadingSessionScreen({
     void playRetryInstructionAndListen(candidate, speechRecorder.prepare());
   }
 
-  async function navigateWithinRange(targetIndex: number) {
+  async function openPagePicker() {
+    if (!pageProgress || retryMode || isBusy) return;
+    pickerShouldReturnToReading.current =
+      uiState === "reading" &&
+      !isMicRecording &&
+      !isListeningActiveRef.current &&
+      countdown === null;
+    if (uiState === "reading") await pauseReading();
+    if (mountedRef.current) {
+      setPageNavigationError(null);
+      setPickerIndex(pageProgress.current_index);
+    }
+  }
+
+  function closePagePicker() {
+    if (isBusy) return;
+    setPickerIndex(null);
+    setPageNavigationError(null);
+    if (pickerShouldReturnToReading.current && uiState === "paused") {
+      setUiState("reading");
+      setCanonicalState("PAGE_READY");
+    }
+  }
+
+  async function navigateWithinRange(
+    targetIndex: number,
+    confirmSelection = false,
+  ) {
     if (
       !pageProgress ||
       (isBusy && !speechPlayer.isPlaying) ||
@@ -1849,7 +1890,16 @@ function ReadingSessionScreen({
       return;
     }
     const target = pageProgress.pages[targetIndex];
-    if (!target || target.page_id === page?.page_id) return;
+    if (!target) return;
+    if (target.page_id === page?.page_id) {
+      if (confirmSelection) {
+        setPickerIndex(null);
+        setPageNavigationError(null);
+        setUiState("reading");
+        setCanonicalState("PAGE_READY");
+      }
+      return;
+    }
 
     setIsBusy(true);
     setPageNavigationError(null);
@@ -1897,6 +1947,10 @@ function ReadingSessionScreen({
       resetPagePresentation();
       setPage(nextPage);
       setCurrentWordId(nextPage.words[0]?.word_id ?? null);
+      if (confirmSelection) {
+        setPickerIndex(null);
+        setCanonicalState("PAGE_READY");
+      }
       setCountdown(null);
       setUiState("reading");
     } catch {
@@ -2275,6 +2329,36 @@ function ReadingSessionScreen({
       .map((word) => word.text)
       .join(" ");
   }
+  function resolveRetrySentenceContext(candidate: RetryWordCandidate): string {
+    const pageWords = pageWordsByRevisionRef.current.get(
+      `${candidate.pageId}:${candidate.pageRevisionId}`,
+    );
+    if (!pageWords || pageWords.length === 0) {
+      return candidate.contextPhrase;
+    }
+    const targetIdx = pageWords.findIndex(
+      (item) => item.word_id === candidate.wordId,
+    );
+    if (targetIdx < 0) return candidate.contextPhrase;
+    let start = targetIdx;
+    for (let i = targetIdx - 1; i >= Math.max(0, targetIdx - 4); i -= 1) {
+      if (/[.!?…]["”']?$/.test(pageWords[i].text)) break;
+      start = i;
+    }
+    let end = targetIdx;
+    for (
+      let i = targetIdx + 1;
+      i <= Math.min(pageWords.length - 1, targetIdx + 4);
+      i += 1
+    ) {
+      end = i;
+      if (/[.!?…]["”']?$/.test(pageWords[i].text)) break;
+    }
+    return pageWords
+      .slice(start, end + 1)
+      .map((item) => item.text)
+      .join(" ");
+  }
   function buildRetryCandidates(): RetryWordCandidate[] {
     return sortRetryWordRecords(retryWordsByIdRef.current.values())
       .filter(
@@ -2409,7 +2493,9 @@ function ReadingSessionScreen({
 
     retryCaptureStartedAtRef.current = getRetryCaptureTimeMs();
     retrySpeechObservedRef.current = false;
+    retryBrowserPulseRef.current = false;
     retrySilenceStartedAtRef.current = null;
+    let prevSpeechDurationMs = 0;
 
     const checkCapture = () => {
       retryCaptureTimeoutRef.current = null;
@@ -2424,10 +2510,19 @@ function ReadingSessionScreen({
 
       const now = getRetryCaptureTimeMs();
       const elapsed = now - retryCaptureStartedAtRef.current;
-      if (speechRecorder.getIsSpeaking()) {
-        // In the browser-recognition path, wait for a recognition result before
-        // treating volume as speech onset. Once speech is confirmed, however,
-        // keep the silence timer aligned with the actual microphone signal.
+      const quality = speechRecorder.getQuality?.();
+      const browserPulse = retryBrowserPulseRef.current;
+      retryBrowserPulseRef.current = false;
+      const acousticActive = hasShortWordSpeechActivity({
+        isSpeakingNow: speechRecorder.getIsSpeaking(),
+        audioLevel: speechRecorder.audioLevel,
+        quality,
+        hasLiveBrowserSpeech: browserPulse,
+        speechObserved: retrySpeechObservedRef.current,
+        previousSpeechDurationMs: prevSpeechDurationMs,
+      });
+      prevSpeechDurationMs = quality?.speechDurationMs ?? prevSpeechDurationMs;
+      if (speechRecorder.getIsSpeaking() || acousticActive) {
         if (useAudioActivityForSpeechOnset || retrySpeechObservedRef.current) {
           retrySpeechObservedRef.current = true;
           retrySilenceStartedAtRef.current = null;
@@ -2444,10 +2539,11 @@ function ReadingSessionScreen({
           ? 0
           : now - retrySilenceStartedAtRef.current;
       if (
-        elapsed >= RETRY_CAPTURE_MAX_MS ||
-        (elapsed >= RETRY_CAPTURE_MIN_MS &&
-          retrySpeechObservedRef.current &&
-          silenceElapsed >= RETRY_CAPTURE_SILENCE_MS)
+        shouldAutoStopShortWordCapture({
+          elapsedMs: elapsed,
+          speechObserved: retrySpeechObservedRef.current,
+          silenceElapsedMs: silenceElapsed,
+        })
       ) {
         void stopRetryListeningAndTranscribe(candidate);
         return;
@@ -2560,6 +2656,7 @@ function ReadingSessionScreen({
       return;
     }
 
+    speechRecorder.cancel();
     setRetryFeedback("not-recognized");
     setLatestTranscript(
       `ViRead chưa nhận diện được từ "${candidate.text}". Bé có thể nghe lại rồi thử thêm nhé. Từ này chưa bị đánh dấu sai.`,
@@ -2645,7 +2742,7 @@ function ReadingSessionScreen({
         setLatestTranscript(
           incorrectCount >= 3
             ? `Mình đã luyện từ "${pending.candidate.text}" ba lần. Mình chuyển sang phần tiếp theo nhé.`
-            : `Bé vừa đọc: "${pending.transcript}". Mình thử lại từ "${pending.candidate.text}" nhé.`,
+            : `Đọc sai — bé vừa đọc: "${pending.transcript}". Mình thử lại từ "${pending.candidate.text}" nhé.`,
         );
         const generation = retryAttemptIdRef.current;
         window.setTimeout(() => {
@@ -2736,10 +2833,17 @@ function ReadingSessionScreen({
       setIsMicRecording(false);
     }
 
+    const retryContextPhrase = resolveRetrySentenceContext(candidate);
+    const classifyOptions = { contextPhrase: retryContextPhrase };
+
     if (!retryRecorderActiveRef.current) {
       if (
         browserTranscript &&
-        classifyRetryTranscript(candidate.text, browserTranscript) === "CORRECT"
+        classifyRetryTranscript(
+          candidate.text,
+          browserTranscript,
+          classifyOptions,
+        ) === "CORRECT"
       ) {
         retryProcessingRef.current = true;
         await confirmRetryWord(candidate, browserTranscript, true);
@@ -2776,10 +2880,14 @@ function ReadingSessionScreen({
         return;
       }
 
-      if (hasUnusableAudio(speechRecorder.getQuality?.())) {
+      const captureQuality = speechRecorder.getQuality?.();
+      if (hasShortWordBlockingAudioIssue(captureQuality)) {
         retryUnclearCapture(
           candidate,
-          "Âm thanh chưa đủ rõ. Bé thử đọc lại nhé.",
+          captureQuality?.status === "SILENCE" ||
+            captureQuality?.status === "NO_AUDIO"
+            ? ""
+            : "Âm thanh chưa đủ rõ. Bé thử đọc lại nhé.",
         );
         return;
       }
@@ -2787,8 +2895,11 @@ function ReadingSessionScreen({
       if (!recording || recording.size === 0) {
         if (
           browserTranscript &&
-          classifyRetryTranscript(candidate.text, browserTranscript) ===
-            "CORRECT"
+          classifyRetryTranscript(
+            candidate.text,
+            browserTranscript,
+            classifyOptions,
+          ) === "CORRECT"
         ) {
           advancePending = await confirmRetryWord(
             candidate,
@@ -2818,11 +2929,8 @@ function ReadingSessionScreen({
 
       let transcript = transcription.text?.trim() ?? "";
 
-      let status = hasUsableTranscript(
-        transcription,
-        speechRecorder.getQuality?.(),
-      )
-        ? classifyRetryTranscript(candidate.text, transcript)
+      let status = hasUsableTranscript(transcription)
+        ? classifyRetryTranscript(candidate.text, transcript, classifyOptions)
         : "UNCERTAIN";
 
       // Lần 2: chỉ chạy khi kết quả lần đầu không rõ.
@@ -2852,14 +2960,21 @@ function ReadingSessionScreen({
           // (logprob >= −0.5), indicating a clear pronunciation even though
           // the browser recognizer missed it.
           const corroborated =
-            classifyRetryTranscript(candidate.text, browserTranscript) ===
-            "CORRECT";
+            classifyRetryTranscript(
+              candidate.text,
+              browserTranscript,
+              classifyOptions,
+            ) === "CORRECT";
           const highConfidenceKeyterm =
             hasHighConfidenceKeytermResult(transcription);
           status =
-            hasUsableTranscript(transcription, speechRecorder.getQuality?.()) &&
+            hasUsableTranscript(transcription) &&
             (corroborated || highConfidenceKeyterm)
-              ? classifyRetryTranscript(candidate.text, transcript)
+              ? classifyRetryTranscript(
+                  candidate.text,
+                  transcript,
+                  classifyOptions,
+                )
               : "UNCERTAIN";
         } catch (fallbackError) {
           if (controller.signal.aborted) return;
@@ -2889,7 +3004,11 @@ function ReadingSessionScreen({
 
       if (
         browserTranscript &&
-        classifyRetryTranscript(candidate.text, browserTranscript) === "CORRECT"
+        classifyRetryTranscript(
+          candidate.text,
+          browserTranscript,
+          classifyOptions,
+        ) === "CORRECT"
       ) {
         // The live recognizer and the recorded-audio recognizer disagree.
         // Keep the word unscored and let the child try again instead of
@@ -2985,7 +3104,7 @@ function ReadingSessionScreen({
     // Bắt đầu ghi âm dự phòng nếu chưa có bản ghi đang chạy.
     if (!retryRecorderActiveRef.current) {
       try {
-        await speechRecorder.start({ retainStream: true });
+        await speechRecorder.start({ retainStream: true, mode: "short-word" });
         retryRecorderActiveRef.current = true;
       } catch (error) {
         console.warn("[RETRY RECORDER ERROR]", error);
@@ -3088,6 +3207,7 @@ function ReadingSessionScreen({
         // Browser recognition is a better speech-onset signal than raw
         // microphone volume, which can be triggered by room noise.
         retrySpeechObservedRef.current = true;
+        retryBrowserPulseRef.current = true;
 
         if (result.isFinal) {
           finalTranscripts.push(text);
@@ -3110,8 +3230,12 @@ function ReadingSessionScreen({
 
       // A browser match can stop capture early, but the saved recording stays
       // the source used to score this retry.
+      const retryContextPhrase = resolveRetrySentenceContext(candidate);
       const matchingFinal = finalTranscripts.find(
-        (text) => classifyRetryTranscript(candidate.text, text) === "CORRECT",
+        (text) =>
+          classifyRetryTranscript(candidate.text, text, {
+            contextPhrase: retryContextPhrase,
+          }) === "CORRECT",
       );
       if (matchingFinal) {
         void stopRetryListeningAndTranscribe(candidate, matchingFinal);
@@ -3222,7 +3346,7 @@ function ReadingSessionScreen({
       recognition.start();
 
       setIsMicRecording(true);
-      scheduleRetryCaptureStop(candidate, false);
+      scheduleRetryCaptureStop(candidate, true);
 
       return true;
     } catch (error) {
@@ -3315,6 +3439,13 @@ function ReadingSessionScreen({
         }
       });
 
+      if (!isCurrent()) {
+        return;
+      }
+
+      await new Promise<void>((resolve) =>
+        window.setTimeout(resolve, SHORT_WORD_CAPTURE_CONFIG.acousticSettleMs),
+      );
       if (!isCurrent()) {
         return;
       }
@@ -3885,9 +4016,9 @@ function ReadingSessionScreen({
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2 px-4 pt-3 sm:px-8">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-2 px-4 py-4 sm:px-8">
         {pageProgress ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-white p-2">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3 [&>div:first-child]:mr-auto">
             <div className="min-w-0">
               <p className="font-semibold text-ink">
                 Phạm vi đọc: Trang {pageProgress.start_page_number}–
@@ -3946,7 +4077,7 @@ function ReadingSessionScreen({
             ) : null}
           </div>
         ) : null}
-        {pageNavigationError ? (
+        {pageNavigationError && pickerIndex === null ? (
           <div className="flex flex-wrap items-center gap-2">
             <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
             {retryMode ? (
@@ -3960,6 +4091,11 @@ function ReadingSessionScreen({
             ) : null}
           </div>
         ) : null}
+        {speechPlayer.fallbackNotice ? (
+          <StatusMessage tone="warning">
+            {speechPlayer.fallbackNotice}
+          </StatusMessage>
+        ) : null}
         {pageProgress &&
         pageProgress.current_index === pageProgress.total_pages - 1 ? (
           <p className="text-sm font-semibold text-primary" role="status">
@@ -3971,6 +4107,9 @@ function ReadingSessionScreen({
 
       <ReadingLayout
         audioLevel={speechRecorder.audioLevel}
+        book={book}
+        child={child}
+        onChoosePage={() => void openPagePicker()}
         bookTitle={book.title}
         previewSnapshot={previewSnapshot}
         controlsDisabled={
@@ -4023,6 +4162,7 @@ function ReadingSessionScreen({
         voiceSettings={
           <ReadingVoiceSettings
             disabled={isMicRecording}
+            fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}
             onPreview={handleVoicePreview}
             onStopPreview={() => speechPlayer.stop()}
@@ -4096,7 +4236,52 @@ function ReadingSessionScreen({
           </StatusBanner>
         ) : null}
       </ReadingLayout>
-      {retryPrompt ? (
+      {pickerIndex !== null && pageProgress ? (
+        <Modal
+          isOpen
+          title="Bé đang đọc trang nào?"
+          tone="paper"
+          showCloseButton={false}
+          closeOnEscape={!isBusy}
+          onClose={closePagePicker}
+        >
+          <div className="grid max-h-[45vh] grid-cols-3 gap-3 overflow-y-auto p-1">
+            {pageProgress.pages.map((item, index) => (
+              <button
+                key={item.page_id}
+                type="button"
+                aria-pressed={pickerIndex === index}
+                disabled={isBusy}
+                onClick={() => setPickerIndex(index)}
+                className="flex min-h-24 flex-col items-start justify-center gap-3 rounded-control border border-border bg-cream p-4 text-sm font-bold text-ink aria-pressed:border-primary aria-pressed:bg-sky"
+              >
+                <BookOpen aria-hidden="true" className="size-6 text-primary" />
+                Trang {item.page_number}
+              </button>
+            ))}
+          </div>
+          {pageNavigationError && (
+            <StatusMessage className="mt-4" tone="error">
+              {pageNavigationError}
+            </StatusMessage>
+          )}
+          <Button
+            className="mt-6"
+            isLoading={isBusy}
+            onClick={() => void navigateWithinRange(pickerIndex, true)}
+          >
+            Đúng trang này
+          </Button>
+          <Button
+            className="mt-2"
+            variant="quiet"
+            disabled={isBusy}
+            onClick={closePagePicker}
+          >
+            Hủy
+          </Button>
+        </Modal>
+      ) : retryPrompt ? (
         <ReadingStatusDialog
           body={`Bé còn ${retryCandidates.length} từ cần đọc lại. Mình cùng luyện thêm một lần nhé!`}
           onClose={() => undefined}
@@ -4187,7 +4372,13 @@ function ReadingSessionScreen({
             onClick: () => void retryPageMatch(),
           }}
           secondaryAction={{
+            label: "Chọn trang",
+            disabled: !pageProgress || isBusy,
+            onClick: () => void openPagePicker(),
+          }}
+          tertiaryAction={{
             label: "Kết thúc an toàn",
+            variant: "quiet",
             onClick: () => setConfirmFinish(true),
           }}
           title="Mình chưa nhìn rõ trang sách"

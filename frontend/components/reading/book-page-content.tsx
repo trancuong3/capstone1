@@ -16,6 +16,7 @@ interface BookPageContentProps {
   selfCorrectedWordIds?: ReadonlySet<string>;
   unresolvedWordIds?: ReadonlySet<string>;
   uncertainWordIds?: ReadonlySet<string>;
+  activeRetryWordId?: string | null;
   page: ReadingPageDTO;
   comparisonResult?: Pick<ComparisonResult, "alignment" | "summary"> | null;
   currentWordId?: string | null;
@@ -34,12 +35,12 @@ export function BookPageContent({
   selfCorrectedWordIds,
   unresolvedWordIds,
   uncertainWordIds,
+  activeRetryWordId = null,
   page,
   comparisonResult,
   currentWordId = null,
   correctWordIds,
   mispronouncedWordIds,
-  spokenWords,
   onWordClick,
   readOnly = false,
   skippedWordIds,
@@ -86,10 +87,10 @@ export function BookPageContent({
     <div
       ref={contentRef}
       data-reading-panel="text"
-      className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-card bg-white/70 p-3 shadow-inner sm:mt-6 sm:p-6"
+      className="mt-4 min-h-0 flex-1 py-3 sm:mt-6 sm:py-2"
     >
       {hasWords ? (
-        <p className="text-[22px] font-semibold leading-[1.8] text-ink sm:text-[28px] sm:leading-[1.6]">
+        <p className="text-balance text-[24px] font-bold leading-[2] text-ink sm:text-[30px] sm:leading-[1.85]">
           {page.words.map((word, index) => {
             const wordIndex = word.word_index ?? index;
 
@@ -126,7 +127,16 @@ export function BookPageContent({
             const isPreviewMatched =
               previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
 
+            const isSelfCorrected = Boolean(
+              selfCorrectedWordIds?.has(word.word_id),
+            );
+            const isActiveRetry =
+              !readOnly &&
+              !isSelfCorrected &&
+              activeRetryWordId === word.word_id;
+
             const isSkipped = Boolean(
+              !isSelfCorrected &&
               !correctWordIds?.has(word.word_id) &&
               (skippedWordIds?.has(word.word_id) ||
                 alignment?.status === "DELETE" ||
@@ -154,6 +164,7 @@ export function BookPageContent({
             );
 
             const isMispronounced = Boolean(
+              !isSelfCorrected &&
               !correctWordIds?.has(word.word_id) &&
               (mispronouncedWordIds?.has(word.word_id) ||
                 alignment?.status === "SUBSTITUTE" ||
@@ -161,6 +172,7 @@ export function BookPageContent({
             );
 
             const isCorrect = Boolean(
+              isSelfCorrected ||
               correctWordIds?.has(word.word_id) ||
               alignment?.status === "MATCH" ||
               previewStatus?.status === "MATCH" ||
@@ -192,9 +204,10 @@ export function BookPageContent({
               (index === 0 || startsLine) &&
               (page.indented_line_indices ?? []).includes(lineIndex);
 
-            const presentationState: WordPresentationState =
-              selfCorrectedWordIds?.has(word.word_id)
-                ? "self-corrected"
+            const presentationState: WordPresentationState = isSelfCorrected
+              ? "self-corrected"
+              : isActiveRetry
+                ? "current"
                 : unresolvedWordIds?.has(word.word_id)
                   ? "unresolved"
                   : uncertainWordIds?.has(word.word_id) ||
@@ -209,23 +222,23 @@ export function BookPageContent({
                           : isCurrent
                             ? "current"
                             : "unread";
-            const statusClass = [
-              "self-corrected",
-              "unresolved",
-              "uncertain",
-            ].includes(presentationState)
-              ? wordPresentationClasses[presentationState]
-              : isSkipped
-                ? "bg-red-200 text-red-900 ring-1 ring-red-500"
-                : isMispronounced
-                  ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
-                  : isRepeated
-                    ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
-                    : isHesitation
-                      ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                      : isCorrect
-                        ? "bg-green-200 text-green-900 ring-1 ring-green-500"
-                        : "";
+            const statusClass = isActiveRetry
+              ? wordPresentationClasses.current
+              : ["self-corrected", "unresolved", "uncertain"].includes(
+                    presentationState,
+                  )
+                ? wordPresentationClasses[presentationState]
+                : isSkipped
+                  ? "bg-red-200 text-red-900 ring-1 ring-red-500"
+                  : isMispronounced
+                    ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
+                    : isRepeated
+                      ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
+                      : isHesitation
+                        ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
+                        : isCorrect
+                          ? "bg-success-surface text-success-ink"
+                          : "";
 
             const hasConfirmedStatus =
               isSkipped ||
@@ -239,7 +252,7 @@ export function BookPageContent({
                   "scale-105 font-semibold shadow-sm",
                   hasConfirmedStatus
                     ? "ring-2 ring-current"
-                    : "bg-yellow-300 text-primary ring-2 ring-yellow-500",
+                    : "bg-highlight text-ink ring-2 ring-amber-600",
                 )
               : "";
 
@@ -290,9 +303,7 @@ export function BookPageContent({
                     !isCurrent &&
                       isMispronounced &&
                       "font-semibold border-b-2 border-orange-500",
-                    !isCurrent &&
-                      isCorrect &&
-                      "font-semibold border-b-2 border-emerald-400",
+                    !isCurrent && isCorrect && "font-bold",
                     !isCurrent &&
                       !hasConfirmedStatus &&
                       !readOnly &&

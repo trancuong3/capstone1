@@ -805,3 +805,12 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     ).toBeInTheDocument();
   });
 });
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+    useSearchParams: () => new URLSearchParams(),
+  };
+});

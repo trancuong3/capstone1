@@ -260,6 +260,78 @@ class SentenceShooterRepository:
         )
         return list(result.scalars().all())
 
+    async def next_round_for_number(
+        self,
+        session_id: UUID,
+        round_number: int,
+    ) -> GameRound | None:
+        return await self.db.scalar(
+            select(GameRound).where(
+                GameRound.GameSessionId == session_id,
+                GameRound.RoundNumber == round_number,
+                GameRound.Status == "IN_PROGRESS",
+            )
+        )
+
+    async def load_shot_bundle(
+        self,
+        actor_id: UUID,
+        session_id: UUID,
+        round_id: UUID,
+        request_id: UUID,
+    ) -> tuple[GameSession, GameRound, dict | None] | None:
+        attempt_subquery = (
+            select(GameAttempt.ResultSnapshot)
+            .where(
+                GameAttempt.GameSessionId == session_id,
+                GameAttempt.RequestId == request_id,
+            )
+            .limit(1)
+            .scalar_subquery()
+        )
+        row = (
+            await self.db.execute(
+                select(
+                    GameSession,
+                    GameRound,
+                    attempt_subquery.label("duplicate_snapshot"),
+                )
+                .join(ChildProfile, ChildProfile.Id == GameSession.ChildProfileId)
+                .join(Profile, Profile.Id == ChildProfile.ParentId)
+                .join(GameRound, GameRound.GameSessionId == GameSession.Id)
+                .where(
+                    Profile.Id == actor_id,
+                    Profile.Role == "parent",
+                    GameSession.Id == session_id,
+                    GameRound.Id == round_id,
+                )
+                .with_for_update(of=(GameSession, GameRound))
+            )
+        ).first()
+        if row is None:
+            return None
+        return row[0], row[1], row[2]
+
+    async def load_result_bundle(
+        self,
+        actor_id: UUID,
+        session_id: UUID,
+    ) -> tuple[GameSession, Book] | None:
+        row = (
+            await self.db.execute(
+                select(GameSession, Book)
+                .join(ChildProfile, ChildProfile.Id == GameSession.ChildProfileId)
+                .join(Profile, Profile.Id == ChildProfile.ParentId)
+                .join(Book, Book.Id == GameSession.BookId)
+                .where(
+                    Profile.Id == actor_id,
+                    Profile.Role == "parent",
+                    GameSession.Id == session_id,
+                )
+            )
+        ).first()
+        return (row[0], row[1]) if row is not None else None
+
     async def attempt(
         self,
         session_id: UUID,

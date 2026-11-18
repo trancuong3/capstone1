@@ -23,10 +23,12 @@ import httpx
 
 from app.providers.elevenlabs_voice_provider import (
     DEFAULT_MODEL_ID,
+    DEFAULT_VOICE_ID,
     ELEVENLABS_API_BASE_URL,
     ElevenLabsVoiceProvider,
     VoiceProviderError,
     VoiceProviderUnavailable,
+    clear_caches as clear_base_caches,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,8 @@ class TimedSpeech:
     content_type: str
     duration_seconds: float
     words: tuple[TimedWord, ...]
+    resolved_voice_id: str | None = None
+    used_fallback_voice: bool = False
 
 
 class _TimedSpeechCache:
@@ -95,6 +99,7 @@ def clear_caches() -> None:
     """Used by tests."""
     _audio_cache.clear()
     _voice_cache.clear()
+    clear_base_caches()
 
 
 def _text_field(value: Any, limit: int = 200) -> str | None:
@@ -263,20 +268,18 @@ class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
         speed: float = 1.0,
     ) -> TimedSpeech:
         headers = self._headers()
-        voice_id = self._voice_id(requested_voice_id)
         model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
         text = " ".join(words)
         settings = self._tts_voice_settings(model_id, speed)
         speed = settings["speed"]
+        fp = self._key_fingerprint or ""
 
-        cache_key = hashlib.sha256(
-            "\x1f".join(
-                (self._key_fingerprint or "", voice_id, model_id, f"{speed:.2f}", text)
-            ).encode("utf-8")
-        ).hexdigest()
-        cached = _audio_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        voice_id, used_fallback = self._resolve_effective_voice(requested_voice_id)
+        candidates = (
+            [(voice_id, used_fallback)]
+            if voice_id == DEFAULT_VOICE_ID
+            else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
+        )
 
         payload: dict[str, Any] = {
             "text": text,
@@ -290,40 +293,74 @@ class ElevenLabsStudioProvider(ElevenLabsVoiceProvider):
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(60.0, connect=10.0)
             ) as client:
-                response = await client.post(
-                    f"{ELEVENLABS_API_BASE_URL}/text-to-speech/{quote(voice_id, safe='')}/with-timestamps",
-                    headers={**headers, "Accept": "application/json"},
-                    params={"output_format": "mp3_44100_128"},
-                    json=payload,
-                )
+                for idx, (candidate_voice, candidate_fallback) in enumerate(candidates):
+                    cache_key = hashlib.sha256(
+                        "\x1f".join(
+                            (fp, candidate_voice, model_id, f"{speed:.2f}", text)
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    cached = _audio_cache.get(cache_key)
+                    if cached is not None:
+                        if (
+                            cached.resolved_voice_id == candidate_voice
+                            and cached.used_fallback_voice == candidate_fallback
+                        ):
+                            return cached
+                        return TimedSpeech(
+                            audio=cached.audio,
+                            content_type=cached.content_type,
+                            duration_seconds=cached.duration_seconds,
+                            words=cached.words,
+                            resolved_voice_id=candidate_voice,
+                            used_fallback_voice=candidate_fallback,
+                        )
+
+                    response = await client.post(
+                        f"{ELEVENLABS_API_BASE_URL}/text-to-speech/{quote(candidate_voice, safe='')}/with-timestamps",
+                        headers={**headers, "Accept": "application/json"},
+                        params={"output_format": "mp3_44100_128"},
+                        json=payload,
+                    )
+                    if (
+                        response.status_code in {402, 404}
+                        and candidate_voice != DEFAULT_VOICE_ID
+                        and idx + 1 < len(candidates)
+                    ):
+                        logger.warning(
+                            "ElevenLabs timed voice unavailable (status=%s); falling back to default voice",
+                            response.status_code,
+                        )
+                        self._mark_voice_unavailable(candidate_voice)
+                        continue
+                    if response.is_error:
+                        raise self._tts_error_from_response(response)
+
+                    try:
+                        data = response.json()
+                        audio = base64.b64decode(data["audio_base64"], validate=True)
+                        timings, duration = word_timings(words, data.get("alignment"))
+                    except VoiceProviderError:
+                        raise
+                    except (ValueError, KeyError, TypeError) as error:
+                        raise VoiceProviderError() from error
+                    if not audio:
+                        raise VoiceProviderError()
+
+                    result = TimedSpeech(
+                        audio=audio,
+                        content_type="audio/mpeg",
+                        duration_seconds=duration,
+                        words=tuple(timings),
+                        resolved_voice_id=candidate_voice,
+                        used_fallback_voice=candidate_fallback,
+                    )
+                    _audio_cache.put(cache_key, result)
+                    return result
+        except VoiceProviderError:
+            raise
         except httpx.TimeoutException as error:
             raise VoiceProviderUnavailable() from error
         except httpx.HTTPError as error:
             raise VoiceProviderError() from error
 
-        if response.status_code == 429 or response.status_code >= 500:
-            logger.warning("ElevenLabs timed TTS HTTP error: status=%s", response.status_code)
-            raise VoiceProviderUnavailable()
-        if response.is_error:
-            logger.error("ElevenLabs timed TTS HTTP error: status=%s", response.status_code)
-            raise VoiceProviderError()
-
-        try:
-            data = response.json()
-            audio = base64.b64decode(data["audio_base64"], validate=True)
-            timings, duration = word_timings(words, data.get("alignment"))
-        except VoiceProviderError:
-            raise
-        except (ValueError, KeyError, TypeError) as error:
-            raise VoiceProviderError() from error
-        if not audio:
-            raise VoiceProviderError()
-
-        result = TimedSpeech(
-            audio=audio,
-            content_type="audio/mpeg",
-            duration_seconds=duration,
-            words=tuple(timings),
-        )
-        _audio_cache.put(cache_key, result)
-        return result
+        raise VoiceProviderError()

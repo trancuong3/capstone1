@@ -10,8 +10,6 @@ import {
   Check,
   CheckCircle2,
   Clock3,
-  Heart,
-  ListChecks,
   Mail,
   RefreshCw,
   Target,
@@ -23,7 +21,7 @@ import { FormPage } from "@/components/common/form-page";
 import { InformationField } from "@/components/common/information-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
-import { BookCover } from "@/components/books/book-cover";
+import { VerifiedBookPicker } from "./verified-book-picker";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
@@ -126,7 +124,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
   const [reminders, setReminders] = useState<ReadingReminderDTO[]>([]);
   const [due, setDue] = useState<ReadingReminderOccurrenceDTO[]>([]);
-  const [books, setBooks] = useState<BookListItemDTO[]>([]);
+  const [books, setBooks] = useState<BookListItemDTO[] | null>([]);
   const [loadingChildren, setLoadingChildren] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -161,6 +159,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const [editingReminderId, setEditingReminderId] = useState("");
 
   const currentRequestKey = `${childId}:${reloadKey}`;
+  const hasReadingData =
+    Boolean(childId) && loadedRequestKey.startsWith(`${childId}:`);
   const isReadingDataLoading =
     Boolean(childId) && settledRequestKey !== currentRequestKey;
   const selectedChild = useMemo(
@@ -212,7 +212,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       service.listPlans(childId, controller.signal),
       service.listCollections(childId, controller.signal),
       service.listReminders(childId, controller.signal),
-      bookService.list({ grade: selectedChild?.grade }),
+      bookService.list({ grade: selectedChild?.grade }).catch(() => null),
     ])
       .then(([goalRows, planRows, savedRows, reminderRows, bookRows]) => {
         if (!active) return;
@@ -495,7 +495,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanBookId(event.target.value)}
                 >
                   <option value="">Chưa chọn sách</option>
-                  {books.map((book) => (
+                  {(books ?? []).map((book) => (
                     <option key={book.id} value={book.id}>
                       {book.title}
                     </option>
@@ -795,12 +795,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <header className="flex flex-wrap items-end justify-between gap-5">
         <div className="min-w-0 flex-1">
-          <p className="mb-2 text-label font-bold text-primary">
-            ViRead · Thói quen đọc
-          </p>
           <h1 className="text-heading font-extrabold leading-tight text-ink">
             Quản lý đọc sách
           </h1>
@@ -869,9 +866,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </p>
       ) : null}
 
-      {childId &&
-      !isReadingDataLoading &&
-      loadedRequestKey === currentRequestKey ? (
+      {hasReadingData ? (
         <>
           <section
             aria-label="Tổng quan thói quen đọc"
@@ -1315,104 +1310,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </tbody>
                 </table>
               )}
-              <details className="mt-4">
-                <summary className="cursor-pointer rounded-control bg-sky px-4 py-3 text-center font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary">
-                  Thêm từ thư viện sách đã xác minh
-                </summary>
-                {books.length === 0 ? (
-                  <p className="text-label text-muted">
-                    Hiện chưa có sách khả dụng phù hợp với lớp của bé.
-                  </p>
-                ) : (
-                  <div className="mt-4 grid gap-4">
-                    {books.map((book) => {
-                      const favorite = collections.some(
-                        (entry) =>
-                          entry.book_id === book.id &&
-                          entry.collection_type === "FAVORITE",
-                      );
-                      const planned = collections.some(
-                        (entry) =>
-                          entry.book_id === book.id &&
-                          entry.collection_type === "WANT_TO_READ",
-                      );
-                      return (
-                        <article
-                          key={book.id}
-                          className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-white p-4 transition-colors hover:border-primary/40 sm:p-5"
-                        >
-                          <div className="flex min-w-0 items-center gap-4">
-                            <BookCover book={book} size="medium" />
-                            <div className="min-w-0">
-                              <h4 className="line-clamp-3 text-lg font-extrabold leading-snug text-ink">
-                                {book.title}
-                              </h4>
-                              <p className="mt-2 line-clamp-2 text-label text-muted">
-                                {book.author ?? "Tác giả đang cập nhật"}
-                              </p>
-                              <p className="mt-2 text-label font-bold text-primary">
-                                Lớp {book.min_grade}–{book.max_grade}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="mt-auto grid grid-cols-2 gap-2">
-                            <button
-                              className={
-                                actionClass +
-                                " w-full " +
-                                (favorite
-                                  ? " bg-sky text-primary"
-                                  : " border border-border")
-                              }
-                              type="button"
-                              disabled={Boolean(busyKey)}
-                              aria-pressed={favorite}
-                              onClick={() =>
-                                void toggleCollection(book.id, "FAVORITE")
-                              }
-                            >
-                              <Heart className="size-4" />
-                              {favorite ? "Đã yêu thích" : "Yêu thích"}
-                            </button>
-                            <button
-                              className={
-                                actionClass +
-                                " w-full " +
-                                (planned
-                                  ? " bg-sky text-primary"
-                                  : " border border-border")
-                              }
-                              type="button"
-                              disabled={Boolean(busyKey)}
-                              aria-pressed={planned}
-                              onClick={() =>
-                                void toggleCollection(book.id, "WANT_TO_READ")
-                              }
-                            >
-                              <ListChecks className="size-4" />
-                              {planned ? "Đã lưu đọc" : "Muốn đọc"}
-                            </button>
-                            <Link
-                              className={
-                                actionClass +
-                                " col-span-2 w-full bg-primary text-white"
-                              }
-                              href={
-                                "/books/" +
-                                encodeURIComponent(book.id) +
-                                "?childId=" +
-                                encodeURIComponent(childId)
-                              }
-                            >
-                              Mở sách
-                            </Link>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-              </details>
+              <VerifiedBookPicker
+                key={childId}
+                books={books}
+                busy={Boolean(busyKey) || isReadingDataLoading}
+                childId={childId}
+                collections={collections}
+                onReload={() => setReloadKey((key) => key + 1)}
+                onToggle={(bookId, type) => void toggleCollection(bookId, type)}
+              />
             </section>
 
             <section className="min-w-0 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6">

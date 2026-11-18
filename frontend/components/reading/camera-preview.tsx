@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Camera,
-  CheckCircle2,
-  RefreshCw,
-  Sparkles,
-  VideoOff,
-} from "lucide-react";
+import { Sparkles, VideoOff } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -311,19 +305,9 @@ export function CameraPreview({
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-4 py-3">
-        <p className="inline-flex items-center gap-2 text-body font-semibold text-ink">
-          {isMatched ? (
-            <CheckCircle2
-              aria-hidden="true"
-              className="size-6 text-success-ink"
-            />
-          ) : (
-            <Camera aria-hidden="true" className="size-6 text-primary" />
-          )}
-          <span>
-            {scanResult?.message ??
-              "Đặt trang sách trọn trong khung để bắt đầu."}
-          </span>
+        <p className="text-body font-semibold text-ink">
+          {scanResult?.message ??
+            "Đặt trang sách nằm gọn vào trong khung viền bên dưới để bắt đầu nhé!"}
         </p>
 
         {scanResult && (
@@ -384,7 +368,7 @@ export function CameraPreview({
                 {/* 4 góc định vị khung đặt sách */}
                 <div className="flex items-center justify-between">
                   <span className="rounded-control bg-white/90 px-3 py-1 text-[13px] font-semibold text-ink shadow">
-                    📖 Khung đặt trang sách
+                    Khung đặt trang sách
                   </span>
                   {isScanning ? (
                     <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-semibold text-white shadow">
@@ -412,24 +396,22 @@ export function CameraPreview({
       </div>
 
       {/* Thanh nút điều khiển Camera */}
-      <div className="flex flex-wrap items-center justify-center gap-3">
+      <div className="flex flex-col gap-4">
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady || isScanning}
           isLoading={isScanning}
           onClick={() => void captureAndScan()}
         >
-          <Camera aria-hidden="true" className="size-5" />
           Xác nhận khung & Quét trang
         </Button>
 
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady}
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
           {autoScan ? "Tự động quét: ĐANG BẬT" : "Tự động quét: ĐANG TẮT"}
         </Button>
       </div>

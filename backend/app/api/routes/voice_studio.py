@@ -9,7 +9,11 @@ from fastapi import APIRouter, Depends
 from app.api.deps import get_current_parent_id
 from app.api.routes.voice import provider_http_exception
 from app.providers.elevenlabs_studio_provider import ElevenLabsStudioProvider
-from app.providers.elevenlabs_voice_provider import DEFAULT_VOICE_ID, VoiceProviderError
+from app.providers.elevenlabs_voice_provider import (
+    DEFAULT_VOICE_ID,
+    VoiceProviderError,
+    is_voice_marked_unavailable,
+)
 from app.schemas.voice_studio import (
     TimedSpeechRead,
     TimedSpeechRequest,
@@ -27,13 +31,23 @@ async def list_voices(
 ) -> VoiceListRead:
     """List the voices the ElevenLabs account can use (cached for ten minutes)."""
 
+    provider = ElevenLabsStudioProvider()
     try:
-        voices = await ElevenLabsStudioProvider().list_voices()
+        voices = await provider.list_voices()
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
+    configured_default = os.getenv("ELEVENLABS_VOICE_ID", "").strip() or DEFAULT_VOICE_ID
+    available_ids = {voice["voice_id"] for voice in voices}
+    if (
+        is_voice_marked_unavailable(provider._key_fingerprint, configured_default)
+        or (voices and configured_default not in available_ids and DEFAULT_VOICE_ID in available_ids)
+    ):
+        resolved_default = DEFAULT_VOICE_ID
+    else:
+        resolved_default = configured_default
     return VoiceListRead(
         voices=[VoiceInfoRead(**voice) for voice in voices],
-        default_voice_id=os.getenv("ELEVENLABS_VOICE_ID", "").strip() or DEFAULT_VOICE_ID,
+        default_voice_id=resolved_default,
     )
 
 
@@ -60,4 +74,6 @@ async def timed_text_to_speech(
             TimedWordRead(index=word.index, start=word.start, end=word.end)
             for word in speech.words
         ],
+        resolved_voice_id=speech.resolved_voice_id,
+        used_fallback_voice=speech.used_fallback_voice,
     )

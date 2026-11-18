@@ -101,20 +101,20 @@ def _normalize_upload_image(raw_bytes: bytes) -> tuple[bytes, str]:
     """Validate and re-encode an uploaded image cleanly, stripping camera EXIF metadata."""
     if not raw_bytes or len(raw_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="INVALID_IMAGE",
         )
     try:
         with Image.open(BytesIO(raw_bytes)) as img:
             if (img.format or "").upper() not in ALLOWED_PIL_FORMATS:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="INVALID_IMAGE",
                 )
             width, height = img.size
             if width < 16 or height < 16 or width * height > MAX_IMAGE_PIXELS:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="INVALID_IMAGE",
                 )
             oriented = ImageOps.exif_transpose(img).convert("RGB")
@@ -129,7 +129,7 @@ def _normalize_upload_image(raw_bytes: bytes) -> tuple[bytes, str]:
         raise
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="INVALID_IMAGE",
         ) from exc
 
@@ -155,7 +155,7 @@ def _normalize_mime_type(image_bytes: bytes, declared_mime: str | None = None) -
         if declared_mime in {"image/jpeg", "image/png", "image/webp"}:
             return image_bytes, declared_mime
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="INVALID_IMAGE",
         )
 
@@ -400,7 +400,7 @@ class PictureDescriptionService:
             if spec is None:
                 await self.repository.db.rollback()
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="INVALID_SAMPLE",
                 )
             await self.repository.db.rollback()
@@ -414,7 +414,7 @@ class PictureDescriptionService:
             if book_page_id is None:
                 await self.repository.db.rollback()
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="BOOK_PAGE_REQUIRED",
                 )
             candidate = await self.repository.get_book_page_for_grade(
@@ -437,7 +437,7 @@ class PictureDescriptionService:
             await self.repository.db.rollback()
             if upload_bytes is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="IMAGE_FILE_REQUIRED",
                 )
             image_bytes, image_mime = _normalize_upload_image(upload_bytes)
@@ -445,7 +445,7 @@ class PictureDescriptionService:
         else:
             await self.repository.db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="INVALID_SOURCE_TYPE",
             )
 

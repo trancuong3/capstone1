@@ -54,6 +54,22 @@ class AuditLogResponse(AuditLogBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DifficultWordSourceRead(BaseModel):
+    book_id: UUID | None = None
+    book_title: str | None = None
+    book_author: str | None = None
+    min_grade: int | None = None
+    max_grade: int | None = None
+    book_cover_url: str | None = None
+    session_id: UUID | None = None
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+    page_number: int | None = None
+    word_id: UUID | None = None
+    context_phrase: str | None = None
+    last_seen_at: datetime
+
+
 class DifficultWordRead(BaseModel):
     normalized_word: str
     display_text: str
@@ -65,6 +81,28 @@ class DifficultWordRead(BaseModel):
     session_count: int = Field(ge=0)
     last_seen_at: datetime
     evidence_word_ids: list[UUID]
+    mispronunciation_count: int = Field(default=0, ge=0)
+    encounter_count: int = Field(default=0, ge=0)
+    practice_status: Literal[
+        "NOT_PRACTICED",
+        "IN_PROGRESS",
+        "NEEDS_MORE_PRACTICE",
+        "COMPLETED",
+    ] = "NOT_PRACTICED"
+    practice_attempts_count: int = Field(default=0, ge=0)
+    practice_correct_count: int = Field(default=0, ge=0)
+    practice_incorrect_count: int = Field(default=0, ge=0)
+    practice_uncertain_count: int = Field(default=0, ge=0)
+    consecutive_correct_count: int = Field(default=0, ge=0)
+    last_practiced_at: datetime | None = None
+    last_practice_status: Literal[
+        "CORRECT",
+        "INCORRECT",
+        "UNCERTAIN",
+        "NO_CLEAR_AUDIO",
+        "ENGINE_ERROR",
+    ] | None = None
+    sources: list[DifficultWordSourceRead] = Field(default_factory=list)
 
 
 class ProgressPeriodRead(BaseModel):

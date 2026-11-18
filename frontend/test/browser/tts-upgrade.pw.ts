@@ -454,7 +454,7 @@ test("Phase 3: browser fallback uses boundary events and stops safely", async ({
   });
   await expect(
     page.locator('[data-word-id="90000000-0000-4000-8000-000000000002"]'),
-  ).toHaveClass(/bg-yellow-300/);
+  ).toHaveAttribute("data-reading-state", "current");
   await page.screenshot({
     path: testInfo.outputPath("fallback-word-highlight.png"),
   });

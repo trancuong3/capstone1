@@ -134,7 +134,17 @@ export async function retryAdminBookUpload(
     failed,
     session.progress.map((item) =>
       failed.some((entry) => entry.client_id === item.client_id)
-        ? { ...item, status: "QUEUED", progress_percent: 0 }
+        ? {
+            ...item,
+            file_name:
+              item.file_name ??
+              failed.find((entry) => entry.client_id === item.client_id)
+                ?.file_name,
+            status: "QUEUED",
+            progress_percent: 0,
+            error_message: undefined,
+            summary_message: undefined,
+          }
         : item,
     ),
   );

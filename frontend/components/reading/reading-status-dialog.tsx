@@ -1,4 +1,3 @@
-import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/common/button";
@@ -18,6 +17,7 @@ interface ReadingStatusDialogProps {
   onClose: () => void;
   primaryAction: DialogAction;
   secondaryAction?: DialogAction;
+  tertiaryAction?: DialogAction;
   title: string;
 }
 
@@ -27,24 +27,18 @@ export function ReadingStatusDialog({
   onClose,
   primaryAction,
   secondaryAction,
+  tertiaryAction,
   title,
 }: ReadingStatusDialogProps) {
   return (
     <Modal
       closeOnEscape={closeOnEscape}
+      tone="paper"
       isOpen
       onClose={onClose}
       showCloseButton={false}
       title={title}
     >
-      <Image
-        alt=""
-        aria-hidden="true"
-        className="mx-auto -mt-3 mb-4"
-        height={72}
-        src="/images/figma/owl-mascot.svg"
-        width={72}
-      />
       <div className="text-body text-muted">{body}</div>
       <div className="mt-6 flex flex-col gap-3">
         <Button
@@ -63,6 +57,16 @@ export function ReadingStatusDialog({
             variant={secondaryAction.variant ?? "quiet"}
           >
             {secondaryAction.label}
+          </Button>
+        ) : null}
+        {tertiaryAction ? (
+          <Button
+            disabled={tertiaryAction.disabled}
+            isLoading={tertiaryAction.isLoading}
+            onClick={tertiaryAction.onClick}
+            variant={tertiaryAction.variant ?? "quiet"}
+          >
+            {tertiaryAction.label}
           </Button>
         ) : null}
       </div>

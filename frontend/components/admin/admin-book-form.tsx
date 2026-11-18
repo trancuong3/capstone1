@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
@@ -35,12 +35,14 @@ type AdminBookFormInitial = Omit<Partial<AdminBookCreateDTO>, "name"> & {
 };
 
 interface AdminBookFormProps {
+  cancelHref?: string;
   initial?: AdminBookFormInitial;
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
   submitLabel?: string;
 }
 
 export function AdminBookForm({
+  cancelHref = "/admin/books",
   initial,
   onSubmit,
   submitLabel = "Lưu sách",
@@ -75,14 +77,10 @@ export function AdminBookForm({
     }
   });
   return (
-    <form className="grid gap-5" noValidate onSubmit={submit}>
+    <form className="grid gap-4" noValidate onSubmit={submit}>
       {errors.root?.message ? (
         <StatusMessage tone="error">{errors.root.message}</StatusMessage>
       ) : null}
-      <p className="text-sm text-muted">
-        Tên sách và tiêu đề sách là hai thông tin riêng biệt; cả hai đều bắt
-        buộc.
-      </p>
       <TextField
         error={errors.name?.message}
         label="Tên sách *"
@@ -100,7 +98,7 @@ export function AdminBookForm({
         label="Tác giả"
         {...register("author")}
       />
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <SelectField
           error={errors.min_grade?.message}
           label="Khối lớp nhỏ nhất *"
@@ -138,14 +136,20 @@ export function AdminBookForm({
           ))}
         </SelectField>
       </div>
-      <Button
-        className="sm:w-auto sm:min-w-48"
-        disabled={isSubmitting}
-        isLoading={isSubmitting}
-        type="submit"
-      >
-        {isSubmitting ? "Đang lưu…" : submitLabel}
-      </Button>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Button
+          className="!max-w-none"
+          disabled={isSubmitting}
+          isLoading={isSubmitting}
+          size="compact"
+          type="submit"
+        >
+          {isSubmitting ? "Đang lưu…" : submitLabel}
+        </Button>
+        <ButtonLink href={cancelHref} size="compact" variant="quiet">
+          Hủy
+        </ButtonLink>
+      </div>
     </form>
   );
 }

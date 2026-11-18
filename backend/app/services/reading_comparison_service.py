@@ -25,7 +25,10 @@ class ReadingComparisonService:
         self.repository = ReadingComparisonRepository(db)
 
     @staticmethod
-    def _to_read(report: ReadingComparisonReport) -> ReadingComparisonReportRead:
+    def _to_read(
+        report: ReadingComparisonReport,
+        self_corrected_word_ids: list[UUID] | None = None,
+    ) -> ReadingComparisonReportRead:
         return ReadingComparisonReportRead(
             report_id=report.Id,
             session_id=report.SessionId,
@@ -36,6 +39,7 @@ class ReadingComparisonService:
             alignment=report.Alignment,
             summary=report.Summary,
             created_at=report.CreatedAt,
+            self_corrected_word_ids=self_corrected_word_ids or [],
         )
 
     async def compare(
@@ -150,15 +154,34 @@ class ReadingComparisonService:
     ) -> ReadingSessionReportsRead:
         await self.content.get_session_summary(session_id, actor_id)
         reports = await self.repository.list_for_session(session_id)
+        events = await self.content.repository.events_for_session(session_id)
         from app.services.reading_assessment import aggregate_assessment
         assessment = aggregate_assessment(
-            session_id, reports, await self.content.repository.events_for_session(session_id),
+            session_id, reports, events,
         )["assessment"]
+        corrected_by_page: dict[tuple[UUID, UUID], set[UUID]] = {}
+        for event in events:
+            if (
+                event.Type == "WORD_RETRY"
+                and event.Status == "CONFIRMED"
+                and event.WordId is not None
+            ):
+                key = (event.PageId, event.PageRevisionId)
+                corrected_by_page.setdefault(key, set()).add(event.WordId)
         return ReadingSessionReportsRead(
             assessment=assessment,
             session_id=session_id,
             total=len(reports),
-            reports=[self._to_read(report) for report in reports],
+            reports=[
+                self._to_read(
+                    report,
+                    sorted(
+                        corrected_by_page.get((report.PageId, report.PageRevisionId), set()),
+                        key=str,
+                    ),
+                )
+                for report in reports
+            ],
         )
 
     async def delete(

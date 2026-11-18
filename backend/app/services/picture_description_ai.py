@@ -5,10 +5,11 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from app.schemas.picture_description import (
     PictureEvaluationFeedbackRead,
@@ -16,11 +17,16 @@ from app.schemas.picture_description import (
     PictureVocabItem,
 )
 
+# Load backend/.env relative to this module so standalone CLI/scripts pick up keys.
+_BACKEND_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(dotenv_path=_BACKEND_ENV_PATH)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash"
-DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
-DEFAULT_TIMEOUT_SECONDS = 35
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
+DEFAULT_TIMEOUT_SECONDS = 20
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,8 @@ class PictureDescriptionAiConfig:
     primary_model: str
     fallback_model: str | None
     timeout_seconds: int
+    groq_api_key: str | None = None
+    groq_model: str = DEFAULT_GROQ_MODEL
 
 
 class PictureAiError(Exception):
@@ -70,7 +78,6 @@ def _timeout_seconds() -> int:
     return max(10, min(90, parsed))
 
 
-@lru_cache(maxsize=1)
 def get_picture_ai_config() -> PictureDescriptionAiConfig:
     primary = _secret("PICTURE_DESC_GEMINI_MODEL") or DEFAULT_PRIMARY_MODEL
     fallback = _secret("PICTURE_DESC_GEMINI_FALLBACK_MODEL")
@@ -78,16 +85,22 @@ def get_picture_ai_config() -> PictureDescriptionAiConfig:
         fallback = DEFAULT_FALLBACK_MODEL if primary != DEFAULT_FALLBACK_MODEL else None
     elif fallback == primary:
         fallback = None
+    groq_model = _secret("PICTURE_DESC_GROQ_MODEL") or DEFAULT_GROQ_MODEL
     return PictureDescriptionAiConfig(
         api_key=_secret("GEMINI_API_KEY"),
         primary_model=primary,
         fallback_model=fallback,
         timeout_seconds=_timeout_seconds(),
+        groq_api_key=_secret("GROQ_API_KEY"),
+        groq_model=groq_model,
     )
 
 
+get_picture_ai_config.cache_clear = lambda: None  # type: ignore[attr-defined]
+
+
 def _strip_json_fences(raw_text: str) -> str:
-    cleaned = raw_text.strip()
+    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*```$", "", cleaned)
@@ -190,30 +203,30 @@ def _compute_stars(score: int, is_relevant: bool) -> int:
 
 def _guide_schema() -> dict[str, Any]:
     return {
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-            "is_child_safe": {"type": "BOOLEAN"},
-            "safety_reason": {"type": "STRING"},
-            "scene_title": {"type": "STRING"},
-            "scene_summary": {"type": "STRING"},
+            "is_child_safe": {"type": "boolean"},
+            "safety_reason": {"type": "string"},
+            "scene_title": {"type": "string"},
+            "scene_summary": {"type": "string"},
             "guiding_questions": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
             "suggested_vocabulary": {
-                "type": "ARRAY",
+                "type": "array",
                 "items": {
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "word": {"type": "STRING"},
-                        "hint": {"type": "STRING"},
+                        "word": {"type": "string"},
+                        "hint": {"type": "string"},
                     },
                     "required": ["word", "hint"],
                 },
             },
             "model_sample_sentences": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
         },
         "required": [
@@ -229,27 +242,27 @@ def _guide_schema() -> dict[str, Any]:
 
 def _evaluation_schema() -> dict[str, Any]:
     return {
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-            "is_relevant": {"type": "BOOLEAN"},
-            "score_out_of_10": {"type": "INTEGER"},
+            "is_relevant": {"type": "boolean"},
+            "score_out_of_10": {"type": "integer"},
             "matched_details": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
             "missed_details": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
-            "praise_message": {"type": "STRING"},
-            "improvement_tip": {"type": "STRING"},
+            "praise_message": {"type": "string"},
+            "improvement_tip": {"type": "string"},
             "upgraded_sentences": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
             "vocabulary_highlights": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
+                "type": "array",
+                "items": {"type": "string"},
             },
         },
         "required": [
@@ -283,6 +296,99 @@ class GeminiPictureDescriptionAI:
             models.append(self.config.fallback_model)
         return models
 
+    async def _call_groq_vision(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        prompt: str,
+        encoded_image: str,
+        mime_type: str,
+        max_output_tokens: int,
+        temperature: float,
+    ) -> tuple[dict[str, Any], str]:
+        assert self.config.groq_api_key
+        request_body = {
+            "model": self.config.groq_model,
+            "temperature": temperature,
+            "max_completion_tokens": max_output_tokens,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{encoded_image}"},
+                        },
+                    ],
+                }
+            ],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.config.groq_api_key}",
+        }
+        try:
+            response = await client.post(GROQ_CHAT_COMPLETIONS_URL, headers=headers, json=request_body)
+        except httpx.TimeoutException:
+            raise PictureAiError(
+                code="AI_TIMEOUT",
+                status_code=504,
+                detail="AI_TIMEOUT",
+                retryable=True,
+            ) from None
+        except httpx.HTTPError:
+            raise PictureAiError(
+                code="AI_UNAVAILABLE",
+                status_code=502,
+                detail="AI_UNAVAILABLE",
+                retryable=True,
+            ) from None
+
+        if response.status_code in {401, 403}:
+            raise PictureAiError(
+                code="AI_AUTH_FAILED",
+                status_code=502,
+                detail="AI_AUTH_FAILED",
+                retryable=False,
+            )
+        if response.status_code == 429:
+            raise PictureAiError(
+                code="AI_RATE_LIMITED",
+                status_code=429,
+                detail="AI_RATE_LIMITED",
+                retryable=True,
+            )
+        if response.status_code != 200:
+            raise PictureAiError(
+                code="AI_UNAVAILABLE",
+                status_code=502,
+                detail="AI_UNAVAILABLE",
+                retryable=True,
+            )
+
+        try:
+            payload = response.json()
+            choices = payload.get("choices")
+            if not isinstance(choices, list) or not choices:
+                raise ValueError("Missing choices")
+            message = choices[0].get("message") if isinstance(choices[0], dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("Empty Groq content")
+            parsed = json.loads(_strip_json_fences(content))
+            if not isinstance(parsed, dict):
+                raise ValueError("Expected JSON object")
+            return parsed, self.config.groq_model
+        except (ValueError, TypeError, json.JSONDecodeError):
+            raise PictureAiError(
+                code="AI_INVALID_RESPONSE",
+                status_code=502,
+                detail="AI_UNAVAILABLE",
+                retryable=True,
+            ) from None
+
     async def _generate_json(
         self,
         *,
@@ -293,7 +399,7 @@ class GeminiPictureDescriptionAI:
         max_output_tokens: int,
         temperature: float,
     ) -> tuple[dict[str, Any], str]:
-        if not self.config.api_key:
+        if not self.config.api_key and not self.config.groq_api_key:
             raise PictureAiError(
                 code="AI_NOT_CONFIGURED",
                 status_code=503,
@@ -302,98 +408,113 @@ class GeminiPictureDescriptionAI:
             )
 
         encoded_image = base64.b64encode(image_bytes).decode("ascii")
-        request_body = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": encoded_image,
-                            }
-                        },
-                    ],
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_output_tokens,
-                "responseMimeType": "application/json",
-                "responseJsonSchema": response_schema,
-            },
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self.config.api_key,
-        }
-
         last_error: PictureAiError | None = None
         async with httpx.AsyncClient(
             timeout=self.config.timeout_seconds,
             transport=self._transport,
+            trust_env=False,
         ) as client:
-            for model in self._model_candidates():
-                endpoint = f"{GEMINI_API_BASE}/{model}:generateContent"
-                try:
-                    response = await client.post(endpoint, headers=headers, json=request_body)
-                except httpx.TimeoutException as exc:
-                    last_error = PictureAiError(
-                        code="AI_TIMEOUT",
-                        status_code=504,
-                        detail="AI_TIMEOUT",
-                        retryable=True,
-                    )
-                    continue
-                except httpx.HTTPError:
-                    last_error = PictureAiError(
-                        code="AI_UNAVAILABLE",
-                        status_code=502,
-                        detail="AI_UNAVAILABLE",
-                        retryable=True,
-                    )
-                    continue
+            if self.config.api_key:
+                request_body = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {"text": prompt},
+                                {
+                                    "inline_data": {
+                                        "mime_type": mime_type,
+                                        "data": encoded_image,
+                                    }
+                                },
+                            ],
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": temperature,
+                        "maxOutputTokens": max_output_tokens,
+                        "responseMimeType": "application/json",
+                        "responseJsonSchema": response_schema,
+                    },
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": self.config.api_key,
+                }
+                for model in self._model_candidates():
+                    endpoint = f"{GEMINI_API_BASE}/{model}:generateContent"
+                    try:
+                        response = await client.post(endpoint, headers=headers, json=request_body)
+                    except httpx.TimeoutException:
+                        last_error = PictureAiError(
+                            code="AI_TIMEOUT",
+                            status_code=504,
+                            detail="AI_TIMEOUT",
+                            retryable=True,
+                        )
+                        continue
+                    except httpx.HTTPError:
+                        last_error = PictureAiError(
+                            code="AI_UNAVAILABLE",
+                            status_code=502,
+                            detail="AI_UNAVAILABLE",
+                            retryable=True,
+                        )
+                        continue
 
-                if response.status_code in {401, 403}:
-                    raise PictureAiError(
-                        code="AI_AUTH_FAILED",
-                        status_code=502,
-                        detail="AI_AUTH_FAILED",
-                        retryable=False,
-                    )
-                if response.status_code == 429:
-                    last_error = PictureAiError(
-                        code="AI_RATE_LIMITED",
-                        status_code=429,
-                        detail="AI_RATE_LIMITED",
-                        retryable=True,
-                    )
-                    continue
-                if response.status_code >= 500 or response.status_code != 200:
-                    last_error = PictureAiError(
-                        code="AI_UNAVAILABLE",
-                        status_code=502,
-                        detail="AI_UNAVAILABLE",
-                        retryable=True,
-                    )
-                    continue
+                    if response.status_code in {401, 403}:
+                        raise PictureAiError(
+                            code="AI_AUTH_FAILED",
+                            status_code=502,
+                            detail="AI_AUTH_FAILED",
+                            retryable=False,
+                        )
+                    if response.status_code == 429:
+                        last_error = PictureAiError(
+                            code="AI_RATE_LIMITED",
+                            status_code=429,
+                            detail="AI_RATE_LIMITED",
+                            retryable=True,
+                        )
+                        continue
+                    if response.status_code >= 500 or response.status_code != 200:
+                        last_error = PictureAiError(
+                            code="AI_UNAVAILABLE",
+                            status_code=502,
+                            detail="AI_UNAVAILABLE",
+                            retryable=True,
+                        )
+                        continue
 
+                    try:
+                        payload = response.json()
+                        raw_text = _extract_candidate_text(payload)
+                        parsed = json.loads(raw_text)
+                        if not isinstance(parsed, dict):
+                            raise ValueError("Expected JSON object")
+                        return parsed, model
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        last_error = PictureAiError(
+                            code="AI_INVALID_RESPONSE",
+                            status_code=502,
+                            detail="AI_UNAVAILABLE",
+                            retryable=True,
+                        )
+                        continue
+
+            if self.config.groq_api_key:
                 try:
-                    payload = response.json()
-                    raw_text = _extract_candidate_text(payload)
-                    parsed = json.loads(raw_text)
-                    if not isinstance(parsed, dict):
-                        raise ValueError("Expected JSON object")
-                    return parsed, model
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    last_error = PictureAiError(
-                        code="AI_INVALID_RESPONSE",
-                        status_code=502,
-                        detail="AI_UNAVAILABLE",
-                        retryable=True,
+                    return await self._call_groq_vision(
+                        client,
+                        prompt=prompt,
+                        encoded_image=encoded_image,
+                        mime_type=mime_type,
+                        max_output_tokens=max_output_tokens,
+                        temperature=temperature,
                     )
-                    continue
+                except PictureAiError as groq_error:
+                    if last_error is None or not groq_error.retryable:
+                        last_error = groq_error
 
         if last_error is not None:
             raise last_error
