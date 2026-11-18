@@ -84,7 +84,19 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ACTIVE", query.params.values())
         self.assertIn("VERIFIED", query.params.values())
         self.assertIn("CONFIRMED", query.params.values())
-        self.assertIn("NOT_RECOMMENDED", query.params.values())
+        suitability_allowlist = next(
+            (
+                value
+                for value in query.params.values()
+                if isinstance(value, list) and "SUITABLE" in value
+            ),
+            None,
+        )
+        self.assertEqual(
+            suitability_allowlist,
+            ["SUITABLE", "SUITABLE_WITH_GUIDANCE", "REVIEW_REQUIRED"],
+        )
+        self.assertNotIn("NOT_RECOMMENDED", suitability_allowlist)
         self.assertIn("%mèo\\_\\%%", query.params.values())
 
     async def test_missing_book_returns_404(self):

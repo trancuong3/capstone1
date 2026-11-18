@@ -50,6 +50,7 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
             profile_role=AsyncMock(return_value="parent"),
             sessions_for_parent=AsyncMock(return_value=[]),
             child_belongs_to_parent=AsyncMock(return_value=True),
+            book_is_eligible=AsyncMock(return_value=True),
             verified_page=AsyncMock(return_value=page),
             all_pages_between_numbers=AsyncMock(return_value=[page]),
             verified_pages_between_numbers=AsyncMock(return_value=[page]),
