@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.policies.book_approval import BOOK_APPROVAL_POLICY_VERSION
 from sqlalchemy.dialects.postgresql import JSONB
+from app.database.role_cache import get_cached_profile_role
 
 
 class BookRepository:
@@ -37,7 +38,7 @@ class BookRepository:
         return list(result.scalars().all())
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def create(self, book: Book) -> Book:
         self.db.add(book)
@@ -70,7 +71,7 @@ class CatalogRepository:
         self.db = db
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await get_cached_profile_role(self.db, actor_id)
 
     @staticmethod
     def eligible_page():
@@ -342,15 +343,11 @@ class CatalogRepository:
         )
         return result.scalars().all()
 
+
 class AdminCatalogRepository(CatalogRepository):
     @staticmethod
     def _latest_revision_subquery(*, book_id: UUID | None = None):
-        """Return one revision per active page, preserving numeric revision order.
-
-        RevisionNo is stored as text. Ordering by the length and lexical value of
-        its normalized ASCII digits gives integer ordering without unsafe casts.
-        Invalid/zero legacy values fall back to creation time and id.
-        """
+        """Return one revision per active page, preserving numeric revision order."""
         normalized_number = func.regexp_replace(PageRevision.RevisionNo, r"^0+", "")
         positive_number = and_(
             PageRevision.RevisionNo.op("~")(r"^[0-9]+$"),
@@ -365,7 +362,10 @@ class AdminCatalogRepository(CatalogRepository):
             PageRevision.DraftText.label("draft_text"),
             PageRevision.VerifiedText.label("verified_text"),
             PageRevision.VerifiedAt.label("verified_at"),
-            PageRevision.ProcessingMeta.label("processing_meta"),
+            func.jsonb_build_object(
+                "ai_proofread_audit",
+                PageRevision.ProcessingMeta["ai_proofread_audit"],
+            ).label("processing_meta"),
             func.row_number()
             .over(
                 partition_by=PageRevision.PageId,
@@ -506,8 +506,6 @@ class AdminCatalogRepository(CatalogRepository):
         return result.all()
 
     async def pages(self, book_id: UUID):
-        # The Admin page list and catalog counts represent active OCR pages only.
-        # Retired pages remain in PostgreSQL for revisions and historical reading data.
         result = await self.db.execute(
             select(BookPage)
             .where(
@@ -529,9 +527,6 @@ class AdminCatalogRepository(CatalogRepository):
         )
         rows = list(result.scalars().all())
 
-        # RevisionNo is stored as TEXT, so UUID/timestamp order alone can put a
-        # concurrent lower revision ahead of a newer one. Match the OCR repository's
-        # established numeric ordering and keep malformed legacy revisions visible last.
         def revision_order(row: PageRevision) -> tuple[int, int]:
             value = str(row.RevisionNo)
             if value.isascii() and value.isdecimal() and int(value) > 0:

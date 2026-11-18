@@ -5,6 +5,50 @@ xuất bản; parent chọn bé rồi mở **Tổng quan → Hát vui**. Thêm b
 code, thêm SQL cho từng bài hoặc build lại ứng dụng. Không thu âm, xin quyền
 microphone, gọi STT/TTS, chấm điểm hoặc ghi lịch sử/tiến bộ đọc.
 
+## Nâng cấp từng tiếng: sử dụng và thứ tự triển khai
+
+Không thêm bảng/bucket/migration. MP3 và ảnh lưu tại Storage private
+`viread-karaoke`; metadata và lời có mốc nằm trong `karaoke_song_versions`
+(cột `lyrics` JSONB), catalog/trạng thái nằm trong `karaoke_songs`.
+`docs/karaoke-demo` chỉ là bộ file để admin tải lên, không được app tự đọc/seed.
+
+1. Triển khai backend hiểu v1/v2, sau đó frontend tương ứng. Giữ bài v1 hoạt động.
+2. Admin mở bản nháp, tải bản nghe thử rồi nhập `ngoi-sao-nho-v2.json` cùng
+   metadata `song-v2.json` trong bộ demo. Không cần tải lại MP3 nếu vẫn đúng file.
+3. Nghe đủ ba lượt ở 1×, đối chiếu từng tiếng, nốt ngân/đoạn nghỉ; editor cho phép
+   chỉnh ±50/100 ms, đánh dấu đầu/cuối, undo, lặp câu và nghe chậm. Phân tích
+   tín hiệu trong manifest chỉ là bằng chứng kỹ thuật, không thay duyệt bằng tai.
+4. Lưu, tải lại bản nghe thử đúng revision, kiểm tra điều kiện, bấm phát và xuất bản.
+   Thay MP3 xóa mốc cũ; cần căn lại. Không xuất bản v2 trước bước 1.
+5. Parent chọn hồ sơ bé → Hát vui → chọn bài → Bắt đầu hát. Bé có 3 giây chuẩn
+   bị, chữ tô theo tiếng, hát lại/lặp/chọn câu, tốc độ 0.75×/1× và mở rộng màn hát.
+   Âm lượng, ghi công/giấy phép nằm trong “Âm lượng và thông tin bài hát”.
+
+### Công cụ nghiệm thu nâng cấp (không tự chạy trong app/CI)
+
+- `scripts/check_karaoke_upgrade_readiness.py --project-ref <ref> --admin-email <email-đã-cho-phép>`: đọc trạng thái
+  dự án bằng transaction read-only, xác minh TLS; không in credential/email.
+- `scripts/analyze_karaoke_demo.mjs`: giải mã MP3 cục bộ ra PCM trong `.cache`,
+  không gọi API. Các mốc và phương pháp đo ở file `ngoi-sao-nho-v2-timing.json`.
+- `scripts/karaoke_upgrade_sessions.py`: chỉ chạy khi đã được chủ dự án cho
+  phép phiên tạm và xác nhận đúng project/tài khoản. `--create-approved-sessions`
+  cùng `--admin-email <email-đã-cho-phép>` tạo phiên cho admin đã chỉ định và parent hiện có hồ sơ; không tạo user,
+  không gửi email, đổi role/password. `--cleanup` logout scope local và xóa file
+  credential cache. Dùng Python trong `backend/.venv`; cần CA ở cache theo script.
+  Cơ chế tham khảo [generate link](https://supabase.com/docs/reference/python/auth-admin-generatelink),
+  [verify OTP](https://supabase.com/docs/reference/python/auth-verifyotp),
+  [local sign-out](https://supabase.com/docs/reference/python/auth-signout).
+- `node scripts/verify_karaoke_upgrade_live.mjs --check-live --allow-v1-draft
+--project-ref <ref>`: cần backend/frontend localhost và phiên tạm đã cho phép.
+  Kiểm tra Auth/API/MP3 Range thật, admin preview v2 trong bộ nhớ, màn bé dùng
+  publication v1. Có thể tạo đúng một nháp v1 từ bài mẫu, **không lưu/publish v2**.
+  Báo cáo/screenshot ở `.cache`, không commit token/signed URL/ảnh có dữ liệu thật.
+
+Để chạy local nghiệm thu bằng dữ liệu thật mà không kích hoạt các worker OCR/
+training ngoài phạm vi, đặt `APP_ENVIRONMENT=test`, `VIREAD_OCR_WARMUP_ENABLED=false`
+chỉ cho tiến trình backend; frontend đặt `PLAYWRIGHT_AUTH_FIXTURES=0`. Không sửa
+`.env` và không mang thiết lập kiểm thử này vào cấu hình production.
+
 ## 1. Cấu hình và migration
 
 Backend dùng cấu hình sẵn có trong `backend/.env`: `DATABASE_URL`,
@@ -73,6 +117,80 @@ trùng mã qua bộ backend test hiện có, không cần đổi workflow.
 hoặc chọn hồ sơ bé rồi mở **Hát vui**. Có thể ẩn qua UI nếu không muốn dùng demo.
 
 ## 2. Chạy ứng dụng local
+
+### Nâng cấp lời chạy theo từng tiếng (Phase 1–3, 2026-11-15)
+
+Đã bổ sung format lời v2 vào JSONB hiện có; nâng cấp này không có migration,
+bảng hoặc bucket mới. Bài v1 tiếp tục chạy theo câu. Chỉ bài được căn tiếng và
+xuất bản thành v2 mới chạy theo tiếng. Không tự nâng cấp dữ liệu Supabase.
+
+Luồng admin:
+
+1. Với bài đang xuất bản, chọn **Tạo bản nháp từ bản xuất bản**; bản bé đang
+   nghe được giữ đến khi admin xuất bản bản sửa.
+2. Nhập lời và căn đầu/cuối câu bằng công cụ cũ. Chọn **Căn từng tiếng dòng N**.
+   Lần đầu sẽ chuyển toàn bộ lời nháp sang v2; các tiếng mới chưa có mốc.
+3. Lưu nháp rồi tải bản nghe thử. Mở lại câu cần căn. **Nghe câu từ đầu**,
+   chọn tốc độ 0.75× hoặc 1×; **Lặp câu** giúp nghe lại cùng đoạn.
+4. Chọn vùng căn tiếng (viền focus), bấm Space hoặc **Đánh dấu tiếng tiếp theo**
+   khi nghe tới mỗi tiếng. Chọn **Đánh dấu cuối tiếng**/E cho tiếng cuối hoặc
+   chỗ có khoảng nghỉ. Mốc cuối tiếng trước từ đầu tiếng sau chỉ là gợi ý.
+   Chọn chip tiếng để sửa riêng đầu/cuối, tinh chỉnh ±50/100 ms, hoặc hoàn tác/Z.
+   Phím tắt không áp dụng khi đang nhập ô văn bản/số hoặc thao tác nút/select.
+5. **Tách cụm thành tiếng**, **Gộp với tiếng sau** và **Tách lại và căn lại câu**
+   hỗ trợ sửa cách chia lời. Sửa nội dung tiếng xóa mốc của tiếng đó; sửa lời
+   câu tách lại và xóa các mốc tiếng của câu. Thay MP3 xóa mọi mốc câu/tiếng.
+6. Có thể sao chép mốc từ câu giống lời: chọn câu nguồn, bấm **Sao chép và dịch
+   mốc**. Hai câu cần có đầu câu; kiểm tra cuối câu/nhịp và nghe lại sau sao chép.
+7. **Lưu nháp khi căn** lưu qua API hiện có và dừng bản nghe thử. Tải/nghe lại
+   bản đã lưu, kiểm tra điều kiện xuất bản. Bấm lỗi để đi đến đúng câu/tiếng,
+   kể cả câu ở trang khác. Chỉ xuất bản khi dữ liệu hợp lệ và đã nghe duyệt.
+8. **Xuất lời và mốc JSON** tải bản sao lời đang chỉnh (gồm mốc chưa hoàn tất).
+   File này nhập lại được qua **File lời bài hát**; cần lưu sau khi nhập.
+
+TXT/LRC UTF-8 vẫn tối đa 256 KiB; JSON v1/v2 tối đa 2 MiB. LRC thường chỉ có
+mốc câu và mốc cuối gợi ý, chưa có mốc tiếng. Enhanced LRC chưa được hỗ trợ;
+dùng JSON v2 hoặc căn trực tiếp trên admin. Ví dụ phần lời v2:
+
+```json
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "text": "Bé vui",
+      "start_ms": 1000,
+      "end_ms": 3000,
+      "syllables": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "text": "Bé",
+          "start_ms": 1000,
+          "end_ms": 1500
+        },
+        {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "text": "vui",
+          "start_ms": 1800,
+          "end_ms": 3000
+        }
+      ]
+    }
+  ]
+}
+```
+
+Đây là ví dụ contract, không phải mốc của bài thật. Mốc null và danh sách
+tiếng trống chỉ được lưu nháp; xuất bản yêu cầu đủ thời gian, đúng thứ tự,
+không chồng lấn, nằm trong câu/nhạc, nội dung ráp tiếng khớp câu. Có thể có
+khoảng nghỉ. Tối đa 150 tiếng/câu và 10.000 tiếng/bài; ID không trùng.
+
+Khi triển khai, backend đọc v1/v2 trước, frontend đọc v1/v2 tiếp theo, sau đó
+mới xuất bản v2. Code cũ chỉ nhận v1 không đọc được bản đã xuất bản v2; cần
+đối chiếu các bài v2 trước khi rollback. Không thay file migration cũ.
+
+Phase 4 mới thay bố cục màn hát của bé/báo vào câu; Phase 5 mới căn/nghe duyệt
+bài thật và xuất bản v2. Phase 1–3 chỉ đưa renderer dùng chung vào player hiện có.
 
 Tại thư mục repository đang làm việc:
 

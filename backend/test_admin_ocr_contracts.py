@@ -148,6 +148,7 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
         response_cases = [
             self.client.post("/books/admin/catalog", json={"name": "Book name", "title": "Book", "author": None, "min_grade": 1, "max_grade": 2}, headers=headers),
             self.client.post(f"/books/admin/catalog/{BOOK}/pages", data={"page_number": "1"}, files={"image": ("page.png", b"not-an-image", "image/png")}, headers=headers),
+            self.client.post(f"/books/admin/catalog/{BOOK}/documents", files={"document": ("book.pdf", b"%PDF-1.4\n", "application/pdf")}, headers=headers),
             self.client.put(f"/books/admin/pages/{PAGE}/revisions/{REVISION}/draft", json={"draft_text": "text", "words": []}, headers=headers),
             self.client.post(f"/books/admin/pages/{PAGE}/verify", json={
                 "page_revision_id": str(REVISION), "corrected_text": "a",
@@ -156,7 +157,7 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
             }, headers=headers),
             self.client.post(f"/books/admin/pages/{PAGE}/reprocess", headers=headers),
         ]
-        self.assertEqual([response.status_code for response in response_cases], [401] * 5)
+        self.assertEqual([response.status_code for response in response_cases], [401] * 6)
         self.db.scalar.assert_not_awaited()
         self.db.add.assert_not_called()
         self.db.commit.assert_not_awaited()
@@ -167,6 +168,16 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
             "name": "Book name", "title": "Book", "author": None, "min_grade": 1, "max_grade": 2, "role": "admin",
             "createdby": str(ACTOR),
         })
+        self.assertEqual(response.status_code, 403)
+        self.db.add.assert_not_called()
+        self.db.commit.assert_not_awaited()
+
+    def test_parent_cannot_upload_document_to_admin_catalog(self):
+        self.app.dependency_overrides[get_current_parent_id] = lambda: ACTOR
+        response = self.client.post(
+            f"/books/admin/catalog/{BOOK}/documents",
+            files={"document": ("book.pdf", b"%PDF-1.4\n", "application/pdf")},
+        )
         self.assertEqual(response.status_code, 403)
         self.db.add.assert_not_called()
         self.db.commit.assert_not_awaited()

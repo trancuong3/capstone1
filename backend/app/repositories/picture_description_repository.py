@@ -79,9 +79,8 @@ class PictureDescriptionRepository:
         self.db = db
 
     async def profile_role(self, profile_id: UUID) -> str | None:
-        return await self.db.scalar(
-            select(Profile.Role).where(Profile.Id == profile_id)
-        )
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def child_owned_by(
         self,

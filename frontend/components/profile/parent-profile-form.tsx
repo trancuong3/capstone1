@@ -224,17 +224,10 @@ export function ParentProfileForm({
     <form
       aria-busy={isSaving}
       aria-label="Chỉnh sửa hồ sơ ba mẹ"
-      className="flex flex-col gap-6"
+      className="flex flex-col gap-4"
       noValidate
       onSubmit={(event) => void saveChanges(event)}
     >
-      <header>
-        <p className="text-label font-bold text-primary">HỒ SƠ TÀI KHOẢN</p>
-        <h2 className="mt-1 text-xl font-extrabold text-ink">
-          Chỉnh sửa hồ sơ
-        </h2>
-      </header>
-
       <ProfileAvatarUpload
         displayName={displayName}
         imageUrl={profile.avatar_url}
@@ -275,7 +268,7 @@ export function ParentProfileForm({
           value={email}
         />
         {profile.pending_email ? (
-          <p className="text-sm text-amber-800">
+          <p className="text-sm text-warning">
             Đang chờ xác minh email mới:{" "}
             <strong>{profile.pending_email}</strong>
           </p>
@@ -290,7 +283,7 @@ export function ParentProfileForm({
         autoComplete="tel"
         error={errors.contact_phone}
         inputMode="tel"
-        label="Số điện thoại liên hệ"
+        label="Số điện thoại"
         maxLength={16}
         onChange={(event) => setPhone(event.target.value)}
         placeholder="0912345678 hoặc +84912345678"
@@ -304,24 +297,37 @@ export function ParentProfileForm({
         </p>
       ) : null}
 
-      <dl className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-control bg-canvas p-4">
-          <dt className="text-sm font-bold text-muted">Vai trò</dt>
-          <dd className="mt-1 text-label font-bold text-ink">
-            {getRoleLabel(profile.role)}
-          </dd>
-        </div>
-        <div className="rounded-control bg-canvas p-4">
-          <dt className="text-sm font-bold text-muted">Ngày tạo tài khoản</dt>
-          <dd className="mt-1 text-label font-bold text-ink">
-            {formatCreatedDate(profile.created_at)}
-          </dd>
-        </div>
-      </dl>
+      <div className="rounded-card bg-sky p-4">
+        <h3 className="font-extrabold text-ink">Đổi email</h3>
+        <p className="mt-2 text-body text-muted">
+          Email mới chỉ có hiệu lực sau khi ba mẹ xác minh.
+        </p>
+      </div>
+      <details>
+        <summary className="cursor-pointer text-sm font-semibold text-primary">
+          Thông tin tài khoản
+        </summary>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-control bg-canvas p-4">
+            <dt className="text-sm font-semibold text-muted">Vai trò</dt>
+            <dd className="mt-1 text-label font-semibold text-ink">
+              {getRoleLabel(profile.role)}
+            </dd>
+          </div>
+          <div className="rounded-control bg-canvas p-4">
+            <dt className="text-sm font-semibold text-muted">
+              Ngày tạo tài khoản
+            </dt>
+            <dd className="mt-1 text-label font-semibold text-ink">
+              {formatCreatedDate(profile.created_at)}
+            </dd>
+          </div>
+        </dl>
+      </details>
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Button
-          className="sm:w-auto sm:px-6"
+          className="order-last sm:px-6"
           disabled={isSaving}
           onClick={onCancel}
           type="button"
@@ -330,7 +336,7 @@ export function ParentProfileForm({
           Hủy
         </Button>
         <Button
-          className="sm:w-auto sm:px-6"
+          className="sm:px-6"
           disabled={!isHydrated || isSaving}
           isLoading={isSaving}
           type="submit"

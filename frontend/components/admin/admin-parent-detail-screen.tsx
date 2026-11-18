@@ -1,14 +1,11 @@
 "use client";
 
 import {
-  ArrowLeft,
   CalendarDays,
-  GraduationCap,
   Mail,
   Pencil,
   Phone,
   RefreshCw,
-  UserRound,
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -169,16 +166,16 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 variant="secondary"
               >
                 <Pencil aria-hidden className="size-5" />
-                Sửa Parent
+                Sửa hồ sơ
               </Button>
             ) : null}
             <ButtonLink
               className="sm:w-auto"
               href="/admin/parents"
-              variant="secondary"
+              variant="quiet"
             >
-              <ArrowLeft aria-hidden className="size-5" />
-              Quay lại danh sách
+              <UsersRound aria-hidden className="size-5" />
+              Danh sách phụ huynh
             </ButtonLink>
           </>
         }
@@ -186,7 +183,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
       {actionNotice ? (
         <div
-          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold"
+          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-semibold"
           role="status"
         >
           {actionNotice}
@@ -243,48 +240,41 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       ) : parent ? (
         <div className="grid gap-6">
           <Card className="bg-white">
-            <div className="flex items-center gap-3">
-              <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
-                <UserRound aria-hidden className="size-6" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-xl font-black text-ink">
-                  Thông tin phụ huynh
-                </h2>
-              </div>
-            </div>
+            <h2 className="text-xl font-bold text-ink">Thông tin Parent</h2>
 
             <dl className="grid gap-4 sm:grid-cols-2">
-              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <Mail aria-hidden className="size-4" />
                   Email
                 </dt>
-                <dd className="break-words font-bold">
+                <dd className="break-words font-semibold">
                   {parent.email?.trim() || fallbackContact}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <Phone aria-hidden className="size-4" />
                   Số điện thoại
                 </dt>
-                <dd className="break-words font-bold">
+                <dd className="break-words font-semibold">
                   {parent.phone?.trim() || fallbackContact}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-bold text-muted">
+              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
+                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <CalendarDays aria-hidden className="size-4" />
                   Ngày tạo hồ sơ
                 </dt>
-                <dd className="font-bold">{formatDate(parent.created_at)}</dd>
+                <dd className="font-semibold">
+                  {formatDate(parent.created_at)}
+                </dd>
               </div>
-              <div className="min-w-0 rounded-control bg-canvas px-4 py-3">
-                <dt className="mb-1 text-sm font-bold text-muted">
-                  Mã phụ huynh
+              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
+                <dt className="mb-1 text-sm font-semibold text-muted">
+                  ID Parent
                 </dt>
-                <dd className="break-all font-bold">{parent.id}</dd>
+                <dd className="break-all font-semibold">{parent.id}</dd>
               </div>
             </dl>
 
@@ -303,9 +293,9 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
               <div>
                 <h2
                   id="children-heading"
-                  className="text-xl font-black text-ink"
+                  className="text-xl font-semibold text-ink"
                 >
-                  Danh sách trẻ em
+                  Hồ sơ trẻ em liên kết
                 </h2>
                 <p className="mt-1 text-sm text-muted">
                   {parent.children.length} hồ sơ trẻ em được liên kết với phụ
@@ -322,37 +312,27 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 {parent.children.map((child) => (
-                  <Card className="bg-white" key={child.id}>
-                    <div className="flex items-center gap-3">
-                      <div className="grid size-11 shrink-0 place-items-center rounded-full bg-sky text-primary">
-                        <UsersRound aria-hidden className="size-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="break-words text-lg font-black text-ink">
-                          {child.alias}
-                        </h3>
-                        <p className="text-sm text-muted">
-                          ID: <span className="break-all">{child.id}</span>
-                        </p>
-                      </div>
+                  <Card
+                    className="items-center bg-white p-5 text-center sm:p-6"
+                    key={child.id}
+                  >
+                    <div
+                      aria-hidden="true"
+                      className="grid size-14 shrink-0 place-items-center rounded-full bg-sky text-lg font-bold text-primary"
+                    >
+                      {child.alias
+                        .trim()
+                        .charAt(0)
+                        .toLocaleUpperCase("vi-VN") || "B"}
                     </div>
-                    <dl className="grid grid-cols-2 gap-3">
-                      <div className="rounded-control bg-canvas px-3 py-2">
-                        <dt className="flex items-center gap-1 text-xs font-bold text-muted">
-                          <GraduationCap aria-hidden className="size-4" />
-                          Khối lớp
-                        </dt>
-                        <dd className="mt-1 font-bold">{child.grade}</dd>
-                      </div>
-                      <div className="rounded-control bg-canvas px-3 py-2">
-                        <dt className="text-xs font-bold text-muted">
-                          Ngày tạo
-                        </dt>
-                        <dd className="mt-1 font-bold">
-                          {formatDate(child.created_at)}
-                        </dd>
-                      </div>
-                    </dl>
+                    <div className="min-w-0">
+                      <h3 className="break-words text-lg font-bold text-ink">
+                        {child.alias}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted">
+                        Lớp {child.grade}
+                      </p>
+                    </div>
                   </Card>
                 ))}
               </div>

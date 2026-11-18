@@ -95,10 +95,15 @@ describe("book-level approval dashboard", () => {
     render(withAdminFixture(<AdminBookContentQualityScreen />, services));
 
     expect(
-      await screen.findByRole("heading", { name: "Truyện đọc lớp 3", level: 3 }),
+      await screen.findByRole("heading", {
+        name: "Truyện đọc lớp 3",
+        level: 3,
+      }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/0 Child Safety findings.*Copyright chưa có scanner tự động/),
+      await screen.findByText(
+        /0 Child Safety findings.*Copyright chưa có scanner tự động/,
+      ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Xem kết quả" }));
     expect(

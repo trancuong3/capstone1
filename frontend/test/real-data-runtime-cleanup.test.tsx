@@ -180,9 +180,10 @@ describe("Phase 5 real-data runtime cleanup", () => {
       screen.getByRole("combobox", { name: "Khối lớp lớn nhất *" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo sách" })).toBeEnabled();
-    expect(
-      screen.getByRole("link", { name: /Hủy và quay lại/ }),
-    ).toHaveAttribute("href", "/admin/books");
+    expect(screen.getByRole("link", { name: "Hủy" })).toHaveAttribute(
+      "href",
+      "/admin/books",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("uploader accepts multiple page images and exposes the real upload action", () => {
@@ -194,7 +195,10 @@ describe("Phase 5 real-data runtime cleanup", () => {
     );
     const input = screen.getByLabelText(/Chọn một hoặc nhiều ảnh trang sách/);
     expect(input).toBeEnabled();
-    expect(input).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    expect(input).toHaveAttribute(
+      "accept",
+      ".jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.pdf,.docx,image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
     expect(input).toHaveAttribute("multiple");
     expect(
       screen.getByRole("button", { name: "Upload và chạy OCR" }),

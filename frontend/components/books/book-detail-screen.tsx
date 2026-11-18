@@ -1,12 +1,17 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookX, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookX,
+  ClipboardList,
+  RefreshCw,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { formatGradeRange } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
@@ -39,10 +44,10 @@ interface BookDetailScreenProps {
 
 function invitationFor(book: BookDetailDTO): string {
   if (book.title === "Chú Mèo Nhỏ") {
-    return "Cùng chú mèo nhỏ khám phá một ngày thật vui nhé!";
+    return "Cùng chú mèo nhỏ khám phá câu chuyện.";
   }
 
-  return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")} nhé!`;
+  return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")}.`;
 }
 
 export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
@@ -337,28 +342,46 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
       <BookChildHeader
         backHref={booksHref}
         child={child}
+        fullBleedDesktop
         mobileLabel={book.title}
       />
-      <div className="mx-auto w-full max-w-[1130px]">
-        <SelectedChildIdentity child={child} />
-      </div>
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:items-start sm:gap-12">
-        <article className="hidden h-[518px] w-[307px] shrink-0 flex-col gap-[14px] rounded-card bg-white p-[19px] shadow-[0_7px_24px_rgba(33,61,66,0.08)] sm:flex">
-          <BookCover book={book} className="h-72 max-w-none p-[19px]" />
-          <p className="text-[19px] font-bold text-muted">
+        <article className="flex w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:w-[306px]">
+          <BookCover book={book} className="h-64 max-w-none p-4" />
+          <p className="text-sm font-medium text-muted">
             {book.author ?? "Tác giả đang cập nhật"}
           </p>
-          <p className="text-[19px] font-bold text-primary">
+          <p className="text-sm font-semibold text-primary">
             {formatGradeRange(book)}
           </p>
         </article>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <h1 className="text-heading font-extrabold text-ink sm:text-[44px] sm:leading-[1.4]">
+          <h1 className="text-heading font-extrabold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
-          <div className="flex flex-wrap gap-3">
+          {targetPageId &&
+          targetConfidence !== null &&
+          targetConfidence >= 0 &&
+          targetConfidence <= 1 ? (
+            <p className="text-sm text-primary">
+              Độ tin cậy {Math.round(targetConfidence * 100)}%
+            </p>
+          ) : null}
+          <div
+            aria-label="Báo cáo nội dung sách"
+            role="group"
+            className="order-last flex flex-wrap gap-2 border-t border-border pt-4"
+          >
+            <ButtonLink
+              href="/book-reports"
+              variant="quiet"
+              className="sm:w-auto"
+            >
+              <ClipboardList aria-hidden="true" className="size-4" /> Báo cáo
+              của tôi
+            </ButtonLink>
             <Button
               className="sm:w-auto"
               onClick={() =>
@@ -385,27 +408,33 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </Button>
           </div>
 
-          <BookCover book={book} className="sm:hidden" hero />
-
           <p className="text-body text-muted">
             {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
           </p>
-          <p className="text-[26px] font-bold leading-[1.4] text-ink">
+          <p className="text-xl font-medium leading-7 text-ink">
             {invitationFor(book)}
           </p>
 
-          {targetPageId &&
-          targetConfidence !== null &&
-          targetConfidence >= 0 &&
-          targetConfidence <= 1 ? (
-            <p className="text-sm font-bold text-primary">
-              Trang nhận diện:{" "}
-              {selectedPage
-                ? `Trang ${selectedPage.page_number}`
-                : "chưa xác nhận"}{" "}
-              · Độ tin cậy {Math.round(targetConfidence * 100)}%
-            </p>
-          ) : null}
+          <Button
+            id="start-reading-button"
+            className="min-h-16 sm:w-[360px]"
+            disabled={
+              !selectedPage ||
+              !selectedEndPageId ||
+              !child ||
+              selectedRangeHasGap ||
+              pages.length === 0
+            }
+            isLoading={startState === "starting"}
+            onClick={handleStartReading}
+          >
+            {startState === "starting"
+              ? "Đang mở bước chuẩn bị…"
+              : "Chuẩn bị đọc"}
+            {startState === "idle" ? (
+              <ArrowRight aria-hidden="true" className="size-5" />
+            ) : null}
+          </Button>
 
           {targetPageId && !selectedPage ? (
             <StatusMessage
@@ -418,27 +447,39 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </StatusMessage>
           ) : null}
 
-          <div className="order-4 grid gap-4 rounded-card border border-line bg-white p-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-bold text-ink">Trang bắt đầu</span>
+          {selectedPage && selectedEndPage ? (
+            <section className="rounded-card bg-sky p-4">
+              <h2 className="font-extrabold text-ink">
+                Phạm vi đọc: Trang {selectedPage.page_number}–
+                {selectedEndPage.page_number}
+              </h2>
+              <p className="mt-2 text-body text-muted">
+                {selectedRangePages.length} trang hợp lệ. Chọn hình trang bên
+                dưới để thay đổi trang bắt đầu.
+              </p>
+            </section>
+          ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
+              <span className="text-sm font-semibold text-ink">
+                Trang bắt đầu
+              </span>
               <span className="text-body text-primary">
                 {selectedPage
                   ? `Trang ${selectedPage.page_number}`
                   : "Chưa chọn trang"}
               </span>
-              <span className="text-sm text-muted">
-                Chọn hình trang bên dưới để thay đổi trang bắt đầu.
-              </span>
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
               <label
-                className="text-sm font-bold text-ink"
+                className="text-sm font-semibold text-ink"
                 htmlFor="reading-end-page"
               >
                 Trang kết thúc
               </label>
               <select
-                className="min-h-11 rounded-control border border-line bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="min-h-11 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={
                   !selectedPage ||
                   pages.length === 0 ||
@@ -464,13 +505,6 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   ))}
               </select>
             </div>
-            {selectedPage && selectedEndPage ? (
-              <p className="text-sm text-muted sm:col-span-2">
-                Phạm vi đọc: Trang {selectedPage.page_number}–
-                {selectedEndPage.page_number} ({selectedRangePages.length} trang
-                hợp lệ)
-              </p>
-            ) : null}
             {selectedRangeHasGap ? (
               <div className="sm:col-span-2">
                 <StatusMessage title="Khoảng trang chưa liên tục" tone="error">
@@ -481,28 +515,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             ) : null}
           </div>
 
-          <Button
-            id="start-reading-button"
-            className="order-6 sm:order-none sm:w-[360px]"
-            disabled={
-              !selectedPage ||
-              !selectedEndPageId ||
-              !child ||
-              selectedRangeHasGap ||
-              pages.length === 0
-            }
-            isLoading={startState === "starting"}
-            onClick={handleStartReading}
-          >
-            {startState === "starting"
-              ? "Đang mở bước chuẩn bị…"
-              : "Chuẩn bị đọc"}
-            {startState === "idle" ? (
-              <ArrowRight aria-hidden="true" className="size-5" />
-            ) : null}
-          </Button>
-
-          <div className="order-5 sm:order-none">
+          <div className="order-3">
             {previewUnavailable ? (
               <div className="mb-4 flex flex-col gap-3">
                 <StatusMessage title="Ảnh xem trước chưa sẵn sàng" tone="info">
@@ -519,9 +532,6 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 </Button>
               </div>
             ) : null}
-            <p className="mb-4 hidden text-label font-bold text-ink sm:block">
-              Chọn trang bé muốn đọc
-            </p>
             <div
               aria-label="Các trang sách có thể xem trước"
               className="flex gap-4 overflow-x-auto pb-1"

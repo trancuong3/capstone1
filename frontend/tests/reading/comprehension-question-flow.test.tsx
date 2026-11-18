@@ -109,7 +109,7 @@ describe("AI tutor question flow", () => {
     expect(getQuestion).toHaveBeenCalledTimes(2);
   });
 
-  it("celebrates only a correct answer with fireworks and marks the choice", async () => {
+  it("marks only a correct answer and keeps the feedback calm", async () => {
     const user = userEvent.setup();
     setup([view(1, 2, "Câu hỏi thứ nhất?")]);
 
@@ -118,11 +118,9 @@ describe("AI tutor question flow", () => {
     expect(screen.queryByTestId("fireworks-burst")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Đúng/ }));
-    await screen.findByText("Đúng rồi! Bé nhớ rất tốt.");
+    await screen.findByText("Đúng rồi. Bé nhớ rất tốt.");
 
-    const fireworks = screen.getByTestId("fireworks-burst");
-    expect(fireworks).toHaveAttribute("aria-hidden", "true");
-    expect(fireworks).toHaveClass("pointer-events-none");
+    expect(screen.queryByTestId("fireworks-burst")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Đúng/ })).toHaveClass(
       "bg-success-surface",
     );
@@ -133,7 +131,7 @@ describe("AI tutor question flow", () => {
   it("emphasises answers on hover only while they can be chosen", async () => {
     setup([view(1, 1, "Câu hỏi?")]);
     const choice = await screen.findByRole("button", { name: /Đúng/ });
-    expect(choice.className).toContain("enabled:hover:font-extrabold");
+    expect(choice.className).toContain("enabled:hover:font-semibold");
     expect(choice.className).toContain("enabled:hover:border-primary");
   });
 

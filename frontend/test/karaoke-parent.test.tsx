@@ -192,6 +192,7 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -388,8 +389,12 @@ describe("parent karaoke playback", () => {
     await waitFor(() => expect(audios).toHaveLength(1));
     expect(audios[0].play).not.toHaveBeenCalled();
     act(() => audios[0].dispatchEvent(new Event("loadedmetadata")));
-    fireEvent.click(screen.getByRole("button", { name: "Phát" }));
-    await act(async () => {});
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu hát" }));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    vi.useRealTimers();
     act(() => {
       audios[0].currentTime = 1.5;
       audios[0].dispatchEvent(new Event("timeupdate"));
@@ -404,11 +409,15 @@ describe("parent karaoke playback", () => {
       audios[0].paused = true;
       audios[0].dispatchEvent(new Event("ended"));
     });
-    expect(screen.getByTestId("karaoke-active-line")).toHaveTextContent(
-      "Đã hết bài hát",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Hát lại" }));
-    await act(async () => {});
+    expect(
+      screen.getByRole("heading", { name: "Bé Hát đã hát xong rồi!" }),
+    ).toBeInTheDocument();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Hát lại bài này" }));
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    vi.useRealTimers();
     expect(audios[0].currentTime).toBe(0);
     expect(
       karaokeCalls().every(([, options]) => options?.method === "GET"),
@@ -460,6 +469,7 @@ describe("parent karaoke playback", () => {
     await screen.findByRole("heading", { name: card.title });
     await waitFor(() => expect(audios).toHaveLength(1));
     expect(audios[0].play).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Âm lượng và thông tin bài hát"));
     fireEvent.click(screen.getByRole("button", { name: "Tải lại nhạc" }));
     await screen.findByRole("heading", { name: card.title });
     expect(
@@ -477,6 +487,7 @@ describe("parent karaoke playback", () => {
     await screen.findByRole("heading", { name: card.title });
     await waitFor(() => expect(audios).toHaveLength(1));
     const old = audios[0];
+    fireEvent.click(screen.getByText("Âm lượng và thông tin bài hát"));
     fireEvent.click(screen.getByRole("button", { name: "Tải lại nhạc" }));
     expect(old.src).toBe("");
     await screen.findByRole("heading", { name: card.title });

@@ -84,7 +84,7 @@ export function SessionDetailScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải chi tiết buổi đọc"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-72 rounded-card" />
@@ -168,7 +168,7 @@ export function SessionDetailScreen({
   const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
   const availability = detail.availability;
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         action={
           <ButtonLink
@@ -211,78 +211,100 @@ export function SessionDetailScreen({
           thời lượng.
         </StatusMessage>
       ) : null}
-      <dl className="grid gap-3 text-label text-muted sm:grid-cols-2">
-        <div>
-          <dt className="font-bold">Bắt đầu (giờ Việt Nam)</dt>
-          <dd>{formatHistoryDateTime(detail.started_at)}</dd>
-        </div>
-        <div>
-          <dt className="font-bold">Kết thúc (giờ Việt Nam)</dt>
-          <dd>
-            {detail.ended_at === null
-              ? "Chưa lưu giờ kết thúc"
-              : formatHistoryDateTime(detail.ended_at)}
-          </dd>
-        </div>
-      </dl>
-      {availability.fluency === "unsupported" ||
-      availability.fluency === "partial" ? (
-        <StatusMessage tone="info">
-          Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy đủ.
-          Chỉ hiển thị điểm/chỉ số đọc được, không tự quy đổi dữ liệu thiếu.
-        </StatusMessage>
-      ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[
-          ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
-          ...(detail.selected_range_pages == null
-            ? []
-            : [
-                ["Trang trong phạm vi", `${detail.selected_range_pages} trang`],
-                [
-                  "Trang đã xác nhận hoàn thành",
-                  detail.pages_completed == null
-                    ? "Chưa ghi nhận"
-                    : `${detail.pages_completed} trang`,
-                ],
-              ]),
-          [
-            "Độ chính xác",
-            metrics?.accuracy_percent == null
-              ? "Chưa ghi nhận"
-              : formatPercent(metrics.accuracy_percent),
-          ],
-          [
-            "Tốc độ đọc",
-            metrics?.reading_wpm == null
-              ? "Chưa ghi nhận"
-              : `${metrics.reading_wpm} từ/phút`,
-          ],
-          [
-            "Điểm trôi chảy",
-            detail.fluency_assessment?.score == null
-              ? availability.fluency === "absent"
-                ? "Chưa đánh giá"
-                : "Chưa có điểm hiển thị"
-              : String(detail.fluency_assessment.score),
-          ],
-        ].map(([label, value]) => (
-          <Card className="gap-2 bg-white p-5 sm:p-6" key={label}>
-            <p className="text-label font-bold text-muted">{label}</p>
-            <p className="text-2xl font-extrabold text-ink">{value}</p>
-          </Card>
-        ))}
-      </div>
+      <section
+        className="rounded-card border border-border bg-white p-4 sm:p-5"
+        aria-labelledby="session-overview-heading"
+      >
+        <h2
+          id="session-overview-heading"
+          className="book-title text-2xl text-ink"
+        >
+          Tóm tắt buổi đọc
+        </h2>
+        <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm text-muted [&_dd]:font-semibold [&_dd]:text-ink">
+          <div>
+            <dt className="font-semibold">Bắt đầu (giờ Việt Nam)</dt>
+            <dd>{formatHistoryDateTime(detail.started_at)}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Kết thúc (giờ Việt Nam)</dt>
+            <dd>
+              {detail.ended_at === null
+                ? "Chưa lưu giờ kết thúc"
+                : formatHistoryDateTime(detail.ended_at)}
+            </dd>
+          </div>
+        </dl>
+        {availability.fluency === "unsupported" ||
+        availability.fluency === "partial" ? (
+          <StatusMessage tone="info">
+            Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy đủ.
+            Chỉ hiển thị điểm/chỉ số đọc được, không tự quy đổi dữ liệu thiếu.
+          </StatusMessage>
+        ) : null}
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
+          {[
+            ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
+            ...(detail.selected_range_pages == null
+              ? []
+              : [
+                  [
+                    "Trang trong phạm vi",
+                    `${detail.selected_range_pages} trang`,
+                  ],
+                  [
+                    "Trang đã xác nhận hoàn thành",
+                    detail.pages_completed == null
+                      ? "Chưa ghi nhận"
+                      : `${detail.pages_completed} trang`,
+                  ],
+                ]),
+            [
+              "Độ chính xác",
+              metrics?.accuracy_percent == null
+                ? "Chưa ghi nhận"
+                : formatPercent(metrics.accuracy_percent),
+            ],
+            [
+              "Tốc độ đọc",
+              metrics?.reading_wpm == null
+                ? "Chưa ghi nhận"
+                : `${metrics.reading_wpm} từ/phút`,
+            ],
+            [
+              "Điểm trôi chảy",
+              detail.fluency_assessment?.score == null
+                ? availability.fluency === "absent"
+                  ? "Chưa đánh giá"
+                  : "Chưa có điểm hiển thị"
+                : String(detail.fluency_assessment.score),
+            ],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <dt className="text-sm font-semibold text-muted">{label}</dt>
+              <dd
+                className={
+                  value.startsWith("Chưa")
+                    ? "mt-1 font-semibold text-muted"
+                    : "mt-1 text-xl font-extrabold leading-snug text-primary"
+                }
+              >
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
       <Card className="bg-white">
         <SessionReadingReports sessionId={sessionId} />
       </Card>
       <details className="rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="cursor-pointer font-extrabold text-primary">
+        <summary className="cursor-pointer font-semibold text-primary">
           Thông tin khác của buổi đọc
         </summary>
         <div className="mt-4 flex flex-col gap-4">
           <Card className="bg-white">
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               Sự kiện trong buổi đọc
             </h2>
             {availability.events === "unsupported" ||
@@ -298,7 +320,7 @@ export function SessionDetailScreen({
             ) : null}
           </Card>
           <Card className="bg-white">
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-2xl font-semibold text-ink">
               Câu hỏi đọc hiểu
             </h2>
             {availability.comprehension === "unsupported" ||
@@ -323,7 +345,7 @@ export function SessionDetailScreen({
                     className="rounded-control border border-border p-4"
                     key={question.id}
                   >
-                    <p className="font-extrabold text-ink">{question.prompt}</p>
+                    <p className="font-semibold text-ink">{question.prompt}</p>
                     <p className="mt-2 text-label text-muted">
                       Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
                     </p>

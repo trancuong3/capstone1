@@ -69,6 +69,8 @@ requests-toolbelt==1.0.0
 urllib3==2.6.0
 certifi==2025.11.12
 charset-normalizer==3.4.4
+# Khóa chardet < 6 để tương thích requests==2.32.5 khi premailer/cssutils kéo chardet
+chardet==5.2.0
 idna==3.11
 dnspython==2.8.0
 python-multipart==0.0.20
@@ -128,3 +130,11 @@ six==1.17.0
 deprecation==2.1.0
 
 setuptools==77.0.3
+
+# =============================================================================
+# 8. PRE-OCR DOCUMENT RASTERIZATION ADAPTER
+# =============================================================================
+pypdfium2==5.15.2
+pymupdf==2.0
+python-docx==1.2.0
+lxml==6.1.3

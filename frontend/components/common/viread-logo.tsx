@@ -44,7 +44,7 @@ export function ViReadLogo({
       </span>
       <span
         className={cn(
-          "font-extrabold tracking-tight",
+          "font-semibold tracking-tight",
           isSmall ? "text-base" : "text-xl",
           compact && "sr-only",
         )}

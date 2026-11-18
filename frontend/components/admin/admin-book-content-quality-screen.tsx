@@ -131,7 +131,7 @@ function OcrLink({
     : "";
   return (
     <Link
-      className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+      className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
       href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(finding.page_id)}${query}`}
     >
       {children}
@@ -156,10 +156,10 @@ function FindingCard({
   return (
     <article className="rounded-control border border-border bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="font-bold text-ink">
+        <div className="font-semibold text-ink">
           Trang {finding.page_number} · {finding.issue_type}
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-bold">
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
           <span className="rounded-full bg-canvas px-3 py-1">
             {finding.severity}
           </span>
@@ -254,8 +254,9 @@ export function AdminBookContentQualityScreen() {
   const [bookFilter, setBookFilter] = useState("");
   const [reportOffset, setReportOffset] = useState(0);
   const [bookSearch, setBookSearch] = useState("");
-  const [bookApprovalFilter, setBookApprovalFilter] =
-    useState<BookApprovalStatus | "">("");
+  const [bookApprovalFilter, setBookApprovalFilter] = useState<
+    BookApprovalStatus | ""
+  >("");
   const [bookAlertFilter, setBookAlertFilter] = useState<
     "" | "CHILD_SAFETY" | "COPYRIGHT" | "BOTH"
   >("");
@@ -335,7 +336,13 @@ export function AdminBookContentQualityScreen() {
     } finally {
       if (requestId === bookRequestId.current) setLoadingBooks(false);
     }
-  }, [bookContentQuality, bookApprovalFilter, bookAlertFilter, bookOffset, bookSearch]);
+  }, [
+    bookContentQuality,
+    bookApprovalFilter,
+    bookAlertFilter,
+    bookOffset,
+    bookSearch,
+  ]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void loadReports(), 180);
@@ -542,13 +549,14 @@ export function AdminBookContentQualityScreen() {
   const bookLast = books
     ? Math.min(books.offset + books.limit, books.total)
     : 0;
-  const aiAttentionCount = selectedBook?.ai_workflows.filter(
-    (workflow) =>
-      workflow.status === "FAILED" ||
-      workflow.status === "READY_FOR_ADMIN_REVIEW" ||
-      workflow.safety_status === "FAILED" ||
-      workflow.safety_status === "STALE",
-  ).length ?? 0;
+  const aiAttentionCount =
+    selectedBook?.ai_workflows.filter(
+      (workflow) =>
+        workflow.status === "FAILED" ||
+        workflow.status === "READY_FOR_ADMIN_REVIEW" ||
+        workflow.safety_status === "FAILED" ||
+        workflow.safety_status === "STALE",
+    ).length ?? 0;
 
   return (
     <section className="mt-10 border-t border-border pt-8">
@@ -592,7 +600,7 @@ export function AdminBookContentQualityScreen() {
               key={key}
             >
               <p className="text-sm text-muted">{label}</p>
-              <p className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
                 {reportSummary?.[key] ?? "—"}
               </p>
             </div>
@@ -603,7 +611,7 @@ export function AdminBookContentQualityScreen() {
       <section className="rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">
+            <h2 className="text-xl font-semibold text-ink">
               Báo cáo từ phụ huynh
             </h2>
             <p className="mt-1 text-sm text-muted">
@@ -736,7 +744,9 @@ export function AdminBookContentQualityScreen() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="font-bold text-ink">{report.book_title}</h3>
+                    <h3 className="font-semibold text-ink">
+                      {report.book_title}
+                    </h3>
                     <p className="mt-1 text-sm text-muted">
                       {issueLabels[report.issue_type]}
                       {report.page_number !== null
@@ -749,7 +759,7 @@ export function AdminBookContentQualityScreen() {
                       {formatDate(report.created_at)}
                     </p>
                   </div>
-                  <span className="rounded-full bg-sky px-3 py-1 text-xs font-bold text-primary-hover">
+                  <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold text-primary-hover">
                     {reportStatusLabels[report.status]}
                   </span>
                 </div>
@@ -817,7 +827,7 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">
+              <h2 className="text-xl font-semibold text-ink">
                 Chi tiết báo cáo
               </h2>
               <p className="mt-1 break-all font-mono text-xs text-muted">
@@ -834,7 +844,9 @@ export function AdminBookContentQualityScreen() {
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <div>
-              <h3 className="font-bold text-ink">Snapshot lúc phụ huynh gửi</h3>
+              <h3 className="font-semibold text-ink">
+                Snapshot lúc phụ huynh gửi
+              </h3>
               <p className="mt-2 text-sm text-muted">
                 {selectedReport.book_title}
                 {selectedReport.page_number !== null
@@ -858,7 +870,7 @@ export function AdminBookContentQualityScreen() {
               )}
               {selectedReport.page_id && selectedReport.book_id ? (
                 <Link
-                  className="mt-3 inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+                  className="mt-3 inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
                   href={`/admin/books/${encodeURIComponent(selectedReport.book_id)}/pages/${encodeURIComponent(selectedReport.page_id)}${selectedReport.page_revision_id ? `?revisionId=${encodeURIComponent(selectedReport.page_revision_id)}` : ""}`}
                 >
                   Mở trang và ảnh gốc trong OCR Review
@@ -871,11 +883,11 @@ export function AdminBookContentQualityScreen() {
               ) : null}
             </div>
             <div>
-              <h3 className="font-bold text-ink">Lịch sử xử lý</h3>
+              <h3 className="font-semibold text-ink">Lịch sử xử lý</h3>
               <ol className="mt-2 space-y-3 border-l-2 border-border pl-4">
                 {selectedReport.history.map((item, index) => (
                   <li key={`${item.created_at}-${index}`}>
-                    <p className="text-sm font-bold text-ink">
+                    <p className="text-sm font-semibold text-ink">
                       {item.from_status
                         ? `${reportStatusLabels[item.from_status]} → `
                         : ""}
@@ -891,7 +903,9 @@ export function AdminBookContentQualityScreen() {
                   </li>
                 ))}
               </ol>
-              <h3 className="mt-5 font-bold text-ink">Findings liên quan</h3>
+              <h3 className="mt-5 font-semibold text-ink">
+                Findings liên quan
+              </h3>
               {selectedReport.related_findings.length ? (
                 <div className="mt-2 grid gap-2">
                   {selectedReport.related_findings.map((finding) => (
@@ -899,7 +913,7 @@ export function AdminBookContentQualityScreen() {
                       className="rounded-control bg-canvas p-3"
                       key={finding.id}
                     >
-                      <p className="text-sm font-bold text-ink">
+                      <p className="text-sm font-semibold text-ink">
                         Trang {finding.page_number} · {finding.issue_type}
                       </p>
                       <p className="mt-1 text-xs text-muted">
@@ -922,7 +936,7 @@ export function AdminBookContentQualityScreen() {
           </div>
           <div className="mt-5 border-t border-border pt-4">
             <label
-              className="block text-sm font-bold text-ink"
+              className="block text-sm font-semibold text-ink"
               htmlFor="report-resolution-note"
             >
               Ghi chú xử lý của Admin
@@ -1012,7 +1026,7 @@ export function AdminBookContentQualityScreen() {
       <section className="mt-8 rounded-card border border-border bg-white p-4 sm:p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold text-ink">
+            <h2 className="text-xl font-semibold text-ink">
               Kiểm tra nội dung toàn sách
             </h2>
             <p className="mt-1 text-sm text-muted">
@@ -1050,7 +1064,10 @@ export function AdminBookContentQualityScreen() {
               ["Sách có nghi vấn Copyright", "COPYRIGHT"],
               ["Sách có cả hai nhóm", "BOTH"],
             ].map(([label, key]) => (
-              <div className="rounded-control border border-amber-200 bg-amber-50 p-3" key={key}>
+              <div
+                className="rounded-control border border-amber-200 bg-amber-50 p-3"
+                key={key}
+              >
                 <p className="text-xs text-muted">{label}</p>
                 <p className="mt-1 text-lg font-extrabold text-ink">
                   {books.alert_summary[key] ?? 0}
@@ -1086,7 +1103,8 @@ export function AdminBookContentQualityScreen() {
             onChange={(event) => {
               setBookOffset(0);
               setBookAlertFilter(
-                event.target.value as "" | "CHILD_SAFETY" | "COPYRIGHT" | "BOTH",
+                event.target.value as
+                  "" | "CHILD_SAFETY" | "COPYRIGHT" | "BOTH",
               );
             }}
             value={bookAlertFilter}
@@ -1098,7 +1116,9 @@ export function AdminBookContentQualityScreen() {
           </select>
         </label>
         <p className="mb-4 text-xs text-muted">
-          Thống kê trạng thái tính trên toàn bộ kết quả tìm kiếm, không chỉ trang đang hiển thị. Copyright sẽ không có kết quả tự động cho đến khi dự án cấu hình được engine và dữ liệu quyền sử dụng.
+          Thống kê trạng thái tính trên toàn bộ kết quả tìm kiếm, không chỉ
+          trang đang hiển thị. Copyright sẽ không có kết quả tự động cho đến khi
+          dự án cấu hình được engine và dữ liệu quyền sử dụng.
         </p>
         {loadingBooks ? (
           <AdminLoading label="Đang tải danh sách sách…" />
@@ -1131,13 +1151,16 @@ export function AdminBookContentQualityScreen() {
                         CẢNH BÁO CHILD SAFETY
                       </span>
                     ) : null}
-                    {book.assessment.copyright_finding_count !== null && book.assessment.copyright_finding_count > 0 ? (
+                    {book.assessment.copyright_finding_count !== null &&
+                    book.assessment.copyright_finding_count > 0 ? (
                       <span className="ml-2 inline-flex rounded-full bg-orange-100 px-3 py-1 text-xs font-extrabold text-orange-900">
                         NGHI VẤN COPYRIGHT
                       </span>
                     ) : null}
                     <p className="mt-2 text-sm text-muted">
-                      Proofreading: {book.assessment.proofreading_status} · Child Safety: {book.assessment.child_safety_status} · Copyright: {book.assessment.copyright_status}
+                      Proofreading: {book.assessment.proofreading_status} ·
+                      Child Safety: {book.assessment.child_safety_status} ·
+                      Copyright: {book.assessment.copyright_status}
                     </p>
                     <p className="mt-1 text-xs font-semibold text-amber-900">
                       {book.assessment.finding_count} Child Safety findings
@@ -1230,7 +1253,7 @@ export function AdminBookContentQualityScreen() {
         <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-xl font-extrabold text-ink">
+              <h2 className="text-xl font-semibold text-ink">
                 {selectedBook.book_title}
               </h2>
               <p className="mt-1 text-sm text-muted">
@@ -1278,47 +1301,95 @@ export function AdminBookContentQualityScreen() {
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                ["Trang hiện hành", `${selectedBook.assessment.ocr_completed_pages}/${selectedBook.assessment.page_count} OCR`],
-                ["OCR revision + Candidate hash hiện hành", `${selectedBook.assessment.ocr_approval_valid_pages}/${selectedBook.assessment.page_count}`],
-                ["Proofreading", `${selectedBook.assessment.proofreading_completed_pages}/${selectedBook.assessment.page_count} · ${selectedBook.assessment.proofreading_status}`],
-                ["Child Safety", `${selectedBook.assessment.child_safety_completed_pages}/${selectedBook.assessment.page_count} · ${selectedBook.assessment.child_safety_status}`],
-                ["Đang xử lý", `${selectedBook.assessment.processing_pages} trang`],
+                [
+                  "Trang hiện hành",
+                  `${selectedBook.assessment.ocr_completed_pages}/${selectedBook.assessment.page_count} OCR`,
+                ],
+                [
+                  "OCR revision + Candidate hash hiện hành",
+                  `${selectedBook.assessment.ocr_approval_valid_pages}/${selectedBook.assessment.page_count}`,
+                ],
+                [
+                  "Proofreading",
+                  `${selectedBook.assessment.proofreading_completed_pages}/${selectedBook.assessment.page_count} · ${selectedBook.assessment.proofreading_status}`,
+                ],
+                [
+                  "Child Safety",
+                  `${selectedBook.assessment.child_safety_completed_pages}/${selectedBook.assessment.page_count} · ${selectedBook.assessment.child_safety_status}`,
+                ],
+                [
+                  "Đang xử lý",
+                  `${selectedBook.assessment.processing_pages} trang`,
+                ],
                 ["Copyright", selectedBook.assessment.copyright_status],
-                ["Findings", `${selectedBook.assessment.finding_count} · HIGH ${selectedBook.assessment.high_finding_count} · MEDIUM ${selectedBook.assessment.medium_finding_count}`],
-                ["Trang có cảnh báo", String(selectedBook.assessment.warning_page_count)],
-                ["Lỗi / chưa quét", `${selectedBook.assessment.failed_or_unscanned_page_count} · lỗi ${selectedBook.assessment.failed_pages}`],
-                ["Kết quả stale", `${selectedBook.assessment.stale_pages} trang`],
-                ["Assessment hash", selectedBook.assessment.assessment_hash.slice(0, 16)],
+                [
+                  "Findings",
+                  `${selectedBook.assessment.finding_count} · HIGH ${selectedBook.assessment.high_finding_count} · MEDIUM ${selectedBook.assessment.medium_finding_count}`,
+                ],
+                [
+                  "Trang có cảnh báo",
+                  String(selectedBook.assessment.warning_page_count),
+                ],
+                [
+                  "Lỗi / chưa quét",
+                  `${selectedBook.assessment.failed_or_unscanned_page_count} · lỗi ${selectedBook.assessment.failed_pages}`,
+                ],
+                [
+                  "Kết quả stale",
+                  `${selectedBook.assessment.stale_pages} trang`,
+                ],
+                [
+                  "Assessment hash",
+                  selectedBook.assessment.assessment_hash.slice(0, 16),
+                ],
               ].map(([label, value]) => (
                 <div className="rounded-control bg-white p-3" key={label}>
                   <p className="text-xs text-muted">{label}</p>
-                  <p className="mt-1 break-all text-sm font-bold text-ink">{value}</p>
+                  <p className="mt-1 break-all text-sm font-bold text-ink">
+                    {value}
+                  </p>
                 </div>
               ))}
             </div>
             <div className="mt-4 rounded-control border border-border bg-canvas p-3 text-sm text-muted">
-              Copyright chỉ là thông tin tham khảo trong policy hiện tại; trạng thái thiếu, lỗi, stale hoặc có finding không khóa phê duyệt.
+              Copyright chỉ là thông tin tham khảo trong policy hiện tại; trạng
+              thái thiếu, lỗi, stale hoặc có finding không khóa phê duyệt.
             </div>
             {selectedBook.assessment.finding_groups.length ? (
               <div className="mt-4 grid gap-3">
-                <h4 className="font-bold text-ink">Tóm tắt Child Safety findings</h4>
+                <h4 className="font-bold text-ink">
+                  Tóm tắt Child Safety findings
+                </h4>
                 {selectedBook.assessment.finding_groups.map((group) => (
                   <article
                     className="rounded-control border border-border bg-white p-3"
                     key={`${group.category}:${group.severity}`}
                   >
                     <p className="font-bold text-ink">
-                      {group.category} · {group.severity} · {group.finding_count} findings trên {group.page_count} trang
+                      {group.category} · {group.severity} ·{" "}
+                      {group.finding_count} findings trên {group.page_count}{" "}
+                      trang
                     </p>
                     <p className="mt-1 text-xs text-muted">
                       Trang: {group.page_numbers.join(", ")}
                     </p>
                     {group.examples.map((example, index) => (
-                      <div className="mt-2 border-t border-border pt-2" key={`${example.page_number}:${index}`}>
-                        <p className="text-xs font-bold text-muted">Bằng chứng · trang {example.page_number}</p>
-                        <blockquote className="mt-1 whitespace-pre-wrap text-sm text-ink">{example.evidence_text}</blockquote>
-                        <p className="mt-1 text-sm text-muted">{example.explanation}</p>
-                        <p className="mt-1 text-sm text-ink">{example.recommendation}</p>
+                      <div
+                        className="mt-2 border-t border-border pt-2"
+                        key={`${example.page_number}:${index}`}
+                      >
+                        <p className="text-xs font-bold text-muted">
+                          Bằng chứng · trang {example.page_number}
+                        </p>
+                        <blockquote className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                          {example.evidence_text}
+                        </blockquote>
+                        <p className="mt-1 text-sm text-muted">
+                          {example.explanation}
+                        </p>
+                        <p className="mt-1 text-sm text-ink">
+                          {example.recommendation}
+                        </p>
                       </div>
                     ))}
                   </article>
@@ -1327,14 +1398,20 @@ export function AdminBookContentQualityScreen() {
             ) : null}
             {selectedBook.assessment.blockers.length ? (
               <p className="mt-3 text-xs text-muted">
-                Điều kiện còn lại: {selectedBook.assessment.blockers.join(" · ")}
+                Điều kiện còn lại:{" "}
+                {selectedBook.assessment.blockers.join(" · ")}
               </p>
             ) : null}
             {selectedBook.assessment.admin_approved_at ? (
               <p className="mt-2 text-sm text-emerald-900">
-                Admin phê duyệt {formatDate(selectedBook.assessment.admin_approved_at)}
-                {selectedBook.assessment.admin_approved_by_name ? ` · ${selectedBook.assessment.admin_approved_by_name}` : ""}
-                {selectedBook.assessment.admin_reason ? ` · ${selectedBook.assessment.admin_reason}` : ""}
+                Admin phê duyệt{" "}
+                {formatDate(selectedBook.assessment.admin_approved_at)}
+                {selectedBook.assessment.admin_approved_by_name
+                  ? ` · ${selectedBook.assessment.admin_approved_by_name}`
+                  : ""}
+                {selectedBook.assessment.admin_reason
+                  ? ` · ${selectedBook.assessment.admin_reason}`
+                  : ""}
               </p>
             ) : null}
 
@@ -1344,13 +1421,19 @@ export function AdminBookContentQualityScreen() {
                 <textarea
                   className="mt-1 min-h-24 w-full rounded-control border border-border bg-white p-3"
                   maxLength={2000}
-                  onChange={(event) => setBookDecisionReason(event.target.value)}
+                  onChange={(event) =>
+                    setBookDecisionReason(event.target.value)
+                  }
                   value={bookDecisionReason}
                 />
               </label>
-              {(selectedBook.assessment.high_finding_count > 0 || selectedBook.ai_workflows.some((workflow) => workflow.suitability === "NOT_RECOMMENDED")) ? (
+              {selectedBook.assessment.high_finding_count > 0 ||
+              selectedBook.ai_workflows.some(
+                (workflow) => workflow.suitability === "NOT_RECOMMENDED",
+              ) ? (
                 <p className="rounded-control bg-rose-50 p-3 text-sm font-semibold text-rose-900">
-                  Chính sách hiện tại chặn phê duyệt nếu có finding HIGH hoặc suitability NOT_RECOMMENDED.
+                  Chính sách hiện tại chặn phê duyệt nếu có finding HIGH hoặc
+                  suitability NOT_RECOMMENDED.
                 </p>
               ) : null}
               <div className="flex flex-wrap gap-2">
@@ -1358,13 +1441,21 @@ export function AdminBookContentQualityScreen() {
                   className="h-10 w-auto px-3 text-sm"
                   disabled={
                     !bookDecisionReason.trim() ||
-                    selectedBook.assessment.ocr_completed_pages !== selectedBook.assessment.page_count ||
-                    selectedBook.assessment.ocr_approval_valid_pages !== selectedBook.assessment.page_count ||
-                    !["COMPLETED", "COMPLETED_WITH_SUGGESTIONS"].includes(selectedBook.assessment.proofreading_status) ||
-                    selectedBook.assessment.child_safety_status !== "COMPLETED" ||
-                    selectedBook.assessment.failed_or_unscanned_page_count > 0 ||
+                    selectedBook.assessment.ocr_completed_pages !==
+                      selectedBook.assessment.page_count ||
+                    selectedBook.assessment.ocr_approval_valid_pages !==
+                      selectedBook.assessment.page_count ||
+                    !["COMPLETED", "COMPLETED_WITH_SUGGESTIONS"].includes(
+                      selectedBook.assessment.proofreading_status,
+                    ) ||
+                    selectedBook.assessment.child_safety_status !==
+                      "COMPLETED" ||
+                    selectedBook.assessment.failed_or_unscanned_page_count >
+                      0 ||
                     selectedBook.assessment.high_finding_count > 0 ||
-                    selectedBook.ai_workflows.some((workflow) => workflow.suitability === "NOT_RECOMMENDED") ||
+                    selectedBook.ai_workflows.some(
+                      (workflow) => workflow.suitability === "NOT_RECOMMENDED",
+                    ) ||
                     busyKey === `book-decision:${selectedBook.book_id}`
                   }
                   onClick={() => void decideBook("APPROVE")}
@@ -1373,7 +1464,10 @@ export function AdminBookContentQualityScreen() {
                 </Button>
                 <Button
                   className="h-10 w-auto px-3 text-sm"
-                  disabled={!bookDecisionReason.trim() || busyKey === `book-decision:${selectedBook.book_id}`}
+                  disabled={
+                    !bookDecisionReason.trim() ||
+                    busyKey === `book-decision:${selectedBook.book_id}`
+                  }
                   onClick={() => void decideBook("REJECT")}
                   variant="secondary"
                 >
@@ -1381,7 +1475,10 @@ export function AdminBookContentQualityScreen() {
                 </Button>
                 <Button
                   className="h-10 w-auto px-3 text-sm"
-                  disabled={!bookDecisionReason.trim() || busyKey === `book-decision:${selectedBook.book_id}`}
+                  disabled={
+                    !bookDecisionReason.trim() ||
+                    busyKey === `book-decision:${selectedBook.book_id}`
+                  }
                   onClick={() => void decideBook("REQUEST_RESCAN")}
                   variant="secondary"
                 >
@@ -1393,13 +1490,19 @@ export function AdminBookContentQualityScreen() {
                   Category false positive
                   <input
                     className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3"
-                    onChange={(event) => setFalsePositiveCategory(event.target.value)}
+                    onChange={(event) =>
+                      setFalsePositiveCategory(event.target.value)
+                    }
                     value={falsePositiveCategory}
                   />
                 </label>
                 <Button
                   className="h-10 w-auto px-3 text-sm"
-                  disabled={!bookDecisionReason.trim() || !falsePositiveCategory.trim() || busyKey === `book-decision:${selectedBook.book_id}`}
+                  disabled={
+                    !bookDecisionReason.trim() ||
+                    !falsePositiveCategory.trim() ||
+                    busyKey === `book-decision:${selectedBook.book_id}`
+                  }
                   onClick={() => void decideBook("FALSE_POSITIVE")}
                   variant="secondary"
                 >
@@ -1408,12 +1511,27 @@ export function AdminBookContentQualityScreen() {
               </div>
               {selectedBook.decision_history.length ? (
                 <details className="rounded-control border border-border bg-white p-3">
-                  <summary className="cursor-pointer text-sm font-bold">Lịch sử quyết định ({selectedBook.decision_history.length})</summary>
+                  <summary className="cursor-pointer text-sm font-bold">
+                    Lịch sử quyết định ({selectedBook.decision_history.length})
+                  </summary>
                   <ul className="mt-2 grid gap-2">
                     {selectedBook.decision_history.map((decision, index) => (
-                      <li className="rounded-control bg-canvas p-3 text-sm" key={`${decision.action}:${decision.created_at}:${index}`}>
-                        <p className="font-bold">{decision.action} · {decision.created_at ? formatDate(decision.created_at) : ""}{decision.actor_name ? ` · ${decision.actor_name}` : ""}</p>
-                        <p className="mt-1 text-muted">{decision.reason ?? "Không có lý do"}</p>
+                      <li
+                        className="rounded-control bg-canvas p-3 text-sm"
+                        key={`${decision.action}:${decision.created_at}:${index}`}
+                      >
+                        <p className="font-bold">
+                          {decision.action} ·{" "}
+                          {decision.created_at
+                            ? formatDate(decision.created_at)
+                            : ""}
+                          {decision.actor_name
+                            ? ` · ${decision.actor_name}`
+                            : ""}
+                        </p>
+                        <p className="mt-1 text-muted">
+                          {decision.reason ?? "Không có lý do"}
+                        </p>
                       </li>
                     ))}
                   </ul>
@@ -1422,7 +1540,10 @@ export function AdminBookContentQualityScreen() {
             </div>
           </section>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Tổng hợp AI toàn sách">
+          <div
+            className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+            aria-label="Tổng hợp AI toàn sách"
+          >
             {[
               ["Trang sách", "pages_total"],
               ["Tổng workflow", "workflows_total"],
@@ -1441,14 +1562,16 @@ export function AdminBookContentQualityScreen() {
                 <p className="text-xs text-muted">{label}</p>
                 <p className="mt-1 text-lg font-extrabold text-ink">
                   {selectedBook.ai_workflow_summary[key] ?? 0}
-                  {key === "needs_admin_review" ? ` · ${selectedBook.ai_workflow_summary.finding_count ?? 0}` : ""}
+                  {key === "needs_admin_review"
+                    ? ` · ${selectedBook.ai_workflow_summary.finding_count ?? 0}`
+                    : ""}
                 </p>
               </div>
             ))}
           </div>
 
           <div className="mt-4">
-            <h3 className="font-bold text-ink">Lịch sử scan</h3>
+            <h3 className="font-semibold text-ink">Lịch sử scan</h3>
             {selectedBook.scans.length ? (
               <div className="mt-2 flex flex-wrap gap-2">
                 {selectedBook.scans.map((scan) => (
@@ -1473,16 +1596,19 @@ export function AdminBookContentQualityScreen() {
           </div>
 
           <div className="mt-5 border-t border-border pt-4">
-            <h3 className="font-bold text-ink">Proofreading & Child Safety history</h3>
+            <h3 className="font-bold text-ink">
+              Proofreading & Child Safety history
+            </h3>
             {aiAttentionCount > 0 ? (
               <div
                 aria-live="polite"
                 className="mt-3 rounded-control border border-amber-500 bg-amber-50 p-4 text-sm text-amber-950"
                 role="status"
               >
-                Có {aiAttentionCount} workflow cần Admin xem xét hoặc xử lý lỗi. Mở từng workflow
-                bên dưới để kiểm tra evidence, trạng thái Safety và retry stage
-                thất bại. Trang chưa có kết quả hợp lệ không được tính là an toàn.
+                Có {aiAttentionCount} workflow cần Admin xem xét hoặc xử lý lỗi.
+                Mở từng workflow bên dưới để kiểm tra evidence, trạng thái
+                Safety và retry stage thất bại. Trang chưa có kết quả hợp lệ
+                không được tính là an toàn.
               </div>
             ) : null}
             {selectedBook.ai_workflows.length ? (
@@ -1498,11 +1624,15 @@ export function AdminBookContentQualityScreen() {
                           {workflow.status} · {workflow.safety_status}
                         </h4>
                         <p className="mt-1 text-xs text-muted">
-                          {workflow.suitability ?? "Chưa có suitability"} · Candidate v{workflow.candidate_version}
-                          {workflow.hash_match ? " · Safety hash khớp" : " · Safety hash stale/chưa khớp"}
+                          {workflow.suitability ?? "Chưa có suitability"} ·
+                          Candidate v{workflow.candidate_version}
+                          {workflow.hash_match
+                            ? " · Safety hash khớp"
+                            : " · Safety hash stale/chưa khớp"}
                         </p>
                         <p className="mt-1 break-all font-mono text-xs text-muted">
-                          Workflow {workflow.workflow_id} · Revision {workflow.page_revision_id}
+                          Workflow {workflow.workflow_id} · Revision{" "}
+                          {workflow.page_revision_id}
                         </p>
                       </div>
                       <Link
@@ -1527,10 +1657,14 @@ export function AdminBookContentQualityScreen() {
                             key={String(finding.finding_id ?? index)}
                           >
                             <p className="font-bold">
-                              {String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.content_type ?? "MENTION")} · {String(finding.severity ?? "REVIEW")}
+                              {String(finding.category ?? "OTHER_SENSITIVE")} ·{" "}
+                              {String(finding.content_type ?? "MENTION")} ·{" "}
+                              {String(finding.severity ?? "REVIEW")}
                             </p>
                             <p className="mt-1 text-xs text-muted">
-                              {String(finding.review_status ?? "PROVISIONAL")} · {String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}
+                              {String(finding.review_status ?? "PROVISIONAL")} ·{" "}
+                              {String(finding.evidence_start ?? "?")}–
+                              {String(finding.evidence_end ?? "?")}
                             </p>
                             <blockquote className="mt-2 whitespace-pre-wrap text-sm">
                               {String(finding.evidence_text ?? "")}
@@ -1546,7 +1680,8 @@ export function AdminBookContentQualityScreen() {
                       </div>
                     ) : (
                       <p className="mt-3 text-sm text-muted">
-                        {workflow.safety_status === "PROVISIONAL" || workflow.safety_status === "CONFIRMED"
+                        {workflow.safety_status === "PROVISIONAL" ||
+                        workflow.safety_status === "CONFIRMED"
                           ? "Không có safety finding trong scan này."
                           : "Chưa có kết quả Child Safety hợp lệ."}
                       </p>
@@ -1555,16 +1690,29 @@ export function AdminBookContentQualityScreen() {
                     {workflow.safety_history.length ? (
                       <details className="mt-3 rounded-control border border-border p-3">
                         <summary className="cursor-pointer text-sm font-bold">
-                          Safety scans trước đây ({workflow.safety_history.length})
+                          Safety scans trước đây (
+                          {workflow.safety_history.length})
                         </summary>
                         <ul className="mt-2 grid gap-2">
                           {workflow.safety_history.map((scan, index) => (
-                            <li className="break-all rounded-control bg-canvas p-3 text-xs" key={`${String(scan.scan_id)}-${index}`}>
+                            <li
+                              className="break-all rounded-control bg-canvas p-3 text-xs"
+                              key={`${String(scan.scan_id)}-${index}`}
+                            >
                               <p className="font-bold">
-                                {String(scan.status)} · {String(scan.suitability ?? "Chưa có suitability")} · {Array.isArray(scan.findings) ? scan.findings.length : 0} findings
+                                {String(scan.status)} ·{" "}
+                                {String(
+                                  scan.suitability ?? "Chưa có suitability",
+                                )}{" "}
+                                ·{" "}
+                                {Array.isArray(scan.findings)
+                                  ? scan.findings.length
+                                  : 0}{" "}
+                                findings
                               </p>
                               <p className="mt-1 font-mono text-muted">
-                                Hash: {String(scan.content_hash ?? "?")} · Archived: {String(scan.archived_at ?? "")}
+                                Hash: {String(scan.content_hash ?? "?")} ·
+                                Archived: {String(scan.archived_at ?? "")}
                               </p>
                             </li>
                           ))}
@@ -1574,34 +1722,56 @@ export function AdminBookContentQualityScreen() {
 
                     <div className="mt-3 grid gap-3 lg:grid-cols-3">
                       <div>
-                        <h5 className="text-sm font-bold">Candidate versions</h5>
+                        <h5 className="text-sm font-bold">
+                          Candidate versions
+                        </h5>
                         <ul className="mt-1 space-y-1 text-xs text-muted">
                           {workflow.candidate_history.map((version, index) => (
-                            <li className="break-all" key={`${String(version.version)}-${index}`}>
-                              v{String(version.version)} · {String(version.changed_by ?? "unknown")} · {String(version.content_hash ?? "")}
+                            <li
+                              className="break-all"
+                              key={`${String(version.version)}-${index}`}
+                            >
+                              v{String(version.version)} ·{" "}
+                              {String(version.changed_by ?? "unknown")} ·{" "}
+                              {String(version.content_hash ?? "")}
                             </li>
                           ))}
                         </ul>
                       </div>
                       <div>
-                        <h5 className="text-sm font-bold">Workflow / Admin review history</h5>
+                        <h5 className="text-sm font-bold">
+                          Workflow / Admin review history
+                        </h5>
                         <ul className="mt-1 space-y-1 text-xs text-muted">
                           {workflow.review_history.map((event, index) => (
                             <li key={`${String(event.created_at)}-${index}`}>
-                              {String(event.event)} · {String(event.actor_id ?? "unknown")} · {String(event.created_at ?? "")}
-                            {event.reason ? ` · Lý do: ${String(event.reason)}` : ""}
+                              {String(event.event)} ·{" "}
+                              {String(event.actor_id ?? "unknown")} ·{" "}
+                              {String(event.created_at ?? "")}
+                              {event.reason
+                                ? ` · Lý do: ${String(event.reason)}`
+                                : ""}
                             </li>
                           ))}
                         </ul>
                       </div>
                       <div>
-                        <h5 className="text-sm font-bold">Provider / model provenance</h5>
+                        <h5 className="text-sm font-bold">
+                          Provider / model provenance
+                        </h5>
                         <ul className="mt-1 space-y-1 text-xs text-muted">
                           {workflow.provider_events.map((event, index) => (
-                            <li key={`${String(event.provider)}-${String(event.chunk_id)}-${index}`}>
-                              {String(event.provider)} · {String(event.model)} · {event.availability ? "available" : "unavailable"}
-                              {event.http_status ? ` · HTTP ${String(event.http_status)}` : ""}
-                              {event.duration_ms !== undefined ? ` · ${String(event.duration_ms)} ms` : ""}
+                            <li
+                              key={`${String(event.provider)}-${String(event.chunk_id)}-${index}`}
+                            >
+                              {String(event.provider)} · {String(event.model)} ·{" "}
+                              {event.availability ? "available" : "unavailable"}
+                              {event.http_status
+                                ? ` · HTTP ${String(event.http_status)}`
+                                : ""}
+                              {event.duration_ms !== undefined
+                                ? ` · ${String(event.duration_ms)} ms`
+                                : ""}
                             </li>
                           ))}
                         </ul>
@@ -1620,7 +1790,7 @@ export function AdminBookContentQualityScreen() {
           {selectedScan ? (
             <div className="mt-5 border-t border-border pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-bold text-ink">
+                <h3 className="font-semibold text-ink">
                   Kết quả scan · {scanStatusLabels[selectedScan.status]}
                 </h3>
                 <span className="font-mono text-xs text-muted">
@@ -1640,7 +1810,7 @@ export function AdminBookContentQualityScreen() {
                     key={String(label)}
                   >
                     <p className="text-xs text-muted">{label}</p>
-                    <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">
+                    <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
                       {value}
                     </p>
                   </div>
@@ -1666,7 +1836,7 @@ export function AdminBookContentQualityScreen() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h4 className="font-bold text-ink">
+                        <h4 className="font-semibold text-ink">
                           Trang {page.page_number}
                         </h4>
                         <p className="mt-1 text-xs text-muted">
@@ -1691,7 +1861,7 @@ export function AdminBookContentQualityScreen() {
                       <div className="flex flex-wrap gap-2">
                         {page.page_id ? (
                           <Link
-                            className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+                            className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
                             href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(page.page_id)}${page.page_revision_id ? `?revisionId=${encodeURIComponent(page.page_revision_id)}` : ""}`}
                           >
                             Kiểm tra và sửa trang

@@ -63,7 +63,7 @@ describe("BookLibraryScreen with real API adapters", () => {
     renderLibrary();
     expect(
       await screen.findByRole("heading", {
-        name: `${childFixture.alias} muốn đọc gì hôm nay?`,
+        name: `Tủ sách của ${childFixture.alias}`,
       }),
     ).toBeInTheDocument();
     expect(

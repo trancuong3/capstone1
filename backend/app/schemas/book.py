@@ -277,3 +277,24 @@ class AdminRevisionDetailRead(BaseModel):
     created_at: datetime
     verified_at: datetime | None
     verified_by: UUID | None
+
+
+class AdminDocumentPageResultRead(BaseModel):
+    source_page: int = Field(ge=1, le=30)
+    status: Literal["SUCCEEDED", "SKIPPED_EMPTY", "FAILED"]
+    page_id: UUID | None = None
+    page_number: int | None = Field(default=None, ge=1)
+    revision: AdminRevisionDetailRead | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class AdminDocumentUploadResponse(BaseModel):
+    book_id: UUID
+    file_name: str
+    source_format: Literal["JPEG", "PNG", "WEBP", "BMP", "TIFF", "PDF", "DOCX"]
+    total_source_pages: int = Field(ge=1, le=30)
+    created_pages_count: int = Field(ge=0)
+    skipped_empty_count: int = Field(ge=0)
+    failed_pages_count: int = Field(ge=0)
+    pages: list[AdminDocumentPageResultRead]

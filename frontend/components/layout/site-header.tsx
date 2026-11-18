@@ -1,7 +1,6 @@
-import Link from "next/link";
-
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
+import { ButtonLink } from "@/components/common/button";
 
 interface SiteHeaderProps {
   readonly className?: string;
@@ -19,7 +18,7 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
         className,
       )}
     >
-      <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
+      <div className="mx-auto flex min-h-24 w-full max-w-[1376px] flex-col items-start justify-between gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-6 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <ViReadLogo
             ariaLabel={
@@ -31,31 +30,34 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             size="md"
           />
           {isAdminLogin ? (
-            <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold tracking-wide text-primary-hover">
+            <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold tracking-wide text-primary-hover">
               ADMIN
             </span>
           ) : null}
         </div>
 
         {isAdminLogin ? (
-          <p className="text-label font-bold text-muted">Khu vực quản trị</p>
+          <p className="text-label font-medium text-muted">Khu vực quản trị</p>
         ) : (
           <nav
-            aria-label="Điều hướng tài khoản"
-            className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:flex-wrap"
+            aria-label="Tài khoản ViRead"
+            className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto"
           >
-            <Link
-              className="inline-flex min-h-11 items-center justify-center rounded-control border border-border bg-white px-4 py-3 text-center text-label font-bold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+            <ButtonLink
               href="/login"
+              size="compact"
+              variant="quiet"
+              className="whitespace-nowrap border border-border sm:min-w-32"
             >
               Đăng nhập
-            </Link>
-            <Link
-              className="inline-flex min-h-11 items-center justify-center rounded-control bg-primary px-4 py-3 text-center text-label font-bold text-white transition-colors hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+            </ButtonLink>
+            <ButtonLink
               href="/register"
+              size="compact"
+              className="whitespace-nowrap sm:min-w-32"
             >
               Đăng ký
-            </Link>
+            </ButtonLink>
           </nav>
         )}
       </div>

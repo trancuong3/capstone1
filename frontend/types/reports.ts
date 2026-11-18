@@ -3,6 +3,35 @@ import type { ChildProfileDTO } from "@/types/child";
 import type { ISODateTime, UUID } from "@/types/profile";
 import type { HistorySessionSummaryDTO } from "@/types/reading";
 
+export type DifficultWordPracticeStatus =
+  "NOT_PRACTICED" | "IN_PROGRESS" | "NEEDS_MORE_PRACTICE" | "COMPLETED";
+
+export type DifficultWordAssessmentStatus =
+  "CORRECT" | "INCORRECT" | "UNCERTAIN" | "NO_CLEAR_AUDIO" | "ENGINE_ERROR";
+
+export type DifficultWordRecognitionSource =
+  | "SERVER_STT"
+  | "SERVER_STT_KEYTERM"
+  | "BROWSER_SPEECH"
+  | "AUDIO_QUALITY_GATE"
+  | "ENGINE_ERROR";
+
+export interface DifficultWordSourceDTO {
+  readonly book_id?: UUID | null;
+  readonly book_title?: string | null;
+  readonly book_author?: string | null;
+  readonly min_grade?: number | null;
+  readonly max_grade?: number | null;
+  readonly book_cover_url?: string | null;
+  readonly session_id?: UUID | null;
+  readonly page_id?: UUID | null;
+  readonly page_revision_id?: UUID | null;
+  readonly page_number?: number | null;
+  readonly word_id?: UUID | null;
+  readonly context_phrase?: string | null;
+  readonly last_seen_at: ISODateTime;
+}
+
 export interface DifficultWordDTO {
   readonly normalized_word: string;
   readonly display_text: string;
@@ -14,6 +43,140 @@ export interface DifficultWordDTO {
   readonly session_count: number;
   readonly last_seen_at: ISODateTime;
   readonly evidence_word_ids: readonly UUID[];
+  readonly mispronunciation_count?: number;
+  readonly encounter_count?: number;
+  readonly practice_status?: DifficultWordPracticeStatus;
+  readonly practice_attempts_count?: number;
+  readonly practice_correct_count?: number;
+  readonly practice_incorrect_count?: number;
+  readonly practice_uncertain_count?: number;
+  readonly consecutive_correct_count?: number;
+  readonly last_practiced_at?: ISODateTime | null;
+  readonly last_practice_status?: DifficultWordAssessmentStatus | null;
+  readonly sources?: readonly DifficultWordSourceDTO[];
+}
+
+export interface DifficultWordEvaluateDirectInput {
+  readonly request_id: UUID;
+  readonly normalized_word: string;
+  readonly display_text?: string;
+  readonly context_phrase?: string | null;
+  readonly audio?: Blob | null;
+  readonly filename?: string;
+  readonly audio_duration_ms?: number | null;
+  readonly audio_quality_status?: string | null;
+  readonly browser_transcript?: string | null;
+  readonly browser_confidence?: number | null;
+  readonly book_id?: UUID | null;
+  readonly session_id?: UUID | null;
+  readonly page_id?: UUID | null;
+  readonly page_revision_id?: UUID | null;
+  readonly word_id?: UUID | null;
+  readonly evidence_word_ids?: readonly UUID[];
+}
+
+export interface DifficultWordBookGroup {
+  readonly key: string;
+  readonly bookId: UUID | null;
+  readonly bookTitle: string;
+  readonly bookAuthor: string | null;
+  readonly minGrade: number | null;
+  readonly maxGrade: number | null;
+  readonly words: readonly DifficultWordDTO[];
+  readonly totalWords: number;
+  readonly completedWords: number;
+  readonly progressPercent: number;
+  readonly latestSeenAt: ISODateTime;
+}
+
+export interface DifficultWordPracticeStartInput {
+  readonly request_id: UUID;
+  readonly normalized_word: string;
+  readonly display_text?: string;
+  readonly evidence_word_ids?: readonly UUID[];
+}
+
+export interface DifficultWordPracticeCompleteInput {
+  readonly completion_request_id: UUID;
+  readonly assessment_status: DifficultWordAssessmentStatus;
+  readonly recognition_source: DifficultWordRecognitionSource;
+  readonly spoken_transcript?: string | null;
+  readonly confidence?: number | null;
+  readonly audio_duration_ms?: number | null;
+}
+
+export interface DifficultWordEvaluateAudioInput {
+  readonly completion_request_id: UUID;
+  readonly audio: Blob;
+  readonly filename?: string;
+  readonly audio_duration_ms?: number | null;
+  readonly audio_quality_status?: string | null;
+  readonly browser_transcript?: string | null;
+  readonly browser_confidence?: number | null;
+}
+
+export interface DifficultWordProgressSummaryDTO {
+  readonly normalized_word: string;
+  readonly practice_status: DifficultWordPracticeStatus;
+  readonly practice_attempts_count: number;
+  readonly practice_correct_count: number;
+  readonly practice_incorrect_count: number;
+  readonly practice_uncertain_count: number;
+  readonly consecutive_correct_count: number;
+  readonly required_consecutive_correct: number;
+  readonly last_practiced_at: ISODateTime | null;
+  readonly last_practice_status: DifficultWordAssessmentStatus | null;
+}
+
+export interface DifficultWordPracticeAttemptDTO {
+  readonly attempt_id: UUID;
+  readonly child_id: UUID;
+  readonly normalized_word: string;
+  readonly display_text: string;
+  readonly attempt_number: number;
+  readonly state: "STARTED" | "COMPLETED";
+  readonly assessment_status: DifficultWordAssessmentStatus | null;
+  readonly recognition_source: DifficultWordRecognitionSource | null;
+  readonly spoken_transcript: string | null;
+  readonly confidence: number | null;
+  readonly audio_duration_ms: number | null;
+  readonly assessment_version: number;
+  readonly evidence_word_ids: readonly UUID[];
+  readonly book_id?: UUID | null;
+  readonly session_id?: UUID | null;
+  readonly page_id?: UUID | null;
+  readonly page_revision_id?: UUID | null;
+  readonly word_id?: UUID | null;
+  readonly resolved_in_session?: boolean;
+  readonly persistence_backend?:
+    "PRACTICE_TABLE_AND_EVENT" | "PRACTICE_TABLE" | "READING_EVENT" | null;
+  readonly started_at: ISODateTime;
+  readonly completed_at: ISODateTime | null;
+  readonly feedback_message: string | null;
+  readonly word_progress: DifficultWordProgressSummaryDTO;
+  readonly next_recommended_word: string | null;
+  readonly evidence_count_unchanged: true;
+}
+
+export interface DifficultWordPracticeHistoryItemDTO {
+  readonly attempt_id: UUID;
+  readonly normalized_word: string;
+  readonly display_text: string;
+  readonly attempt_number: number;
+  readonly state: "STARTED" | "COMPLETED";
+  readonly assessment_status: DifficultWordAssessmentStatus | null;
+  readonly recognition_source: DifficultWordRecognitionSource | null;
+  readonly spoken_transcript: string | null;
+  readonly confidence: number | null;
+  readonly audio_duration_ms: number | null;
+  readonly assessment_version: number;
+  readonly started_at: ISODateTime;
+  readonly completed_at: ISODateTime | null;
+}
+
+export interface DifficultWordPracticeHistoryDTO {
+  readonly storage_ready: boolean;
+  readonly items: readonly DifficultWordPracticeHistoryItemDTO[];
 }
 
 export interface ProgressPeriodSummaryDTO {

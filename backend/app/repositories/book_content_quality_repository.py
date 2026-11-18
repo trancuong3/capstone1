@@ -54,7 +54,8 @@ class BookContentQualityRepository:
         await self.db.refresh(entity)
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def profile_for_update(self, actor_id: UUID) -> Profile | None:
         return await self.db.scalar(

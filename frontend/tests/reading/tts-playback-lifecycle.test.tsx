@@ -6,6 +6,7 @@ import {
   resetSpeechPreferencesCache,
   setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 
 const { speech, studio } = vi.hoisted(() => ({
   speech: { synthesize: vi.fn(), transcribe: vi.fn() },
@@ -23,6 +24,8 @@ class AudioFixture {
   static nextDuration = 2;
   duration = AudioFixture.nextDuration;
   currentTime = 0;
+  defaultPlaybackRate = 1;
+  playbackRate = 1;
   paused = true;
   ended = false;
   onended: (() => void) | null = null;
@@ -416,5 +419,69 @@ describe("Phase 3 TTS lifecycle", () => {
     expect(studio.synthesizeTimed).toHaveBeenCalledTimes(3);
     act(() => next.finish());
     await third;
+  });
+
+  it("resets server cooldown when preferences change, applies playbackRate=1 once, caches short TTS by voice+speed+text, and surfaces fallback notice", async () => {
+    speech.synthesize.mockRejectedValueOnce(new Error("503"));
+    voices = [{ lang: "vi-VN" } as SpeechSynthesisVoice];
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    // 1. Trigger server failure -> sets serverRetryAfter & browser fallback notice
+    const p1 = result.current.play("Chào bé.");
+    await waitFor(() => expect(utterances).toHaveLength(1));
+    expect(result.current.fallbackNotice).toMatch(/trình duyệt/i);
+    act(() =>
+      utterances[0].onend?.({ elapsedTime: 0.8 } as SpeechSynthesisEvent),
+    );
+    await p1;
+
+    // 2. Switching speed clears cooldown immediately so the next play hits server with new speed
+    const fallbackBlob = new Blob(["mp3-1"], { type: "audio/mpeg" });
+    setSynthesizedAudioMeta(fallbackBlob, {
+      resolvedVoiceId: "cgSgspJ2msm6clMCkdW9",
+      usedFallbackVoice: true,
+    });
+    speech.synthesize.mockResolvedValueOnce(fallbackBlob);
+    act(() =>
+      setSpeechPreferences({ voiceId: "unavailable-voice", speed: 0.8 }),
+    );
+    expect(result.current.fallbackNotice).toBeNull();
+
+    const p2 = result.current.play("Chào bé.");
+    const a1 = await audioAt(0);
+    expect(a1.defaultPlaybackRate).toBe(1);
+    expect(a1.playbackRate).toBe(1);
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    expect(result.current.fallbackNotice).toMatch(/giọng mặc định/i);
+    act(() => a1.finish());
+    await p2;
+
+    // 3. Replaying same (voiceId, speed, text) hits shortCache with 0 extra network requests
+    const p3 = result.current.play("Chào bé.");
+    const a2 = await audioAt(1);
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    act(() => a2.finish());
+    await p3;
+
+    // 4. Changing speed invalidates cache key and requests fresh audio immediately
+    const freshBlob = new Blob(["mp3-2"], { type: "audio/mpeg" });
+    setSynthesizedAudioMeta(freshBlob, {
+      resolvedVoiceId: "CwhRBWXzGAHq8TQ4Fs17",
+      usedFallbackVoice: false,
+    });
+    speech.synthesize.mockResolvedValueOnce(freshBlob);
+    act(() =>
+      setSpeechPreferences({ voiceId: "CwhRBWXzGAHq8TQ4Fs17", speed: 1.1 }),
+    );
+    const p4 = result.current.play("Chào bé.");
+    const a3 = await audioAt(2);
+    expect(speech.synthesize).toHaveBeenCalledTimes(3);
+    expect(speech.synthesize.mock.calls[2][1]).toMatchObject({
+      voiceId: "CwhRBWXzGAHq8TQ4Fs17",
+      speed: 1.1,
+    });
+    expect(result.current.fallbackNotice).toBeNull();
+    act(() => a3.finish());
+    await p4;
   });
 });

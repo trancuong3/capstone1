@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasUsableTranscript,
   hasUsableBrowserConfidence,
+  hasHighConfidenceKeytermResult,
 } from "@/lib/reading/recognition-evidence";
 import {
   normalizeVietnameseText,
@@ -77,5 +78,91 @@ describe("shared Vietnamese normalization", () => {
     expect(tokenizeVietnameseText(value)).toEqual(["bé", "bé", "đi", "học"]);
     expect(tokenizeRealtimeText(value)).toEqual(tokenizeVietnameseText(value));
     expect(normalizeRetryText(value)).toBe("bé bé đi học");
+  });
+});
+
+describe("hasHighConfidenceKeytermResult", () => {
+  it("accepts a single word with high logprob", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [{ text: "mình", start: 0, end: 0.5, logprob: -0.2 }],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts when all words have logprob >= -0.5", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [
+          { text: "bé", start: 0, end: 0.3, logprob: -0.3 },
+          { text: "mình", start: 0.3, end: 0.6, logprob: -0.5 },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects when any word has logprob below -0.5", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [
+          { text: "mình", start: 0, end: 0.5, logprob: -0.3 },
+          { text: "ơi", start: 0.5, end: 0.8, logprob: -0.8 },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects when no words have logprob data", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [{ text: "mình", start: 0, end: 0.5 }],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects when words array is empty", () => {
+    expect(hasHighConfidenceKeytermResult({ ...transcript, words: [] })).toBe(
+      false,
+    );
+  });
+
+  it("rejects when words is null", () => {
+    expect(hasHighConfidenceKeytermResult({ ...transcript, words: null })).toBe(
+      false,
+    );
+  });
+
+  it("ignores non-word types when checking confidence", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [
+          { text: "mình", start: 0, end: 0.5, logprob: -0.1 },
+          {
+            text: "laughter",
+            start: 0.5,
+            end: 1,
+            type: "audio_event",
+            logprob: -3,
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("treats words without logprob as passing when at least one scored word exists", () => {
+    expect(
+      hasHighConfidenceKeytermResult({
+        ...transcript,
+        words: [
+          { text: "mình", start: 0, end: 0.5, logprob: -0.2 },
+          { text: "nè", start: 0.5, end: 0.8 },
+        ],
+      }),
+    ).toBe(true);
   });
 });

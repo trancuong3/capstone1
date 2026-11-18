@@ -225,7 +225,9 @@ export const bookQualityBookPageSchema = z.object({
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
   summary: z.record(z.string(), z.number().int().nonnegative()).default({}),
-  alert_summary: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  alert_summary: z
+    .record(z.string(), z.number().int().nonnegative())
+    .default({}),
 });
 
 export const bookQualityBookDecisionReadSchema = z.object({
@@ -252,7 +254,9 @@ export const bookQualityBookDetailSchema = z.object({
   scans: z.array(bookQualityScanSchema),
   latest_scan_detail: bookQualityScanDetailSchema.nullable(),
   ai_workflows: z.array(adminAiWorkflowSchema).default([]),
-  ai_workflow_summary: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  ai_workflow_summary: z
+    .record(z.string(), z.number().int().nonnegative())
+    .default({}),
   assessment: bookApprovalAssessmentSchema,
   decision_history: bookQualityBookDecisionReadSchema.shape.decision_history,
 });

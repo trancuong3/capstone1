@@ -238,6 +238,33 @@ def test_t24_trdg_provenance_must_be_explicit_and_unique(tmp_path):
 def test_t25_public_training_profiles_map_to_separate_legacy_dataset_sources():
     assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"] == {"FLOW2_EXTERNAL", "FLOW2_TRDG"}
     assert PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"] == {"FLOW1_VERIFIED"}
+
+
+def test_t26_production_gate_checks_parent_and_active_non_regression():
+    metrics = _metrics("win")
+    regression = {
+        "candidate_rate": 0.11,
+        "parent_rate": 0.10,
+        "delta_candidate_minus_parent": 0.01,
+        "paired_cluster_bootstrap_95ci_candidate_minus_parent": [0.002, 0.018],
+    }
+    metrics["parent_cer"] = regression
+    metrics["parent_wer"] = regression
+    metrics["active_cer"] = {"candidate_rate": 0.11, "active_rate": 0.10,
+                             "delta_candidate_minus_active": 0.0,
+                             "paired_cluster_bootstrap_95ci_candidate_minus_active": [-0.01, 0.0]}
+    metrics["active_wer"] = metrics["active_cer"]
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "ORIGINAL_WIN"
+    assert result["promotion_allowed"] is False
+
+
+def test_t27_non_finite_confidence_interval_fails_closed():
+    metrics = _metrics("win")
+    metrics["cer"]["paired_cluster_bootstrap_95ci"] = [float("nan"), -0.01]
+    result = evaluate_gate(metrics, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert result["status"] == "EVALUATION_FAILED"
+    assert result["promotion_allowed"] is False
     assert PROFILES["FLOW1_EXTERNAL_TRDG"]["flows"].isdisjoint(PROFILES["FLOW2_ADMIN_VERIFIED"]["flows"])
 
 

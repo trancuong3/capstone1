@@ -34,6 +34,29 @@ export function hasUsableTranscript(
   );
 }
 
+/**
+ * Returns true when a keyterm-biased transcription has high enough word-level
+ * confidence to be trusted without independent browser corroboration.
+ *
+ * The threshold (logprob >= −0.5) is intentionally much stricter than the
+ * general usability gate (−1.5) to guard against keyterm hallucination while
+ * still accepting clear correct pronunciations that the browser missed.
+ */
+export function hasHighConfidenceKeytermResult(
+  transcript: SpeechTranscript,
+): boolean {
+  const words =
+    transcript.words?.filter((word) => !word.type || word.type === "word") ??
+    [];
+  // Require at least one word with a logprob score to make a judgement.
+  if (!words.length || !words.some((w) => w.logprob != null)) return false;
+  return words.every(
+    (word) =>
+      word.logprob == null ||
+      (Number.isFinite(word.logprob) && word.logprob >= -0.5),
+  );
+}
+
 export function hasUsableBrowserConfidence(confidence?: number): boolean {
   // Some engines report zero when confidence is not supplied.
   return (

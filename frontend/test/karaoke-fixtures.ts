@@ -1,10 +1,47 @@
-import type { AdminKaraokeDetail, KaraokePreview } from "@/types/karaoke";
+import type {
+  AdminKaraokeDetail,
+  KaraokePreview,
+  KaraokeLyrics,
+} from "@/types/karaoke";
 
 // Test-only DTOs. Never imported by application code or used as API fallbacks.
 export const songId = "11111111-1111-4111-8111-111111111111";
 export const versionId = "22222222-2222-4222-8222-222222222222";
 export const lineId = "33333333-3333-4333-8333-333333333333";
 export const stamp = "2026-11-14T00:00:00Z";
+export function syllableLyrics(): KaraokeLyrics {
+  return {
+    format_version: 2,
+    lines: [
+      {
+        id: lineId,
+        text: "Bé hát, vui!",
+        start_ms: 1000,
+        end_ms: 4000,
+        syllables: [
+          {
+            id: "44444444-4444-4444-8444-444444444441",
+            text: "Bé",
+            start_ms: 1000,
+            end_ms: 1500,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444442",
+            text: "hát,",
+            start_ms: 1800,
+            end_ms: 2500,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444443",
+            text: "vui!",
+            start_ms: 2600,
+            end_ms: 4000,
+          },
+        ],
+      },
+    ],
+  };
+}
 export function songDetail(): AdminKaraokeDetail {
   return {
     song_id: songId,

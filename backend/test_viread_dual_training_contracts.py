@@ -10,6 +10,7 @@ from app.services.viread_ocr_training_service import (
     _canonicalize_legacy_verified_snapshot,
     _verified_snapshot,
     _verified_snapshot_db_rows,
+    _gate,
 )
 
 
@@ -130,6 +131,28 @@ class VireadDualTrainingContracts(unittest.TestCase):
             _canonicalize_legacy_verified_snapshot([first, conflicting_split])
 
         self.assertEqual(raised.exception.status_code, 409)
+
+    def test_pilot_evaluation_is_advisory_and_never_promotable(self):
+        metrics = {"outputs": [{"group_id": f"document-{index % 5}"} for index in range(20)]}
+
+        gate = _gate(metrics, manifest_sha="a" * 64, evaluation_type="PILOT",
+                     require_model_baselines=True)
+
+        self.assertEqual(gate["status"], "INSUFFICIENT_EVIDENCE")
+        self.assertFalse(gate["promotion_allowed"])
+        self.assertEqual(gate["sample_count"], 20)
+        self.assertEqual(gate["group_count"], 5)
+
+    def test_production_evaluation_requires_parent_and_active_predictions(self):
+        metrics = {"outputs": [{"group_id": f"document-{index % 30}"} for index in range(200)],
+                   "cer": {}, "wer": {}}
+
+        gate = _gate(metrics, manifest_sha="b" * 64, evaluation_type="PRODUCTION",
+                     require_model_baselines=True)
+
+        self.assertEqual(gate["status"], "EVALUATION_FAILED")
+        self.assertFalse(gate["promotion_allowed"])
+        self.assertEqual(gate["reason"], "parent_and_active_baselines_required")
 
 
 if __name__ == "__main__":

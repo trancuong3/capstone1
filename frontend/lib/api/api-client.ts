@@ -184,6 +184,51 @@ const safeBackendMessages: Record<string, string> = {
     "Số trang vượt ngoài phạm vi hợp lệ (1-32767).",
   "Image decoding failed": "Không đọc được file ảnh gửi lên.",
   "Image dimensions are invalid": "Kích thước ảnh không hợp lệ.",
+  "A file is required": "Hãy chọn tệp ảnh hoặc tài liệu để tải lên.",
+  "Document exceeds the 50 MB limit":
+    "Tệp tài liệu vượt quá giới hạn dung lượng 50 MB.",
+  "Image exceeds the 12 MB limit":
+    "Ảnh tải lên vượt quá giới hạn dung lượng 12 MB.",
+  "Image dimensions must not exceed 6000 by 6000 pixels":
+    "Kích thước ảnh vượt quá giới hạn 6000 × 6000 px.",
+  "Document exceeds the 30-page limit per upload":
+    "Mỗi tệp tài liệu chỉ hỗ trợ quét tối đa 30 trang. Hãy tách nhỏ tệp rồi tải lên lại.",
+  "Password-protected PDF files are not supported":
+    "Không hỗ trợ tệp PDF đặt mật khẩu. Hãy gỡ mật khẩu trước khi tải lên.",
+  "Password-protected documents are not supported":
+    "Không hỗ trợ tài liệu đặt mật khẩu. Hãy gỡ mật khẩu trước khi tải lên.",
+  "Legacy .doc files are not supported; convert to .docx or .pdf":
+    "Chưa hỗ trợ định dạng Word .doc cũ. Hãy lưu sang .docx hoặc .pdf rồi tải lên.",
+  "Macro-enabled Word documents are not permitted":
+    "Không cho phép tài liệu Word chứa macro (.docm) vì lý do bảo mật.",
+  "Archive structure exceeds safe extraction limits":
+    "Cấu trúc nén của tệp vượt ngưỡng an toàn.",
+  "Document XML contains unsafe declarations":
+    "Tệp DOCX chứa khai báo XML không an toàn nên đã bị từ chối.",
+  "Unsupported upload format; use JPEG, PNG, WebP, BMP, TIFF, PDF, or DOCX":
+    "Định dạng tệp chưa hỗ trợ. Hãy chọn JPEG, PNG, WebP, BMP, TIFF, PDF hoặc DOCX.",
+  "File content does not match the declared file type or extension":
+    "Nội dung thực tế của tệp không khớp với định dạng hoặc phần mở rộng.",
+  "The uploaded document is empty or corrupted":
+    "Tệp tải lên bị rỗng hoặc bị hỏng không thể đọc được.",
+  "No usable text was detected in the uploaded document":
+    "Không phát hiện được chữ trong tài liệu tải lên. Hãy kiểm tra chất lượng bản scan hoặc nội dung tệp.",
+  "Document upload failed to produce any valid OCR page":
+    "Không tạo được trang OCR hợp lệ nào từ tài liệu này.",
+  "Server Unicode font for DOCX rendering is unavailable":
+    "Máy chủ thiếu font Unicode tiếng Việt để dựng trang DOCX.",
+  "PDF rendering engine is not available on the server":
+    "Máy chủ chưa sẵn sàng bộ dựng trang PDF.",
+  DIFFICULT_WORD_PRACTICE_STORAGE_UNAVAILABLE:
+    "Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ.",
+  DIFFICULT_WORD_ATTEMPT_ALREADY_COMPLETED:
+    "Lượt luyện từ này đã được ghi nhận trước đó. Con hãy bắt đầu lượt luyện mới nhé.",
+  DIFFICULT_WORD_ATTEMPT_NOT_FOUND:
+    "Không tìm thấy lượt luyện từ này trong hồ sơ của bé.",
+  INVALID_PRACTICE_WORD: "Từ cần luyện chưa hợp lệ.",
+  EMPTY_AUDIO: "Chưa nhận được âm thanh ghi âm. Con hãy thử nói lại nhé.",
+  AUDIO_TOO_LARGE: "Đoạn ghi âm quá dài. Con hãy ghi âm ngắn gọn một từ nhé.",
+  UNSUPPORTED_AUDIO: "Định dạng âm thanh chưa được hỗ trợ trên thiết bị này.",
 };
 
 function errorCode(status: number): ServiceErrorCode {

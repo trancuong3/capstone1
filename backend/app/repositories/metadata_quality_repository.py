@@ -15,9 +15,8 @@ class MetadataQualityRepository:
         self.db = db
 
     async def role(self, actor_id):
-        return await self.db.scalar(
-            select(Profile.Role).where(Profile.Id == actor_id)
-        )
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, actor_id)
 
     @staticmethod
     def _trim_whitespace(value):

@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
-import { FireworksBurst } from "@/components/reading/fireworks-burst";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { cn } from "@/lib/utils/cn";
@@ -118,7 +117,7 @@ export function ComprehensionQuestion({
       <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
       <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink sm:text-center">
-          Mình cùng trả lời nhé!
+          Mình cùng trả lời nhé
         </h1>
         <div
           aria-hidden="true"
@@ -163,10 +162,10 @@ export function ComprehensionQuestion({
         ) : (
           <>
             <div className="rounded-card bg-cream p-4 sm:p-6">
-              <p className="text-label font-bold text-purple-ink">
+              <p className="text-label font-semibold text-purple-ink">
                 {loadState.value.progress_label}
               </p>
-              <p className="mt-4 text-[26px] font-extrabold text-ink sm:text-heading">
+              <p className="mt-4 text-[26px] font-semibold text-ink sm:text-heading">
                 {loadState.value.question.prompt}
               </p>
             </div>
@@ -179,16 +178,16 @@ export function ComprehensionQuestion({
                   <button
                     aria-pressed={selected}
                     className={cn(
-                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-left text-body font-bold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-left text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                       // Hover only applies to answers that can still be chosen.
-                      "enabled:cursor-pointer enabled:hover:-translate-y-0.5 enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-extrabold enabled:hover:shadow-md enabled:active:translate-y-0",
+                      "enabled:cursor-pointer enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-semibold enabled:hover:shadow-md",
                       !correct && !(selected && result) && "bg-white",
                       selected && "border-primary",
                       selected &&
                         result?.is_correct === false &&
                         "border-warning bg-warning-surface",
                       correct &&
-                        "border-success-ink bg-success-surface font-extrabold text-success-ink",
+                        "border-success-ink bg-success-surface font-semibold text-success-ink",
                     )}
                     disabled={isSubmitting || result?.is_correct === true}
                     key={choice.id}
@@ -210,14 +209,10 @@ export function ComprehensionQuestion({
               })}
             </div>
 
-            {result?.is_correct ? (
-              <FireworksBurst key={result.answer_id} />
-            ) : null}
-
             {result ? (
               <StatusMessage tone={result.is_correct ? "success" : "warning"}>
                 {result.is_correct
-                  ? "Đúng rồi! Bé nhớ rất tốt."
+                  ? "Đúng rồi. Bé nhớ rất tốt."
                   : "Gần đúng rồi, thử lại nhé."}
               </StatusMessage>
             ) : (

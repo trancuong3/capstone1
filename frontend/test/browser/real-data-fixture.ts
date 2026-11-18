@@ -204,10 +204,51 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       verified_by: verified ? ids.parent : null,
     };
   }
+  const difficultPracticeAttempts: Record<string, unknown>[] = [];
+  const difficultWordState: {
+    normalized_word: string;
+    display_text: string;
+    practice_status?: string;
+    practice_attempts_count?: number;
+    practice_correct_count?: number;
+    consecutive_correct_count?: number;
+    last_practiced_at?: string | null;
+    last_practice_status?: string | null;
+    [key: string]: unknown;
+  } = { ...word };
   await page.context().route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin === "http://127.0.0.1:3106") return route.continue();
+    if (
+      url.hostname === "example.supabase.co" &&
+      url.pathname === "/auth/v1/user"
+    ) {
+      if (request.method() === "OPTIONS")
+        return route.fulfill({
+          status: 204,
+          headers: { ...headers, "access-control-allow-credentials": "true" },
+        });
+      if (request.method() === "GET")
+        return route.fulfill({
+          status: 200,
+          headers: {
+            ...headers,
+            "access-control-allow-credentials": "true",
+          },
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: ids.parent,
+            aud: "authenticated",
+            role: "authenticated",
+            email: "parent@example.test",
+            app_metadata: { provider: "email", providers: ["email"] },
+            user_metadata: { display_name: "Ba mẹ API" },
+            created_at: timestamp,
+            updated_at: timestamp,
+          }),
+        });
+    }
     // Every other origin is intercepted: no real network calls can escape.
     if (url.origin !== "http://127.0.0.1:8000") {
       state.unexpected.push(`external:${url.hostname}`);
@@ -387,6 +428,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (
       path === "/reading-management/collections" ||
       path === "/reading-management/goals" ||
+      path === "/reading-management/plans" ||
       path === "/reading-management/reminders" ||
       path === "/reading-management/reminders/due"
     )
@@ -397,12 +439,34 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         role: "parent",
         display_name: "Ba mẹ API",
         created_at: timestamp,
+        email: "parent@example.test",
+        contact_phone: "+84900000000",
+        email_verified: true,
+        contact_info_status: "available",
+        children: state.emptyChildren ? [] : [child],
       });
     if (path === "/profiles/children")
       return respond(route, state.emptyChildren ? [] : [child]);
     if (path === `/profiles/children/${ids.child}`)
       return respond(route, child);
     if (path.startsWith("/profiles/children/")) return respond(route, {}, 404);
+    if (path === "/profiles/admin/parents")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === `/profiles/admin/parents/${ids.parent}`)
+      return respond(route, {
+        id: ids.parent,
+        display_name: "Ba mẹ API",
+        email: "parent@example.test",
+        phone: null,
+        created_at: timestamp,
+        children: [child],
+        contact_info_status: "not_configured",
+      });
     if (path === "/books/catalog") {
       if (state.catalogStatus !== 200)
         return respond(
@@ -424,8 +488,26 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       );
     }
     if (path === `/books/catalog/${ids.book}`) return respond(route, book);
-    if (path === `/books/catalog/${ids.book}/preview`)
-      return respond(route, [], state.previewStatus);
+    if (path === `/books/catalog/${ids.book}/preview`) {
+      if (state.previewStatus !== 200)
+        return respond(route, [], state.previewStatus);
+      return respond(route, [
+        {
+          page_id: ids.page,
+          page_number: 1,
+          lifecycle_status: "ACTIVE",
+          current_verified_revision_id: ids.revision,
+          preview_url: "http://127.0.0.1:8000/test-page.svg",
+        },
+      ]);
+    }
+    if (path === "/books/reports/mine")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 20),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
     if (path.startsWith("/books/catalog/")) return respond(route, {}, 404);
     if (path === "/reading/history")
       return respond(
@@ -523,8 +605,115 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         },
         state.reportStatus,
       );
+    if (
+      path.startsWith(`/system/difficult-words/${ids.child}/practice/history`)
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      return respond(route, {
+        storage_ready: true,
+        items: difficultPracticeAttempts,
+      });
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/evaluate` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: difficultWordState.normalized_word,
+        display_text: difficultWordState.display_text,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "COMPLETED",
+        assessment_status: "CORRECT",
+        recognition_source: "SERVER_STT",
+        spoken_transcript: difficultWordState.display_text,
+        confidence: null,
+        audio_duration_ms: 820,
+        assessment_version: 1,
+        evidence_word_ids: [ids.revision],
+        persistence_backend: "READING_EVENT",
+        resolved_in_session: true,
+        started_at: timestamp,
+        completed_at: timestamp,
+        feedback_message: "Chính xác rồi! Con giỏi lắm!",
+        word_progress: {
+          normalized_word: difficultWordState.normalized_word,
+          practice_status: "COMPLETED",
+          practice_attempts_count: 1,
+          practice_correct_count: 1,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: 1,
+          required_consecutive_correct: 1,
+          last_practiced_at: timestamp,
+          last_practice_status: "CORRECT",
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultWordState.practice_status = "COMPLETED";
+      difficultWordState.practice_attempts_count = 1;
+      difficultWordState.practice_correct_count = 1;
+      difficultWordState.consecutive_correct_count = 1;
+      difficultWordState.last_practiced_at = timestamp;
+      difficultWordState.last_practice_status = "CORRECT";
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/start` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const body = route.request().postDataJSON() as {
+        normalized_word: string;
+        display_text?: string;
+        evidence_word_ids?: string[];
+      };
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: body.normalized_word,
+        display_text: body.display_text ?? body.normalized_word,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "STARTED",
+        assessment_status: null,
+        recognition_source: null,
+        spoken_transcript: null,
+        confidence: null,
+        audio_duration_ms: null,
+        assessment_version: 1,
+        evidence_word_ids: body.evidence_word_ids ?? [ids.revision],
+        started_at: timestamp,
+        completed_at: null,
+        feedback_message: null,
+        word_progress: {
+          normalized_word: body.normalized_word,
+          practice_status: "IN_PROGRESS",
+          practice_attempts_count: difficultPracticeAttempts.length,
+          practice_correct_count: difficultPracticeAttempts.length,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: difficultPracticeAttempts.length,
+          required_consecutive_correct: 2,
+          last_practiced_at: null,
+          last_practice_status: null,
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
     if (path.startsWith("/system/difficult-words/"))
-      return respond(route, [word], state.reportStatus);
+      return respond(route, [difficultWordState], state.reportStatus);
     if (path === "/books/admin/catalog")
       return respond(
         route,
@@ -539,6 +728,47 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           }),
         ),
       );
+    if (path === "/books/admin/metadata-quality")
+      return respond(route, {
+        summary: {
+          total_books: 0,
+          books_with_issues: 0,
+          missing_title: 0,
+          missing_author: 0,
+          invalid_grade_range: 0,
+          possible_duplicate_groups: 0,
+          books_in_duplicate_groups: 0,
+          checked_at: timestamp,
+        },
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/quality/reports")
+      return respond(route, {
+        items: [],
+        total: 0,
+        summary: {},
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/quality/books")
+      return respond(route, {
+        items: [],
+        total: 0,
+        limit: Number(url.searchParams.get("limit") ?? 10),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+    if (path === "/books/admin/viread-training/overview")
+      return respond(route, {
+        outbox: [],
+        samples: [],
+        jobs: [],
+        runs: [],
+        benchmarks: [],
+        active_model: null,
+      });
     if (
       state.createdBook &&
       path === `/books/admin/catalog/${state.createdBook.id}`

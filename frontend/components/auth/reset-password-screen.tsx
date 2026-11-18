@@ -50,12 +50,9 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
   if (isSuccessful) {
     return (
       <AuthShell>
-        <Card
-          className="mx-auto max-w-[560px] border border-border shadow-sm"
-          tone="success"
-        >
+        <Card className="border border-border" tone="success">
           <div>
-            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-success-ink">
+            <p className="text-sm font-semibold text-success-ink">
               Tài khoản ViRead
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-success-ink">
@@ -80,9 +77,9 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
     return (
       <AuthShell>
-        <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+        <Card className="border border-border bg-white">
           <div>
-            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-ink">
@@ -111,9 +108,9 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+      <Card className="border border-border bg-white">
         <div>
-          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+          <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
           </p>
           <h1 className="mt-2 text-heading font-extrabold text-ink">

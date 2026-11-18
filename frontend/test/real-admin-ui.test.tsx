@@ -282,15 +282,17 @@ beforeEach(() => {
           hash_match: false,
           suitability: null,
           findings: [],
-          provider_events: [{
-            provider: "gemini_primary",
-            model: "gemini-test",
-            stage: "CHILD_SAFETY_SCANNING",
-            availability: false,
-            http_status: 200,
-            error_code: "INVALID_EVIDENCE",
-            duration_ms: 12,
-          }],
+          provider_events: [
+            {
+              provider: "gemini_primary",
+              model: "gemini-test",
+              stage: "CHILD_SAFETY_SCANNING",
+              availability: false,
+              http_status: 200,
+              error_code: "INVALID_EVIDENCE",
+              duration_ms: 12,
+            },
+          ],
         };
       }
       return Response.json(latestAiWorkflow);
@@ -638,15 +640,15 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
             ([url, init]) =>
               String(url).endsWith(
                 "/ai-workflows/66666666-6666-4666-8666-666666666666/candidate",
-              ) &&
-              (init as RequestInit | undefined)?.method === "PATCH",
+              ) && (init as RequestInit | undefined)?.method === "PATCH",
           ),
         ).toBe(true),
       );
-      await waitFor(() =>
-        expect(
-          screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
-        ).toBeEnabled(),
+      await waitFor(
+        () =>
+          expect(
+            screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
+          ).toBeEnabled(),
         { timeout: 5000 },
       );
       await user.click(
@@ -683,18 +685,20 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
 
   it("shows compact Safety findings as collapsible cards and highlights HIGH", async () => {
     aiReviewDraftEnabled = true;
-    aiSafetyFindings = [{
-      finding_id: "finding-1",
-      category: "SEXUAL_CONTENT",
-      content_type: "DESCRIPTION",
-      severity: "HIGH",
-      evidence_text: "mô tả hành vi xâm hại tình dục trực diện",
-      evidence_start: 12,
-      evidence_end: 54,
-      explanation:
-        "Nội dung mô tả xâm hại tình dục trực diện, không phù hợp với học sinh lớp 1–5.",
-      recommendation: "Không phê duyệt sách cho thư viện trẻ em.",
-    }];
+    aiSafetyFindings = [
+      {
+        finding_id: "finding-1",
+        category: "SEXUAL_CONTENT",
+        content_type: "DESCRIPTION",
+        severity: "HIGH",
+        evidence_text: "mô tả hành vi xâm hại tình dục trực diện",
+        evidence_start: 12,
+        evidence_end: 54,
+        explanation:
+          "Nội dung mô tả xâm hại tình dục trực diện, không phù hợp với học sinh lớp 1–5.",
+        recommendation: "Không phê duyệt sách cho thư viện trẻ em.",
+      },
+    ];
     const user = userEvent.setup();
     render(
       <AdminServicesProvider>
@@ -711,9 +715,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
 
     expect(await screen.findByText("SEXUAL CONTENT")).toBeInTheDocument();
-    expect(screen.getByText("HIGH", { exact: true })).toHaveClass(
-      "bg-red-700",
-    );
+    expect(screen.getByText("HIGH", { exact: true })).toHaveClass("bg-red-700");
     expect(
       screen.getByText("Mở chi tiết").closest("details"),
     ).toBeInTheDocument();
@@ -735,7 +737,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       name: "Xác nhận kết quả Safety",
     });
     expect(safetyConfirm).toBeDisabled();
-    await user.type(safetyReason, "Admin đã xem ngữ cảnh và giữ trạng thái chặn.");
+    await user.type(
+      safetyReason,
+      "Admin đã xem ngữ cảnh và giữ trạng thái chặn.",
+    );
     expect(safetyConfirm).toBeEnabled();
     await user.click(safetyConfirm);
     await waitFor(() => {
@@ -743,9 +748,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         String(url).endsWith("/safety-decision"),
       );
       expect(decisionCall).toBeDefined();
-      expect(JSON.parse(String((decisionCall?.[1] as RequestInit).body)).reason).toBe(
-        "Admin đã xem ngữ cảnh và giữ trạng thái chặn.",
-      );
+      expect(
+        JSON.parse(String((decisionCall?.[1] as RequestInit).body)).reason,
+      ).toBe("Admin đã xem ngữ cảnh và giữ trạng thái chặn.");
     });
     expect(
       screen.getByRole("button", {
@@ -997,7 +1002,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     expect(await screen.findByText("book.read")).toBeInTheDocument();
     expect(screen.getByText(actorId)).toBeInTheDocument();
-    expect(screen.getByText(`book · ${resourceId}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`book · ${resourceId}`)),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Không thể tải nhật ký/)).not.toBeInTheDocument();
     expect(screen.getByText("{}")).toBeInTheDocument();
   });
@@ -1085,4 +1092,13 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       await screen.findByRole("heading", { name: "Database" }),
     ).toBeInTheDocument();
   });
+});
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+    useSearchParams: () => new URLSearchParams(),
+  };
 });

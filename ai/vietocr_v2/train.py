@@ -41,6 +41,7 @@ def validate_flow1_sample_counts(counts: dict[str, int]) -> None:
 ORIGINAL_WEIGHTS_URL = "https://vocr.vn/data/vietocr/vgg_transformer.pth"
 PREPROCESSING_CONFIG = {
     "pipeline": "opencv-line-v1",
+    "label_unicode_policy": "locked-vocab-typographic-punctuation-v1",
     "deskew_max_degrees": 10.0,
     "denoise_h": 3,
     "clahe_clip_limit": 2.0,
@@ -95,7 +96,31 @@ def _profile_config(profile: str, config: dict[str, Any], data_root: Path, train
     return cfg
 
 
-def _write_annotations(rows, manifest_dir: Path, root: Path) -> tuple[Path, Path]:
+_LOCKED_VOCAB_PUNCTUATION = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-",
+    "\u2026": "...", "\u00a0": " ",
+})
+
+
+def _label_for_locked_vocabulary(label: str, vocabulary: str) -> str:
+    """Map common typographic punctuation to equivalent characters in Original.
+
+    The VietOCR Original decoder has a fixed, hash-locked vocabulary. Keep source
+    labels untouched, normalize only their training/validation text view, and
+    fail early with a readable codepoint for any unsupported character that
+    cannot be represented without changing its meaning.
+    """
+    normalized = label.translate(_LOCKED_VOCAB_PUNCTUATION)
+    unsupported = sorted(set(normalized).difference(vocabulary))
+    if unsupported:
+        details = ", ".join(f"U+{ord(char):04X} ({char!r})" for char in unsupported)
+        raise ValueError(f"training label contains characters unsupported by the locked VietOCR vocabulary: {details}")
+    return normalized
+
+
+def _write_annotations(rows, manifest_dir: Path, root: Path, *, vocabulary: str) -> tuple[Path, Path]:
     import sys
 
     service_dir = Path(__file__).resolve().parents[2] / "backend" / "app" / "services"
@@ -121,7 +146,8 @@ def _write_annotations(rows, manifest_dir: Path, root: Path) -> tuple[Path, Path
                 processed = processed_root / f"{sha256_file(image)}.png"
                 if not processed.exists():
                     preprocess_line_image(image, processed)
-                stream.write(f"{processed.as_posix()}\t{row.label}\n")
+                label = _label_for_locked_vocabulary(row.label, vocabulary)
+                stream.write(f"{processed.as_posix()}\t{label}\n")
     if not train_path.stat().st_size or not valid_path.stat().st_size:
         raise ValueError("training requires both train and validation groups")
     return train_path, valid_path
@@ -474,7 +500,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
 
     config = dict(Cfg.load_config_from_name("vgg_transformer"))
     architecture_sha = _assert_original_config(config)
-    train_tsv, valid_tsv = _write_annotations(rows, manifest.parent, run_dir / "dataset")
+    train_tsv, valid_tsv = _write_annotations(
+        rows, manifest.parent, run_dir / "dataset", vocabulary=str(config["vocab"]),
+    )
     cfg = _profile_config(profile, config, run_dir / "dataset", train_tsv, valid_tsv, run_dir,
                           total_steps, batch_size, seed, dataset_version_sha256)
     amp_enabled = bool(use_fp16 and cfg["device"] == "cuda")

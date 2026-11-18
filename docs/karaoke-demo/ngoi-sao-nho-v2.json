@@ -1,0 +1,905 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a01",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 382,
+      "end_ms": 5907,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000001",
+          "text": "Ngôi",
+          "start_ms": 382,
+          "end_ms": 1067
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000002",
+          "text": "sao",
+          "start_ms": 1067,
+          "end_ms": 1767
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000003",
+          "text": "nhỏ",
+          "start_ms": 1767,
+          "end_ms": 2452
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000004",
+          "text": "sáng",
+          "start_ms": 2452,
+          "end_ms": 3142
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000005",
+          "text": "ở",
+          "start_ms": 3142,
+          "end_ms": 3832
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000006",
+          "text": "trên",
+          "start_ms": 3832,
+          "end_ms": 4522
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000007",
+          "text": "trời",
+          "start_ms": 4522,
+          "end_ms": 5907
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a02",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 5907,
+      "end_ms": 11422,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000008",
+          "text": "Lung",
+          "start_ms": 5907,
+          "end_ms": 6592
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000009",
+          "text": "linh",
+          "start_ms": 6592,
+          "end_ms": 7282
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000010",
+          "text": "soi",
+          "start_ms": 7282,
+          "end_ms": 7967
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000011",
+          "text": "sáng",
+          "start_ms": 7967,
+          "end_ms": 8657
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000012",
+          "text": "khắp",
+          "start_ms": 8657,
+          "end_ms": 9352
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000013",
+          "text": "muôn",
+          "start_ms": 9352,
+          "end_ms": 10047
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000014",
+          "text": "nơi",
+          "start_ms": 10047,
+          "end_ms": 11422
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a03",
+      "text": "Em ngước mắt nhìn ánh sao xa",
+      "start_ms": 11422,
+      "end_ms": 16942,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000015",
+          "text": "Em",
+          "start_ms": 11422,
+          "end_ms": 12112
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000016",
+          "text": "ngước",
+          "start_ms": 12112,
+          "end_ms": 12802
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000017",
+          "text": "mắt",
+          "start_ms": 12802,
+          "end_ms": 13492
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000018",
+          "text": "nhìn",
+          "start_ms": 13492,
+          "end_ms": 14182
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000019",
+          "text": "ánh",
+          "start_ms": 14182,
+          "end_ms": 14867
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000020",
+          "text": "sao",
+          "start_ms": 14867,
+          "end_ms": 15552
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000021",
+          "text": "xa",
+          "start_ms": 15552,
+          "end_ms": 16942
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a04",
+      "text": "Mỉm cười bé hát tiếng ngân nga",
+      "start_ms": 16942,
+      "end_ms": 22447,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000022",
+          "text": "Mỉm",
+          "start_ms": 16942,
+          "end_ms": 17627
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000023",
+          "text": "cười",
+          "start_ms": 17627,
+          "end_ms": 18317
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000024",
+          "text": "bé",
+          "start_ms": 18317,
+          "end_ms": 19007
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000025",
+          "text": "hát",
+          "start_ms": 19007,
+          "end_ms": 19697
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000026",
+          "text": "tiếng",
+          "start_ms": 19697,
+          "end_ms": 20387
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000027",
+          "text": "ngân",
+          "start_ms": 20387,
+          "end_ms": 21067
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000028",
+          "text": "nga",
+          "start_ms": 21067,
+          "end_ms": 22447
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a05",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 22447,
+      "end_ms": 27972,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000029",
+          "text": "Ngôi",
+          "start_ms": 22447,
+          "end_ms": 23142
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000030",
+          "text": "sao",
+          "start_ms": 23142,
+          "end_ms": 23832
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000031",
+          "text": "nhỏ",
+          "start_ms": 23832,
+          "end_ms": 24522
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000032",
+          "text": "sáng",
+          "start_ms": 24522,
+          "end_ms": 25212
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000033",
+          "text": "ở",
+          "start_ms": 25212,
+          "end_ms": 25902
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000034",
+          "text": "trên",
+          "start_ms": 25902,
+          "end_ms": 26592
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000035",
+          "text": "trời",
+          "start_ms": 26592,
+          "end_ms": 27972
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a06",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 27972,
+      "end_ms": 33497,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000036",
+          "text": "Lung",
+          "start_ms": 27972,
+          "end_ms": 28662
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000037",
+          "text": "linh",
+          "start_ms": 28662,
+          "end_ms": 29352
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000038",
+          "text": "soi",
+          "start_ms": 29352,
+          "end_ms": 30042
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000039",
+          "text": "sáng",
+          "start_ms": 30042,
+          "end_ms": 30732
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000040",
+          "text": "khắp",
+          "start_ms": 30732,
+          "end_ms": 31422
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000041",
+          "text": "muôn",
+          "start_ms": 31422,
+          "end_ms": 32107
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000042",
+          "text": "nơi",
+          "start_ms": 32107,
+          "end_ms": 33497
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a07",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 33497,
+      "end_ms": 39017,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000043",
+          "text": "Ngôi",
+          "start_ms": 33497,
+          "end_ms": 34182
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000044",
+          "text": "sao",
+          "start_ms": 34182,
+          "end_ms": 34872
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000045",
+          "text": "nhỏ",
+          "start_ms": 34872,
+          "end_ms": 35557
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000046",
+          "text": "sáng",
+          "start_ms": 35557,
+          "end_ms": 36257
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000047",
+          "text": "ở",
+          "start_ms": 36257,
+          "end_ms": 36937
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000048",
+          "text": "trên",
+          "start_ms": 36937,
+          "end_ms": 37647
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000049",
+          "text": "trời",
+          "start_ms": 37647,
+          "end_ms": 39017
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a08",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 39017,
+      "end_ms": 44537,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000050",
+          "text": "Lung",
+          "start_ms": 39017,
+          "end_ms": 39697
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000051",
+          "text": "linh",
+          "start_ms": 39697,
+          "end_ms": 40402
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000052",
+          "text": "soi",
+          "start_ms": 40402,
+          "end_ms": 41077
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000053",
+          "text": "sáng",
+          "start_ms": 41077,
+          "end_ms": 41777
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000054",
+          "text": "khắp",
+          "start_ms": 41777,
+          "end_ms": 42452
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000055",
+          "text": "muôn",
+          "start_ms": 42452,
+          "end_ms": 43147
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000056",
+          "text": "nơi",
+          "start_ms": 43147,
+          "end_ms": 44537
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a09",
+      "text": "Em ngước mắt nhìn ánh sao xa",
+      "start_ms": 44537,
+      "end_ms": 50057,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000057",
+          "text": "Em",
+          "start_ms": 44537,
+          "end_ms": 45217
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000058",
+          "text": "ngước",
+          "start_ms": 45217,
+          "end_ms": 45912
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000059",
+          "text": "mắt",
+          "start_ms": 45912,
+          "end_ms": 46597
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000060",
+          "text": "nhìn",
+          "start_ms": 46597,
+          "end_ms": 47292
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000061",
+          "text": "ánh",
+          "start_ms": 47292,
+          "end_ms": 47977
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000062",
+          "text": "sao",
+          "start_ms": 47977,
+          "end_ms": 48672
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000063",
+          "text": "xa",
+          "start_ms": 48672,
+          "end_ms": 50057
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a10",
+      "text": "Mỉm cười bé hát tiếng ngân nga",
+      "start_ms": 50057,
+      "end_ms": 55572,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000064",
+          "text": "Mỉm",
+          "start_ms": 50057,
+          "end_ms": 50727
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000065",
+          "text": "cười",
+          "start_ms": 50727,
+          "end_ms": 51442
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000066",
+          "text": "bé",
+          "start_ms": 51442,
+          "end_ms": 52112
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000067",
+          "text": "hát",
+          "start_ms": 52112,
+          "end_ms": 52812
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000068",
+          "text": "tiếng",
+          "start_ms": 52812,
+          "end_ms": 53492
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000069",
+          "text": "ngân",
+          "start_ms": 53492,
+          "end_ms": 54197
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000070",
+          "text": "nga",
+          "start_ms": 54197,
+          "end_ms": 55572
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a11",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 55572,
+      "end_ms": 61087,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000071",
+          "text": "Ngôi",
+          "start_ms": 55572,
+          "end_ms": 56252
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000072",
+          "text": "sao",
+          "start_ms": 56252,
+          "end_ms": 56957
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000073",
+          "text": "nhỏ",
+          "start_ms": 56957,
+          "end_ms": 57632
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000074",
+          "text": "sáng",
+          "start_ms": 57632,
+          "end_ms": 58337
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000075",
+          "text": "ở",
+          "start_ms": 58337,
+          "end_ms": 59007
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000076",
+          "text": "trên",
+          "start_ms": 59007,
+          "end_ms": 59707
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000077",
+          "text": "trời",
+          "start_ms": 59707,
+          "end_ms": 61087
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a12",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 61087,
+      "end_ms": 66592,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000078",
+          "text": "Lung",
+          "start_ms": 61087,
+          "end_ms": 61767
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000079",
+          "text": "linh",
+          "start_ms": 61767,
+          "end_ms": 62472
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000080",
+          "text": "soi",
+          "start_ms": 62472,
+          "end_ms": 63127
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000081",
+          "text": "sáng",
+          "start_ms": 63127,
+          "end_ms": 63847
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000082",
+          "text": "khắp",
+          "start_ms": 63847,
+          "end_ms": 64517
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000083",
+          "text": "muôn",
+          "start_ms": 64517,
+          "end_ms": 65222
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000084",
+          "text": "nơi",
+          "start_ms": 65222,
+          "end_ms": 66592
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a13",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 66592,
+      "end_ms": 72117,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000085",
+          "text": "Ngôi",
+          "start_ms": 66592,
+          "end_ms": 67282
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000086",
+          "text": "sao",
+          "start_ms": 67282,
+          "end_ms": 67987
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000087",
+          "text": "nhỏ",
+          "start_ms": 67987,
+          "end_ms": 68662
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000088",
+          "text": "sáng",
+          "start_ms": 68662,
+          "end_ms": 69347
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000089",
+          "text": "ở",
+          "start_ms": 69347,
+          "end_ms": 70042
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000090",
+          "text": "trên",
+          "start_ms": 70042,
+          "end_ms": 70732
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000091",
+          "text": "trời",
+          "start_ms": 70732,
+          "end_ms": 72117
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a14",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 72117,
+      "end_ms": 77632,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000092",
+          "text": "Lung",
+          "start_ms": 72117,
+          "end_ms": 72802
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000093",
+          "text": "linh",
+          "start_ms": 72802,
+          "end_ms": 73497
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000094",
+          "text": "soi",
+          "start_ms": 73497,
+          "end_ms": 74172
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000095",
+          "text": "sáng",
+          "start_ms": 74172,
+          "end_ms": 74877
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000096",
+          "text": "khắp",
+          "start_ms": 74877,
+          "end_ms": 75562
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000097",
+          "text": "muôn",
+          "start_ms": 75562,
+          "end_ms": 76267
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000098",
+          "text": "nơi",
+          "start_ms": 76267,
+          "end_ms": 77632
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a15",
+      "text": "Em ngước mắt nhìn ánh sao xa",
+      "start_ms": 77632,
+      "end_ms": 83152,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000099",
+          "text": "Em",
+          "start_ms": 77632,
+          "end_ms": 78322
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000100",
+          "text": "ngước",
+          "start_ms": 78322,
+          "end_ms": 79007
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000101",
+          "text": "mắt",
+          "start_ms": 79007,
+          "end_ms": 79692
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000102",
+          "text": "nhìn",
+          "start_ms": 79692,
+          "end_ms": 80397
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000103",
+          "text": "ánh",
+          "start_ms": 80397,
+          "end_ms": 81082
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000104",
+          "text": "sao",
+          "start_ms": 81082,
+          "end_ms": 81777
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000105",
+          "text": "xa",
+          "start_ms": 81777,
+          "end_ms": 83152
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a16",
+      "text": "Mỉm cười bé hát tiếng ngân nga",
+      "start_ms": 83152,
+      "end_ms": 88672,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000106",
+          "text": "Mỉm",
+          "start_ms": 83152,
+          "end_ms": 83832
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000107",
+          "text": "cười",
+          "start_ms": 83832,
+          "end_ms": 84532
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000108",
+          "text": "bé",
+          "start_ms": 84532,
+          "end_ms": 85217
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000109",
+          "text": "hát",
+          "start_ms": 85217,
+          "end_ms": 85912
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000110",
+          "text": "tiếng",
+          "start_ms": 85912,
+          "end_ms": 86587
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000111",
+          "text": "ngân",
+          "start_ms": 86587,
+          "end_ms": 87287
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000112",
+          "text": "nga",
+          "start_ms": 87287,
+          "end_ms": 88672
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a17",
+      "text": "Ngôi sao nhỏ sáng ở trên trời",
+      "start_ms": 88672,
+      "end_ms": 94182,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000113",
+          "text": "Ngôi",
+          "start_ms": 88672,
+          "end_ms": 89352
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000114",
+          "text": "sao",
+          "start_ms": 89352,
+          "end_ms": 90047
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000115",
+          "text": "nhỏ",
+          "start_ms": 90047,
+          "end_ms": 90732
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000116",
+          "text": "sáng",
+          "start_ms": 90732,
+          "end_ms": 91422
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000117",
+          "text": "ở",
+          "start_ms": 91422,
+          "end_ms": 92082
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000118",
+          "text": "trên",
+          "start_ms": 92082,
+          "end_ms": 92807
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000119",
+          "text": "trời",
+          "start_ms": 92807,
+          "end_ms": 94182
+        }
+      ]
+    },
+    {
+      "id": "7feaf101-47ce-481c-b25a-20f031e30a18",
+      "text": "Lung linh soi sáng khắp muôn nơi",
+      "start_ms": 94182,
+      "end_ms": 99706,
+      "syllables": [
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000120",
+          "text": "Lung",
+          "start_ms": 94182,
+          "end_ms": 94862
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000121",
+          "text": "linh",
+          "start_ms": 94862,
+          "end_ms": 95567
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000122",
+          "text": "soi",
+          "start_ms": 95567,
+          "end_ms": 96247
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000123",
+          "text": "sáng",
+          "start_ms": 96247,
+          "end_ms": 96947
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000124",
+          "text": "khắp",
+          "start_ms": 96947,
+          "end_ms": 97607
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000125",
+          "text": "muôn",
+          "start_ms": 97607,
+          "end_ms": 98327
+        },
+        {
+          "id": "b8a83d5e-4dc4-54fa-a91f-000000000126",
+          "text": "nơi",
+          "start_ms": 98327,
+          "end_ms": 99706
+        }
+      ]
+    }
+  ]
+}

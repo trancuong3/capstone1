@@ -1,9 +1,10 @@
-﻿import {
+import {
   act,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -528,7 +529,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await waitFor(() => expect(speechPlayerMock.play).toHaveBeenCalledOnce());
     await user.click(screen.getByRole("button", { name: /^mèo$/ }));
     await waitFor(() => expect(speechPlayerMock.play).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Đọc mẫu 1 chữ:")).toBeInTheDocument();
+    expect(screen.getByText("Đọc mẫu từ")).toBeInTheDocument();
     expect(screen.queryByText("Đọc mẫu cả đoạn:")).not.toBeInTheDocument();
     await act(async () => finishSecond());
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
@@ -812,10 +813,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         if (duplicate) recognition.onresult?.(finalEvent);
       });
       expect(screen.getByRole("button", { name: "Bé" })).toHaveClass(
-        "bg-green-200",
+        "bg-success-surface",
       );
       expect(screen.getByRole("button", { name: "mèo" })).toHaveClass(
-        "bg-green-200",
+        "bg-success-surface",
       );
       expect(screen.getByRole("button", { name: "nhỏ" })).not.toHaveClass(
         "bg-orange-200",
@@ -974,7 +975,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
       await user.click(retryConsent);
       await screen.findByText(/Bé đọc lại từ/);
-      expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === "P" &&
+            element.textContent === "Từ cần luyện mèo",
+        ),
+      ).toBeInTheDocument();
       await waitFor(() => {
         expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
           TEST_SESSION_ID,
@@ -1015,7 +1022,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await waitFor(() =>
           expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
         );
-        expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+        expect(
+          screen.getByText(
+            (_, element) =>
+              element?.tagName === "P" &&
+              element.textContent === "Từ cần luyện mèo",
+          ),
+        ).toBeInTheDocument();
         expect(speechPlayerMock.play).toHaveBeenCalledTimes(4);
         expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
         return;
@@ -1034,8 +1047,21 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           })
           .mockResolvedValueOnce({
             text: "mèo",
-            language_code: "vi",
-            words: [{ text: "mèo", start: 0, end: 1, logprob: -0.1 }],
+            // low-confidence-keyterm: correct language but logprob below
+            // the −0.5 high-confidence gate → still rejected.
+            // wrong-language-keyterm: non-Vietnamese language_code →
+            // hasUsableTranscript rejects regardless of logprob.
+            // browser-corroborated-keyterm: good confidence + browser
+            // confirmation → accepted.
+            language_code: outcome === "wrong-language-keyterm" ? "en" : "vi",
+            words: [
+              {
+                text: "mèo",
+                start: 0,
+                end: 1,
+                logprob: outcome === "low-confidence-keyterm" ? -0.8 : -0.1,
+              },
+            ],
           });
         if (outcome === "browser-corroborated-keyterm") {
           act(() =>
@@ -1072,6 +1098,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           expect(screen.getByRole("button", { name: "mèo" })).not.toHaveClass(
             "bg-green-200",
           );
+          expect(screen.getByRole("button", { name: "mèo" })).not.toHaveClass(
+            "bg-success-surface",
+          );
         }
         expect(speechServiceMock.transcribe).toHaveBeenLastCalledWith(
           expect.any(Blob),
@@ -1101,7 +1130,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             );
           }
         }
-        await screen.findByText("Từ cần luyện: “nhỏ”");
+        await screen.findByText(
+          (_, element) =>
+            element?.tagName === "P" &&
+            element.textContent === "Từ cần luyện nhỏ",
+        );
         await waitFor(() =>
           expect(speechRecorderMock.start).toHaveBeenCalledTimes(5),
         );
@@ -1216,9 +1249,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           ],
         });
       });
-      expect(
-        screen.getByText("Đang nghe bé đọc từ này..."),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Đang nghe bé")).toBeInTheDocument();
       if (outcome === "technical-error") {
         await user.click(
           screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
@@ -1478,7 +1509,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       );
     });
     expect(services.readingService.navigateToPage).toHaveBeenCalledOnce();
-    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Từ cần luyện mèo",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Chưa mở lại được trang 4/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Thử mở lại trang" }),
@@ -1505,14 +1542,20 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         pageFour.page_revision_id,
       );
     });
-    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Từ cần luyện mèo",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(/Chưa mở lại được trang 4/),
     ).not.toBeInTheDocument();
     const skipWordButton = screen.getByRole("button", {
       name: "Bỏ qua từ này",
     });
-    expect(skipWordButton).toBeEnabled();
+    await waitFor(() => expect(skipWordButton).toBeEnabled());
     expect(screen.getByText(/Bé đọc lại từ ·/)).toHaveTextContent("1/1");
     await user.click(skipWordButton);
 
@@ -1894,8 +1937,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     const user = userEvent.setup();
     renderReading("ready");
     expect(
-      await screen.findAllByRole("heading", { name: "Sẵn sàng đọc chưa nào?" }),
-    ).not.toHaveLength(0);
+      await screen.findByRole("heading", { level: 1, name: bookFixture.title }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Microphone sẽ bật khi bắt đầu đọc."),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Bắt đầu đọc" }));
     expect(
       await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" }),
@@ -2124,6 +2170,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await screen.findByLabelText("Trang sách 5");
     const nextWord = screen.getByRole("button", { name: "Bé" });
     expect(nextWord.className).not.toContain("bg-green-200");
+    expect(nextWord.className).not.toContain("bg-success-surface");
     expect(speechPlayerMock.play).not.toHaveBeenCalled();
     expect(speechRecorderMock.start).toHaveBeenCalledOnce();
     expect(services.readingService.completeCurrentPage).not.toHaveBeenCalled();
@@ -2593,18 +2640,22 @@ describe("ReadingScreen presentation with typed test-local service responses", (
   it("offers camera retry and safe exit without a manual page picker", async () => {
     const user = userEvent.setup();
     renderReading("page-confidence-low");
-    await screen.findByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Mình chưa nhìn rõ trang sách",
     });
-    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Kết thúc an toàn" }),
+      within(dialog).getByRole("button", { name: "Thử lại" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Chọn trang")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Kết thúc an toàn" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Chọn trang" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: "Bé đang đọc trang nào?" }),
     ).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Thử lại" }));
+    await user.click(within(dialog).getByRole("button", { name: "Thử lại" }));
     expect(services.pageMatchService.retryCurrentPage).toHaveBeenCalledWith(
       TEST_SESSION_ID,
     );
@@ -2662,7 +2713,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     const user = userEvent.setup();
     renderReading("question");
-    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé!" });
+    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé" });
     expect(document.body.textContent).not.toContain("expected_answer");
     await user.click(await screen.findByRole("button", { name: /Trên bàn/ }));
     expect(
@@ -2670,7 +2721,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Bên cửa sổ/ }));
     expect(
-      await screen.findByText("Đúng rồi! Bé nhớ rất tốt."),
+      await screen.findByText("Đúng rồi. Bé nhớ rất tốt."),
     ).toBeInTheDocument();
     expect(services.comprehensionService.submitAnswer).toHaveBeenLastCalledWith(
       TEST_SESSION_ID,

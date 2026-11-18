@@ -263,25 +263,45 @@ class SentenceShooterService:
         token_id: UUID,
         request_id: UUID,
     ) -> SentenceShooterShotRead:
-        await self._require_parent(actor_id)
-        game_session = await self.repository.session_for_parent(
-            session_id,
-            actor_id,
-            lock=True,
+        bundle = (
+            await self.repository.load_shot_bundle(
+                actor_id,
+                session_id,
+                round_id,
+                request_id,
+            )
+            if hasattr(self.repository, "load_shot_bundle")
+            else None
         )
-        if game_session is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        duplicate = await self.repository.attempt(session_id, request_id)
-        if duplicate is not None:
-            return SentenceShooterShotRead.model_validate(duplicate.ResultSnapshot)
-        if game_session.Status != "IN_PROGRESS":
-            raise HTTPException(status_code=409, detail="SESSION_NOT_ACTIVE")
+        if bundle is not None:
+            game_session, game_round, duplicate_snapshot = bundle
+            if duplicate_snapshot is not None:
+                await self.repository.rollback()
+                return SentenceShooterShotRead.model_validate(duplicate_snapshot)
+            if game_session.Status != "IN_PROGRESS":
+                raise HTTPException(status_code=409, detail="SESSION_NOT_ACTIVE")
+            if game_round.Status != "IN_PROGRESS" or game_round.RoundNumber != game_session.CompletedRounds + 1:
+                raise HTTPException(status_code=409, detail="ROUND_NOT_ACTIVE")
+        else:
+            await self._require_parent(actor_id)
+            game_session = await self.repository.session_for_parent(
+                session_id,
+                actor_id,
+                lock=True,
+            )
+            if game_session is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            duplicate = await self.repository.attempt(session_id, request_id)
+            if duplicate is not None:
+                return SentenceShooterShotRead.model_validate(duplicate.ResultSnapshot)
+            if game_session.Status != "IN_PROGRESS":
+                raise HTTPException(status_code=409, detail="SESSION_NOT_ACTIVE")
 
-        game_round = await self.repository.game_round(session_id, round_id, lock=True)
-        if game_round is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if game_round.Status != "IN_PROGRESS" or game_round.RoundNumber != game_session.CompletedRounds + 1:
-            raise HTTPException(status_code=409, detail="ROUND_NOT_ACTIVE")
+            game_round = await self.repository.game_round(session_id, round_id, lock=True)
+            if game_round is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if game_round.Status != "IN_PROGRESS" or game_round.RoundNumber != game_session.CompletedRounds + 1:
+                raise HTTPException(status_code=409, detail="ROUND_NOT_ACTIVE")
 
         shuffled_ids = {str(value) for value in game_round.ShuffledTokenIds}
         expected_ids = [str(value) for value in game_round.ExpectedTokenIds]
@@ -303,6 +323,7 @@ class SentenceShooterService:
         round_completed = game_round.NextExpectedPosition == len(expected_ids)
         stars_awarded = 0
         completed_sentence = None
+        next_round_payload: dict[str, Any] | None = None
         if round_completed:
             game_round.Status = "COMPLETED"
             game_round.CompletedAt = datetime.now(timezone.utc)
@@ -314,6 +335,26 @@ class SentenceShooterService:
             if game_session.CompletedRounds == game_session.TotalRounds:
                 game_session.Status = "COMPLETED"
                 game_session.CompletedAt = datetime.now(timezone.utc)
+            else:
+                upcoming = None
+                if hasattr(self.repository, "next_round_for_number"):
+                    upcoming = await self.repository.next_round_for_number(
+                        game_session.Id,
+                        game_session.CompletedRounds + 1,
+                    )
+                if upcoming is None:
+                    rounds = await self.repository.rounds(game_session.Id)
+                    upcoming = next(
+                        (
+                            candidate
+                            for candidate in rounds
+                            if candidate.RoundNumber == game_session.CompletedRounds + 1
+                            and candidate.Status == "IN_PROGRESS"
+                        ),
+                        None,
+                    )
+                if upcoming is not None:
+                    next_round_payload = self._public_round(upcoming).model_dump(mode="json")
 
         if round_completed:
             message = "Hoàn thành câu! Tuyệt lắm!"
@@ -334,6 +375,7 @@ class SentenceShooterService:
             "next_expected_position": game_round.NextExpectedPosition,
             "stars_awarded": stars_awarded,
             "completed_sentence": completed_sentence,
+            "next_round": next_round_payload,
             "message": message,
         }
         self.repository.add(
@@ -425,13 +467,21 @@ class SentenceShooterService:
         )
 
     async def result(self, actor_id: UUID, session_id: UUID) -> SentenceShooterResultRead:
-        await self._require_parent(actor_id)
-        game_session = await self.repository.session_for_parent(session_id, actor_id)
-        if game_session is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        book = await self.repository.book(game_session.BookId)
-        if book is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
+        bundle = (
+            await self.repository.load_result_bundle(actor_id, session_id)
+            if hasattr(self.repository, "load_result_bundle")
+            else None
+        )
+        if bundle is not None:
+            game_session, book = bundle
+        else:
+            await self._require_parent(actor_id)
+            game_session = await self.repository.session_for_parent(session_id, actor_id)
+            if game_session is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            book = await self.repository.book(game_session.BookId)
+            if book is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
         now = datetime.now(timezone.utc)
         started_at = game_session.StartedAt
         if started_at.tzinfo is None:

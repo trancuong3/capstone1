@@ -47,6 +47,7 @@ export interface SentenceShooterShotDTO {
   readonly next_expected_position: number;
   readonly stars_awarded: number;
   readonly completed_sentence: string | null;
+  readonly next_round?: SentenceShooterRoundDTO | null;
   readonly message: string;
 }
 

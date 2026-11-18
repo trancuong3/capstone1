@@ -28,6 +28,7 @@ import {
   resolveDisplayName,
 } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
+import { ButtonSizeContext } from "@/components/common/button";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
@@ -88,6 +89,7 @@ export function AppShell({ children }: AppShellProps) {
   const profileService = useProfileService();
   const pathname = usePathname();
   const router = useRouter();
+  const activeNavigationRef = useRef<HTMLAnchorElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const avatarButtonRef = useRef<HTMLButtonElement>(null);
   const [profile, setProfile] = useState<ParentProfileDTO | null>(null);
@@ -110,6 +112,12 @@ export function AppShell({ children }: AppShellProps) {
     profile?.email ?? user?.email,
   );
   const email = profile?.email ?? user?.email ?? null;
+
+  useEffect(() => {
+    const activeLink = activeNavigationRef.current;
+    if (typeof activeLink?.scrollIntoView !== "function") return;
+    activeLink.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pathname]);
 
   useEffect(() => {
     let isActive = true;
@@ -229,7 +237,7 @@ export function AppShell({ children }: AppShellProps) {
     items[nextIndex]?.focus();
   }
 
-  if (isReadingRoute) {
+  if (isReadingRoute || isBookRoute) {
     return (
       <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
         {children}
@@ -238,44 +246,53 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas">
+    <div className="parent-shell flex min-h-dvh flex-col bg-canvas">
       <a
-        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-primary focus:shadow-lg"
+        className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
         href="#main-content"
       >
         Bỏ qua điều hướng, đến nội dung
       </a>
-      <header className="shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
+      <header className="parent-topbar shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(
-            "mx-auto flex w-full min-w-0 max-w-[1376px]",
+            "mx-auto flex w-full min-w-0 max-w-[1312px]",
             isChildOnboarding
-              ? "min-h-11 items-center"
-              : "flex-col gap-3 sm:min-h-16 sm:flex-row sm:items-center sm:gap-4",
+              ? "min-h-11 items-center sm:flex-row"
+              : "flex-col gap-3 xl:min-h-16 xl:flex-row xl:items-center xl:gap-4",
           )}
         >
           <ViReadLogo
             ariaLabel="ViRead - về tổng quan"
-            className={cn(isChildOnboarding ? "text-label" : "sm:mr-auto")}
+            className={cn(isChildOnboarding ? "text-label" : "xl:mr-auto")}
             href="/dashboard"
             size="md"
           />
 
-          <div className="flex w-full min-w-0 items-start gap-2 sm:w-auto sm:items-center sm:gap-3">
+          <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto xl:gap-3">
             {!isChildOnboarding ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 sm:justify-end sm:gap-2">
+              <div className="parent-nav-links flex min-w-0 flex-1 flex-wrap items-center gap-1 py-1 xl:flex-none xl:flex-nowrap xl:justify-end xl:gap-2">
                 {navigationItems.map(({ href, icon: Icon, label }) => {
-                  const isActive = routeIsActive(pathname, href);
+                  const isActive =
+                    (routeIsActive(pathname, href) &&
+                      !navigationItems.some(
+                        (other) =>
+                          other.href.length > href.length &&
+                          routeIsActive(pathname, other.href),
+                      )) ||
+                    (href === "/entertainment" &&
+                      (pathname === "/karaoke" ||
+                        pathname.startsWith("/karaoke/")));
 
                   return (
                     <Link
                       aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-control px-2.5 text-center text-[13px] font-bold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:h-12 sm:gap-2 sm:px-3 sm:text-label",
+                        "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
                         isActive
-                          ? "bg-sky text-primary-hover"
-                          : "bg-white hover:bg-sky",
+                          ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
+                          : "bg-white hover:bg-canvas",
                       )}
                       href={href}
                       key={href}
@@ -285,10 +302,12 @@ export function AppShell({ children }: AppShellProps) {
                           isOpen: false,
                         }))
                       }
+                      ref={isActive ? activeNavigationRef : undefined}
                     >
                       <Icon
                         aria-hidden="true"
-                        className="size-5 shrink-0 sm:hidden"
+                        className="size-4 shrink-0 sm:size-[18px]"
+                        strokeWidth={1.8}
                       />
                       <span className="whitespace-nowrap">{label}</span>
                     </Link>
@@ -352,7 +371,7 @@ export function AppShell({ children }: AppShellProps) {
                     imageUrl={profile?.avatar_url}
                     size="lg"
                   />
-                  <p className="max-w-full break-words text-label font-extrabold text-ink">
+                  <p className="max-w-full break-words text-label font-semibold text-ink">
                     {displayName ?? "Tài khoản ViRead"}
                   </p>
                   {roleLabel(profile?.role) ? (
@@ -373,7 +392,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/profile") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/profile")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -396,7 +415,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/children") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/children")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -421,7 +440,7 @@ export function AppShell({ children }: AppShellProps) {
                     routeIsActive(pathname, "/settings") ? "page" : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/settings")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -443,7 +462,7 @@ export function AppShell({ children }: AppShellProps) {
                       : undefined
                   }
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-bold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
                     routeIsActive(pathname, "/help-support")
                       ? "bg-sky text-primary-hover"
                       : "hover:bg-sky",
@@ -461,7 +480,7 @@ export function AppShell({ children }: AppShellProps) {
 
                 <div className="my-2 border-t border-border" />
                 <button
-                  className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-bold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                  className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
                   disabled={isSigningOut}
                   onClick={() => void handleSignOut()}
                   role="menuitem"
@@ -477,7 +496,7 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
         {hasSignOutError ? (
           <p
-            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-bold text-danger"
+            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-semibold text-danger"
             role="alert"
           >
             Chưa thể đăng xuất lúc này. Ba mẹ vui lòng thử lại.
@@ -491,13 +510,15 @@ export function AppShell({ children }: AppShellProps) {
         className={cn(
           isImmersiveRoute
             ? "w-full flex-1"
-            : "mx-auto w-full max-w-[1440px] px-4 sm:px-8",
+            : "mx-auto w-full max-w-[1184px] px-4 sm:px-8",
           !isImmersiveRoute && "min-w-0 flex-1",
           !isImmersiveRoute &&
-            (isChildOnboarding ? "pb-8 pt-4 sm:pb-12" : "py-8 sm:py-12"),
+            (isChildOnboarding ? "pb-8 pt-4 sm:pb-10" : "py-8 sm:py-10"),
         )}
       >
-        {children}
+        <ButtonSizeContext.Provider value="compact">
+          {children}
+        </ButtonSizeContext.Provider>
       </main>
       <SiteFooter variant="parent" />
     </div>

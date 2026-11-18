@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpenText } from "lucide-react";
+import { ArrowLeft, ArrowRight, Mic } from "lucide-react";
 import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
@@ -29,86 +29,40 @@ export function ReadingReady({
         mobileLabel={`${child.alias} · ${book.title}`}
       />
 
-      <div className="mx-auto flex w-full max-w-[744px] flex-col gap-4 sm:gap-6">
-        <div className="hidden items-start gap-6 rounded-card bg-cream p-6 sm:flex">
+      <article className="mx-auto grid w-full max-w-[900px] overflow-hidden rounded-card border border-border bg-white sm:grid-cols-[0.85fr_1fr]">
+        <div className="flex items-center justify-center bg-cream px-8 py-6 sm:py-12">
           <Image
             alt=""
-            aria-hidden="true"
-            height={96}
-            src="/images/figma/owl-mascot.svg"
-            width={96}
+            src="/images/figma/reading-setup.svg"
+            width={320}
+            height={220}
+            priority
+            className="h-auto w-full max-w-72"
           />
+        </div>
+        <div className="flex flex-col items-start justify-center gap-5 p-6 sm:p-9">
           <div>
-            <h1 className="text-[26px] font-extrabold text-ink">
-              Sẵn sàng đọc chưa nào?
-            </h1>
-            <p className="mt-2 text-body text-muted">
-              Mình sẽ nhìn trang sách và nghe bé đọc.
+            <p className="mb-2 text-sm font-bold text-primary">
+              {child.alias} · Lớp {child.grade}
             </p>
+            <h1 className="book-title text-4xl text-ink">{book.title}</h1>
           </div>
-        </div>
-
-        <h1 className="text-heading font-extrabold text-ink sm:hidden">
-          Sẵn sàng đọc chưa nào?
-        </h1>
-
-        <Image
-          alt="Minh họa bé sẵn sàng đọc sách"
-          className="mx-auto h-auto w-full max-w-[320px]"
-          height={112}
-          priority
-          src="/images/figma/reading-setup.svg"
-          width={320}
-        />
-
-        <p className="hidden text-center text-label font-bold text-primary sm:block">
-          {child.alias} · {book.title}
-        </p>
-
-        <div className="flex items-start gap-3 rounded-card bg-sky p-4 sm:p-6">
-          <BookOpenText
-            aria-hidden="true"
-            className="mt-1 size-6 shrink-0 text-primary"
-          />
-          <div className="text-left">
-            <p className="font-extrabold text-ink">{book.title}</p>
-            <p className="mt-1 text-sm text-muted">
-              Microphone đã được kiểm tra ở bước chuẩn bị. Khi ba mẹ bắt đầu,
-              ViRead sẽ mở microphone để nghe bé đọc.
-            </p>
-          </div>
-        </div>
-
-        <div className="text-left sm:text-center">
-          <p className="text-body text-ink sm:text-[26px] sm:font-bold">
-            Đặt sách trước mặt bé và đọc to, tự nhiên nhé.
+          <p className="text-lg leading-relaxed text-ink">
+            Đặt sách trước mặt bé. Khi sẵn sàng, bé hãy đọc to từng dòng.
           </p>
-          <p className="text-body text-ink sm:mt-3 sm:text-muted">
-            Đọc to và tự nhiên nhé.
+          <p className="flex items-start gap-3 border-t border-border pt-4 text-sm text-muted">
+            <Mic className="size-5 shrink-0 text-primary" aria-hidden="true" />
+            Microphone sẽ bật khi bắt đầu đọc.
           </p>
-        </div>
-
-        <Button
-          className="mx-auto max-w-[360px]"
-          isLoading={isStarting}
-          onClick={onStart}
-        >
-          Bắt đầu đọc
-          {!isStarting ? (
-            <ArrowRight aria-hidden="true" className="size-5" />
-          ) : null}
-        </Button>
-        <div className="hidden sm:block">
-          <ButtonLink
-            className="mx-auto max-w-[360px]"
-            href={detailHref}
-            variant="quiet"
-          >
+          <Button isLoading={isStarting} onClick={onStart}>
+            Bắt đầu đọc <ArrowRight aria-hidden="true" className="size-5" />
+          </Button>
+          <ButtonLink href={detailHref} variant="quiet">
             <ArrowLeft aria-hidden="true" className="size-5" />
             Quay lại chi tiết sách
           </ButtonLink>
         </div>
-      </div>
+      </article>
     </section>
   );
 }

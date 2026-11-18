@@ -79,8 +79,8 @@ function ScoreRing({ score }: { readonly score: number | null }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-extrabold text-ink">{score ?? "–"}</span>
-        <span className="text-label font-bold text-muted">/ 100</span>
+        <span className="text-4xl font-semibold text-ink">{score ?? "–"}</span>
+        <span className="text-label font-semibold text-muted">/ 100</span>
       </div>
     </div>
   );
@@ -94,7 +94,7 @@ function TrendBadge({ delta }: { readonly delta: number | null }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-control px-2 py-1 text-label font-bold",
+        "inline-flex items-center gap-1 rounded-control px-2 py-1 text-label font-semibold",
         up
           ? "bg-success-surface text-success-ink"
           : down
@@ -119,8 +119,8 @@ function ComponentBar({
   return (
     <li className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="font-extrabold text-ink">{component.label}</span>
-        <span className="text-label font-extrabold text-primary">
+        <span className="font-semibold text-ink">{component.label}</span>
+        <span className="text-label font-semibold text-primary">
           {score === null ? "Chưa đủ dữ liệu" : `${score}/100`}
         </span>
       </div>
@@ -153,10 +153,7 @@ function WeeklyChart({
   const maxMinutes = Math.max(...weekly.map((week) => week.minutes), 1);
   return (
     <section aria-labelledby="progress-weekly-title" className="space-y-3">
-      <h3
-        className="text-lg font-extrabold text-ink"
-        id="progress-weekly-title"
-      >
+      <h3 className="text-lg font-semibold text-ink" id="progress-weekly-title">
         Thời gian đọc theo tuần
       </h3>
       <div aria-hidden="true" className="flex h-36 items-end gap-3">
@@ -165,7 +162,7 @@ function WeeklyChart({
             className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
             key={week.week_start}
           >
-            <span className="mb-1 text-xs font-bold text-muted">
+            <span className="mb-1 text-xs font-semibold text-muted">
               {week.accuracy_pct === null
                 ? ""
                 : `${Math.round(week.accuracy_pct)}%`}
@@ -177,7 +174,7 @@ function WeeklyChart({
               }}
               title={`${week.minutes} phút`}
             />
-            <span className="mt-2 text-xs font-bold text-muted">
+            <span className="mt-2 text-xs font-semibold text-muted">
               {shortDate(week.week_start)}
             </span>
           </div>
@@ -213,7 +210,7 @@ function ListSection({
 }) {
   return (
     <section className={cn("space-y-3 rounded-card p-4 sm:p-5", tone)}>
-      <h3 className="text-lg font-extrabold text-ink">{title}</h3>
+      <h3 className="text-lg font-semibold text-ink">{title}</h3>
       {children}
     </section>
   );
@@ -303,16 +300,16 @@ export function ChildProgressAssessmentCard({
   return (
     <section
       aria-labelledby="ai-progress-title"
-      className="rounded-card bg-white p-5 shadow-[0_12px_32px_rgba(33,65,86,0.06)] sm:p-8"
+      className="rounded-card border border-border bg-white p-5 sm:p-6"
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <p className="inline-flex items-center gap-2 text-label font-extrabold uppercase tracking-wide text-purple-ink">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-purple-ink">
             <Sparkles aria-hidden="true" className="size-4" />
             Đánh giá bằng AI
           </p>
           <h2
-            className="text-2xl font-extrabold text-ink"
+            className="text-2xl font-semibold text-ink"
             id="ai-progress-title"
           >
             {childName} đang đọc thế nào?
@@ -331,7 +328,7 @@ export function ChildProgressAssessmentCard({
             <button
               aria-checked={days === option}
               className={cn(
-                "rounded-control px-3 py-2 text-label font-bold transition focus-visible:outline-3 focus-visible:outline-primary",
+                "rounded-control px-3 py-2 text-label font-semibold transition focus-visible:outline-3 focus-visible:outline-primary",
                 days === option
                   ? "bg-primary text-white"
                   : "text-primary-hover hover:bg-white",
@@ -411,7 +408,7 @@ function AssessmentBody({
             {score.grade_label ? (
               <span
                 className={cn(
-                  "rounded-control px-3 py-1 text-lg font-extrabold",
+                  "rounded-control px-3 py-1 text-lg font-semibold",
                   GRADE_STYLES[score.grade ?? ""] ??
                     "bg-sky text-primary-hover",
                 )}
@@ -419,7 +416,7 @@ function AssessmentBody({
                 {score.grade_label}
               </span>
             ) : (
-              <span className="rounded-control bg-sky px-3 py-1 text-lg font-extrabold text-primary-hover">
+              <span className="rounded-control bg-sky px-3 py-1 text-lg font-semibold text-primary-hover">
                 Chưa đủ dữ liệu
               </span>
             )}
@@ -447,8 +444,8 @@ function AssessmentBody({
           ],
         ].map(([label, value]) => (
           <div className="rounded-card bg-cream p-4 text-center" key={label}>
-            <dt className="text-label font-bold text-muted">{label}</dt>
-            <dd className="text-2xl font-extrabold text-ink">{value}</dd>
+            <dt className="text-label font-semibold text-muted">{label}</dt>
+            <dd className="text-2xl font-semibold text-ink">{value}</dd>
           </div>
         ))}
       </dl>
@@ -464,7 +461,7 @@ function AssessmentBody({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p
             className={cn(
-              "inline-flex items-center gap-2 rounded-control px-3 py-1 text-label font-extrabold",
+              "inline-flex items-center gap-2 rounded-control px-3 py-1 text-label font-semibold",
               assessment.source === "AI"
                 ? "bg-purple/20 text-purple-ink"
                 : "bg-sky text-primary-hover",
@@ -498,7 +495,7 @@ function AssessmentBody({
           </StatusMessage>
         ) : null}
 
-        <h3 className="text-xl font-extrabold text-ink">
+        <h3 className="text-xl font-semibold text-ink">
           {assessment.headline}
         </h3>
         <p className="text-body text-ink">{assessment.summary}</p>
@@ -534,7 +531,7 @@ function AssessmentBody({
         </div>
 
         <section className="space-y-3">
-          <h3 className="inline-flex items-center gap-2 text-lg font-extrabold text-ink">
+          <h3 className="inline-flex items-center gap-2 text-lg font-semibold text-ink">
             <Lightbulb aria-hidden="true" className="size-5 text-book-orange" />
             Cần làm gì để bé tốt hơn
           </h3>
@@ -550,7 +547,7 @@ function AssessmentBody({
                   className="space-y-2 rounded-card bg-cream p-4"
                   key={audience}
                 >
-                  <h4 className="font-extrabold text-purple-ink">{title}</h4>
+                  <h4 className="font-semibold text-purple-ink">{title}</h4>
                   <ul className="space-y-3">
                     {actionsFor(audience).map((action) => (
                       <li key={action.title}>
@@ -569,7 +566,7 @@ function AssessmentBody({
 
         {assessment.practice_words.length > 0 ? (
           <section className="space-y-2">
-            <h3 className="text-lg font-extrabold text-ink">
+            <h3 className="text-lg font-semibold text-ink">
               Từ bé nên luyện thêm
             </h3>
             <ul className="flex flex-wrap gap-2">
@@ -579,7 +576,7 @@ function AssessmentBody({
                 );
                 return (
                   <li
-                    className="rounded-control bg-sky px-3 py-1.5 font-bold text-primary-hover"
+                    className="rounded-control bg-sky px-3 py-1.5 font-semibold text-primary-hover"
                     key={word}
                     title={
                       detail?.heard_as
@@ -600,7 +597,7 @@ function AssessmentBody({
           </section>
         ) : null}
 
-        <p className="rounded-card bg-primary/10 p-4 text-center text-lg font-extrabold text-primary-hover">
+        <p className="rounded-card bg-primary/10 p-4 text-center text-lg font-semibold text-primary-hover">
           {assessment.encouragement}
         </p>
       </div>

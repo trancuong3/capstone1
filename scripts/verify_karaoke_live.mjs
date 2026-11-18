@@ -305,14 +305,16 @@ try {
     exact: true,
   });
   await expect(
-    player.getByRole("button", { name: "Phát", exact: true }),
+    player.getByRole("button", { name: "Bắt đầu hát", exact: true }),
   ).toBeEnabled();
   assert.ok(
     await parent.evaluate(() =>
       window.__karaokeAcceptanceAudios.every((a) => a.paused),
     ),
   );
-  await player.getByRole("button", { name: "Phát", exact: true }).click();
+  await player
+    .getByRole("button", { name: "Bắt đầu hát", exact: true })
+    .click();
   await expect(player.getByTestId("karaoke-active-line")).toHaveText(
     lyrics.lines[0].text,
   );
@@ -330,13 +332,15 @@ try {
   await position.focus();
   await position.press("End");
   await expect(
-    player.getByRole("button", { name: "Hát lại", exact: true }),
+    player.getByRole("button", { name: "Hát lại bài này", exact: true }),
   ).toBeVisible();
-  await player.getByRole("button", { name: "Hát lại", exact: true }).click();
+  await player
+    .getByRole("button", { name: "Hát lại bài này", exact: true })
+    .click();
   await expect(
     player.getByRole("button", { name: "Tạm dừng", exact: true }),
   ).toBeVisible();
-  await player.getByRole("button", { name: "Về đầu", exact: true }).click();
+  await player.getByRole("button", { name: "Tạm dừng", exact: true }).click();
   checkpoint("real-parent-child-catalog-mp3-pause-keyboard-seek-replay-mobile");
   stage = "navigation audio disposal";
   await parent
@@ -354,7 +358,7 @@ try {
     .toBe(true);
   await parent.goBack();
   await expect(
-    parent.getByRole("button", { name: "Phát", exact: true }),
+    parent.getByRole("button", { name: "Bắt đầu hát", exact: true }),
   ).toBeEnabled();
   assert.ok(
     await parent.evaluate(() =>
@@ -488,7 +492,7 @@ try {
       .getByRole("button", { name: "Tải phiên bản mới", exact: true })
       .click();
     await expect(
-      parent.getByRole("button", { name: "Phát", exact: true }),
+      parent.getByRole("button", { name: "Bắt đầu hát", exact: true }),
     ).toBeEnabled();
     assert.ok(
       await parent.evaluate(() =>

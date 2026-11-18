@@ -302,19 +302,21 @@ export function createAdminServiceFixture() {
         .mockResolvedValue(null),
       updateWorkflowCandidate: vi
         .fn<AdminServices["ocr"]["updateWorkflowCandidate"]>()
-        .mockImplementation(async (_pageId, _workflowId, version, candidateText) => ({
-          ...workflowFixture,
-          candidate_text: candidateText,
-          candidate_hash: "d".repeat(64),
-          candidate_version: version + 1,
-          safety_input_hash: null,
-          hash_match: false,
-          suitability: null,
-          safety_status: "STALE",
-          findings: [],
-          status: "CHILD_SAFETY_SCANNING",
-          stage: "CHILD_SAFETY_SCANNING",
-        })),
+        .mockImplementation(
+          async (_pageId, _workflowId, version, candidateText) => ({
+            ...workflowFixture,
+            candidate_text: candidateText,
+            candidate_hash: "d".repeat(64),
+            candidate_version: version + 1,
+            safety_input_hash: null,
+            hash_match: false,
+            suitability: null,
+            safety_status: "STALE",
+            findings: [],
+            status: "CHILD_SAFETY_SCANNING",
+            stage: "CHILD_SAFETY_SCANNING",
+          }),
+        ),
       decideWorkflowSafety: vi
         .fn<AdminServices["ocr"]["decideWorkflowSafety"]>()
         .mockImplementation(async (_pageId, _workflowId, _hash, confirmed) => ({

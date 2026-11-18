@@ -18,7 +18,10 @@ import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
 type ReportsState =
   | { readonly status: "loading" }
-  | { readonly status: "empty" }
+  | {
+      readonly status: "empty";
+      readonly assessment?: ReadingAssessmentMetricsDTO | null;
+    }
   | {
       readonly status: "ready";
       readonly reports: readonly SavedReadingReport[];
@@ -145,7 +148,7 @@ function ReportCard({
     <article className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-xl font-extrabold text-ink">
+          <h3 className="text-xl font-semibold text-ink">
             {page ? `Trang ${page.page_number}` : "Báo cáo trang"}
           </h3>
           <p className="text-sm text-muted">
@@ -153,30 +156,33 @@ function ReportCard({
           </p>
         </div>
         {reportCount > 1 ? (
-          <nav aria-label="Chuyển báo cáo trang" className="flex gap-2">
+          <nav
+            aria-label="Chuyển báo cáo trang"
+            className="flex flex-wrap justify-end gap-2"
+          >
             <button
               aria-label="Báo cáo trang trước"
-              className="inline-flex size-11 items-center justify-center rounded-control border border-border bg-white text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-sm font-semibold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={reportNumber <= 1}
               onClick={onPrevious}
               type="button"
             >
-              <ChevronLeft aria-hidden="true" className="size-5" />
+              <ChevronLeft aria-hidden="true" className="size-4" /> Trước
             </button>
             <button
               aria-label="Báo cáo trang tiếp theo"
-              className="inline-flex size-11 items-center justify-center rounded-control border border-border bg-white text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-sm font-semibold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={reportNumber >= reportCount}
               onClick={onNext}
               type="button"
             >
-              <ChevronRight aria-hidden="true" className="size-5" />
+              Sau <ChevronRight aria-hidden="true" className="size-4" />
             </button>
           </nav>
         ) : null}
       </div>
 
-      <div className="rounded-card border border-[#e3d7bf] bg-[#fff8ea] p-3 sm:p-5">
+      <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
         {page ? (
           <article
             className="relative mx-auto flex aspect-[3/2] min-h-[280px] w-full max-w-[1008px] flex-col overflow-hidden rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
@@ -192,7 +198,22 @@ function ReportCard({
                 Trang {page.page_number}
               </span>
             </header>
-            <BookPageContent comparisonResult={report} page={page} readOnly />
+            <BookPageContent
+              comparisonResult={report}
+              page={page}
+              selfCorrectedWordIds={
+                new Set(report.self_corrected_word_ids ?? [])
+              }
+              readOnly
+            />
+            {(report.self_corrected_word_ids?.length ?? 0) > 0 ? (
+              <p className="mt-2 inline-flex items-center gap-1.5 self-start rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">
+                <span aria-hidden="true">↺</span>
+                Đã đọc lại đúng: {report.self_corrected_word_ids?.length ??
+                  0}{" "}
+                từ
+              </p>
+            ) : null}
             <p className="mt-2 text-right text-sm text-muted">
               {page.page_number}
             </p>
@@ -206,7 +227,7 @@ function ReportCard({
       </div>
 
       <div className="rounded-control border border-border bg-white p-4">
-        <p className="text-sm font-bold text-muted">Lời đọc đã lưu</p>
+        <p className="text-sm font-semibold text-muted">Lời đọc đã lưu</p>
         <p className="mt-1 text-base text-ink">
           {report.transcript.trim() || "Chưa ghi nhận"}
         </p>
@@ -219,7 +240,7 @@ function ReportCard({
             className={`min-h-20 rounded-control border p-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary ${
               selectedMetric === metric.key
                 ? "border-primary bg-sky"
-                : "border-border bg-white hover:bg-surface"
+                : "border-border bg-white hover:bg-canvas"
             }`}
             key={metric.key}
             onClick={() => onSelectMetric(metric.key)}
@@ -228,7 +249,7 @@ function ReportCard({
             <span className={`block text-sm font-semibold ${metric.color}`}>
               {metric.label}
             </span>
-            <span className="mt-1 block text-2xl font-extrabold text-ink">
+            <span className="mt-1 block text-[32px] font-extrabold text-primary">
               {metric.count}
             </span>
           </button>
@@ -240,14 +261,14 @@ function ReportCard({
           aria-live="polite"
           className="rounded-card border border-border bg-white p-4"
         >
-          <h4 className={`font-extrabold ${activeMetric.color}`}>
+          <h4 className={`font-semibold ${activeMetric.color}`}>
             {activeMetric.label} · {activeMetric.count}
           </h4>
           {activeMetric.words.length > 0 ? (
             <ul className="mt-3 flex flex-wrap gap-2">
               {activeMetric.words.map((word, index) => (
                 <li
-                  className="rounded-full bg-surface px-3 py-1.5 text-sm font-semibold text-ink"
+                  className="rounded-full bg-canvas px-3 py-1.5 text-sm font-semibold text-ink"
                   key={`${word}-${index}`}
                 >
                   {word}
@@ -287,7 +308,7 @@ export function SessionReadingReports({
         const result = await getSessionReports(sessionId);
         if (!active) return;
         if (result.reports.length === 0) {
-          setState({ status: "empty" });
+          setState({ status: "empty", assessment: result.assessment });
           return;
         }
 
@@ -396,7 +417,7 @@ export function SessionReadingReports({
       className="flex flex-col gap-4"
     >
       <h2
-        className="text-2xl font-extrabold text-ink"
+        className="book-title text-2xl text-ink"
         id="session-reading-reports-title"
       >
         Báo cáo đọc
@@ -408,6 +429,10 @@ export function SessionReadingReports({
         >
           Đang tải báo cáo...
         </div>
+      ) : null}
+      {showAssessment &&
+      (state.status === "ready" || state.status === "empty") ? (
+        <ReadingAssessmentSummary assessment={state.assessment} />
       ) : null}
       {state.status === "empty" ? (
         <p className="rounded-control bg-sky p-5 text-label text-muted">
@@ -427,9 +452,6 @@ export function SessionReadingReports({
       ) : null}
       {state.status === "ready" ? (
         <>
-          {showAssessment ? (
-            <ReadingAssessmentSummary assessment={state.assessment} />
-          ) : null}
           {state.partial ? (
             <StatusMessage title="Báo cáo chỉ tải được một phần" tone="warning">
               Một số nội dung trang hoặc revision lịch sử chưa tải được; không
@@ -470,7 +492,8 @@ export function SessionReadingReports({
       ) : null}
       {state.status !== "loading" && state.status !== "empty" ? (
         <Button
-          className="h-12 sm:self-start"
+          className="sm:self-start"
+          size="compact"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >

@@ -200,22 +200,63 @@ export interface AdminPageImageUI {
   readonly height: number;
 }
 
+export type AdminImageUploadMimeType =
+  "image/jpeg" | "image/png" | "image/webp";
+
+export type AdminDocumentUploadMimeType =
+  | "image/bmp"
+  | "image/x-ms-bmp"
+  | "image/tiff"
+  | "application/pdf"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export type AdminUploadMimeType =
+  AdminImageUploadMimeType | AdminDocumentUploadMimeType;
+
 export interface AdminPageUploadInputUI {
   readonly client_id: string;
   readonly file_name: string;
-  readonly mime_type: "image/jpeg" | "image/png" | "image/webp";
+  readonly mime_type: AdminUploadMimeType;
   readonly size_bytes: number;
   readonly width?: number;
   readonly height?: number;
+  readonly upload_kind?: "image" | "document";
   /** Browser File is sent as multipart/form-data; the server validates actual bytes and dimensions. */
   readonly file: File;
 }
 
 export interface AdminPageUploadProgressUI {
   readonly client_id: string;
+  readonly file_name?: string;
   readonly progress_percent: number;
   readonly status: "QUEUED" | "UPLOADING" | "PROCESSING" | "FAILED";
   readonly error_message?: string;
+  readonly created_pages_count?: number;
+  readonly skipped_empty_count?: number;
+  readonly failed_pages_count?: number;
+  readonly summary_message?: string;
+}
+
+export interface AdminDocumentPageResultDTO {
+  readonly source_page: number;
+  readonly status: "SUCCEEDED" | "SKIPPED_EMPTY" | "FAILED";
+  readonly page_id: UUID | null;
+  readonly page_number: number | null;
+  readonly revision: AdminPageRevisionDetailDTO | null;
+  readonly error_code: string | null;
+  readonly error_message: string | null;
+}
+
+export interface AdminDocumentUploadResponseDTO {
+  readonly book_id: UUID;
+  readonly file_name: string;
+  readonly source_format:
+    "JPEG" | "PNG" | "WEBP" | "BMP" | "TIFF" | "PDF" | "DOCX";
+  readonly total_source_pages: number;
+  readonly created_pages_count: number;
+  readonly skipped_empty_count: number;
+  readonly failed_pages_count: number;
+  readonly pages: readonly AdminDocumentPageResultDTO[];
 }
 
 export interface AdminRevisionVerifyRequestDTO {
@@ -224,7 +265,8 @@ export interface AdminRevisionVerifyRequestDTO {
   readonly corrected_text: string;
   readonly words: readonly AdminRevisionWordDTO[];
   readonly proofread_audit: {
-    readonly mode: "AI_CHECKED" | "AI_AUTO_VERIFIED" | "MANUAL_FALLBACK" | "ADMIN_EDITED";
+    readonly mode:
+      "AI_CHECKED" | "AI_AUTO_VERIFIED" | "MANUAL_FALLBACK" | "ADMIN_EDITED";
     readonly checked_text: string;
     readonly suggestions: readonly {
       readonly word_index: number;

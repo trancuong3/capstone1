@@ -89,66 +89,77 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
 
 async def _process(event: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as db:
-        result = await db.execute(text("""
-            SELECT p.imagepath, p.width, p.height, r.verificationstatus, r.verifiedtext,
-                   r.contenthash, r.processingmeta, w.wordindex, w.lineindex, w.text, w.boundingbox
+        header_result = await db.execute(text("""
+            SELECT p.imagepath, p.bookid, r.verificationstatus, r.contenthash,
+                   r.processingmeta -> 'ai_proofread_audit' ->> 'mode' AS ai_proofread_mode
             FROM public.bookpages AS p
             JOIN public.pagerevisions AS r ON r.pageid = p.id
-            JOIN public.pagerevisionwords AS w ON w.pagerevisionid = r.id
             WHERE p.id = :page_id AND r.id = :revision_id
-            ORDER BY w.lineindex, w.wordindex
         """), {"page_id": event["page_id"], "revision_id": event["revision_id"]})
-        rows = [dict(row) for row in result.mappings().all()]
-    if not rows or rows[0]["verificationstatus"] != "VERIFIED":
-        raise ValueError("outbox source revision is missing or not VERIFIED")
-    processing_meta = rows[0].get("processingmeta")
-    ai_audit = (
-        processing_meta.get("ai_proofread_audit")
-        if isinstance(processing_meta, dict)
-        else None
-    )
-    ai_review_required = (
-        isinstance(ai_audit, dict)
-        and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
-    )
-    image_path = rows[0]["imagepath"]
+        header = header_result.mappings().first()
+        if not header or header["verificationstatus"] != "VERIFIED":
+            raise ValueError("outbox source revision is missing or not VERIFIED")
+
+        words_result = await db.execute(text("""
+            SELECT w.wordindex, w.lineindex, w.text, w.boundingbox
+            FROM public.pagerevisionwords AS w
+            WHERE w.pagerevisionid = :revision_id
+            ORDER BY w.lineindex, w.wordindex, w.id
+        """), {"revision_id": event["revision_id"]})
+        words = [dict(row) for row in words_result.mappings().all()]
+
+    if not words:
+        raise ValueError("outbox source revision has no words")
+
+    ai_review_required = header["ai_proofread_mode"] == "AI_AUTO_VERIFIED"
+    image_path = header["imagepath"]
     image_bytes = await asyncio.to_thread(download_object, image_path)
-    words = [{key: row[key] for key in ("wordindex", "lineindex", "text", "boundingbox")} for row in rows]
     crops = _line_crops(image_bytes, words)
     if not crops:
         raise ValueError("verified revision contains no usable line crops")
 
+    total_crop_bytes = sum(len(crop) for _, crop, _, _ in crops)
+    total_db_bytes = sum(len(label.encode("utf-8")) + 2048 for _, _, label, _ in crops)
+    async with AsyncSessionLocal() as db:
+        await ensure_storage_capacity(db, total_crop_bytes)
+        await ensure_database_capacity(db, total_db_bytes)
+
+    group_id = str(header["bookid"] or event["page_id"])
+    split_value = "train" if ai_review_required else _stable_split(group_id)
+    sample_rows: list[dict[str, Any]] = []
+
     for line_index, crop, label, fingerprint in crops:
         object_path = f"ocr-training/flow2/admin-verified/{event['revision_id']}/{line_index:04d}-{fingerprint}.png"
-        async with AsyncSessionLocal() as db:
-            await ensure_storage_capacity(db, len(crop), existing_object_path=object_path)
-            await db.commit()
         await asyncio.to_thread(upload_object, object_path, crop, "image/png", upsert=True)
         image_hash = hashlib.sha256(crop).hexdigest()
-        async with AsyncSessionLocal() as db:
-            await ensure_database_capacity(db, len(label.encode("utf-8")) + 2048)
-            await db.execute(text("""
-                INSERT INTO public.viread_ocr_samples
-                    (source_flow, source_group_id, split, image_storage_path, image_sha256,
-                     label, source_page_id, source_revision_id, provenance)
-                VALUES ('FLOW1_VERIFIED', :group_id, :split, :path, :image_sha, :label,
-                        :page_id, :revision_id, CAST(:provenance AS jsonb))
-                ON CONFLICT DO NOTHING
-            """), {
-                "group_id": str(event["page_id"]),
-                "split": "train" if ai_review_required else _stable_split(str(event["page_id"])),
-                "path": object_path,
-                "image_sha": image_hash,
-                "label": label,
-                "page_id": event["page_id"],
-                "revision_id": event["revision_id"],
-                "provenance": json.dumps({"outbox_event_id": str(event["id"]), "line_index": line_index,
-                                           "source_content_hash": rows[0]["contenthash"],
-                                           "verified_by_admin": not ai_review_required,
-                                           "ai_review_required": ai_review_required,
-                                           "verification_source": "ai_auto" if ai_review_required else "admin"}),
-            })
-            await db.commit()
+        sample_rows.append({
+            "group_id": group_id,
+            "split": split_value,
+            "path": object_path,
+            "image_sha": image_hash,
+            "label": label,
+            "page_id": event["page_id"],
+            "revision_id": event["revision_id"],
+            "provenance": json.dumps({
+                "outbox_event_id": str(event["id"]),
+                "line_index": line_index,
+                "source_content_hash": header["contenthash"],
+                "verified_by_admin": not ai_review_required,
+                "ai_review_required": ai_review_required,
+                "verification_source": "ai_auto" if ai_review_required else "admin",
+            }),
+        })
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO public.viread_ocr_samples
+                (source_flow, source_group_id, split, image_storage_path, image_sha256,
+                 label, source_page_id, source_revision_id, provenance)
+            VALUES ('FLOW1_VERIFIED', :group_id, :split, :path, :image_sha, :label,
+                    :page_id, :revision_id, CAST(:provenance AS jsonb))
+            ON CONFLICT DO NOTHING
+        """), sample_rows)
+        await db.commit()
 
 
 def _stable_split(group_id: str) -> str:
@@ -156,20 +167,63 @@ def _stable_split(group_id: str) -> str:
     return "train" if value < 0.70 else "validation" if value < 0.85 else "holdout"
 
 
-async def _finish(event_id, *, status: str, error_code: str | None = None, delay_seconds: int = 0) -> None:
+async def _finish(
+    event_id,
+    *,
+    status: str,
+    expected_attempts: int | None = None,
+    error_code: str | None = None,
+    delay_seconds: int = 0,
+) -> bool:
+    async with AsyncSessionLocal() as db:
+        if expected_attempts is None:
+            result = await db.execute(text("""
+                UPDATE public.viread_ocr_outbox
+                SET status = :status, last_error_code = :error_code, locked_at = NULL,
+                    available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
+                WHERE id = :event_id AND status = 'PROCESSING'
+            """), {"event_id": event_id, "status": status, "error_code": error_code,
+                  "delay_seconds": delay_seconds})
+        else:
+            result = await db.execute(text("""
+                UPDATE public.viread_ocr_outbox
+                SET status = :status, last_error_code = :error_code, locked_at = NULL,
+                    available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
+                WHERE id = :event_id AND status = 'PROCESSING' AND attempts = :expected_attempts
+            """), {"event_id": event_id, "status": status, "expected_attempts": expected_attempts,
+                  "error_code": error_code, "delay_seconds": delay_seconds})
+        await db.commit()
+        return bool(result.rowcount)
+
+
+async def _release_claim_on_cancel(event_id, *, expected_attempts: int) -> None:
+    """Return an interrupted PROCESSING claim to the queue without burning an attempt."""
     async with AsyncSessionLocal() as db:
         await db.execute(text("""
             UPDATE public.viread_ocr_outbox
-            SET status = :status, last_error_code = :error_code, locked_at = NULL,
-                available_at = now() + (:delay_seconds * interval '1 second'), updated_at = now()
-            WHERE id = :event_id
-        """), {"event_id": event_id, "status": status, "error_code": error_code,
-              "delay_seconds": delay_seconds})
+            SET status = CASE WHEN attempts <= 1 THEN 'PENDING' ELSE 'RETRY' END,
+                attempts = GREATEST(0, attempts - 1),
+                locked_at = NULL,
+                available_at = now(),
+                updated_at = now()
+            WHERE id = :event_id AND status = 'PROCESSING' AND attempts = :expected_attempts
+        """), {"event_id": event_id, "expected_attempts": expected_attempts})
         await db.commit()
+
+
+async def _wait_for_stop_or_timeout(stop: asyncio.Event, timeout_seconds: float) -> None:
+    """Sleep up to timeout_seconds while waking immediately when stop is signaled."""
+    if stop.is_set() or timeout_seconds <= 0:
+        return
+    try:
+        await asyncio.wait_for(stop.wait(), timeout=timeout_seconds)
+    except TimeoutError:
+        pass
 
 
 async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -> None:
     """Durable multi-process-safe outbox worker. Failed events retry and eventually dead-letter."""
+    idle_streak = 0
     while not stop.is_set():
         try:
             event = await _claim_one()
@@ -178,25 +232,69 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
         except Exception as exc:
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_claim_failed",
                            stage="database_claim", exception=exc)
-            await asyncio.sleep(poll_seconds)
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
             continue
         if event is None:
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
-            except TimeoutError:
-                pass
+            idle_streak = min(idle_streak + 1, 4)
+            sleep_for = (
+                min(30, poll_seconds * (2 ** (idle_streak - 1)))
+                if poll_seconds >= 1
+                else poll_seconds
+            )
+            await _wait_for_stop_or_timeout(stop, sleep_for)
             continue
+
+        idle_streak = 0
+        attempts = int(event["attempts"])
+        process_completed = False
         try:
             await _process(event)
-            await _finish(event["id"], status="DONE")
+            process_completed = True
+            # Shield DONE finalization so cancellation arriving after all crops/samples
+            # were persisted does not leave a completed event in PROCESSING.
+            await asyncio.shield(
+                _finish(event["id"], status="DONE", expected_attempts=attempts)
+            )
         except asyncio.CancelledError:
+            if not process_completed:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(
+                            _release_claim_on_cancel(
+                                event["id"], expected_attempts=attempts
+                            )
+                        ),
+                        timeout=3.0,
+                    )
+                except (TimeoutError, asyncio.CancelledError, Exception):
+                    # If DB teardown is already underway, the 10-minute locked_at lease
+                    # guarantees another worker will safely reclaim the event later.
+                    pass
             raise
         except Exception as exc:
-            attempts = int(event["attempts"])
             terminal = attempts >= MAX_ATTEMPTS
             delay = min(3600, 2 ** min(attempts, 10))
-            await _finish(event["id"], status="DEAD" if terminal else "RETRY",
-                          error_code=type(exc).__name__[:64], delay_seconds=delay)
+            try:
+                await _finish(
+                    event["id"],
+                    status="DEAD" if terminal else "RETRY",
+                    expected_attempts=attempts,
+                    error_code=type(exc).__name__[:64],
+                    delay_seconds=delay,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as finish_exc:
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="viread_ocr_outbox_finish_failed",
+                    stage="database_finish",
+                    exception=finish_exc,
+                    outbox_id=str(event["id"]),
+                    attempt=attempts,
+                )
+                await _wait_for_stop_or_timeout(stop, poll_seconds)
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_processing_failed",
                            stage="line_crop_materialization", exception=exc,
                            outbox_id=str(event["id"]), attempt=attempts, terminal=terminal)

@@ -90,6 +90,7 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
     const user = userEvent.setup();
     renderScreen();
     await screen.findByRole("heading", { name: "Mục tiêu đọc" });
+    await user.click(screen.getByRole("button", { name: "Thêm mục tiêu" }));
     await user.click(screen.getByRole("button", { name: "Tạo mục tiêu" }));
     expect(
       await screen.findByText(/Không thực hiện được thao tác/),

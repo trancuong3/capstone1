@@ -40,6 +40,8 @@ def _preprocess_v2_candidate_image(image: Image.Image) -> Image.Image:
 
 def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, original_checkpoint: str,
                          candidate_checkpoint: str, output_path: str, image_cache_dir: str | None = None,
+                         parent_checkpoint: str | None = None, active_checkpoint: str | None = None,
+                         parent_profile: str = "ORIGINAL", active_profile: str = "ORIGINAL",
                          candidate_profile: Literal[
                              "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
                              "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
@@ -73,6 +75,15 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
         raise ValueError("VietOCR Original checkpoint hash mismatch")
     original = _predictor(config, str(Path(original_checkpoint).resolve()))
     candidate = _predictor(config, str(Path(candidate_checkpoint).resolve()))
+    predictors: dict[str, Any] = {}
+    for baseline, checkpoint, profile in (("parent", parent_checkpoint, parent_profile),
+                                           ("active", active_checkpoint, active_profile)):
+        if checkpoint:
+            baseline_hash = sha256_file(checkpoint)
+            if baseline_hash == original_hash:
+                predictors[baseline] = (original, "ORIGINAL")
+            else:
+                predictors[baseline] = (_predictor(config, str(Path(checkpoint).resolve())), profile)
     paired: list[PairedLine] = []
     seen: set[str] = set()
     for item in rows:
@@ -97,17 +108,27 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
             if candidate_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
                 candidate_image = _preprocess_v2_candidate_image(crop)
             candidate_text = unicodedata.normalize("NFC", str(candidate.predict(candidate_image)))
-        paired.append(PairedLine(group_id, reference, original_text, candidate_text, sample_id))
+            baseline_text: dict[str, str | None] = {"parent": None, "active": None}
+            for baseline, (predictor, profile) in predictors.items():
+                baseline_image = crop
+                if profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                    baseline_image = _preprocess_v2_candidate_image(crop)
+                baseline_text[baseline] = unicodedata.normalize("NFC", str(predictor.predict(baseline_image)))
+        paired.append(PairedLine(group_id, reference, original_text, candidate_text, sample_id,
+                                 baseline_text["parent"], baseline_text["active"]))
 
     metrics = benchmark_metrics(paired)
     metrics.update({"locked_manifest_sha256": actual_manifest_sha256,
                     "locked_manifest_id": manifest.get("manifest_id"),
                     "original_checkpoint_sha256": original_hash,
+                    "parent_checkpoint_sha256": sha256_file(parent_checkpoint) if parent_checkpoint else None,
+                    "active_checkpoint_sha256": sha256_file(active_checkpoint) if active_checkpoint else None,
                     "candidate_checkpoint_sha256": sha256_file(candidate_checkpoint),
                     "candidate_profile": candidate_profile,
                     "architecture_sha256": canonical_sha256({key: config.get(key) for key in ("backbone", "cnn", "transformer", "seq_modeling")}),
                     "outputs": [{"sample_id": line.sample_id, "group_id": line.group_id, "reference": line.reference,
-                                 "original": line.original, "candidate": line.candidate} for line in paired]})
+                                 "original": line.original, "candidate": line.candidate,
+                                 "parent": line.parent, "active": line.active} for line in paired]})
     metrics["quality_gate"] = evaluate_gate(metrics, paired_manifest_hash=actual_manifest_sha256,
                                              expected_locked_manifest_hash=expected_manifest_sha256, policy=policy)
     output = Path(output_path)

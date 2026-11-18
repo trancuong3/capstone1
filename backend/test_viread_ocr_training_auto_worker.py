@@ -173,6 +173,9 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(json.loads(reconciliation_params["reconciliation_metadata"])[
             "manual_colab_failure_reconciled"
         ])
+        exhausted_update = session.calls[2][0]
+        self.assertIn("evaluation_status", exhausted_update)
+        self.assertIn("BENCHMARK_ONLY", exhausted_update)
 
 
 if __name__ == "__main__":

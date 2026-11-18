@@ -1,0 +1,45 @@
+.stage {
+  background: linear-gradient(
+    155deg,
+    var(--ra-color-cream) 0%,
+    white 42%,
+    var(--ra-color-sky) 100%
+  );
+  border: 1px solid var(--ra-color-border);
+  border-radius: 2rem;
+  padding: clamp(1rem, 3vw, 2rem);
+  min-width: 0;
+}
+.stage:fullscreen {
+  border-radius: 0;
+  min-height: 100dvh;
+  overflow-y: auto;
+}
+.expanded {
+  min-height: 90svh;
+}
+.lyrics {
+  min-height: 15rem;
+  display: grid;
+  align-content: center;
+  gap: 1.25rem;
+  padding: clamp(1rem, 4vw, 3rem) 0;
+  text-align: center;
+}
+.line {
+  font-size: clamp(1.9rem, 4.8vw, 3.5rem);
+  line-height: 1.65;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+  color: var(--ra-color-primary-hover);
+}
+.next {
+  font-size: clamp(1rem, 2.5vw, 1.4rem);
+  line-height: 1.6;
+  color: var(--ra-color-muted);
+  overflow-wrap: anywhere;
+}
+.action {
+  min-height: 4rem;
+  height: auto;
+}

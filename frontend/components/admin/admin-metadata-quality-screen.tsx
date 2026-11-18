@@ -117,11 +117,8 @@ export function AdminMetadataQualityScreen() {
         }
       />
 
-      <section
-        aria-label="Bộ lọc chất lượng metadata"
-        className="mb-6 rounded-card border border-border bg-white p-4 sm:p-6"
-      >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_240px_200px]">
+      <section aria-label="Bộ lọc chất lượng metadata" className="mb-4">
+        <div className="grid gap-4 lg:grid-cols-3">
           <div className="relative">
             <Search
               aria-hidden
@@ -192,7 +189,7 @@ export function AdminMetadataQualityScreen() {
         >
           {error === "auth" ? (
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
               Đến trang đăng nhập
@@ -214,7 +211,7 @@ export function AdminMetadataQualityScreen() {
         <>
           <section
             aria-label="Tổng quan metadata"
-            className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+            className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
           >
             {[
               {
@@ -251,14 +248,16 @@ export function AdminMetadataQualityScreen() {
               },
             ].map((metric) => (
               <article
-                className="rounded-card border border-border bg-white p-5"
+                className="rounded-card border border-border bg-white p-4"
                 key={metric.label}
               >
-                <p className="text-sm font-bold text-muted">{metric.label}</p>
-                <p className="mt-2 text-3xl font-black tabular-nums text-ink">
+                <p className="text-sm font-semibold text-muted">
+                  {metric.label}
+                </p>
+                <p className="mt-2 text-[32px] font-extrabold tabular-nums text-primary">
                   {metric.value.toLocaleString("vi-VN")}
                 </p>
-                <p className="mt-2 text-sm text-muted">{metric.detail}</p>
+                <p className="sr-only">{metric.detail}</p>
               </article>
             ))}
           </section>
@@ -266,7 +265,7 @@ export function AdminMetadataQualityScreen() {
           <section className="rounded-card border border-border bg-white p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-xl font-black text-ink">
+                <h2 className="text-2xl font-extrabold text-ink">
                   Sách cần kiểm tra
                 </h2>
                 <p className="mt-1 text-sm text-muted">
@@ -274,14 +273,17 @@ export function AdminMetadataQualityScreen() {
                   bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.
                 </p>
               </div>
-              <p aria-live="polite" className="text-sm font-bold text-muted">
+              <p
+                aria-live="polite"
+                className="text-sm font-semibold text-muted"
+              >
                 {dashboard.total.toLocaleString("vi-VN")} kết quả
               </p>
             </div>
 
             {dashboard.items.length === 0 ? (
               <div className="rounded-card bg-cream p-8 text-center">
-                <h3 className="font-extrabold text-ink">
+                <h3 className="font-semibold text-ink">
                   {hasFilters
                     ? "Không có kết quả phù hợp"
                     : dashboard.summary.books_with_issues === 0
@@ -298,23 +300,23 @@ export function AdminMetadataQualityScreen() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-border text-muted">
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                    <tr className="border-b border-border bg-sky text-primary">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Sách
                       </th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Tác giả
                       </th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Khối lớp
                       </th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Trạng thái
                       </th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Vấn đề phát hiện
                       </th>
-                      <th className="px-3 py-3 font-extrabold" scope="col">
+                      <th className="px-3 py-3 font-semibold" scope="col">
                         Thao tác
                       </th>
                     </tr>
@@ -325,7 +327,7 @@ export function AdminMetadataQualityScreen() {
                         className="border-b border-border last:border-0"
                         key={book.id}
                       >
-                        <td className="px-3 py-4 font-bold text-ink">
+                        <td className="px-3 py-4 font-semibold text-ink">
                           {book.title?.trim() ? book.title : "Chưa có tiêu đề"}
                         </td>
                         <td className="px-3 py-4 text-muted">
@@ -337,7 +339,7 @@ export function AdminMetadataQualityScreen() {
                             : "Lớp " + book.min_grade + "–" + book.max_grade}
                         </td>
                         <td className="px-3 py-4">
-                          <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-bold text-muted">
+                          <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-semibold text-muted">
                             {lifecycleLabels[book.lifecycle_status] ??
                               book.lifecycle_status}
                           </span>
@@ -346,7 +348,7 @@ export function AdminMetadataQualityScreen() {
                           <div className="flex max-w-sm flex-wrap gap-2">
                             {book.issues.map((issue) => (
                               <span
-                                className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-bold text-warning"
+                                className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-semibold text-warning"
                                 key={issue}
                               >
                                 {issueLabels[issue]}
@@ -360,7 +362,7 @@ export function AdminMetadataQualityScreen() {
                               (issue) => issue !== "POSSIBLE_DUPLICATE",
                             ) ? (
                               <Link
-                                className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                                 href={
                                   "/admin/books/" +
                                   encodeURIComponent(book.id) +
@@ -379,7 +381,7 @@ export function AdminMetadataQualityScreen() {
                             ) : null}
                             {book.issues.includes("POSSIBLE_DUPLICATE") ? (
                               <Link
-                                className="inline-flex min-h-10 items-center rounded-control px-2 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                                 href={
                                   "/admin/books/" + encodeURIComponent(book.id)
                                 }

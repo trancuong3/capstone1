@@ -125,8 +125,9 @@ async def _has_unresolved_training_job(db) -> bool:
             WHERE status IN (
                 'QUEUED', 'LOCAL_RUNNING', 'FALLBACK_QUEUED_COLAB', 'COLAB_RUNNING',
                 'WAITING_FOR_COLAB_WORKER', 'COLAB_SUBMITTING', 'COLAB_SUBMITTED',
-                'COLAB_EXECUTING', 'BLOCKED_CONFIGURATION', 'BLOCKED', 'CANDIDATE', 'BENCHMARKED'
+                'COLAB_EXECUTING', 'BLOCKED_CONFIGURATION'
             )
+              AND COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY'
         )
     """))
     return bool(result.scalar_one())
@@ -251,9 +252,7 @@ def dataset_snapshot_count_matches(declared_count: int, materialized_count: int 
 
 
 async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> int:
-    """Enqueue an immutable Flow 1 job only when the registered real+TRDG version meets its contract."""
-    if not locked_test or locked_test.get("status") != "READY":
-        return 0
+    """Enqueue an immutable Flow 1 job when its training dataset meets its contract."""
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):
@@ -308,11 +307,10 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
             WHERE profile='FLOW1_EXTERNAL_TRDG' AND dataset_version_id=:dataset_id
               AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
               AND parent_checkpoint_sha256=:parent_sha
-              AND locked_test_version_id=CAST(:locked_id AS uuid)
+              AND locked_test_version_id IS NULL
             ORDER BY generation DESC LIMIT 1 FOR UPDATE
         """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
-              "config_sha": config_sha, "parent_sha": parent_sha,
-              "locked_id": locked_test["version_id"]})
+              "config_sha": config_sha, "parent_sha": parent_sha})
         prior_row = prior.mappings().first()
         generation = next_job_generation(
             int(prior_row["generation"]) if prior_row else None,
@@ -327,29 +325,25 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
                  locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW1_EXTERNAL_TRDG', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
-                    CAST(:locked_id AS uuid), :locked_sha, :generation,
+                    NULL, NULL, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
             ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
               "config_sha": config_sha, "parent_sha": parent_sha, "target": target, "status": initial_status,
-              "locked_id": locked_test["version_id"], "locked_sha": locked_test["manifest_sha256"],
               "generation": generation,
               "actor_id": selected["created_by"], "metadata": json.dumps({
                   "hardware": hardware, "train_count": counts["FLOW2_EXTERNAL_train"] + counts["FLOW2_TRDG_train"],
                   "validation_count": counts["FLOW2_EXTERNAL_validation"] + counts["FLOW2_TRDG_validation"],
                   "components": {key: value for key, value in counts.items() if not key.endswith(("_train", "_validation"))},
                   "training_config": training_config,
-                  "locked_test_version_id": locked_test["version_id"],
-                  "locked_test_manifest_sha256": locked_test["manifest_sha256"]})})
+                  "evaluation_status": "WAITING_FOR_HOLDOUT"})})
         await db.commit()
         return 1 if inserted.scalar_one_or_none() else 0
 
 
 async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> int:
-    """Snapshot committed VERIFIED samples and enqueue one immutable Flow 2 job when splits are ready."""
-    if not locked_test or locked_test.get("status") != "READY":
-        return 0
+    """Snapshot committed VERIFIED samples and enqueue once train/validation are ready."""
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):
@@ -395,11 +389,10 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
             WHERE profile='FLOW2_ADMIN_VERIFIED' AND dataset_version_id=:dataset_id
               AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
               AND parent_checkpoint_sha256=:parent_sha
-              AND locked_test_version_id=CAST(:locked_id AS uuid)
+              AND locked_test_version_id IS NULL
             ORDER BY generation DESC LIMIT 1 FOR UPDATE
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha,
-              "config_sha": config_sha, "parent_sha": parent_sha,
-              "locked_id": locked_test["version_id"]})
+              "config_sha": config_sha, "parent_sha": parent_sha})
         prior_row = prior.mappings().first()
         generation = next_job_generation(
             int(prior_row["generation"]) if prior_row else None,
@@ -414,20 +407,18 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
                  locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW2_ADMIN_VERIFIED', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
-                    CAST(:locked_id AS uuid), :locked_sha, :generation,
+                    NULL, NULL, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
             ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha, "config_sha": config_sha,
               "parent_sha": parent_sha, "target": target, "status": initial_status,
-              "locked_id": locked_test["version_id"], "locked_sha": locked_test["manifest_sha256"],
               "generation": generation,
               "actor_id": actor_id, "metadata": json.dumps({"hardware": hardware,
                                                                 "train_count": counts["train_count"],
                                                                 "validation_count": counts["validation_count"],
                                                                 "training_config": training_config,
-                                                                "locked_test_version_id": locked_test["version_id"],
-                                                                "locked_test_manifest_sha256": locked_test["manifest_sha256"]})})
+                                                                "evaluation_status": "WAITING_FOR_HOLDOUT"})})
         await db.commit()
         return 1 if inserted.scalar_one_or_none() else 0
 
@@ -461,15 +452,27 @@ async def _expire_exhausted_jobs() -> None:
                 worker_id=NULL, lease_expires_at=NULL,
                 last_error_code=COALESCE(last_error_code, 'COLAB_WORKER_LEASE_EXPIRED'), updated_at=now()
             WHERE target='COLAB' AND status='COLAB_RUNNING'
-              AND lease_expires_at < now() AND attempts < :max_attempts
+              AND lease_expires_at < now()
+              AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts < :max_attempts)
+                   OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts < :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
         await db.execute(text("""
             UPDATE public.viread_ocr_training_jobs
-            SET status='FAILED', worker_id=NULL, lease_expires_at=NULL,
+            SET status=CASE WHEN metadata->>'operation'='BENCHMARK_ONLY' THEN 'CANDIDATE' ELSE 'FAILED' END,
+                worker_id=NULL, lease_expires_at=NULL,
                 last_error_code='WORKER_LEASE_EXPIRED_RETRY_LIMIT',
-                progress='{"stage":"failed"}'::jsonb, updated_at=now()
+                progress=CASE WHEN metadata->>'operation'='BENCHMARK_ONLY'
+                               THEN '{"stage":"evaluation_failed"}'::jsonb
+                               ELSE '{"stage":"failed"}'::jsonb END,
+                metadata=metadata || CASE WHEN metadata->>'operation'='BENCHMARK_ONLY'
+                    THEN jsonb_build_object('evaluation_status','FAILED',
+                                            'evaluation_error_code','WORKER_LEASE_EXPIRED_RETRY_LIMIT')
+                    ELSE '{}'::jsonb END,
+                updated_at=now()
             WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING')
-              AND lease_expires_at < now() AND attempts >= :max_attempts
+              AND lease_expires_at < now()
+              AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts >= :max_attempts)
+                   OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts >= :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
         await db.commit()
 
@@ -518,24 +521,6 @@ async def _claim_local_job(worker_id: str) -> dict[str, Any] | None:
                     status='QUEUED' OR
                     (status='LOCAL_RUNNING' AND lease_expires_at < now())
                 ) AND attempts < :max_attempts
-                  AND locked_test_version_id IS NOT NULL
-                  AND locked_test_manifest_sha256 IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM public.viread_ocr_dataset_versions locked
-                    WHERE locked.id=viread_ocr_training_jobs.locked_test_version_id
-                      AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
-                      AND locked.version_sha256=viread_ocr_training_jobs.locked_test_manifest_sha256
-                      AND locked.sample_count >= 200
-                      AND (SELECT count(*) FROM public.viread_ocr_samples sample
-                           WHERE sample.dataset_version_id=locked.id
-                             AND sample.source_flow='LOCKED_TEST'
-                             AND sample.split='locked_test')=locked.sample_count
-                      AND (SELECT count(DISTINCT sample.source_group_id)
-                           FROM public.viread_ocr_samples sample
-                           WHERE sample.dataset_version_id=locked.id
-                             AND sample.source_flow='LOCKED_TEST'
-                             AND sample.split='locked_test') >= 30
-                  )
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_training_jobs running
                     WHERE running.status='LOCAL_RUNNING' AND running.lease_expires_at > now()
@@ -762,8 +747,17 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
         shutil.copyfile(downloaded, original_path)
     if hashlib.sha256(original_path.read_bytes()).hexdigest() != ORIGINAL_CHECKPOINT_SHA256:
         raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+    parent_path = await _active_parent(job, run_dir)
+    async with AsyncSessionLocal() as db:
+        active_result = await db.execute(text("""
+            SELECT checkpoint_sha256, profile FROM public.viread_ocr_active_model
+            WHERE singleton=TRUE
+        """))
+        active_row = active_result.mappings().first()
+    if (not active_row or active_row["checkpoint_sha256"] != job["parent_checkpoint_sha256"]):
+        raise ValueError("ACTIVE_PARENT_CHANGED_BEFORE_BENCHMARK")
     from ai.vietocr_v2.benchmark import run_locked_benchmark
-    report_path = run_dir / "locked-test-report.json"
+    report_path = run_dir / f"production-{locked['version_sha256']}-{job['parent_checkpoint_sha256']}.json"
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding="utf-8"))
     else:
@@ -771,14 +765,17 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
             run_locked_benchmark, manifest_path=str(receipt_path),
             expected_manifest_sha256=locked["version_sha256"],
             original_checkpoint=str(original_path), candidate_checkpoint=str(candidate_path),
-                candidate_profile=job["profile"], output_path=str(report_path),
+            candidate_profile=job["profile"], output_path=str(report_path),
             image_cache_dir=str(cache),
+            parent_checkpoint=parent_path, active_checkpoint=parent_path,
+            parent_profile=active_row["profile"], active_profile=active_row["profile"],
         )
     if (report.get("candidate_checkpoint_sha256") != hashlib.sha256(candidate_path.read_bytes()).hexdigest()
             or report.get("locked_manifest_sha256") != locked["version_sha256"]):
         raise ValueError("BENCHMARK_CANDIDATE_HASH_MISMATCH")
     outputs = [BenchmarkOutput(sample_id=item["sample_id"], group_id=item["group_id"],
-                               original=item["original"], candidate=item["candidate"])
+                               original=item["original"], candidate=item["candidate"],
+                               parent=item.get("parent"), active=item.get("active"))
                for item in report.get("outputs", [])]
     async with AsyncSessionLocal() as db:
         prior = await db.execute(text("""
@@ -795,7 +792,9 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
         service = VireadOcrTrainingService(db)
         registered = await service.benchmark(actor_id, BenchmarkCreate(
             run_id=run_id, locked_test_version_id=locked["id"],
-            locked_test_manifest_sha256=locked["version_sha256"], outputs=outputs,
+            locked_test_manifest_sha256=locked["version_sha256"],
+            parent_checkpoint_sha256=job["parent_checkpoint_sha256"],
+            active_checkpoint_sha256=job["parent_checkpoint_sha256"], outputs=outputs,
         ))
     return registered
 
@@ -865,13 +864,15 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
     if candidate.get("config_sha256") != job.get("config_sha256"):
         raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
     run_id = await _register_candidate(job, candidate)
-    benchmark = await _benchmark_candidate(job, run_id, stable_candidate, run_dir)
+    benchmark = None
+    if job.get("locked_test_version_id") and job.get("locked_test_manifest_sha256"):
+        benchmark = await _benchmark_candidate(job, run_id, stable_candidate, run_dir)
     final_status = ("BENCHMARKED" if benchmark and benchmark.get("gate_status") == "V2_WIN"
                     else "QUALITY_GATE_REJECTED" if benchmark else "CANDIDATE")
     await _set_job(job_id, status=final_status, run_id=run_id,
                    metadata={"device": candidate.get("device"), "steps": candidate.get("steps"),
                              "checkpoint_sha256": candidate.get("checkpoint_sha256"),
-                             "benchmark_status": benchmark.get("gate_status") if benchmark else "WAITING_FOR_LOCKED_TEST"})
+                             "benchmark_status": benchmark.get("gate_status") if benchmark else "WAITING_FOR_EVALUATION"})
 
 
 async def _run_local_once(worker_id: str) -> bool:
@@ -982,37 +983,24 @@ async def _dispatch_or_poll_colab_once() -> bool:
             await db.commit()
         else:
             result = await db.execute(text("""
-                SELECT job.id, job.profile, job.attempts, job.dataset_version_id,
-                       job.colab_execution_id, job.colab_execution_number, job.run_id, job.metadata
+                SELECT job.id, job.profile, job.attempts, job.evaluation_attempts,
+                       job.dataset_version_id, job.colab_execution_id,
+                       job.colab_execution_number, job.run_id, job.metadata
                 FROM public.viread_ocr_training_jobs job
                 WHERE job.target='COLAB' AND job.available_at <= now()
                   AND job.status IN ('WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')
-                  AND job.attempts < :max_attempts
-                  AND job.locked_test_version_id IS NOT NULL
-                  AND job.locked_test_manifest_sha256 IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM public.viread_ocr_dataset_versions locked
-                    WHERE locked.id=job.locked_test_version_id
-                      AND locked.source_flow='LOCKED_TEST' AND locked.is_locked_test=TRUE
-                      AND locked.version_sha256=job.locked_test_manifest_sha256
-                      AND locked.sample_count >= 200
-                      AND (SELECT count(*) FROM public.viread_ocr_samples sample
-                           WHERE sample.dataset_version_id=locked.id
-                             AND sample.source_flow='LOCKED_TEST'
-                             AND sample.split='locked_test')=locked.sample_count
-                      AND (SELECT count(DISTINCT sample.source_group_id)
-                           FROM public.viread_ocr_samples sample
-                           WHERE sample.dataset_version_id=locked.id
-                             AND sample.source_flow='LOCKED_TEST'
-                             AND sample.split='locked_test') >= 30
-                  )
+                  AND ((job.metadata->>'operation'='BENCHMARK_ONLY'
+                        AND job.evaluation_attempts < :max_attempts)
+                       OR (COALESCE(job.metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY'
+                           AND job.attempts < :max_attempts))
                   AND NOT EXISTS (
                     SELECT 1 FROM public.viread_ocr_training_jobs other
                     WHERE other.id <> job.id AND other.status IN (
                         'QUEUED','LOCAL_RUNNING','FALLBACK_QUEUED_COLAB','COLAB_RUNNING',
                         'WAITING_FOR_COLAB_WORKER','COLAB_SUBMITTING','COLAB_SUBMITTED',
-                        'COLAB_EXECUTING','BLOCKED_CONFIGURATION','BLOCKED','CANDIDATE','BENCHMARKED'
+                        'COLAB_EXECUTING','BLOCKED_CONFIGURATION'
                     )
+                      AND COALESCE(other.metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY'
                   )
                 ORDER BY job.created_at, job.id
                 FOR UPDATE OF job SKIP LOCKED LIMIT 1
@@ -1174,14 +1162,60 @@ async def _dispatch_or_poll_colab_once() -> bool:
         return True
 
 
-async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -> None:
+async def _pipeline_change_token() -> tuple[Any, ...]:
+    """Lightweight 1-row watermark so idle ticks skip full manifest & holdout scans."""
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(text("""
+            SELECT
+                (SELECT max(updated_at) FROM public.viread_ocr_outbox WHERE status = 'DONE') AS last_outbox_done,
+                (SELECT max(created_at) FROM public.viread_ocr_dataset_versions) AS last_dataset_at,
+                (SELECT max(updated_at) FROM public.viread_ocr_training_jobs) AS last_job_at,
+                (SELECT updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE) AS active_model_at,
+                EXISTS (
+                    SELECT 1 FROM public.viread_ocr_training_jobs
+                    WHERE status IN (
+                        'LOCAL_RUNNING', 'COLAB_RUNNING', 'COLAB_SUBMITTING',
+                        'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'WAITING_FOR_COLAB_WORKER',
+                        'FALLBACK_QUEUED_COLAB', 'BLOCKED_CONFIGURATION'
+                    )
+                ) AS has_active_jobs
+        """))
+        row = res.mappings().one()
+        return (
+            row["last_outbox_done"],
+            row["last_dataset_at"],
+            row["last_job_at"],
+            row["active_model_at"],
+            bool(row["has_active_jobs"]),
+        )
+
+
+async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:
+    last_schedule_token: tuple[Any, ...] | None = None
     while not stop.is_set():
+        did_work = False
         try:
-            await _expire_exhausted_jobs()
-            locked_test = await _ensure_automatic_locked_test()
-            await _schedule_ready_flow1(locked_test)
-            await _schedule_ready_flow2(locked_test)
-            did_work = await _dispatch_or_poll_colab_once()
+            current_token = await _pipeline_change_token()
+            has_active_jobs = current_token[4]
+            data_changed = (last_schedule_token is None) or (current_token[:4] != last_schedule_token[:4])
+
+            if has_active_jobs or data_changed:
+                await _expire_exhausted_jobs()
+
+            if data_changed:
+                await _schedule_ready_flow1()
+                await _schedule_ready_flow2()
+                try:
+                    await _ensure_automatic_locked_test()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as evaluation_error:
+                    log_diagnostic(logger, logging.WARNING, event="viread_training_evaluation_snapshot_deferred",
+                                   stage="automatic_locked_test_snapshot", exception=evaluation_error)
+                last_schedule_token = await _pipeline_change_token()
+
+            if has_active_jobs or data_changed:
+                did_work = await _dispatch_or_poll_colab_once()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1189,6 +1223,7 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
                            stage="automatic_dataset_schedule_or_colab_dispatch", exception=exc)
             did_work = False
         if did_work:
+            last_schedule_token = None
             continue
         try:
             await asyncio.wait_for(stop.wait(), timeout=poll_seconds)

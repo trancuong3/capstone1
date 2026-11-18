@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
+import { syllableIssues } from "@/lib/karaoke/syllable-timing";
 import {
   karaokePreviewSchema,
   lyricLineSchema,
@@ -41,13 +42,16 @@ const playback = karaokePreviewSchema
         .max(300),
     }),
   })
-  .refine((value) =>
-    value.lyrics.lines.every(
-      (line, i, lines) =>
-        line.start_ms < line.end_ms &&
-        line.end_ms <= value.duration_ms &&
-        (i === 0 || line.start_ms >= lines[i - 1].end_ms),
-    ),
+  .refine(
+    (value) =>
+      value.lyrics.lines.every(
+        (line, i, lines) =>
+          line.start_ms < line.end_ms &&
+          line.end_ms <= value.duration_ms &&
+          (i === 0 || line.start_ms >= lines[i - 1].end_ms),
+      ) &&
+      (value.lyrics.format_version === 1 ||
+        syllableIssues(value.lyrics.lines, value.duration_ms).length === 0),
   );
 
 /** Read-only karaoke adapter; selected child is validated before calling it. */

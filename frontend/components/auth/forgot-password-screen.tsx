@@ -46,9 +46,9 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
   if (submittedEmail) {
     return (
       <AuthShell>
-        <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+        <Card className="border border-border bg-white">
           <div>
-            <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+            <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-ink">
@@ -85,9 +85,9 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+      <Card className="border border-border bg-white">
         <div>
-          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
+          <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
           </p>
           <h1 className="mt-2 text-heading font-extrabold text-ink">

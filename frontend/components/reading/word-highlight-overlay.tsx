@@ -1,23 +1,16 @@
 import type { ReadingPageDTO } from "@/types/reading";
-import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface WordHighlightOverlayProps {
   currentWordId: string | null;
   page: ReadingPageDTO;
   correctWordIds?: Set<string>;
+  selfCorrectedWordIds?: ReadonlySet<string>;
   mispronouncedWordIds?: Set<string>;
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
   previewSnapshot?: RealtimeAlignmentSnapshot | null;
-}
-
-function normalizeWord(word: string): string {
-  return word
-    .toLocaleLowerCase("vi")
-    .normalize("NFC")
-    .replace(/[.,!?;:"“”()]/g, "");
 }
 
 function getWordStatus(
@@ -29,8 +22,18 @@ function getWordStatus(
   repeatedWordIds?: Set<string>,
   hesitationWordIds?: Set<string>,
   previewSnapshot?: RealtimeAlignmentSnapshot | null,
+  selfCorrectedWordIds?: ReadonlySet<string>,
 ): string {
   const previewStatus = previewSnapshot?.statusByWordId.get(wordId);
+
+  if (
+    selfCorrectedWordIds?.has(wordId) ||
+    correctWordIds?.has(wordId) ||
+    previewStatus?.status === "MATCH" ||
+    previewSnapshot?.previewMatchedWordIds.has(wordId)
+  ) {
+    return "correct";
+  }
 
   if (skippedWordIds?.has(wordId) || previewStatus?.status === "DELETE") {
     return "missing";
@@ -61,21 +64,13 @@ function getWordStatus(
     return "current";
   }
 
-  if (
-    correctWordIds?.has(wordId) ||
-    previewStatus?.status === "MATCH" ||
-    previewSnapshot?.previewMatchedWordIds.has(wordId)
-  ) {
-    return "correct";
-  }
-
   return "";
 }
 
 function getWordColor(status: string): string {
   switch (status) {
     case "current":
-      return "border-yellow-500 bg-yellow-300 scale-105 font-black text-primary shadow-sm ring-2 ring-primary";
+      return "border-yellow-500 bg-yellow-300 scale-105 font-semibold text-primary shadow-sm ring-2 ring-primary";
 
     case "correct":
       return "border-green-500 bg-green-100";
@@ -101,6 +96,7 @@ export function WordHighlightOverlay({
   currentWordId,
   page,
   correctWordIds,
+  selfCorrectedWordIds,
   mispronouncedWordIds,
   skippedWordIds,
   repeatedWordIds,
@@ -111,8 +107,7 @@ export function WordHighlightOverlay({
 
   return (
     <>
-      {page.words.map((item, index) => {
-        const wordIndex = item.word_index ?? index;
+      {page.words.map((item) => {
         const status = getWordStatus(
           item.word_id,
           currentWordId,
@@ -122,6 +117,7 @@ export function WordHighlightOverlay({
           repeatedWordIds,
           hesitationWordIds,
           previewSnapshot,
+          selfCorrectedWordIds,
         );
 
         return (

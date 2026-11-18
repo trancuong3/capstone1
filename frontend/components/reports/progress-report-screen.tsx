@@ -204,7 +204,7 @@ function ProgressReportContent({
   );
   if (selected === "invalid")
     return (
-      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
         <StatusMessage title="Kỳ báo cáo không hợp lệ" tone="error">
           Cần đủ ngày bắt đầu và kết thúc hợp lệ, ngày kết thúc không trước ngày
           bắt đầu.
@@ -221,7 +221,7 @@ function ProgressReportContent({
       <section
         aria-busy="true"
         aria-label="Đang tải báo cáo tiến bộ"
-        className="mx-auto flex max-w-[1120px] flex-col gap-6"
+        className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-card" />
         <Skeleton className="h-80 rounded-card" />
@@ -238,7 +238,7 @@ function ProgressReportContent({
     );
   if (state.status !== "loaded")
     return (
-      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
         <StatusMessage
           title={
             state.status === "not-found"
@@ -255,7 +255,7 @@ function ProgressReportContent({
     );
   const { child, children, report, periods } = state;
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <ReportPageHeader
         eyebrow="Tiến bộ của bé"
         title={`Cùng nhìn lại hành trình của ${child.alias}`}
@@ -271,7 +271,6 @@ function ProgressReportContent({
           </ButtonLink>
         }
       />
-      <ChildProgressAssessmentCard childId={child.id} childName={child.alias} />
       <ProgressReportFilters
         childrenProfiles={children}
         childId={child.id}
@@ -299,7 +298,7 @@ function ProgressReportContent({
       ) : null}
       {state.reportStatus === "unavailable" ? (
         <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-extrabold text-ink">
+          <h2 className="text-2xl font-semibold text-ink">
             Dữ liệu đang chờ bổ sung
           </h2>
           <StatusMessage>
@@ -336,7 +335,6 @@ function ProgressReportContent({
               không được coi là số 0.
             </StatusMessage>
           ) : null}
-          <ReadingAssessmentSummary assessment={report.assessment} />
           {report.assessment_coverage &&
           report.assessment_coverage.assessed_sessions <
             report.assessment_coverage.total_sessions ? (
@@ -347,20 +345,20 @@ function ProgressReportContent({
               thiếu không được tính thành đúng hoặc sai.
             </StatusMessage>
           ) : null}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="report-metrics grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {mapReportMetrics(report).map((metric) => (
               <MetricCard key={metric.id} metric={metric} />
             ))}
           </div>
-          <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+          <div className="grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
             <ProgressChart report={report} />
             <section
-              className="rounded-card bg-cream p-5 sm:p-8"
+              className="rounded-card border border-border bg-cream p-5 sm:p-8"
               aria-labelledby="comparison-title"
             >
               <h2
                 id="comparison-title"
-                className="text-2xl font-extrabold text-ink"
+                className="text-2xl font-semibold text-ink"
               >
                 So sánh trong báo cáo đã lưu
               </h2>
@@ -393,8 +391,8 @@ function ProgressReportContent({
                       ],
                     ].map(([label, value, suffix]) => (
                       <div key={String(label)}>
-                        <dt className="font-bold text-muted">{label}</dt>
-                        <dd className="text-xl font-extrabold text-ink">
+                        <dt className="font-semibold text-muted">{label}</dt>
+                        <dd className="text-xl font-semibold text-ink">
                           {typeof value !== "number"
                             ? "Chưa đủ dữ liệu"
                             : `${value > 0 ? "+" : ""}${Number(value.toFixed(2))}${suffix}`}
@@ -411,9 +409,10 @@ function ProgressReportContent({
               )}
             </section>
           </div>
+          <ReadingAssessmentSummary assessment={report.assessment} />
           {report.legacy ? (
-            <section className="rounded-card bg-white p-5 sm:p-8">
-              <h2 className="text-2xl font-extrabold text-ink">
+            <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
+              <h2 className="text-2xl font-semibold text-ink">
                 Chỉ số định dạng cũ
               </h2>
               <p className="mt-2 text-label text-muted">
@@ -424,20 +423,24 @@ function ProgressReportContent({
                 {report.legacy.total_books !== null ? (
                   <div>
                     <dt>Tổng sách đã lưu (total_books)</dt>
-                    <dd className="font-bold">{report.legacy.total_books}</dd>
+                    <dd className="font-semibold">
+                      {report.legacy.total_books}
+                    </dd>
                   </div>
                 ) : null}
                 {report.legacy.avg_fluency !== null ? (
                   <div>
                     <dt>Giá trị avg_fluency đã lưu (chưa xác định đơn vị)</dt>
-                    <dd className="font-bold">{report.legacy.avg_fluency}</dd>
+                    <dd className="font-semibold">
+                      {report.legacy.avg_fluency}
+                    </dd>
                   </div>
                 ) : null}
               </dl>
             </section>
           ) : null}
-          <section className="rounded-card bg-white p-5 sm:p-8">
-            <h2 className="text-2xl font-extrabold text-ink">
+          <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
+            <h2 className="text-2xl font-semibold text-ink">
               Từ cần luyện nổi bật
             </h2>
             <p className="mt-2 text-label text-muted">
@@ -454,7 +457,7 @@ function ProgressReportContent({
                 {report.difficult_words.map((word, index) => (
                   <li
                     key={`${word.normalized_word}-${index}`}
-                    className="rounded-full bg-warning-surface px-4 py-2 font-bold text-warning"
+                    className="rounded-full bg-warning-surface px-4 py-2 font-semibold text-warning"
                   >
                     {word.display_text} · {word.difficulty_score}
                   </li>
@@ -479,6 +482,20 @@ function ProgressReportContent({
           </section>
         </>
       ) : null}
+      <details
+        className="rounded-card border border-border bg-white p-4 sm:p-6"
+        open
+      >
+        <summary className="cursor-pointer font-bold text-primary">
+          Đánh giá đọc của bé
+        </summary>
+        <div className="mt-4">
+          <ChildProgressAssessmentCard
+            childId={child.id}
+            childName={child.alias}
+          />
+        </div>
+      </details>
     </section>
   );
 }

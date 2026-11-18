@@ -72,6 +72,7 @@ class SentenceShooterShotRead(BaseModel):
     next_expected_position: int = Field(ge=0)
     stars_awarded: int = Field(ge=0, le=3)
     completed_sentence: str | None = None
+    next_round: SentenceShooterRoundRead | None = None
     message: str
 
 

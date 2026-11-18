@@ -62,7 +62,7 @@ describe("AdminParentDetailScreen", () => {
     expect(screen.getByText("parent@example.com")).toBeInTheDocument();
     expect(screen.getByText("0900000000")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Be An" })).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText(/Lớp 2/)).toBeInTheDocument();
     expect(getById).toHaveBeenCalledWith(PARENT_ID, expect.any(AbortSignal));
   });
 
@@ -125,7 +125,7 @@ describe("AdminParentDetailScreen", () => {
       await screen.findByText("Không tìm thấy phụ huynh"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: /Quay lại danh sách/i }),
+      screen.getByRole("link", { name: /Danh sách phụ huynh/i }),
     ).toHaveAttribute("href", "/admin/parents");
   });
 
@@ -160,7 +160,7 @@ describe("AdminParentDetailScreen", () => {
     );
 
     renderScreen();
-    fireEvent.click(await screen.findByRole("button", { name: /Sửa Parent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Sửa hồ sơ/i }));
     fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
       target: { value: "Changed Name" },
     });
@@ -183,7 +183,7 @@ describe("AdminParentDetailScreen", () => {
 
     renderScreen();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Sửa Parent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Sửa hồ sơ/i }));
     fireEvent.change(screen.getByLabelText("Tên hiển thị"), {
       target: { value: "Nguyen Van Updated" },
     });

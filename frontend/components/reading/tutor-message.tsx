@@ -25,7 +25,7 @@ export function TutorMessage({
     <ReadingStatusDialog
       body={
         <div className="space-y-3">
-          <p className="text-[32px] font-extrabold text-primary">{word}</p>
+          <p className="text-[32px] font-semibold text-primary">{word}</p>
           <p>
             {ttsFailed
               ? "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé."
@@ -34,7 +34,7 @@ export function TutorMessage({
                 : "Bé có thể nhấn Nghe mẫu để nghe lại từ này."}
           </p>
           {action?.message_code === "READ_EXAMPLE_REPLAYED" ? (
-            <p className="font-bold text-success-ink" role="status">
+            <p className="font-semibold text-success-ink" role="status">
               Đã thử lại phần nghe mẫu.
             </p>
           ) : null}

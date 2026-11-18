@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Camera,
-  CheckCircle2,
-  RefreshCw,
-  Sparkles,
-  VideoOff,
-} from "lucide-react";
+import { Sparkles, VideoOff } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -245,7 +239,7 @@ export function CameraPreview({
             framing_valid: false,
             matched: false,
             status_code: "INVALID_IMAGE",
-            message: "Đang kết nối tới ViRead... Bé giữ yên sách nhé!",
+            message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
             confidence: 0,
             matched_page: null,
           });
@@ -291,7 +285,7 @@ export function CameraPreview({
         aria-label="Bản xem trước camera mô phỏng"
         className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 sm:flex-1 sm:p-8"
       >
-        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-bold text-muted sm:right-5 sm:top-5">
+        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-semibold text-muted sm:right-5 sm:top-5">
           <VideoOff aria-hidden="true" className="size-4" />
           <span className="hidden sm:inline">Mô phỏng · không ghi hình</span>
           <span className="sr-only sm:hidden">Mô phỏng, không ghi hình</span>
@@ -311,25 +305,15 @@ export function CameraPreview({
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-4 py-3">
-        <p className="inline-flex items-center gap-2 text-body font-bold text-ink">
-          {isMatched ? (
-            <CheckCircle2
-              aria-hidden="true"
-              className="size-6 text-success-ink"
-            />
-          ) : (
-            <Camera aria-hidden="true" className="size-6 text-primary" />
-          )}
-          <span>
-            {scanResult?.message ??
-              "Đặt trang sách nằm gọn vào trong khung viền bên dưới để bắt đầu nhé!"}
-          </span>
+        <p className="text-body font-semibold text-ink">
+          {scanResult?.message ??
+            "Đặt trang sách nằm gọn vào trong khung viền bên dưới để bắt đầu nhé!"}
         </p>
 
         {scanResult && (
           <span
             className={cn(
-              "rounded-control px-3 py-1 text-[14px] font-extrabold",
+              "rounded-control px-3 py-1 text-[14px] font-semibold",
               isMatched
                 ? "bg-white text-success-ink"
                 : isFrameValid
@@ -351,7 +335,7 @@ export function CameraPreview({
         {cameraDenied ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white">
             <VideoOff aria-hidden="true" className="size-10 text-muted" />
-            <p className="text-[20px] font-bold">
+            <p className="text-[20px] font-semibold">
               Chưa bật được Camera trên trình duyệt
             </p>
             <p className="max-w-md text-body text-white/80">
@@ -373,7 +357,7 @@ export function CameraPreview({
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 sm:p-10">
               <div
                 className={cn(
-                  "relative flex h-[78%] w-[78%] flex-col justify-between rounded-card border-4 border-dashed p-4 transition-all duration-300",
+                  "relative flex h-[78%] w-[78%] flex-col justify-between rounded-card border-2 border-dashed p-4 transition-colors",
                   isMatched
                     ? "border-success-ink bg-white/10"
                     : isFrameValid
@@ -383,11 +367,11 @@ export function CameraPreview({
               >
                 {/* 4 góc định vị khung đặt sách */}
                 <div className="flex items-center justify-between">
-                  <span className="rounded-control bg-white/90 px-3 py-1 text-[13px] font-extrabold text-ink shadow">
-                    📖 Khung đặt trang sách
+                  <span className="rounded-control bg-white/90 px-3 py-1 text-[13px] font-semibold text-ink shadow">
+                    Khung đặt trang sách
                   </span>
                   {isScanning ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-bold text-white shadow">
+                    <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-semibold text-white shadow">
                       <Sparkles
                         aria-hidden="true"
                         className="size-4 animate-spin"
@@ -397,11 +381,11 @@ export function CameraPreview({
                   ) : null}
                 </div>
 
-                <div className="mx-auto rounded-control bg-black/60 px-4 py-1.5 text-center text-[14px] font-bold text-white">
+                <div className="mx-auto rounded-control bg-black/60 px-4 py-1.5 text-center text-[14px] font-semibold text-white">
                   {isMatched
-                    ? `Đã xác nhận đúng khung — Trang ${scanResult?.matched_page?.page_number}!`
+                    ? `Đã xác nhận khung — Trang ${scanResult?.matched_page?.page_number}`
                     : isFrameValid
-                      ? "Khung hình hợp lệ! Giữ yên sách để nhận diện trang..."
+                      ? "Khung hình hợp lệ. Giữ sách yên để nhận diện trang."
                       : "Căn chỉnh sao cho 4 mép trang sách nằm gọn trong khung"}
                 </div>
               </div>
@@ -412,24 +396,22 @@ export function CameraPreview({
       </div>
 
       {/* Thanh nút điều khiển Camera */}
-      <div className="flex flex-wrap items-center justify-center gap-3">
+      <div className="flex flex-col gap-4">
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady || isScanning}
           isLoading={isScanning}
           onClick={() => void captureAndScan()}
         >
-          <Camera aria-hidden="true" className="size-5" />
           Xác nhận khung & Quét trang
         </Button>
 
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady}
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
           {autoScan ? "Tự động quét: ĐANG BẬT" : "Tự động quét: ĐANG TẮT"}
         </Button>
       </div>

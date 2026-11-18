@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -22,12 +22,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import {
-  AdminLoading,
-  AdminPageHeader,
-  AdminStatusBadge,
-} from "@/components/admin/admin-ui";
-import { Button } from "@/components/common/button";
+import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
@@ -174,6 +170,7 @@ export function getWordReviewColorGroup(
   word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
 ): WordReviewColorGroup {
+  void _paddleLineScore;
   const contractGroup = word?.review_color_group;
   if (
     contractGroup === "green" ||
@@ -343,6 +340,7 @@ export function getWordReviewLabel(
   word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
 ): string {
+  void _paddleLineScore;
   const group = getWordReviewColorGroup(status, word);
   if (group === "green") {
     if (status === "verified") return "Admin đã xác minh từ";
@@ -763,13 +761,13 @@ function OcrImageViewer({
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-black">Ảnh trang gốc</h2>
+        <h2 className="text-2xl font-semibold">Ảnh trang gốc</h2>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted">
             {image.width} × {image.height} px
           </span>
           <button
-            className="min-h-10 rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
+            className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
             onClick={() => setIsExpanded(true)}
             ref={expandButtonRef}
             type="button"
@@ -791,11 +789,11 @@ function OcrImageViewer({
         >
           <div className="grid max-h-full w-full justify-items-center gap-3">
             <div className="flex w-full max-w-[92vw] items-center justify-between gap-3 text-white">
-              <h2 className="font-bold" id="ocr-expanded-image-title">
+              <h2 className="font-semibold" id="ocr-expanded-image-title">
                 Trang {image.page_number} · {book.title}
               </h2>
               <button
-                className="min-h-11 rounded-control bg-white px-4 font-bold text-ink hover:bg-canvas"
+                className="min-h-11 rounded-control bg-white px-4 font-semibold text-ink hover:bg-canvas"
                 onClick={() => setIsExpanded(false)}
                 ref={closeButtonRef}
                 type="button"
@@ -832,9 +830,11 @@ export function AdminOcrReviewScreen({
   pageId: string;
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
+  const router = useRouter();
   const searchParams = useSearchParams();
   // Next's compatibility layer can return null outside the App Router (e.g. tests).
   const preferredRevisionId = searchParams?.get("revisionId") ?? null;
+  const activeView = searchParams?.get("view") ?? "review";
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [image, setImage] = useState<AdminPageImageUI | null>(null);
   const [history, setHistory] = useState<
@@ -864,7 +864,14 @@ export function AdminOcrReviewScreen({
   const [safetyDecisionReason, setSafetyDecisionReason] = useState("");
   const [candidateEditPending, setCandidateEditPending] = useState(false);
   const [busy, setBusy] = useState<
-    "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | "workflow" | null
+    | "edit"
+    | "save"
+    | "verify"
+    | "reprocess"
+    | "reupload"
+    | "ai_correct"
+    | "workflow"
+    | null
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const requestIdRef = useRef(0);
@@ -901,7 +908,10 @@ export function AdminOcrReviewScreen({
   }, []);
 
   const restoreWorkflowReview = useCallback(
-    (workflow: AdminAiWorkflowDTO | null, revision: AdminPageRevisionDetailDTO) => {
+    (
+      workflow: AdminAiWorkflowDTO | null,
+      revision: AdminPageRevisionDetailDTO,
+    ) => {
       if (!workflow?.candidate_text || !workflow.proofread_text) return;
       const savedDraft = revision.draft_text ?? "";
       if (workflow.candidate_version <= 1) {
@@ -916,7 +926,10 @@ export function AdminOcrReviewScreen({
         }
         return;
       }
-      const synchronized = syncPageTextToWords(workflow.candidate_text, revision.words);
+      const synchronized = syncPageTextToWords(
+        workflow.candidate_text,
+        revision.words,
+      );
       if (
         synchronized.status === "synchronized" &&
         synchronized.tokens.length === revision.words.length
@@ -975,9 +988,9 @@ export function AdminOcrReviewScreen({
       const [nextDetail, nextImage, nextWorkflow] = await Promise.all([
         ocr.getRevision(pageId, selectedRevision.page_revision_id),
         pages.getImage(pageId, selectedRevision.page_revision_id),
-        ocr.getLatestWorkflow(pageId, selectedRevision.page_revision_id).catch(
-          () => null,
-        ),
+        ocr
+          .getLatestWorkflow(pageId, selectedRevision.page_revision_id)
+          .catch(() => null),
       ]);
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
@@ -1061,7 +1074,10 @@ export function AdminOcrReviewScreen({
             return;
           }
           try {
-            const latest = await ocr.getLatestWorkflow(pageId, requestedRevision);
+            const latest = await ocr.getLatestWorkflow(
+              pageId,
+              requestedRevision,
+            );
             if (latest) setAiWorkflow(latest);
           } catch {
             setNotice(
@@ -1076,14 +1092,7 @@ export function AdminOcrReviewScreen({
       globalThis.clearTimeout(timer);
       candidateSyncRequestRef.current += 1;
     };
-  }, [
-    aiWorkflow,
-    candidateEditPending,
-    detail,
-    draftText,
-    ocr,
-    pageId,
-  ]);
+  }, [aiWorkflow, candidateEditPending, detail, draftText, ocr, pageId]);
 
   useEffect(() => {
     if (
@@ -1346,10 +1355,7 @@ export function AdminOcrReviewScreen({
   }
 
   async function correctWithAi() {
-    if (
-      aiWorkflow?.status === "FAILED" &&
-      aiWorkflow.proofread_text === null
-    ) {
+    if (aiWorkflow?.status === "FAILED" && aiWorkflow.proofread_text === null) {
       await retryWorkflow();
       return;
     }
@@ -1380,15 +1386,15 @@ export function AdminOcrReviewScreen({
     setNotice(null);
     try {
       const workflow = await ocr.runCombinedWorkflow(
-          pageId,
-          requestedRevisionId,
-          requestedText,
-          words,
-          (progress) => {
-            if (mountedRef.current) setAiProgress(progress);
-          },
-          controller.signal,
-        );
+        pageId,
+        requestedRevisionId,
+        requestedText,
+        words,
+        (progress) => {
+          if (mountedRef.current) setAiProgress(progress);
+        },
+        controller.signal,
+      );
       if (
         !mountedRef.current ||
         draftEditVersionRef.current !== requestedVersion ||
@@ -1483,11 +1489,16 @@ export function AdminOcrReviewScreen({
   }
 
   async function decideSafety(confirmed: boolean) {
-    if (!aiWorkflow?.candidate_hash || !aiWorkflow.hash_match || busy !== null) return;
+    if (!aiWorkflow?.candidate_hash || !aiWorkflow.hash_match || busy !== null)
+      return;
     const reason = safetyDecisionReason.trim();
-    const reasonRequired = Boolean(aiWorkflow.findings.length) || aiWorkflow.suitability !== "SUITABLE";
+    const reasonRequired =
+      Boolean(aiWorkflow.findings.length) ||
+      aiWorkflow.suitability !== "SUITABLE";
     if (confirmed && reasonRequired && !reason) {
-      setNotice("Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả Safety.");
+      setNotice(
+        "Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả Safety.",
+      );
       return;
     }
     setBusy("workflow");
@@ -1712,7 +1723,9 @@ export function AdminOcrReviewScreen({
       return;
     }
     if (candidateEditPending && aiWorkflow?.proofread_text) {
-      setNotice("Đang đồng bộ Candidate và lên lịch Safety rescan. Hãy lưu lại sau khi hoàn tất bước này.");
+      setNotice(
+        "Đang đồng bộ Candidate và lên lịch Safety rescan. Hãy lưu lại sau khi hoàn tất bước này.",
+      );
       return;
     }
     const requestedRevisionId = detail.page_revision_id;
@@ -1734,7 +1747,9 @@ export function AdminOcrReviewScreen({
         return;
       }
       const latestWorkflow = aiWorkflow
-        ? await ocr.getLatestWorkflow(pageId, requestedRevisionId).catch(() => aiWorkflow)
+        ? await ocr
+            .getLatestWorkflow(pageId, requestedRevisionId)
+            .catch(() => aiWorkflow)
         : null;
       applyDetail(saved);
       setAiWorkflow(latestWorkflow);
@@ -1790,7 +1805,9 @@ export function AdminOcrReviewScreen({
       return;
     }
     if (candidateEditPending && aiWorkflow?.proofread_text) {
-      setNotice("Candidate wordt opgeslagen en Child Safety wordt opnieuw gestart. Wacht tot de hash is bijgewerkt.");
+      setNotice(
+        "Candidate wordt opgeslagen en Child Safety wordt opnieuw gestart. Wacht tot de hash is bijgewerkt.",
+      );
       return;
     }
     const requestedRevisionId = detail.page_revision_id;
@@ -1800,7 +1817,9 @@ export function AdminOcrReviewScreen({
     try {
       const verifiedResult = await revisions.verify(pageId, {
         page_revision_id: requestedRevisionId,
-        workflow_id: aiWorkflow?.proofread_text ? aiWorkflow.workflow_id : undefined,
+        workflow_id: aiWorkflow?.proofread_text
+          ? aiWorkflow.workflow_id
+          : undefined,
         corrected_text: draftText,
         words,
         proofread_audit: finalProofreadAudit,
@@ -1940,16 +1959,16 @@ export function AdminOcrReviewScreen({
     ) === true;
   const workflowHasHighRisk = Boolean(
     aiWorkflow &&
-      (aiWorkflow.suitability === "NOT_RECOMMENDED" ||
-        aiWorkflow.findings.some(
-          (finding) => String(finding.severity ?? "").toUpperCase() === "HIGH",
-        )),
+    (aiWorkflow.suitability === "NOT_RECOMMENDED" ||
+      aiWorkflow.findings.some(
+        (finding) => String(finding.severity ?? "").toUpperCase() === "HIGH",
+      )),
   );
   const workflowFinalApprovalBlocked = Boolean(
     aiWorkflow?.proofread_text &&
-      (aiWorkflow.safety_status !== "CONFIRMED" ||
-        !aiWorkflow.hash_match ||
-        workflowHasHighRisk),
+    (aiWorkflow.safety_status !== "CONFIRMED" ||
+      !aiWorkflow.hash_match ||
+      workflowHasHighRisk),
   );
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
@@ -2084,7 +2103,7 @@ export function AdminOcrReviewScreen({
               Thử lại
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline"
               href={`/admin/books/${bookId}`}
             >
               Quay lại sách
@@ -2097,20 +2116,135 @@ export function AdminOcrReviewScreen({
   if (!book || !image || !history || !detail)
     return <AdminLoading label="Đang tải ảnh và revision…" />;
 
+  const pagePath = `/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}`;
+  function viewHref(view: "review" | "words" | "history") {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    if (view === "review") params.delete("view");
+    else params.set("view", view);
+    const query = params.toString();
+    return `${pagePath}${query ? `?${query}` : ""}`;
+  }
+
+  if (activeView === "words") {
+    return (
+      <AdminOcrWordReviewPanel
+        backHref={viewHref("review")}
+        bookTitle={book.title}
+        busy={busy !== null}
+        onAddWord={() => {
+          if (detail.verification_status !== "NEEDS_REVIEW") return;
+          const nextIndex =
+            words.reduce(
+              (maximum, word) => Math.max(maximum, word.word_index),
+              -1,
+            ) + 1;
+          const nextWord: AdminRevisionWordDTO = {
+            word_index: nextIndex,
+            line_index: words.at(-1)?.line_index ?? 0,
+            text: "Từ mới",
+            normalized_text: normalizeVietnameseWord("Từ mới"),
+            bbox: [0.1, 0.1, 0.1, 0.05],
+            ocr_confidence: null,
+            ocr_review_status: "needs_review",
+          };
+          setWords((current) => [...current, nextWord]);
+          setDraftText((current) => `${current.trim()} Từ mới`.trim());
+          setSelectedWord(nextIndex);
+          setWordSyncError(null);
+          draftEditVersionRef.current += 1;
+        }}
+        onComplete={() => router.push(viewHref("review"))}
+        onRemoveWord={(wordIndex) => {
+          if (detail.verification_status !== "NEEDS_REVIEW") return;
+          const removedOrdinal = words.findIndex(
+            (word) => word.word_index === wordIndex,
+          );
+          const range = getWordRangeInText(draftText, removedOrdinal);
+          if (!range) return;
+          let [start, end] = range;
+          if (end < draftText.length && /\s/u.test(draftText[end] ?? "")) {
+            end += 1;
+          } else if (start > 0 && /\s/u.test(draftText[start - 1] ?? "")) {
+            start -= 1;
+          }
+          const nextText = draftText.slice(0, start) + draftText.slice(end);
+          const nextWords = words
+            .filter((word) => word.word_index !== wordIndex)
+            .map((word, index) => ({ ...word, word_index: index }));
+          const synced = syncPageTextToWords(nextText, nextWords);
+          if (synced.status !== "synchronized") {
+            setWordSyncError(
+              "Không thể đồng bộ văn bản sau khi xóa từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu.",
+            );
+            return;
+          }
+          setWords([...synced.words]);
+          setDraftText(nextText.normalize("NFC"));
+          setSelectedWord(nextWords[0]?.word_index ?? null);
+          setWordSyncError(null);
+          draftEditVersionRef.current += 1;
+        }}
+        onSelectWord={setSelectedWord}
+        onUpdateBbox={updateBbox}
+        onUpdateWord={updateWord}
+        pageNumber={image.page_number}
+        revisionNo={detail.revision_no}
+        selectedWord={selectedWord}
+        status={detail.verification_status}
+        wordSyncError={wordSyncError}
+        words={words}
+      />
+    );
+  }
+
+  if (activeView === "history") {
+    return (
+      <AdminOcrHistoryPanel
+        backHref={viewHref("review")}
+        bookTitle={book.title}
+        busy={busy}
+        detail={detail}
+        history={history}
+        notice={notice}
+        onChooseRevision={(revisionId) => void chooseRevision(revisionId)}
+        onReload={() => void load()}
+        onReprocess={() => void reprocess()}
+        onReplacementFileChange={setReplacementFile}
+        onReplaceImage={() => void replaceImageAndReprocess()}
+        pageNumber={image.page_number}
+        replacementFile={replacementFile}
+      />
+    );
+  }
+
   return (
     <>
       <AdminPageHeader
         eyebrow={`${book.title} · Trang ${image.page_number}`}
         title={`Kiểm tra OCR · R${detail.revision_no}`}
         description="Sửa nội dung và vị trí từ, lưu nháp, xác minh hoặc tạo revision OCR mới."
-        actions={<AdminStatusBadge status={detail.verification_status} />}
+        actions={<OcrRevisionStatus status={detail.verification_status} />}
       />
       <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href={`/admin/books/${bookId}`}
       >
         <ArrowLeft aria-hidden className="size-5" /> Chi tiết sách
       </Link>
+      {detail.verification_status === "VERIFIED" ? (
+        <StatusMessage
+          className="mb-6"
+          title="Đã xác minh revision"
+          tone="success"
+        >
+          Revision này có thể làm ground truth cho session mới nếu trang đang
+          ACTIVE.
+        </StatusMessage>
+      ) : detail.verification_status === "PROCESSING" ? (
+        <StatusMessage className="mb-6" title="PROCESSING" tone="info">
+          Đang tạo revision mới. Revision cũ vẫn được giữ nguyên.
+        </StatusMessage>
+      ) : null}
       {notice ? (
         <StatusMessage
           className="mb-6"
@@ -2179,7 +2313,7 @@ export function AdminOcrReviewScreen({
               ] as const
             ).map((state) => (
               <div
-                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-bold ${state.cardClass}`}
+                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-semibold ${state.cardClass}`}
                 key={state.id}
               >
                 <strong className="text-xl leading-none">{state.count}</strong>
@@ -2234,7 +2368,7 @@ export function AdminOcrReviewScreen({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
-              className="min-h-10 rounded-control border border-border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!nextWordToReview}
               onClick={() => {
                 if (nextWordToReview) {
@@ -2257,13 +2391,13 @@ export function AdminOcrReviewScreen({
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-black">Văn bản OCR</h2>
+                <h2 className="text-2xl font-semibold">Văn bản nháp</h2>
                 <p className="mt-1 text-sm text-muted">
                   Chỉnh nội dung tại đây; các vùng từ và ảnh sẽ được đồng bộ.
                 </p>
               </div>
             </div>
-            <label className="grid gap-2 font-bold" htmlFor="ocr-text">
+            <label className="grid gap-2 font-semibold" htmlFor="ocr-text">
               Nội dung trang
               <textarea
                 aria-describedby="ocr-help"
@@ -2279,7 +2413,11 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend bắt đầu Proofreading và Child Safety song song trên cùng OCR snapshot. Nếu Proofreading đổi nội dung, Safety tự quét lại Candidate theo hash mới. Ollama chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ. AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
+              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend bắt đầu Proofreading và
+              Child Safety song song trên cùng OCR snapshot. Nếu Proofreading
+              đổi nội dung, Safety tự quét lại Candidate theo hash mới. Ollama
+              chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ.
+              AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2288,7 +2426,7 @@ export function AdminOcrReviewScreen({
                 role="status"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-bold">
+                  <span className="font-semibold">
                     {aiProgress?.status === "QUEUED"
                       ? "Workflow đang chờ worker"
                       : aiProgress?.status === "PROOFREADING"
@@ -2339,7 +2477,7 @@ export function AdminOcrReviewScreen({
               >
                 <div>
                   <h3
-                    className="text-lg font-extrabold text-purple-950"
+                    className="text-lg font-semibold text-purple-950"
                     id="ai-correction-review-title"
                   >
                     Rà soát đề xuất AI
@@ -2352,7 +2490,7 @@ export function AdminOcrReviewScreen({
                   </p>
                   <p
                     aria-live="polite"
-                    className="mt-1 text-sm font-bold text-purple-950"
+                    className="mt-1 text-sm font-semibold text-purple-950"
                   >
                     Đã chọn {aiAcceptedChanges.size} / {aiChanges.length} đề
                     xuất. Chọn thay đổi bên dưới hoặc dùng “Chọn tất cả”.
@@ -2397,7 +2535,7 @@ export function AdminOcrReviewScreen({
                 </div>
                 <div
                   aria-live="polite"
-                  className="text-xs font-bold text-muted"
+                  className="text-xs font-semibold text-muted"
                 >
                   Trang {Math.min(aiDiffPage + 1, aiDiffPageCount)} /{" "}
                   {aiDiffPageCount}
@@ -2566,9 +2704,11 @@ export function AdminOcrReviewScreen({
                       workflowFinalApprovalBlocked ||
                       aiSuggestion !== null ||
                       (aiWorkflow !== null &&
-                        ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
-                          aiWorkflow.status,
-                        ))
+                        [
+                          "QUEUED",
+                          "PROOFREADING",
+                          "CHILD_SAFETY_SCANNING",
+                        ].includes(aiWorkflow.status))
                     }
                     isLoading={busy === "verify" || busy === "ai_correct"}
                     onClick={() => void verifyRevision()}
@@ -2585,8 +2725,12 @@ export function AdminOcrReviewScreen({
                         ? "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG"
                         : "XÁC NHẬN & CHẠY AI"}
                   </Button>
-                  {aiWorkflow?.proofread_text && workflowFinalApprovalBlocked ? (
-                    <p className="basis-full text-sm text-amber-900" role="status">
+                  {aiWorkflow?.proofread_text &&
+                  workflowFinalApprovalBlocked ? (
+                    <p
+                      className="basis-full text-sm text-amber-900"
+                      role="status"
+                    >
                       {workflowHasHighRisk
                         ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
                         : aiWorkflow.safety_status !== "CONFIRMED"
@@ -2614,9 +2758,12 @@ export function AdminOcrReviewScreen({
             <Card className="bg-white" data-testid="admin-ai-workflow">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-black">Child Safety · GRADE_1_TO_5</h2>
+                  <h2 className="text-2xl font-black">
+                    Child Safety · GRADE_1_TO_5
+                  </h2>
                   <p className="mt-1 text-sm text-muted">
-                    Quét văn bản Candidate sau Proofreading. Kết quả là provisional cho đến khi Admin xác nhận.
+                    Quét văn bản Candidate sau Proofreading. Kết quả là
+                    provisional cho đến khi Admin xác nhận.
                   </p>
                 </div>
                 <span className="rounded-full border border-border px-3 py-1 text-sm font-bold">
@@ -2665,7 +2812,12 @@ export function AdminOcrReviewScreen({
 
               {aiWorkflow.uncertain_word_indices.length > 0 ? (
                 <p className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
-                  Proofreading còn {aiWorkflow.uncertain_word_indices.length} từ chưa chắc chắn (vị trí {aiWorkflow.uncertain_word_indices.map((index) => index + 1).join(", ")}). Các từ này được giữ nguyên để Admin đối chiếu.
+                  Proofreading còn {aiWorkflow.uncertain_word_indices.length} từ
+                  chưa chắc chắn (vị trí{" "}
+                  {aiWorkflow.uncertain_word_indices
+                    .map((index) => index + 1)
+                    .join(", ")}
+                  ). Các từ này được giữ nguyên để Admin đối chiếu.
                 </p>
               ) : null}
 
@@ -2680,44 +2832,64 @@ export function AdminOcrReviewScreen({
                 </div>
                 <div>
                   <dt className="font-bold">FinalApprovedTextHash</dt>
-                  <dd>{aiWorkflow.final_approved_text_hash ?? "Chưa xác nhận OCR cuối cùng"}</dd>
+                  <dd>
+                    {aiWorkflow.final_approved_text_hash ??
+                      "Chưa xác nhận OCR cuối cùng"}
+                  </dd>
                 </div>
               </dl>
 
-              {aiWorkflow.status === "FAILED" || aiWorkflow.safety_status === "FAILED" ? (() => {
-                const failureEvent = [...aiWorkflow.provider_events]
-                  .reverse()
-                  .find((event) =>
-                    Boolean(event.error_code) &&
-                    (!event.stage || event.stage === aiWorkflow.stage),
-                  );
-                const failureMessage = aiWorkflow.error_code === "INVALID_EVIDENCE"
-                  ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
-                  : aiWorkflow.error_code === "INVALID_JSON"
-                    ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
-                    : aiWorkflow.error_code === "INVALID_OUTPUT_SCHEMA"
-                      ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
-                      : "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn.";
-                return (
-                  <div className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950" role="alert">
-                    <p className="font-bold">
-                      {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-                        ? "Child Safety chưa hoàn tất."
-                        : "Proofreading chưa hoàn tất."}
-                    </p>
-                    <p className="mt-1">{failureMessage}</p>
-                    <p className="mt-1">
-                      Lỗi: {aiWorkflow.error_code ?? "UNKNOWN"}
-                      {failureEvent?.provider ? ` · Provider ${String(failureEvent.provider)}` : ""}
-                      {failureEvent?.model ? ` · Model ${String(failureEvent.model)}` : ""}
-                      {failureEvent?.duration_ms != null ? ` · ${String(failureEvent.duration_ms)} ms` : ""}
-                      {` · Lần thử ${aiWorkflow.attempts}`}
-                      {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
-                    </p>
-                    <p className="mt-1">Có thể thử lại riêng giai đoạn Safety; không chạy lại Proofreading.</p>
-                  </div>
-                );
-              })() : null}
+              {aiWorkflow.status === "FAILED" ||
+              aiWorkflow.safety_status === "FAILED"
+                ? (() => {
+                    const failureEvent = [...aiWorkflow.provider_events]
+                      .reverse()
+                      .find(
+                        (event) =>
+                          Boolean(event.error_code) &&
+                          (!event.stage || event.stage === aiWorkflow.stage),
+                      );
+                    const failureMessage =
+                      aiWorkflow.error_code === "INVALID_EVIDENCE"
+                        ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
+                        : aiWorkflow.error_code === "INVALID_JSON"
+                          ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
+                          : aiWorkflow.error_code === "INVALID_OUTPUT_SCHEMA"
+                            ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
+                            : "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn.";
+                    return (
+                      <div
+                        className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
+                        role="alert"
+                      >
+                        <p className="font-bold">
+                          {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                            ? "Child Safety chưa hoàn tất."
+                            : "Proofreading chưa hoàn tất."}
+                        </p>
+                        <p className="mt-1">{failureMessage}</p>
+                        <p className="mt-1">
+                          Lỗi: {aiWorkflow.error_code ?? "UNKNOWN"}
+                          {failureEvent?.provider
+                            ? ` · Provider ${String(failureEvent.provider)}`
+                            : ""}
+                          {failureEvent?.model
+                            ? ` · Model ${String(failureEvent.model)}`
+                            : ""}
+                          {failureEvent?.duration_ms != null
+                            ? ` · ${String(failureEvent.duration_ms)} ms`
+                            : ""}
+                          {` · Lần thử ${aiWorkflow.attempts}`}
+                          {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
+                        </p>
+                        <p className="mt-1">
+                          Có thể thử lại riêng giai đoạn Safety; không chạy lại
+                          Proofreading.
+                        </p>
+                      </div>
+                    );
+                  })()
+                : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
                 {aiWorkflow.status === "FAILED" ? (
@@ -2737,24 +2909,29 @@ export function AdminOcrReviewScreen({
                 ) : null}
                 {aiWorkflow.safety_status === "PROVISIONAL" &&
                 aiWorkflow.hash_match &&
-                (aiWorkflow.findings.length > 0 || aiWorkflow.suitability !== "SUITABLE") ? (
+                (aiWorkflow.findings.length > 0 ||
+                  aiWorkflow.suitability !== "SUITABLE") ? (
                   <label className="basis-full text-sm font-bold text-ink">
                     Lý do Admin xem xét Safety · bắt buộc
                     <textarea
                       className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
                       maxLength={500}
-                      onChange={(event) => setSafetyDecisionReason(event.target.value)}
+                      onChange={(event) =>
+                        setSafetyDecisionReason(event.target.value)
+                      }
                       value={safetyDecisionReason}
                     />
                   </label>
                 ) : null}
-                {aiWorkflow.safety_status === "PROVISIONAL" && aiWorkflow.hash_match ? (
+                {aiWorkflow.safety_status === "PROVISIONAL" &&
+                aiWorkflow.hash_match ? (
                   <Button
                     className="h-10 w-auto px-3"
                     disabled={
                       busy !== null ||
                       candidateEditPending ||
-                      ((Boolean(aiWorkflow.findings.length) || aiWorkflow.suitability !== "SUITABLE") &&
+                      ((Boolean(aiWorkflow.findings.length) ||
+                        aiWorkflow.suitability !== "SUITABLE") &&
                         !safetyDecisionReason.trim())
                     }
                     isLoading={busy === "workflow"}
@@ -2762,9 +2939,11 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận kết quả Safety
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận kết
+                    quả Safety
                   </Button>
-                ) : aiWorkflow.safety_status === "CONFIRMED" && aiWorkflow.hash_match ? (
+                ) : aiWorkflow.safety_status === "CONFIRMED" &&
+                  aiWorkflow.hash_match ? (
                   <Button
                     className="h-10 w-auto px-3"
                     disabled={busy !== null}
@@ -2783,42 +2962,83 @@ export function AdminOcrReviewScreen({
                 {aiWorkflow.findings.length ? (
                   <ul className="mt-2 grid gap-3">
                     {aiWorkflow.findings.map((finding, index) => {
-                      const severity = String(finding.severity ?? "REVIEW").toUpperCase();
-                      const category = String(finding.category ?? "OTHER_SENSITIVE").replaceAll("_", " ");
+                      const severity = String(
+                        finding.severity ?? "REVIEW",
+                      ).toUpperCase();
+                      const category = String(
+                        finding.category ?? "OTHER_SENSITIVE",
+                      ).replaceAll("_", " ");
                       const evidence = String(finding.evidence_text ?? "");
-                      const compactEvidence = evidence.length > 240
-                        ? evidence.slice(0, 240).trimEnd() + "…"
-                        : evidence;
+                      const compactEvidence =
+                        evidence.length > 240
+                          ? evidence.slice(0, 240).trimEnd() + "…"
+                          : evidence;
                       const high = severity === "HIGH";
                       return (
                         <li key={String(finding.finding_id ?? index)}>
-                          <details className={"rounded-control border p-3 " + (high ? "border-red-400 bg-red-50" : "border-border bg-white")}>
+                          <details
+                            className={
+                              "rounded-control border p-3 " +
+                              (high
+                                ? "border-red-400 bg-red-50"
+                                : "border-border bg-white")
+                            }
+                          >
                             <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-3 focus-visible:outline-primary">
                               <span className="font-extrabold">{category}</span>
-                              <span className="text-xs text-muted">{String(finding.content_type ?? "MENTION").replaceAll("_", " ")}</span>
-                              <span className={"rounded-full px-2.5 py-1 text-xs font-extrabold " + (high ? "bg-red-700 text-white" : "bg-canvas text-ink")}>
+                              <span className="text-xs text-muted">
+                                {String(
+                                  finding.content_type ?? "MENTION",
+                                ).replaceAll("_", " ")}
+                              </span>
+                              <span
+                                className={
+                                  "rounded-full px-2.5 py-1 text-xs font-extrabold " +
+                                  (high
+                                    ? "bg-red-700 text-white"
+                                    : "bg-canvas text-ink")
+                                }
+                              >
                                 {severity}
                               </span>
-                              <span className="ml-auto text-xs text-muted">Mở chi tiết</span>
+                              <span className="ml-auto text-xs text-muted">
+                                Mở chi tiết
+                              </span>
                             </summary>
                             <div className="mt-3 border-t border-border pt-3">
-                              <p className="text-xs font-bold uppercase tracking-wide text-muted">Bằng chứng</p>
+                              <p className="text-xs font-bold uppercase tracking-wide text-muted">
+                                Bằng chứng
+                              </p>
                               <blockquote className="mt-1 border-l-2 border-primary pl-3 text-sm">
                                 “{compactEvidence}”
                                 <span className="ml-2 font-mono text-xs text-muted">
-                                  [{String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}]
+                                  [{String(finding.evidence_start ?? "?")}–
+                                  {String(finding.evidence_end ?? "?")}]
                                 </span>
                               </blockquote>
                               {evidence.length > 240 ? (
                                 <details className="mt-2 text-sm">
-                                  <summary className="cursor-pointer font-bold text-primary">Xem toàn bộ trích dẫn nguyên văn ({evidence.length} ký tự)</summary>
-                                  <blockquote className="mt-2 border-l-2 border-primary pl-3">“{evidence}”</blockquote>
+                                  <summary className="cursor-pointer font-bold text-primary">
+                                    Xem toàn bộ trích dẫn nguyên văn (
+                                    {evidence.length} ký tự)
+                                  </summary>
+                                  <blockquote className="mt-2 border-l-2 border-primary pl-3">
+                                    “{evidence}”
+                                  </blockquote>
                                 </details>
                               ) : null}
-                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">Giải thích</p>
-                              <p className="mt-1 text-sm">{String(finding.explanation ?? "")}</p>
-                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">Khuyến nghị</p>
-                              <p className="mt-1 text-sm text-muted">{String(finding.recommendation ?? "")}</p>
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
+                                Giải thích
+                              </p>
+                              <p className="mt-1 text-sm">
+                                {String(finding.explanation ?? "")}
+                              </p>
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
+                                Khuyến nghị
+                              </p>
+                              <p className="mt-1 text-sm text-muted">
+                                {String(finding.recommendation ?? "")}
+                              </p>
                             </div>
                           </details>
                         </li>
@@ -2827,7 +3047,8 @@ export function AdminOcrReviewScreen({
                   </ul>
                 ) : (
                   <p className="mt-2 text-sm text-muted">
-                    {aiWorkflow.safety_status === "PROVISIONAL" || aiWorkflow.safety_status === "CONFIRMED"
+                    {aiWorkflow.safety_status === "PROVISIONAL" ||
+                    aiWorkflow.safety_status === "CONFIRMED"
                       ? "AI chưa phát hiện finding trong Candidate này."
                       : "Findings sẽ hiển thị sau khi Safety hoàn tất."}
                   </p>
@@ -2836,9 +3057,12 @@ export function AdminOcrReviewScreen({
 
               {aiWorkflow.safety_history.length > 0 ? (
                 <section className="mt-5">
-                  <h3 className="font-extrabold">Safety history · kết quả cũ</h3>
+                  <h3 className="font-extrabold">
+                    Safety history · kết quả cũ
+                  </h3>
                   <p className="mt-1 text-xs text-muted">
-                    Các scan này chỉ phục vụ audit; không áp dụng cho Candidate hiện tại.
+                    Các scan này chỉ phục vụ audit; không áp dụng cho Candidate
+                    hiện tại.
                   </p>
                   <div className="mt-2 grid gap-2">
                     {aiWorkflow.safety_history.map((scan, scanIndex) => {
@@ -2851,24 +3075,47 @@ export function AdminOcrReviewScreen({
                           )
                         : [];
                       return (
-                        <details className="rounded-control border border-border p-3" key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}>
+                        <details
+                          className="rounded-control border border-border p-3"
+                          key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
+                        >
                           <summary className="cursor-pointer text-sm font-bold">
-                            {String(scan.status ?? "UNKNOWN")} · {String(scan.suitability ?? "Chưa có suitability")}
+                            {String(scan.status ?? "UNKNOWN")} ·{" "}
+                            {String(scan.suitability ?? "Chưa có suitability")}
                             {` · ${historicalFindings.length} finding`}
-                            {scan.content_hash ? ` · hash ${String(scan.content_hash).slice(0, 12)}…` : " · chưa có hash"}
+                            {scan.content_hash
+                              ? ` · hash ${String(scan.content_hash).slice(0, 12)}…`
+                              : " · chưa có hash"}
                           </summary>
                           {historicalFindings.length ? (
                             <ul className="mt-2 grid gap-2">
-                              {historicalFindings.map((finding, findingIndex) => {
-                                return (
-                                  <li className="border-l-2 border-border pl-3 text-sm" key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}>
-                                    <p className="font-bold">{String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.severity ?? "UNKNOWN")}</p>
-                                    <p>“{String(finding.evidence_text ?? "")}”</p>
-                                  </li>
-                                );
-                              })}
+                              {historicalFindings.map(
+                                (finding, findingIndex) => {
+                                  return (
+                                    <li
+                                      className="border-l-2 border-border pl-3 text-sm"
+                                      key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
+                                    >
+                                      <p className="font-bold">
+                                        {String(
+                                          finding.category ?? "OTHER_SENSITIVE",
+                                        )}{" "}
+                                        ·{" "}
+                                        {String(finding.severity ?? "UNKNOWN")}
+                                      </p>
+                                      <p>
+                                        “{String(finding.evidence_text ?? "")}”
+                                      </p>
+                                    </li>
+                                  );
+                                },
+                              )}
                             </ul>
-                          ) : <p className="mt-2 text-sm">Không có finding trong scan lịch sử.</p>}
+                          ) : (
+                            <p className="mt-2 text-sm">
+                              Không có finding trong scan lịch sử.
+                            </p>
+                          )}
                         </details>
                       );
                     })}
@@ -2879,684 +3126,1092 @@ export function AdminOcrReviewScreen({
               <section className="mt-5">
                 <h3 className="font-extrabold">Provider và model provenance</h3>
                 <p className="mt-1 break-all font-mono text-xs text-muted">
-                  Run {String(aiWorkflow.proofread_metadata.run_id ?? aiWorkflow.workflow_id)}
-                  {" · Prompt "}{String(aiWorkflow.proofread_metadata.prompt_version ?? "—")}
-                  {" · "}{String(aiWorkflow.proofread_metadata.processing_time_ms ?? 0)} ms
-                  {" · Safety prompt "}{String(aiWorkflow.safety_metadata.prompt_version ?? "—")}
+                  Run{" "}
+                  {String(
+                    aiWorkflow.proofread_metadata.run_id ??
+                      aiWorkflow.workflow_id,
+                  )}
+                  {" · Prompt "}
+                  {String(aiWorkflow.proofread_metadata.prompt_version ?? "—")}
+                  {" · "}
+                  {String(
+                    aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
+                  )}{" "}
+                  ms
+                  {" · Safety prompt "}
+                  {String(aiWorkflow.safety_metadata.prompt_version ?? "—")}
                 </p>
                 {aiWorkflow.provider_events.length ? (
                   <ul className="mt-2 grid gap-2 text-xs">
                     {aiWorkflow.provider_events.map((event, index) => (
-                      <li className="rounded-control bg-canvas p-3" key={`${String(event.provider ?? "provider")}-${index}`}>
-                        <span className="font-bold">{String(event.provider ?? "—")}</span>
-                        {" · "}{String(event.model ?? "—")}
-                        {" · "}{event.availability === true ? "khả dụng" : event.availability === false ? "không khả dụng" : "đang kiểm tra"}
-                        {" · HTTP "}{String(event.http_status ?? "—")}
-                        {" · "}{String(event.duration_ms ?? 0)} ms
-                        {event.error_code ? ` · ${String(event.error_code)}` : ""}
+                      <li
+                        className="rounded-control bg-canvas p-3"
+                        key={`${String(event.provider ?? "provider")}-${index}`}
+                      >
+                        <span className="font-bold">
+                          {String(event.provider ?? "—")}
+                        </span>
+                        {" · "}
+                        {String(event.model ?? "—")}
+                        {" · "}
+                        {event.availability === true
+                          ? "khả dụng"
+                          : event.availability === false
+                            ? "không khả dụng"
+                            : "đang kiểm tra"}
+                        {" · HTTP "}
+                        {String(event.http_status ?? "—")}
+                        {" · "}
+                        {String(event.duration_ms ?? 0)} ms
+                        {event.error_code
+                          ? ` · ${String(event.error_code)}`
+                          : ""}
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-2 text-sm text-muted">Chưa có provider event.</p>
+                  <p className="mt-2 text-sm text-muted">
+                    Chưa có provider event.
+                  </p>
                 )}
               </section>
 
               <p className="mt-4 text-xs text-muted">
-                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận Safety cho đúng Candidate hiện tại.
+                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với
+                workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận
+                Safety cho đúng Candidate hiện tại.
               </p>
             </Card>
           ) : null}
-
-          <Card className="bg-white">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-black">Danh sách từ OCR</h2>
-                <p className="mt-1 text-sm text-muted">
-                  Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần kiểm
-                  tra; {colorCounts.green} từ đã có evidence tốt, nhưng nhóm
-                  xanh chưa đồng nghĩa với Admin verified.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  className="min-h-11 h-auto w-auto px-3 text-sm"
-                  disabled={verified || busy !== null || words.length === 0}
-                  onClick={reconcileAllMatchedWords}
-                  type="button"
-                  variant="secondary"
-                >
-                  <CheckCircle2 aria-hidden className="size-4" /> Đồng bộ từ
-                  khớp với văn bản
-                </Button>
-                <Button
-                  className="min-h-11 h-auto w-auto px-3 text-sm"
-                  disabled={verified || busy !== null}
-                  onClick={syncTextFromWords}
-                  variant="secondary"
-                >
-                  Đồng bộ văn bản từ danh sách từ
-                </Button>
-              </div>
-            </div>
-            <p className="mb-4 text-sm text-muted">
-              Chọn một từ để làm nổi bật vùng trên ảnh. Bằng chứng engine nằm
-              trong chi tiết; tọa độ chỉ hiện khi mở phần chỉnh sửa nâng cao.
-            </p>
-            <div
-              aria-live="polite"
-              className="mb-4 rounded-control border border-border bg-canvas px-3 py-2 text-sm text-muted"
-              role="status"
+          <div className="grid gap-3">
+            <ButtonLink
+              className="sm:max-w-[280px]"
+              href={viewHref("words")}
+              size="compact"
+              variant="secondary"
             >
-              <span className="font-bold">Đối chiếu văn bản ↔ vùng OCR: </span>
-              {textAlignment.canCompare ? (
-                <>
-                  {textAlignment.matched}/{words.length} từ khớp ·{" "}
-                  {textAlignment.different} từ cần đối chiếu
-                </>
-              ) : (
-                "Chưa thể ghép từng từ vì số lượng từ chưa khớp."
-              )}
-            </div>
-            <div
-              aria-label="Lọc danh sách từ theo trạng thái"
-              className="mb-4 flex flex-wrap gap-2"
-              role="group"
+              Kiểm tra từ và vị trí
+            </ButtonLink>
+            <ButtonLink
+              className="sm:max-w-[280px]"
+              href={viewHref("history")}
+              size="compact"
+              variant="secondary"
             >
-              {(
-                [
-                  { id: "all", label: "Tất cả", count: words.length },
-                  {
-                    id: "review",
-                    label: "Cần xem",
-                    count: colorCounts.red + colorCounts.yellow,
-                  },
-                  {
-                    id: "risk",
-                    label: "Rủi ro cao",
-                    count: colorCounts.yellow,
-                  },
-                  {
-                    id: "disagreement",
-                    label: "Engine bất đồng",
-                    count: words.filter((word) => {
-                      const status = getWordReviewStatus(
-                        word,
-                        detail?.verification_status,
-                      );
-                      return hasEngineDisagreementEvidence(word);
-                    }).length,
-                  },
-                  {
-                    id: "red",
-                    label: "Đỏ · reference xác nhận sai",
-                    count: colorCounts.red,
-                  },
-                  {
-                    id: "green",
-                    label: "Xanh · evidence tốt",
-                    count: colorCounts.green,
-                  },
-                ] as const satisfies readonly {
-                  id: WordFilter;
-                  label: string;
-                  count: number;
-                }[]
-              ).map((filter) => (
-                <button
-                  aria-pressed={wordFilter === filter.id}
-                  className={`min-h-10 rounded-full border px-3 text-sm font-bold ${
-                    wordFilter === filter.id
-                      ? filter.id === "risk" || filter.id === "disagreement"
-                        ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
-                        : filter.id === "green"
-                          ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
-                          : filter.id === "red"
-                            ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
-                            : "border-primary bg-sky text-primary-hover"
-                      : "border-border bg-white text-muted hover:bg-canvas"
-                  }`}
-                  key={filter.id}
-                  onClick={() => setWordFilter(filter.id)}
-                  type="button"
-                >
-                  {filter.label} ({filter.count})
-                </button>
-              ))}
-              <span
-                aria-live="polite"
-                className="self-center text-xs font-semibold text-muted"
-              >
-                {wordFilter === "review"
-                  ? `Còn ${filteredWords.length} từ cần chú ý`
-                  : `Đang hiện ${filteredWords.length}/${words.length} từ`}
-              </span>
-            </div>
-            <div className="grid gap-3">
-              {filteredWords.length === 0 ? (
-                <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
-                  {wordFilter === "review"
-                    ? "Không có từ nào có mismatch hoặc thiếu bằng chứng cần ưu tiên."
-                    : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "vàng" : wordFilter === "red" ? "đỏ" : wordFilter === "green" ? "xanh" : wordFilter === "disagreement" ? "engine bất đồng" : "này"}.`}
-                </p>
-              ) : (
-                filteredWords.map((word) => {
-                  const reviewStatus = getWordReviewStatus(
-                    word,
-                    detail.verification_status,
-                  );
-                  const paddleLineScore = getPaddleLineScoreForWord(
-                    detail.ocr_metadata,
-                    word,
-                  );
-                  const colorGroup = getWordReviewColorGroup(
-                    reviewStatus,
-                    word,
-                    paddleLineScore,
-                  );
-                  const reviewLabel = getWordReviewLabel(
-                    reviewStatus,
-                    word,
-                    paddleLineScore,
-                  );
-                  const draftToken = draftTokens[word.word_index];
-                  const canCompareToken =
-                    textAlignment.canCompare && draftToken !== undefined;
-                  const tokenMatches =
-                    canCompareToken &&
-                    normalizeVietnameseWord(draftToken) ===
-                      normalizeVietnameseWord(word.text);
+              Lịch sử xử lý OCR
+            </ButtonLink>
+          </div>
 
-                  return (
-                    <div
-                      ref={(el) => {
-                        if (el) wordRefs.current.set(word.word_index, el);
-                        else wordRefs.current.delete(word.word_index);
-                      }}
-                      id={`ocr-word-${word.word_index}`}
-                      className={`rounded-control border border-border border-l-4 p-3 transition-shadow ${
-                        colorGroup === "green"
-                          ? "border-l-green-600"
-                          : colorGroup === "red"
-                            ? "border-l-red-600"
-                            : colorGroup === "yellow"
-                              ? "border-l-amber-500"
-                              : "border-l-slate-400"
-                      } ${
-                        word.word_index === selectedWord
-                          ? "border-y-primary border-r-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
-                          : "bg-white hover:shadow-sm"
-                      }`}
-                      key={word.word_index}
+          <details className="rounded-card border border-border bg-white p-4">
+            <summary className="cursor-pointer rounded-control font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary">
+              Thông tin chi tiết từ OCR và lịch sử revision
+            </summary>
+            <div className="mt-4 grid gap-6">
+              <Card className="bg-white">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Danh sách từ OCR</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần
+                      kiểm tra; {colorCounts.green} từ đã có evidence tốt, nhưng
+                      nhóm xanh chưa đồng nghĩa với Admin verified.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      className="min-h-11 h-auto w-auto px-3 text-sm"
+                      disabled={verified || busy !== null || words.length === 0}
+                      onClick={reconcileAllMatchedWords}
+                      type="button"
+                      variant="secondary"
                     >
-                      <div className="mb-3 flex items-center justify-between gap-2">
-                        <button
-                          aria-pressed={word.word_index === selectedWord}
-                          className="rounded-sm text-left text-sm font-extrabold text-primary underline underline-offset-2"
-                          onClick={() => selectWordOnImage(word.word_index)}
-                          type="button"
+                      <CheckCircle2 aria-hidden className="size-4" /> Đồng bộ từ
+                      khớp với văn bản
+                    </Button>
+                    <Button
+                      className="min-h-11 h-auto w-auto px-3 text-sm"
+                      disabled={verified || busy !== null}
+                      onClick={syncTextFromWords}
+                      variant="secondary"
+                    >
+                      Đồng bộ văn bản từ danh sách từ
+                    </Button>
+                  </div>
+                </div>
+                <p className="mb-4 text-sm text-muted">
+                  Chọn một từ để làm nổi bật vùng trên ảnh. Bằng chứng engine
+                  nằm trong chi tiết; tọa độ chỉ hiện khi mở phần chỉnh sửa nâng
+                  cao.
+                </p>
+                <div
+                  aria-live="polite"
+                  className="mb-4 rounded-control border border-border bg-canvas px-3 py-2 text-sm text-muted"
+                  role="status"
+                >
+                  <span className="font-semibold">
+                    Đối chiếu văn bản ↔ vùng OCR:{" "}
+                  </span>
+                  {textAlignment.canCompare ? (
+                    <>
+                      {textAlignment.matched}/{words.length} từ khớp ·{" "}
+                      {textAlignment.different} từ cần đối chiếu
+                    </>
+                  ) : (
+                    "Chưa thể ghép từng từ vì số lượng từ chưa khớp."
+                  )}
+                </div>
+                <div
+                  aria-label="Lọc danh sách từ theo trạng thái"
+                  className="mb-4 flex flex-wrap gap-2"
+                  role="group"
+                >
+                  {(
+                    [
+                      { id: "all", label: "Tất cả", count: words.length },
+                      {
+                        id: "review",
+                        label: "Cần xem",
+                        count: colorCounts.red + colorCounts.yellow,
+                      },
+                      {
+                        id: "risk",
+                        label: "Rủi ro cao",
+                        count: colorCounts.yellow,
+                      },
+                      {
+                        id: "disagreement",
+                        label: "Engine bất đồng",
+                        count: words.filter((word) => {
+                          return hasEngineDisagreementEvidence(word);
+                        }).length,
+                      },
+                      {
+                        id: "red",
+                        label: "Đỏ · reference xác nhận sai",
+                        count: colorCounts.red,
+                      },
+                      {
+                        id: "green",
+                        label: "Xanh · evidence tốt",
+                        count: colorCounts.green,
+                      },
+                    ] as const satisfies readonly {
+                      id: WordFilter;
+                      label: string;
+                      count: number;
+                    }[]
+                  ).map((filter) => (
+                    <button
+                      aria-pressed={wordFilter === filter.id}
+                      className={`min-h-10 rounded-full border px-3 text-sm font-semibold ${
+                        wordFilter === filter.id
+                          ? filter.id === "risk" || filter.id === "disagreement"
+                            ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
+                            : filter.id === "green"
+                              ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
+                              : filter.id === "red"
+                                ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
+                                : "border-primary bg-sky text-primary-hover"
+                          : "border-border bg-white text-muted hover:bg-canvas"
+                      }`}
+                      key={filter.id}
+                      onClick={() => setWordFilter(filter.id)}
+                      type="button"
+                    >
+                      {filter.label} ({filter.count})
+                    </button>
+                  ))}
+                  <span
+                    aria-live="polite"
+                    className="self-center text-xs font-semibold text-muted"
+                  >
+                    {wordFilter === "review"
+                      ? `Còn ${filteredWords.length} từ cần chú ý`
+                      : `Đang hiện ${filteredWords.length}/${words.length} từ`}
+                  </span>
+                </div>
+                <div className="grid gap-3">
+                  {filteredWords.length === 0 ? (
+                    <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
+                      {wordFilter === "review"
+                        ? "Không có từ nào có mismatch hoặc thiếu bằng chứng cần ưu tiên."
+                        : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "vàng" : wordFilter === "red" ? "đỏ" : wordFilter === "green" ? "xanh" : wordFilter === "disagreement" ? "engine bất đồng" : "này"}.`}
+                    </p>
+                  ) : (
+                    filteredWords.map((word) => {
+                      const reviewStatus = getWordReviewStatus(
+                        word,
+                        detail.verification_status,
+                      );
+                      const paddleLineScore = getPaddleLineScoreForWord(
+                        detail.ocr_metadata,
+                        word,
+                      );
+                      const colorGroup = getWordReviewColorGroup(
+                        reviewStatus,
+                        word,
+                        paddleLineScore,
+                      );
+                      const reviewLabel = getWordReviewLabel(
+                        reviewStatus,
+                        word,
+                        paddleLineScore,
+                      );
+                      const draftToken = draftTokens[word.word_index];
+                      const canCompareToken =
+                        textAlignment.canCompare && draftToken !== undefined;
+                      const tokenMatches =
+                        canCompareToken &&
+                        normalizeVietnameseWord(draftToken) ===
+                          normalizeVietnameseWord(word.text);
+
+                      return (
+                        <div
+                          ref={(el) => {
+                            if (el) wordRefs.current.set(word.word_index, el);
+                            else wordRefs.current.delete(word.word_index);
+                          }}
+                          id={`ocr-word-${word.word_index}`}
+                          className={`rounded-control border border-border border-l-4 p-3 transition-shadow ${
+                            colorGroup === "green"
+                              ? "border-l-green-600"
+                              : colorGroup === "red"
+                                ? "border-l-red-600"
+                                : colorGroup === "yellow"
+                                  ? "border-l-amber-500"
+                                  : "border-l-slate-400"
+                          } ${
+                            word.word_index === selectedWord
+                              ? "border-y-primary border-r-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
+                              : "bg-white hover:shadow-sm"
+                          }`}
+                          key={word.word_index}
                         >
-                          Từ #{word.word_index} · Dòng {word.line_index}
-                        </button>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <span
-                            className={`rounded border px-2 py-0.5 text-xs font-bold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
-                          >
-                            {reviewLabel}
-                          </span>
-                        </div>
-                      </div>
-
-                      {colorGroup === "red" ? (
-                        <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
-                          {reviewStatus === "confirmed_mismatch" ? (
-                            <>
-                              <span className="font-bold">
-                                Reference đã xác minh không khớp
-                              </span>
-                              <span className="break-words">
-                                OCR đọc “{word.text}”
-                                {word.ocr_evidence?.reference_text
-                                  ? ` · Bản đã xác minh: “${word.ocr_evidence.reference_text}”`
-                                  : ""}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-bold">
-                                Reference mismatch đã được xác nhận
-                              </span>
-                              <span className="break-words">
-                                Từ OCR: “{word.text}” ·{" "}
-                                {getWordScoreLabel(word, detail.ocr_metadata)}
-                              </span>
-                              <span className="text-xs">
-                                Màu đỏ chỉ dùng cho mismatch đã được Admin hoặc
-                                reference đáng tin cậy xác nhận.
-                              </span>
-                            </>
-                          )}
-                          {word.ocr_evidence?.review_reason ? (
-                            <span className="text-xs">
-                              {word.ocr_evidence.review_reason}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
-                        <span className="text-xs font-bold text-muted">
-                          Văn bản trang ↔ từ gắn với vùng ảnh
-                        </span>
-                        <span className="break-words font-semibold">
-                          {canCompareToken
-                            ? `${draftToken} ↔ ${word.text}`
-                            : "Không thể ghép từ này theo vị trí hiện tại"}
-                          {canCompareToken ? (
-                            <span className="ml-2 whitespace-nowrap text-xs font-bold text-muted">
-                              {tokenMatches ? "Khớp" : "Cần đối chiếu"}
-                            </span>
-                          ) : null}
-                        </span>
-                      </div>
-
-                      <label className="grid gap-1 text-sm font-bold">
-                        Chỉnh từ OCR - Từ {word.word_index + 1}
-                        <input
-                          className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
-                          disabled={verified || busy !== null}
-                          onChange={(event) =>
-                            updateWord(word.word_index, {
-                              text: event.target.value,
-                              normalized_text: normalizeVietnameseWord(
-                                event.target.value,
-                              ),
-                            })
-                          }
-                          value={word.text}
-                        />
-                      </label>
-                      <details className="mt-2 rounded-control border border-border bg-white">
-                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
-                          Tọa độ vùng ảnh · chỉnh sửa nâng cao
-                        </summary>
-                        <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
-                          {(["x", "y", "w", "h"] as const).map(
-                            (label, coordinate) => (
-                              <label
-                                className="grid gap-1 text-xs font-bold"
-                                key={label}
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <button
+                              aria-pressed={word.word_index === selectedWord}
+                              className="rounded-sm text-left text-sm font-semibold text-primary underline underline-offset-2"
+                              onClick={() => selectWordOnImage(word.word_index)}
+                              type="button"
+                            >
+                              Từ #{word.word_index} · Dòng {word.line_index}
+                            </button>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <span
+                                className={`rounded border px-2 py-0.5 text-xs font-semibold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
                               >
-                                {label}
-                                <input
-                                  aria-label={`Từ ${word.word_index} bbox ${label}`}
-                                  className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
-                                  disabled={verified || busy !== null}
-                                  max={1}
-                                  min={0}
-                                  onChange={(event) =>
-                                    updateBbox(
-                                      word.word_index,
-                                      coordinate,
-                                      Number(event.target.value),
-                                    )
-                                  }
-                                  step="0.001"
-                                  type="number"
-                                  value={word.bbox[coordinate]}
-                                />
-                              </label>
-                            ),
-                          )}
-                        </div>
-                      </details>
-                      <details
-                        className="mt-2 rounded-control border border-border bg-canvas"
-                        open={word.word_index === selectedWord}
-                      >
-                        <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-bold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
-                          Bằng chứng nhận dạng ·{" "}
-                          {getWordScoreLabel(word, detail.ocr_metadata)}
-                        </summary>
-                        <section
-                          aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
-                          className="grid gap-1 border-t border-border px-3 py-3 text-xs"
-                        >
-                          <h3 className="text-sm font-bold">Bằng chứng OCR</h3>
-                          <span>
-                            PaddleOCR:{" "}
-                            {getEngineEvidenceDisplay(
-                              word,
-                              "paddleocr",
-                              detail.ocr_metadata,
-                            )}
-                          </span>
-                          <span>
-                            VietOCR:{" "}
-                            {getEngineEvidenceDisplay(
-                              word,
-                              "vietocr",
-                              detail.ocr_metadata,
-                            )}
-                          </span>
-                          {typeof word.ocr_evidence?.engine_outputs
-                            .paddleocr !== "string" &&
-                          getLineEngineOutput(
-                            word,
-                            "paddleocr",
-                            detail.ocr_metadata,
-                          ) ? (
-                            <span>
-                              PaddleOCR dòng gốc (không phải token căn chỉnh):{" "}
-                              {getLineEngineOutput(
+                                {reviewLabel}
+                              </span>
+                            </div>
+                          </div>
+
+                          {colorGroup === "red" ? (
+                            <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
+                              {reviewStatus === "confirmed_mismatch" ? (
+                                <>
+                                  <span className="font-semibold">
+                                    Reference đã xác minh không khớp
+                                  </span>
+                                  <span className="break-words">
+                                    OCR đọc “{word.text}”
+                                    {word.ocr_evidence?.reference_text
+                                      ? ` · Bản đã xác minh: “${word.ocr_evidence.reference_text}”`
+                                      : ""}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-semibold">
+                                    Reference mismatch đã được xác nhận
+                                  </span>
+                                  <span className="break-words">
+                                    Từ OCR: “{word.text}” ·{" "}
+                                    {getWordScoreLabel(
+                                      word,
+                                      detail.ocr_metadata,
+                                    )}
+                                  </span>
+                                  <span className="text-xs">
+                                    Màu đỏ chỉ dùng cho mismatch đã được Admin
+                                    hoặc reference đáng tin cậy xác nhận.
+                                  </span>
+                                </>
+                              )}
+                              {word.ocr_evidence?.review_reason ? (
+                                <span className="text-xs">
+                                  {word.ocr_evidence.review_reason}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
+                            <span className="text-xs font-semibold text-muted">
+                              Văn bản trang ↔ từ gắn với vùng ảnh
+                            </span>
+                            <span className="break-words font-semibold">
+                              {canCompareToken
+                                ? `${draftToken} ↔ ${word.text}`
+                                : "Không thể ghép từ này theo vị trí hiện tại"}
+                              {canCompareToken ? (
+                                <span className="ml-2 whitespace-nowrap text-xs font-semibold text-muted">
+                                  {tokenMatches ? "Khớp" : "Cần đối chiếu"}
+                                </span>
+                              ) : null}
+                            </span>
+                          </div>
+
+                          <label className="grid gap-1 text-sm font-semibold">
+                            Chỉnh từ OCR - Từ {word.word_index + 1}
+                            <input
+                              className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
+                              disabled={verified || busy !== null}
+                              onChange={(event) =>
+                                updateWord(word.word_index, {
+                                  text: event.target.value,
+                                  normalized_text: normalizeVietnameseWord(
+                                    event.target.value,
+                                  ),
+                                })
+                              }
+                              value={word.text}
+                            />
+                          </label>
+                          <details className="mt-2 rounded-control border border-border bg-white">
+                            <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
+                              Tọa độ vùng ảnh · chỉnh sửa nâng cao
+                            </summary>
+                            <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
+                              {(["x", "y", "w", "h"] as const).map(
+                                (label, coordinate) => (
+                                  <label
+                                    className="grid gap-1 text-xs font-semibold"
+                                    key={label}
+                                  >
+                                    {label}
+                                    <input
+                                      aria-label={`Từ ${word.word_index} bbox ${label}`}
+                                      className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
+                                      disabled={verified || busy !== null}
+                                      max={1}
+                                      min={0}
+                                      onChange={(event) =>
+                                        updateBbox(
+                                          word.word_index,
+                                          coordinate,
+                                          Number(event.target.value),
+                                        )
+                                      }
+                                      step="0.001"
+                                      type="number"
+                                      value={word.bbox[coordinate]}
+                                    />
+                                  </label>
+                                ),
+                              )}
+                            </div>
+                          </details>
+                          <details
+                            className="mt-2 rounded-control border border-border bg-canvas"
+                            open={word.word_index === selectedWord}
+                          >
+                            <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
+                              Bằng chứng nhận dạng ·{" "}
+                              {getWordScoreLabel(word, detail.ocr_metadata)}
+                            </summary>
+                            <section
+                              aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
+                              className="grid gap-1 border-t border-border px-3 py-3 text-xs"
+                            >
+                              <h3 className="text-sm font-semibold">
+                                Bằng chứng OCR
+                              </h3>
+                              <span>
+                                PaddleOCR:{" "}
+                                {getEngineEvidenceDisplay(
+                                  word,
+                                  "paddleocr",
+                                  detail.ocr_metadata,
+                                )}
+                              </span>
+                              <span>
+                                VietOCR:{" "}
+                                {getEngineEvidenceDisplay(
+                                  word,
+                                  "vietocr",
+                                  detail.ocr_metadata,
+                                )}
+                              </span>
+                              {typeof word.ocr_evidence?.engine_outputs
+                                .paddleocr !== "string" &&
+                              getLineEngineOutput(
                                 word,
                                 "paddleocr",
                                 detail.ocr_metadata,
-                              )}
-                            </span>
-                          ) : null}
-                          {typeof word.ocr_evidence?.engine_outputs.vietocr !==
-                            "string" &&
-                          getLineEngineOutput(
-                            word,
-                            "vietocr",
-                            detail.ocr_metadata,
-                          ) ? (
-                            <span>
-                              VietOCR dòng gốc (không phải token căn chỉnh):{" "}
-                              {getLineEngineOutput(
+                              ) ? (
+                                <span>
+                                  PaddleOCR dòng gốc (không phải token căn
+                                  chỉnh):{" "}
+                                  {getLineEngineOutput(
+                                    word,
+                                    "paddleocr",
+                                    detail.ocr_metadata,
+                                  )}
+                                </span>
+                              ) : null}
+                              {typeof word.ocr_evidence?.engine_outputs
+                                .vietocr !== "string" &&
+                              getLineEngineOutput(
                                 word,
                                 "vietocr",
                                 detail.ocr_metadata,
-                              )}
-                            </span>
-                          ) : null}
-                          <span>
-                            Tesseract:{" "}
-                            {getEngineEvidenceDisplay(
-                              word,
-                              "tesseract",
-                              detail.ocr_metadata,
-                            )}
-                          </span>
-                          <span>
-                            OCR source token:{" "}
-                            {word.ocr_evidence?.source_text ?? "Not recorded"}
-                          </span>
-                          {word.ocr_evidence?.source_text &&
-                          normalizeVietnameseWord(
-                            word.ocr_evidence.source_text,
-                          ) !== normalizeVietnameseWord(word.text) ? (
-                            <span className="text-amber-900">
-                              {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}
-                            </span>
-                          ) : null}
-                          <span>
-                            Alignment:{" "}
-                            {word.ocr_evidence?.alignment ?? "Not computed"}
-                          </span>
-                          <span>
-                            Điểm tương đồng giữa engine:{" "}
-                            {word.ocr_evidence?.engine_agreement_score ===
-                              null ||
-                            word.ocr_evidence?.engine_agreement_score ===
-                              undefined
-                              ? "Not computed"
-                              : `${Math.round(word.ocr_evidence.engine_agreement_score * 100)}/100 · heuristic, không phải xác suất`}
-                          </span>
-                          <span>
-                            Reference text:{" "}
-                            {word.ocr_evidence?.reference_text ??
-                              "Not provided"}
-                          </span>
-                          <span>
-                            Nguồn xác minh:{" "}
-                            {word.ocr_evidence?.verification_source ?? "None"}
-                          </span>
-                          <span>
-                            Calibrated accuracy:{" "}
-                            {word.ocr_score_source ===
-                              "ocr_calibrated_word_accuracy_v1" &&
-                            word.ocr_confidence !== null
-                              ? `${Math.round(word.ocr_confidence * 100)}%`
-                              : "Not calibrated · chưa có calibration evidence"}
-                          </span>
-                          <span>
-                            Engine dùng cho bản nháp:{" "}
-                            {word.ocr_evidence?.selected_engine ??
-                              "Not selected"}{" "}
-                            · lựa chọn tạm thời, chưa phải verified
-                          </span>
-                          <span>
-                            Lý do chọn candidate:{" "}
-                            {word.ocr_evidence?.selection_reason ??
-                              "Not recorded"}
-                          </span>
-                          <span>
-                            Hình học của box: {getWordGeometryLabel(word)}
-                          </span>
-                          <span>Dấu câu: {getWordPunctuationLabel(word)}</span>
-                          <span>
-                            Bounding box quality:{" "}
-                            {word.ocr_evidence?.bbox_quality ?? "Not assessed"}
-                          </span>
-                          <span>
-                            Crop quality:{" "}
-                            {word.ocr_evidence?.crop_quality ?? "Not processed"}
-                          </span>
-                          {word.ocr_evidence?.crop_evidence ? (
-                            <>
-                              <span>
-                                Crop PaddleOCR:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .paddleocr_candidate === "string"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .paddleocr_candidate
-                                  : "No crop candidate recorded"}
-                              </span>
-                              <span>
-                                Crop VietOCR:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .vietocr_candidate === "string"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .vietocr_candidate
-                                  : "No crop candidate recorded"}
-                              </span>
-                              <span>
-                                Crop Tesseract:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .tesseract_candidate === "string"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .tesseract_candidate
-                                  : "Not run or no candidate"}
-                              </span>
-                              <span>
-                                Phân xử candidate:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .adjudication_status === "string"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .adjudication_status
-                                  : "Not recorded"}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .adjudication_support === "string" &&
-                                word.ocr_evidence.crop_evidence
-                                  .adjudication_support
-                                  ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
-                                  : ""}
-                              </span>
-                              {typeof word.ocr_evidence.crop_evidence
-                                .text_before_adjudication === "string" ? (
+                              ) ? (
                                 <span>
-                                  Text trước phân xử:{" "}
-                                  {
-                                    word.ocr_evidence.crop_evidence
-                                      .text_before_adjudication
-                                  }
+                                  VietOCR dòng gốc (không phải token căn chỉnh):{" "}
+                                  {getLineEngineOutput(
+                                    word,
+                                    "vietocr",
+                                    detail.ocr_metadata,
+                                  )}
                                 </span>
                               ) : null}
                               <span>
-                                Paddle crop raw recognition score:{" "}
-                                {formatRawOcrEvidence(
-                                  word.ocr_evidence.crop_evidence
-                                    .paddle_crop_recognition_score,
-                                )}{" "}
-                                · not probability
-                              </span>
-                              <span>
-                                VietOCR crop raw recognition score:{" "}
-                                {formatRawOcrEvidence(
-                                  word.ocr_evidence.crop_evidence
-                                    .vietocr_crop_recognition_score,
-                                )}{" "}
-                                · not probability
-                              </span>
-                              <span>
-                                Crop status:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .status === "string"
-                                  ? word.ocr_evidence.crop_evidence.status
-                                  : "Not processed"}
-                              </span>
-                              <span>
-                                VietOCR decoding mode:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .vietocr_decoding_mode === "string"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .vietocr_decoding_mode
-                                  : "Not applicable"}
-                              </span>
-                              <span>
-                                Crop contrast (standard deviation):{" "}
-                                {formatRawOcrEvidence(
-                                  word.ocr_evidence.crop_evidence.contrast_std,
+                                Tesseract:{" "}
+                                {getEngineEvidenceDisplay(
+                                  word,
+                                  "tesseract",
+                                  detail.ocr_metadata,
                                 )}
                               </span>
                               <span>
-                                Ink ratio:{" "}
-                                {formatRawOcrEvidence(
-                                  word.ocr_evidence.crop_evidence.ink_ratio,
-                                )}
+                                OCR source token:{" "}
+                                {word.ocr_evidence?.source_text ??
+                                  "Not recorded"}
+                              </span>
+                              {word.ocr_evidence?.source_text &&
+                              normalizeVietnameseWord(
+                                word.ocr_evidence.source_text,
+                              ) !== normalizeVietnameseWord(word.text) ? (
+                                <span className="text-amber-900">
+                                  {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}
+                                </span>
+                              ) : null}
+                              <span>
+                                Alignment:{" "}
+                                {word.ocr_evidence?.alignment ?? "Not computed"}
                               </span>
                               <span>
-                                Padding clipped by page boundary:{" "}
-                                {typeof word.ocr_evidence.crop_evidence
-                                  .padding_clipped === "boolean"
-                                  ? word.ocr_evidence.crop_evidence
-                                      .padding_clipped
-                                    ? "Yes"
-                                    : "No"
-                                  : "Not assessed"}
+                                Điểm tương đồng giữa engine:{" "}
+                                {word.ocr_evidence?.engine_agreement_score ===
+                                  null ||
+                                word.ocr_evidence?.engine_agreement_score ===
+                                  undefined
+                                  ? "Not computed"
+                                  : `${Math.round(word.ocr_evidence.engine_agreement_score * 100)}/100 · heuristic, không phải xác suất`}
                               </span>
-                            </>
-                          ) : null}
-                          <span>
-                            Lý do trạng thái:{" "}
-                            {word.ocr_evidence?.review_reason ??
-                              (colorGroup === "green"
-                                ? "Evidence supports a likely-correct OCR token; not Admin verified"
-                                : "Insufficient OCR evidence; Admin review required")}
-                          </span>
-                          <span>
-                            {getPaddleLineScoreLabel(
-                              detail.ocr_metadata,
-                              word.line_index,
-                            )}
-                          </span>
-                        </section>
-                      </details>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </Card>
+                              <span>
+                                Reference text:{" "}
+                                {word.ocr_evidence?.reference_text ??
+                                  "Not provided"}
+                              </span>
+                              <span>
+                                Nguồn xác minh:{" "}
+                                {word.ocr_evidence?.verification_source ??
+                                  "None"}
+                              </span>
+                              <span>
+                                Calibrated accuracy:{" "}
+                                {word.ocr_score_source ===
+                                  "ocr_calibrated_word_accuracy_v1" &&
+                                word.ocr_confidence !== null
+                                  ? `${Math.round(word.ocr_confidence * 100)}%`
+                                  : "Not calibrated · chưa có calibration evidence"}
+                              </span>
+                              <span>
+                                Engine dùng cho bản nháp:{" "}
+                                {word.ocr_evidence?.selected_engine ??
+                                  "Not selected"}{" "}
+                                · lựa chọn tạm thời, chưa phải verified
+                              </span>
+                              <span>
+                                Lý do chọn candidate:{" "}
+                                {word.ocr_evidence?.selection_reason ??
+                                  "Not recorded"}
+                              </span>
+                              <span>
+                                Hình học của box: {getWordGeometryLabel(word)}
+                              </span>
+                              <span>
+                                Dấu câu: {getWordPunctuationLabel(word)}
+                              </span>
+                              <span>
+                                Bounding box quality:{" "}
+                                {word.ocr_evidence?.bbox_quality ??
+                                  "Not assessed"}
+                              </span>
+                              <span>
+                                Crop quality:{" "}
+                                {word.ocr_evidence?.crop_quality ??
+                                  "Not processed"}
+                              </span>
+                              {word.ocr_evidence?.crop_evidence ? (
+                                <>
+                                  <span>
+                                    Crop PaddleOCR:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .paddleocr_candidate === "string"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .paddleocr_candidate
+                                      : "No crop candidate recorded"}
+                                  </span>
+                                  <span>
+                                    Crop VietOCR:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .vietocr_candidate === "string"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .vietocr_candidate
+                                      : "No crop candidate recorded"}
+                                  </span>
+                                  <span>
+                                    Crop Tesseract:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .tesseract_candidate === "string"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .tesseract_candidate
+                                      : "Not run or no candidate"}
+                                  </span>
+                                  <span>
+                                    Phân xử candidate:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .adjudication_status === "string"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .adjudication_status
+                                      : "Not recorded"}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .adjudication_support === "string" &&
+                                    word.ocr_evidence.crop_evidence
+                                      .adjudication_support
+                                      ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
+                                      : ""}
+                                  </span>
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .text_before_adjudication === "string" ? (
+                                    <span>
+                                      Text trước phân xử:{" "}
+                                      {
+                                        word.ocr_evidence.crop_evidence
+                                          .text_before_adjudication
+                                      }
+                                    </span>
+                                  ) : null}
+                                  <span>
+                                    Paddle crop raw recognition score:{" "}
+                                    {formatRawOcrEvidence(
+                                      word.ocr_evidence.crop_evidence
+                                        .paddle_crop_recognition_score,
+                                    )}{" "}
+                                    · not probability
+                                  </span>
+                                  <span>
+                                    VietOCR crop raw recognition score:{" "}
+                                    {formatRawOcrEvidence(
+                                      word.ocr_evidence.crop_evidence
+                                        .vietocr_crop_recognition_score,
+                                    )}{" "}
+                                    · not probability
+                                  </span>
+                                  <span>
+                                    Crop status:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .status === "string"
+                                      ? word.ocr_evidence.crop_evidence.status
+                                      : "Not processed"}
+                                  </span>
+                                  <span>
+                                    VietOCR decoding mode:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .vietocr_decoding_mode === "string"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .vietocr_decoding_mode
+                                      : "Not applicable"}
+                                  </span>
+                                  <span>
+                                    Crop contrast (standard deviation):{" "}
+                                    {formatRawOcrEvidence(
+                                      word.ocr_evidence.crop_evidence
+                                        .contrast_std,
+                                    )}
+                                  </span>
+                                  <span>
+                                    Ink ratio:{" "}
+                                    {formatRawOcrEvidence(
+                                      word.ocr_evidence.crop_evidence.ink_ratio,
+                                    )}
+                                  </span>
+                                  <span>
+                                    Padding clipped by page boundary:{" "}
+                                    {typeof word.ocr_evidence.crop_evidence
+                                      .padding_clipped === "boolean"
+                                      ? word.ocr_evidence.crop_evidence
+                                          .padding_clipped
+                                        ? "Yes"
+                                        : "No"
+                                      : "Not assessed"}
+                                  </span>
+                                </>
+                              ) : null}
+                              <span>
+                                Lý do trạng thái:{" "}
+                                {word.ocr_evidence?.review_reason ??
+                                  (colorGroup === "green"
+                                    ? "Evidence supports a likely-correct OCR token; not Admin verified"
+                                    : "Insufficient OCR evidence; Admin review required")}
+                              </span>
+                              <span>
+                                {getPaddleLineScoreLabel(
+                                  detail.ocr_metadata,
+                                  word.line_index,
+                                )}
+                              </span>
+                            </section>
+                          </details>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </Card>
 
-          <Card className="bg-white">
-            <h2 className="mb-3 text-2xl font-black">Lịch sử revision</h2>
-            <div className="grid gap-2">
-              {history.map((revision) => (
-                <button
-                  className={
-                    revision.page_revision_id === detail.page_revision_id
-                      ? "rounded-control border-2 border-primary bg-sky p-3 text-left"
-                      : "rounded-control border border-border p-3 text-left"
-                  }
-                  key={revision.page_revision_id}
-                  disabled={busy !== null}
-                  onClick={() => void chooseRevision(revision.page_revision_id)}
-                  type="button"
-                >
-                  <span className="font-bold">
-                    Revision R{revision.revision_no}
-                  </span>
-                  <span className="ml-2 text-sm text-muted">
-                    {revision.verification_status}
-                    {revision.is_current_verified ? " · hiện hành" : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 grid gap-3">
-              <label
-                className="grid gap-2 text-sm font-bold"
-                htmlFor="replacement-page-image"
-              >
-                Tải ảnh mới cho riêng trang này
-                <input
-                  id="replacement-page-image"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="block w-full rounded-control border border-border bg-white p-3 text-sm"
+              <Card className="bg-white">
+                <h2 className="mb-3 text-2xl font-semibold">
+                  Lịch sử revision
+                </h2>
+                <div className="grid gap-2">
+                  {history.map((revision) => (
+                    <button
+                      className={
+                        revision.page_revision_id === detail.page_revision_id
+                          ? "rounded-control border-2 border-primary bg-sky p-3 text-left"
+                          : "rounded-control border border-border p-3 text-left"
+                      }
+                      key={revision.page_revision_id}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void chooseRevision(revision.page_revision_id)
+                      }
+                      type="button"
+                    >
+                      <span className="font-semibold">
+                        Revision R{revision.revision_no}
+                      </span>
+                      <span className="ml-2 text-sm text-muted">
+                        {revision.verification_status}
+                        {revision.is_current_verified ? " · hiện hành" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-3">
+                  <label
+                    className="grid gap-2 text-sm font-semibold"
+                    htmlFor="replacement-page-image"
+                  >
+                    Tải ảnh mới cho riêng trang này
+                    <input
+                      id="replacement-page-image"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="block w-full rounded-control border border-border bg-white p-3 text-sm"
+                      disabled={
+                        busy !== null || detail.lifecycle_status !== "ACTIVE"
+                      }
+                      onChange={(event) =>
+                        setReplacementFile(event.target.files?.[0] ?? null)
+                      }
+                      type="file"
+                    />
+                  </label>
+                  {replacementFile ? (
+                    <p className="text-sm text-muted">
+                      Đã chọn: {replacementFile.name}
+                    </p>
+                  ) : null}
+                  <Button
+                    className="sm:w-auto"
+                    disabled={
+                      busy !== null ||
+                      !replacementFile ||
+                      detail.lifecycle_status !== "ACTIVE"
+                    }
+                    isLoading={busy === "reupload"}
+                    onClick={() => void replaceImageAndReprocess()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và
+                    chạy OCR
+                  </Button>
+                </div>
+                <Button
+                  className="mt-4 sm:w-auto"
                   disabled={
                     busy !== null || detail.lifecycle_status !== "ACTIVE"
                   }
-                  onChange={(event) =>
-                    setReplacementFile(event.target.files?.[0] ?? null)
-                  }
-                  type="file"
-                />
-              </label>
-              {replacementFile ? (
-                <p className="text-sm text-muted">
-                  Đã chọn: {replacementFile.name}
-                </p>
-              ) : null}
-              <Button
-                className="sm:w-auto"
-                disabled={
-                  busy !== null ||
-                  !replacementFile ||
-                  detail.lifecycle_status !== "ACTIVE"
-                }
-                isLoading={busy === "reupload"}
-                onClick={() => void replaceImageAndReprocess()}
-                type="button"
-                variant="secondary"
-              >
-                <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và chạy
-                OCR
-              </Button>
+                  isLoading={busy === "reprocess"}
+                  onClick={() => void reprocess()}
+                  variant="secondary"
+                >
+                  <RotateCcw aria-hidden className="size-4" /> Chạy lại OCR từ
+                  ảnh đã lưu
+                </Button>
+                <Button
+                  className="mt-4 sm:w-auto"
+                  disabled={busy !== null}
+                  onClick={() => void load()}
+                  variant="quiet"
+                >
+                  <RefreshCw aria-hidden className="size-4" /> Tải lại dữ liệu
+                </Button>
+              </Card>
             </div>
-            <Button
-              className="mt-4 sm:w-auto"
-              disabled={busy !== null || detail.lifecycle_status !== "ACTIVE"}
-              isLoading={busy === "reprocess"}
-              onClick={() => void reprocess()}
-              variant="secondary"
-            >
-              <RotateCcw aria-hidden className="size-4" /> Chạy lại OCR từ ảnh
-              đã lưu
-            </Button>
-            <Button
-              className="mt-4 sm:w-auto"
-              disabled={busy !== null}
-              onClick={() => void load()}
-              variant="quiet"
-            >
-              <RefreshCw aria-hidden className="size-4" /> Tải lại dữ liệu
-            </Button>
-          </Card>
+          </details>
         </div>
       </div>
     </>
+  );
+}
+
+function OcrRevisionStatus({
+  status,
+}: {
+  status: AdminPageRevisionDetailDTO["verification_status"];
+}) {
+  const tone =
+    status === "VERIFIED"
+      ? "bg-success-surface text-success-ink"
+      : status === "PROCESSING"
+        ? "bg-sky text-primary-hover"
+        : "bg-warning-surface text-warning";
+
+  return (
+    <span
+      className={`inline-flex min-h-9 min-w-[220px] items-center rounded-full px-4 text-sm font-bold ${tone}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function AdminOcrWordReviewPanel({
+  backHref,
+  bookTitle,
+  busy,
+  onAddWord,
+  onComplete,
+  onRemoveWord,
+  onSelectWord,
+  onUpdateBbox,
+  onUpdateWord,
+  pageNumber,
+  revisionNo,
+  selectedWord,
+  status,
+  wordSyncError,
+  words,
+}: {
+  backHref: string;
+  bookTitle: string;
+  busy: boolean;
+  onAddWord: () => void;
+  onComplete: () => void;
+  onRemoveWord: (wordIndex: number) => void;
+  onSelectWord: (wordIndex: number) => void;
+  onUpdateBbox: (wordIndex: number, coordinate: number, value: number) => void;
+  onUpdateWord: (
+    wordIndex: number,
+    patch: Partial<AdminRevisionWordDTO>,
+  ) => void;
+  pageNumber: number;
+  revisionNo: number;
+  selectedWord: number | null;
+  status: AdminPageRevisionDetailDTO["verification_status"];
+  wordSyncError: string | null;
+  words: readonly AdminRevisionWordDTO[];
+}) {
+  const selected =
+    words.find((word) => word.word_index === selectedWord) ?? words[0] ?? null;
+  const readOnly = status !== "NEEDS_REVIEW" || busy;
+
+  return (
+    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
+      <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
+        ← Quay lại
+      </ButtonLink>
+      <header className="flex flex-col gap-2">
+        <h1 className="text-heading font-extrabold text-ink">
+          Kiểm tra từ và vị trí
+        </h1>
+        <p className="text-sm text-muted">
+          {bookTitle} · Trang {pageNumber} · Revision R{revisionNo}
+        </p>
+        <OcrRevisionStatus status={status} />
+      </header>
+
+      <Card className="gap-4 bg-white sm:p-8">
+        <h2 className="text-2xl font-extrabold text-ink">Từ và bounding box</h2>
+        <div className="max-h-[360px] overflow-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="sticky top-0 bg-sky text-primary-hover">
+              <tr>
+                <th className="px-3 py-3 font-bold">#</th>
+                <th className="px-3 py-3 font-bold">Từ</th>
+                <th className="px-3 py-3 font-bold">Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {words.map((word) => {
+                const isSelected = word.word_index === selected?.word_index;
+                return (
+                  <tr
+                    className={
+                      isSelected ? "bg-sky/50" : "border-b border-border"
+                    }
+                    key={word.word_index}
+                  >
+                    <td className="px-3 py-3">{word.word_index}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        aria-label={`Từ ${word.word_index + 1}`}
+                        className="min-h-9 w-full min-w-20 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          onUpdateWord(word.word_index, {
+                            text: event.target.value,
+                          })
+                        }
+                        onFocus={() => onSelectWord(word.word_index)}
+                        value={word.text}
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      {word.ocr_confidence === null
+                        ? "—"
+                        : getOcrScoreLabel(word)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {selected ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["x", "y", "w", "h"] as const).map((label, coordinate) => (
+              <label
+                className="grid min-h-[72px] gap-1 rounded-control border border-border bg-white px-4 py-3 text-sm text-muted"
+                key={label}
+              >
+                <span>{label}</span>
+                <input
+                  aria-label={`${label} của từ ${selected.word_index + 1}`}
+                  className="min-h-6 w-full bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary disabled:text-muted"
+                  disabled={readOnly}
+                  max="1"
+                  min="0"
+                  onChange={(event) =>
+                    onUpdateBbox(
+                      selected.word_index,
+                      coordinate,
+                      Number(event.target.value),
+                    )
+                  }
+                  step="0.01"
+                  type="number"
+                  value={selected.bbox[coordinate].toFixed(2)}
+                />
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-control bg-canvas p-4 text-sm text-muted">
+            Chưa có từ nào trong revision này.
+          </p>
+        )}
+
+        {wordSyncError ? (
+          <StatusMessage tone="error">{wordSyncError}</StatusMessage>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Button
+            className="min-h-12"
+            disabled={readOnly}
+            onClick={onAddWord}
+            size="compact"
+            variant="secondary"
+          >
+            Thêm từ
+          </Button>
+          <Button
+            className="min-h-12"
+            disabled={readOnly || !selected}
+            onClick={() => selected && onRemoveWord(selected.word_index)}
+            size="compact"
+            variant="quiet"
+          >
+            Xóa từ
+          </Button>
+        </div>
+      </Card>
+
+      <Button className="sm:max-w-[280px]" onClick={onComplete}>
+        Hoàn tất kiểm tra
+      </Button>
+    </section>
+  );
+}
+
+function AdminOcrHistoryPanel({
+  backHref,
+  bookTitle,
+  busy,
+  detail,
+  history,
+  notice,
+  onChooseRevision,
+  onReload,
+  onReprocess,
+  onReplacementFileChange,
+  onReplaceImage,
+  pageNumber,
+  replacementFile,
+}: {
+  backHref: string;
+  bookTitle: string;
+  busy:
+    | "edit"
+    | "save"
+    | "verify"
+    | "reprocess"
+    | "reupload"
+    | "ai_correct"
+    | "workflow"
+    | null;
+  detail: AdminPageRevisionDetailDTO;
+  history: readonly AdminRevisionSummaryUI[];
+  notice: string | null;
+  onChooseRevision: (revisionId: string) => void;
+  onReload: () => void;
+  onReprocess: () => void;
+  onReplacementFileChange: (file: File | null) => void;
+  onReplaceImage: () => void;
+  pageNumber: number;
+  replacementFile: File | null;
+}) {
+  const processing = detail.verification_status === "PROCESSING";
+  const canChangeImage = detail.lifecycle_status === "ACTIVE" && !processing;
+
+  return (
+    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
+      <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
+        ← Quay lại
+      </ButtonLink>
+      <header className="flex flex-col gap-2">
+        <h1 className="text-heading font-extrabold text-ink">
+          Lịch sử xử lý OCR
+        </h1>
+        <p className="text-sm text-muted">
+          {bookTitle} · Trang {pageNumber} · Revision R{detail.revision_no}
+        </p>
+        <OcrRevisionStatus status={detail.verification_status} />
+      </header>
+
+      {notice ? (
+        <StatusMessage
+          tone={
+            notice.startsWith("Không thể") || notice.startsWith("Lỗi")
+              ? "error"
+              : "info"
+          }
+        >
+          {notice}
+        </StatusMessage>
+      ) : null}
+
+      <Card className="gap-4 bg-white sm:p-8">
+        <h2 className="text-2xl font-extrabold text-ink">Lịch sử revision</h2>
+        <div className="grid gap-2">
+          {history.map((revision) => {
+            const selected =
+              revision.page_revision_id === detail.page_revision_id;
+            return (
+              <button
+                className={`rounded-card p-4 text-left ${selected ? "bg-sky" : "border border-border"}`}
+                key={revision.page_revision_id}
+                onClick={() => onChooseRevision(revision.page_revision_id)}
+                type="button"
+              >
+                <span className="block font-extrabold text-ink">
+                  Revision R{revision.revision_no}
+                </span>
+                <span className="mt-1 block text-sm text-muted">
+                  {revision.verification_status} ·{" "}
+                  {revision.is_current_verified ? "hiện hành" : "đang xem"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <label
+          className="grid gap-2 text-center text-sm font-semibold text-ink"
+          htmlFor="replacement-page-image"
+        >
+          Tải ảnh mới cho riêng trang này
+          <input
+            id="replacement-page-image"
+            accept="image/jpeg,image/png,image/webp"
+            className="block w-full rounded-control border border-border bg-white p-3 text-sm"
+            disabled={busy !== null || !canChangeImage}
+            onChange={(event) =>
+              onReplacementFileChange(event.target.files?.[0] ?? null)
+            }
+            type="file"
+          />
+        </label>
+        {replacementFile ? (
+          <p className="text-sm text-muted">Đã chọn: {replacementFile.name}</p>
+        ) : null}
+        <Button
+          className="min-h-12"
+          disabled={busy !== null || !replacementFile || !canChangeImage}
+          isLoading={busy === "reupload"}
+          onClick={onReplaceImage}
+          size="compact"
+          variant="secondary"
+        >
+          Tải ảnh mới và chạy OCR
+        </Button>
+        <Button
+          className="min-h-12"
+          disabled={busy !== null || !canChangeImage}
+          isLoading={busy === "reprocess"}
+          onClick={onReprocess}
+          size="compact"
+          variant="secondary"
+        >
+          Chạy lại OCR từ ảnh đã lưu
+        </Button>
+        <Button
+          className="min-h-12"
+          disabled={busy !== null}
+          onClick={onReload}
+          size="compact"
+          variant="quiet"
+        >
+          Tải lại dữ liệu
+        </Button>
+      </Card>
+    </section>
   );
 }

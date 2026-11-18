@@ -1,5 +1,3 @@
-import { ArrowRight, Heart, ListChecks } from "lucide-react";
-
 import { BookCover } from "@/components/books/book-cover";
 import { ButtonLink } from "@/components/common/button";
 import type { BookListItemDTO } from "@/types/book";
@@ -25,28 +23,24 @@ export function BookCard({
   collectionBusy = false,
 }: BookCardProps) {
   return (
-    <article className="flex min-h-[432px] w-full flex-col items-center gap-3 rounded-card bg-white p-4 shadow-[0_6px_24px_rgba(33,61,66,0.08)] sm:w-64 sm:items-start">
-      <BookCover book={book} titleAsHeading />
-      <p className="w-full truncate text-label font-bold text-muted">
-        {book.author ?? "Tác giả đang cập nhật"}
-      </p>
-      <p className="w-full text-label font-bold text-primary">
-        {formatGradeRange(book)}
+    <article className="catalog-volume group flex h-full min-w-0 flex-col items-start gap-3">
+      <BookCover book={book} hero className="catalog-jacket" />
+      <h2 className="book-title text-2xl text-ink">{book.title}</h2>
+      <p className="w-full text-sm text-muted">
+        {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
       </p>
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
-        className="mt-auto max-w-56"
+        className="order-last mt-auto min-h-12"
         href={`/books/${encodeURIComponent(book.id)}`}
       >
-        Đọc sách
-        <ArrowRight aria-hidden="true" className="size-5" />
+        Xem sách
       </ButtonLink>
       {onToggleCollection ? (
-        <div className="flex w-full flex-wrap gap-2">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
           {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
             const saved = savedTypes.includes(type);
             const label = type === "FAVORITE" ? "Yêu thích" : "Muốn đọc";
-            const ActionIcon = type === "FAVORITE" ? Heart : ListChecks;
             return (
               <button
                 aria-label={
@@ -58,7 +52,7 @@ export function BookCard({
                 }
                 aria-pressed={saved}
                 className={
-                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-bold " +
+                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-semibold " +
                   (saved
                     ? "bg-sky text-primary"
                     : "border border-border text-ink hover:bg-canvas")
@@ -68,8 +62,8 @@ export function BookCard({
                 onClick={() => onToggleCollection(type)}
                 type="button"
               >
-                <ActionIcon aria-hidden="true" className="size-4" />
-                {saved ? "Đã lưu" : label}
+                {saved ? "✓ " : ""}
+                {label}
               </button>
             );
           })}

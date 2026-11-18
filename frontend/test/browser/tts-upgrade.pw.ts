@@ -309,7 +309,7 @@ test("Phase 3: selecting a second word keeps the newest word sample active", asy
   expect(await page.evaluate(() => window.__ttsProbe.audios[0].paused)).toBe(
     true,
   );
-  await expect(page.getByText("Đọc mẫu 1 chữ:")).toBeVisible();
+  await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
   expect(fixture.prompts.map((prompt) => prompt.text)).toEqual(["Bé", "mèo"]);
   expect(fixture.prompts.every((prompt) => prompt.speed === 0.9)).toBe(true);
   expect(fixture.writes).toEqual([]);
@@ -454,7 +454,7 @@ test("Phase 3: browser fallback uses boundary events and stops safely", async ({
   });
   await expect(
     page.locator('[data-word-id="90000000-0000-4000-8000-000000000002"]'),
-  ).toHaveClass(/bg-yellow-300/);
+  ).toHaveAttribute("data-reading-state", "current");
   await page.screenshot({
     path: testInfo.outputPath("fallback-word-highlight.png"),
   });
