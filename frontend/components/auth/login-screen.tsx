@@ -20,7 +20,7 @@ export function LoginScreen({
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[440px] border border-border bg-white">
+      <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">DÀNH CHO BA MẸ</p>
           <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">

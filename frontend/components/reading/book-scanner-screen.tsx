@@ -48,7 +48,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     return (
       <section
         aria-busy="true"
-        className="mx-auto w-full max-w-[900px] px-4 py-8"
+        className="mx-auto w-full max-w-[960px] px-4 py-8"
       >
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
@@ -78,7 +78,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-primary">Quét trang sách</p>
+          <p className="text-label font-bold text-primary">Quét trang sách</p>
           <h1 className="mt-1 text-heading font-extrabold text-ink">
             Đưa trang sách vào khung camera
           </h1>
@@ -143,7 +143,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           aria-hidden="true"
           className="mt-1 size-5 shrink-0 text-primary"
         />
-        <p className="text-sm leading-6 text-muted">
+        <p className="text-label leading-6 text-muted">
           Sau khi nhận diện được trang, ViRead sẽ mở thông tin sách để ba mẹ
           kiểm tra. Buổi đọc chỉ được tạo sau bước xác minh microphone.
         </p>

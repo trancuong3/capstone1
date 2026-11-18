@@ -73,7 +73,7 @@ export function AdminLoginScreen({
             <p className="text-sm font-semibold text-primary">
               Khu vực quản trị
             </p>
-            <h1 className="mt-2 text-[32px] font-extrabold text-ink">
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
               Đăng nhập quản trị
             </h1>
             <p className="mt-2 text-muted">

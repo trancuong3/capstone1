@@ -1,4 +1,4 @@
-﻿import {
+import {
   act,
   fireEvent,
   render,
@@ -1034,8 +1034,21 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           })
           .mockResolvedValueOnce({
             text: "mèo",
-            language_code: "vi",
-            words: [{ text: "mèo", start: 0, end: 1, logprob: -0.1 }],
+            // low-confidence-keyterm: correct language but logprob below
+            // the −0.5 high-confidence gate → still rejected.
+            // wrong-language-keyterm: non-Vietnamese language_code →
+            // hasUsableTranscript rejects regardless of logprob.
+            // browser-corroborated-keyterm: good confidence + browser
+            // confirmation → accepted.
+            language_code: outcome === "wrong-language-keyterm" ? "en" : "vi",
+            words: [
+              {
+                text: "mèo",
+                start: 0,
+                end: 1,
+                logprob: outcome === "low-confidence-keyterm" ? -0.8 : -0.1,
+              },
+            ],
           });
         if (outcome === "browser-corroborated-keyterm") {
           act(() =>

@@ -367,7 +367,7 @@ export function AccountSettingsScreen() {
               {email || "Không thể tải thông tin"}
             </dd>
             {profile.pending_email ? (
-              <p className="mt-2 break-all text-sm text-amber-700">
+              <p className="mt-2 break-all text-sm text-warning">
                 Email mới đang chờ xác nhận:{" "}
                 <strong>{profile.pending_email}</strong>
               </p>

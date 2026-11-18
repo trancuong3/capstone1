@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   Maximize2,
+  Mic,
+  MicOff,
   Minimize2,
   Music2,
   Pause,
@@ -12,8 +14,10 @@ import {
   Star,
 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/common/button";
+import { KaraokeScoreCard } from "@/components/karaoke/karaoke-score-card";
 import { StatusMessage } from "@/components/common/status-message";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
+import { useKaraokeScoring } from "@/hooks/use-karaoke-scoring";
 import type { KaraokePlayerController } from "@/hooks/use-karaoke-player";
 import {
   activeLyricIndex,
@@ -45,6 +49,7 @@ export function KaraokeStage({
   const [expanded, setExpanded] = useState(false);
   const [practiceId, setPracticeId] = useState<string | null>(null);
   const [repeat, setRepeat] = useState(false);
+  const scoring = useKaraokeScoring(source.lyrics);
   const lines = source.lyrics.lines;
   const activeIndex = activeLyricIndex(lines, player.currentMs);
   const activeLine = lines[activeIndex];
@@ -100,6 +105,8 @@ export function KaraokeStage({
         timer.current = null;
         setCountdown(null);
         setStarted(true);
+        // Start scoring recognition when playback begins (non-practice only).
+        if (!practiceId && scoring.enabled) scoring.startListening();
         void player.play(start, end, loop);
       } else {
         setCountdown(value);
@@ -109,10 +116,25 @@ export function KaraokeStage({
     timer.current = setTimeout(() => tick(2), 1000);
   }
   function restartSong() {
+    scoring.reset();
     setPracticeId(null);
     setRepeat(false);
     prepare(0);
   }
+
+  // Auto-score when song ends.
+  const prevEndedRef = useRef(false);
+  useEffect(() => {
+    if (
+      ended &&
+      !prevEndedRef.current &&
+      scoring.enabled &&
+      scoring.listening
+    ) {
+      scoring.stopAndScore();
+    }
+    prevEndedRef.current = ended;
+  }, [ended, scoring]);
   function togglePlay() {
     if (countdown !== null) {
       cancelPreparation();
@@ -223,39 +245,68 @@ export function KaraokeStage({
             <Music2 aria-hidden className="size-6" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-primary">
+            <p className="text-label font-bold text-primary">
               HÁT VUI CÙNG {childAlias}
             </p>
-            <h1 className="break-words text-2xl font-extrabold sm:text-3xl">
+            <h1 className="break-words text-heading font-extrabold">
               {source.title}
             </h1>
           </div>
         </div>
-        <button
-          ref={expandButton}
-          type="button"
-          className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-auto"
-          aria-pressed={expanded}
-          onClick={() => void toggleExpanded()}
-        >
-          {expanded ? (
-            <Minimize2 aria-hidden className="size-5" />
-          ) : (
-            <Maximize2 aria-hidden className="size-5" />
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {scoring.supported && (
+            <button
+              type="button"
+              className={`inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control px-4 py-3 font-bold focus-visible:outline-3 focus-visible:outline-primary sm:w-auto ${
+                scoring.enabled
+                  ? "bg-primary text-white"
+                  : "bg-sky text-primary"
+              }`}
+              aria-pressed={scoring.enabled}
+              onClick={scoring.toggle}
+            >
+              {scoring.enabled ? (
+                <Mic aria-hidden className="size-5" />
+              ) : (
+                <MicOff aria-hidden className="size-5" />
+              )}
+              Chấm điểm
+            </button>
           )}
-          {expanded ? "Thu gọn màn hát" : "Mở rộng màn hát"}
-        </button>
+          <button
+            ref={expandButton}
+            type="button"
+            className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-auto"
+            aria-pressed={expanded}
+            onClick={() => void toggleExpanded()}
+          >
+            {expanded ? (
+              <Minimize2 aria-hidden className="size-5" />
+            ) : (
+              <Maximize2 aria-hidden className="size-5" />
+            )}
+            {expanded ? "Thu gọn màn hát" : "Mở rộng màn hát"}
+          </button>
+        </div>
       </div>
       {ended ? (
         <div className={`${styles.lyrics} rounded-card bg-white/80`}>
-          <Star
-            aria-hidden
-            className="mx-auto size-16 fill-amber-100 text-amber-700"
-          />
-          <h2 className="text-3xl font-extrabold">
+          {scoring.score ? (
+            <KaraokeScoreCard score={scoring.score} />
+          ) : (
+            <Star
+              aria-hidden
+              className="mx-auto size-16 fill-amber-100 text-amber-700"
+            />
+          )}
+          <h2 className="text-heading font-extrabold">
             {childAlias} đã hát xong rồi!
           </h2>
-          <p className="text-muted">Cảm ơn bé đã mang tiếng hát đến hôm nay.</p>
+          <p className="text-muted">
+            {scoring.score
+              ? `Bé hát đúng ${scoring.score.matchedWords}/${scoring.score.totalWords} từ. Giỏi lắm!`
+              : "Cảm ơn bé đã mang tiếng hát đến hôm nay."}
+          </p>
           <div className="flex flex-wrap justify-center gap-3 px-4">
             <Button
               className={`${styles.action} sm:w-auto`}
@@ -281,9 +332,15 @@ export function KaraokeStage({
           >
             <p
               role="status"
-              className="font-bold text-primary"
+              className="flex items-center gap-2 font-bold text-primary"
               data-testid="karaoke-cue"
             >
+              {scoring.listening && (
+                <Mic
+                  aria-label="Đang lắng nghe"
+                  className="size-4 animate-pulse text-primary"
+                />
+              )}
               {status}
             </p>
             <p className={styles.line} data-testid="karaoke-active-line">
@@ -502,8 +559,9 @@ export function KaraokeStage({
             )}
           </div>
           <p className="text-sm text-muted">
-            Nhạc phát khi bé bấm nút. Bé hát vui cùng lời trên màn hình; không
-            thu âm. Phím cách để phát hoặc tạm dừng khi vùng hát có focus.
+            {scoring.enabled
+              ? "Bé hát theo lời trên màn hình. Trình duyệt đang lắng nghe để chấm điểm đúng lời. Phím cách để phát hoặc tạm dừng."
+              : "Nhạc phát khi bé bấm nút. Bé hát vui cùng lời trên màn hình; không thu âm. Phím cách để phát hoặc tạm dừng khi vùng hát có focus."}
           </p>
         </div>
       </details>

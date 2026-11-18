@@ -233,7 +233,7 @@ export function AdminBookEditorScreen({
         </StatusMessage>
       ) : null}
       <Card className="w-full bg-white">
-        <h2 className="mb-5 text-xl font-semibold">Thông tin sách</h2>
+        <h2 className="mb-5 text-lg font-bold text-ink">Thông tin sách</h2>
         <AdminBookForm
           initial={initial}
           onSubmit={saveMetadata}

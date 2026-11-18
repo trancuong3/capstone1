@@ -50,10 +50,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
   if (isSuccessful) {
     return (
       <AuthShell>
-        <Card
-          className="mx-auto max-w-[440px] border border-border"
-          tone="success"
-        >
+        <Card className="border border-border" tone="success">
           <div>
             <p className="text-sm font-semibold text-success-ink">
               Tài khoản ViRead
@@ -80,7 +77,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
     return (
       <AuthShell>
-        <Card className="mx-auto max-w-[440px] border border-border bg-white">
+        <Card className="border border-border bg-white">
           <div>
             <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
@@ -111,7 +108,7 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[440px] border border-border bg-white">
+      <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead

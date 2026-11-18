@@ -274,7 +274,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "not-found") {
     return (
-      <section className="mx-auto w-full max-w-[720px]">
+      <section className="mx-auto w-full max-w-[744px]">
         <EmptyState
           headingLevel={1}
           action={
@@ -299,7 +299,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
         <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>

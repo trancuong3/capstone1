@@ -176,7 +176,7 @@ export function DashboardScreen() {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
         <StatusMessage title="Chưa tải được tổng quan" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
@@ -271,7 +271,7 @@ export function DashboardScreen() {
                   className="mt-1 size-5 shrink-0 text-warning"
                 />
                 <div>
-                  <p className="font-semibold text-warning-ink">
+                  <p className="font-semibold text-warning">
                     {invalidSelection
                       ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
                       : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
