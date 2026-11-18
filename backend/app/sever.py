@@ -29,9 +29,17 @@ from sqlalchemy.exc import (
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
-from app.database.config import APP_ENVIRONMENT, CORS_ALLOWED_ORIGINS
+from app.database.config import (
+    APP_ENVIRONMENT,
+    CORS_ALLOWED_ORIGINS,
+    DATABASE_CONNECT_TIMEOUT,
+)
 from app.database.integrity import postgres_integrity_error_metadata
-from app.database.session import DatabaseConcurrencyLimitExceeded, engine
+from app.database.session import (
+    DatabaseConcurrencyLimitExceeded,
+    engine,
+    probe_database_connection,
+)
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
@@ -43,7 +51,17 @@ from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_oc
 logger = logging.getLogger(__name__)
 
 
-_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 10.0
+
+
+def _task_runtime_state(task: asyncio.Task[object] | None) -> str:
+    if task is None:
+        return "disabled"
+    if not task.done():
+        return "running"
+    if task.cancelled():
+        return "cancelled"
+    return "failed" if task.exception() is not None else "stopped"
 
 
 async def _shutdown_worker_task(
@@ -108,6 +126,27 @@ async def _shutdown_subprocess(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
+    if APP_ENVIRONMENT != "test":
+        db_probe = await probe_database_connection(
+            timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
+        )
+        log_diagnostic(
+            logger,
+            logging.INFO if db_probe["ok"] else logging.WARNING,
+            event=(
+                "database_startup_probe_succeeded"
+                if db_probe["ok"]
+                else "database_startup_probe_failed"
+            ),
+            stage="lifespan_startup",
+            dns_resolved=db_probe["dns_resolved"],
+            ssl_enabled=db_probe["ssl_enabled"],
+            pool_class=db_probe["pool_class"],
+            pooler_mode=db_probe["pooler_mode"],
+            latency_ms=db_probe["latency_ms"],
+            database_error_type=db_probe["error_type"],
+        )
+
     warmup_enabled = os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -174,6 +213,15 @@ async def lifespan(_app: FastAPI):
         except Exception as exc:
             logger.warning("Could not start the local VietOCR worker (%s)", type(exc).__name__)
 
+    if _app is not None:
+        _app.state.background_workers = {
+            "viread_ocr_outbox": viread_outbox_task,
+            "viread_ocr_training": viread_training_task,
+            "book_quality": book_quality_task,
+            "active_model_registry": active_model_worker,
+            "local_trainer_process": local_trainer_process,
+        }
+
     try:
         yield
     except asyncio.CancelledError:
@@ -208,6 +256,9 @@ async def lifespan(_app: FastAPI):
 
         if active_model_worker is not None:
             active_model_worker.join(timeout=6)
+
+        if _app is not None and hasattr(_app.state, "background_workers"):
+            _app.state.background_workers = {}
 
         try:
             await admin_ocr_correction_jobs.shutdown()
@@ -457,5 +508,41 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
+
+@app.get("/health", tags=["System"])
+async def get_health(request: Request) -> dict[str, object]:
+    """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
+    db_probe = await probe_database_connection(timeout=4.0)
+    workers = getattr(request.app.state, "background_workers", None) or {}
+    active_model_thread = workers.get("active_model_registry")
+    local_trainer = workers.get("local_trainer_process")
+    worker_states = {
+        "viread_ocr_outbox": _task_runtime_state(workers.get("viread_ocr_outbox")),
+        "viread_ocr_training": _task_runtime_state(workers.get("viread_ocr_training")),
+        "book_quality": _task_runtime_state(workers.get("book_quality")),
+        "active_model_registry": (
+            "disabled"
+            if active_model_thread is None
+            else ("running" if active_model_thread.is_alive() else "stopped")
+        ),
+        "local_trainer_process": (
+            "disabled"
+            if local_trainer is None
+            else ("running" if local_trainer.returncode is None else "stopped")
+        ),
+    }
+    return {
+        "status": "ok" if db_probe["ok"] else "degraded",
+        "database": {
+            "status": "healthy" if db_probe["ok"] else "unavailable",
+            "dns_resolved": db_probe["dns_resolved"],
+            "ssl_enabled": db_probe["ssl_enabled"],
+            "pool_class": db_probe["pool_class"],
+            "pooler_mode": db_probe["pooler_mode"],
+            "latency_ms": db_probe["latency_ms"],
+        },
+        "workers": worker_states,
+    }
+
 
 app.include_router(api_router)

@@ -1,4 +1,4 @@
-"""Tests for graceful FastAPI lifespan shutdown under Ctrl+C cancellation and worker timeouts."""
+"""Tests for FastAPI lifespan, /docs, /health, worker startup/shutdown, and dependency pins."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import asyncio
 import inspect
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import json
 from fastapi import FastAPI
 from starlette.routing import Router as StarletteRouter
 
@@ -21,6 +23,19 @@ os.environ.setdefault("DATABASE_POOLER_MODE", "local")
 os.environ.setdefault("DATABASE_SSL_REQUIRED", "false")
 
 from app.sever import app, lifespan
+
+
+def _mock_probe_ok() -> dict[str, object]:
+    return {
+        "ok": True,
+        "dns_resolved": True,
+        "ssl_enabled": False,
+        "pool_class": "NullPool",
+        "pooler_mode": "local",
+        "port": 5432,
+        "latency_ms": 2,
+        "error_type": None,
+    }
 
 
 class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
@@ -48,9 +63,14 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             if "lifespan" in inspect.signature(FastAPI.__init__).parameters
             else StarletteRouter(lifespan=lifespan)
         )
+        fake_engine = SimpleNamespace(dispose=AsyncMock())
 
         with (
             patch("app.sever.APP_ENVIRONMENT", "development"),
+            patch(
+                "app.sever.probe_database_connection",
+                new=AsyncMock(return_value=_mock_probe_ok()),
+            ),
             patch.dict(
                 os.environ,
                 {"VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false"},
@@ -76,10 +96,7 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
                 "app.sever.admin_ocr_correction_jobs.shutdown",
                 new_callable=AsyncMock,
             ) as mock_jobs_shutdown,
-            patch(
-                "app.sever.engine.dispose",
-                new_callable=AsyncMock,
-            ) as mock_engine_dispose,
+            patch("app.sever.engine", fake_engine),
         ):
             lifespan_task = asyncio.create_task(
                 target_router.lifespan({"app": app, "state": {}}, receive, send)
@@ -90,6 +107,9 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 sent_messages, [{"type": "lifespan.startup.complete"}]
             )
+            workers = getattr(app.state, "background_workers", {})
+            if workers:
+                self.assertFalse(workers["viread_ocr_outbox"].done())
 
             # Cancel background workers AND router lifespan concurrently, matching
             # asyncio.Runner._cancel_all_tasks on Ctrl+C / reloader stop.
@@ -112,7 +132,7 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
             mock_jobs_shutdown.assert_awaited_once()
-            mock_engine_dispose.assert_awaited_once()
+            fake_engine.dispose.assert_awaited_once()
 
     async def test_lifespan_cancels_timed_out_workers_on_graceful_shutdown(self):
         worker_cancelled = asyncio.Event()
@@ -124,9 +144,14 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
                 worker_cancelled.set()
                 raise
 
+        fake_engine = SimpleNamespace(dispose=AsyncMock())
         with (
             patch("app.sever.APP_ENVIRONMENT", "development"),
             patch("app.sever._WORKER_SHUTDOWN_TIMEOUT_SECONDS", 0.05),
+            patch(
+                "app.sever.probe_database_connection",
+                new=AsyncMock(return_value=_mock_probe_ok()),
+            ),
             patch.dict(
                 os.environ,
                 {"VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false"},
@@ -152,35 +177,98 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
                 "app.sever.admin_ocr_correction_jobs.shutdown",
                 new_callable=AsyncMock,
             ) as mock_jobs_shutdown,
-            patch(
-                "app.sever.engine.dispose",
-                new_callable=AsyncMock,
-            ) as mock_engine_dispose,
+            patch("app.sever.engine", fake_engine),
         ):
             async with lifespan(app):
                 await asyncio.sleep(0.01)
+                self.assertFalse(
+                    app.state.background_workers["viread_ocr_outbox"].done()
+                )
 
             self.assertTrue(worker_cancelled.is_set())
+            self.assertEqual(app.state.background_workers, {})
             mock_jobs_shutdown.assert_awaited_once()
-            mock_engine_dispose.assert_awaited_once()
+            fake_engine.dispose.assert_awaited_once()
 
     async def test_non_cancellation_errors_still_propagate_from_lifespan_body(self):
+        fake_engine = SimpleNamespace(dispose=AsyncMock())
         with (
             patch(
                 "app.sever.admin_ocr_correction_jobs.shutdown",
                 new_callable=AsyncMock,
             ) as mock_jobs_shutdown,
-            patch(
-                "app.sever.engine.dispose",
-                new_callable=AsyncMock,
-            ) as mock_engine_dispose,
+            patch("app.sever.engine", fake_engine),
         ):
             with self.assertRaisesRegex(RuntimeError, "simulated failure"):
                 async with lifespan(app):
                     raise RuntimeError("simulated failure")
 
             mock_jobs_shutdown.assert_awaited_once()
-            mock_engine_dispose.assert_awaited_once()
+            fake_engine.dispose.assert_awaited_once()
+
+
+async def _asgi_get(target_app: FastAPI, path: str) -> tuple[int, str]:
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
+        "headers": [(b"host", b"testserver")],
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+        "app": target_app,
+    }
+    request_sent = False
+    status_code = 0
+    chunks: list[bytes] = []
+
+    async def receive() -> dict[str, object]:
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Future()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, object]) -> None:
+        nonlocal status_code
+        if message["type"] == "http.response.start":
+            status_code = int(message["status"])
+        elif message["type"] == "http.response.body":
+            chunks.append(bytes(message.get("body", b"")))
+
+    await target_app(scope, receive, send)
+    return status_code, b"".join(chunks).decode("utf-8")
+
+
+class ServerHealthAndDocsEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_docs_and_health_endpoints_respond_without_leaking_secrets(self):
+        fake_engine = SimpleNamespace(dispose=AsyncMock())
+        with (
+            patch(
+                "app.sever.probe_database_connection",
+                new=AsyncMock(return_value=_mock_probe_ok()),
+            ),
+            patch("app.sever.engine", fake_engine),
+        ):
+            async with lifespan(app):
+                docs_status, docs_text = await _asgi_get(app, "/docs")
+                self.assertEqual(docs_status, 200)
+                self.assertIn("Swagger UI", docs_text)
+
+                health_status, health_text = await _asgi_get(app, "/health")
+                self.assertEqual(health_status, 200)
+                body = json.loads(health_text)
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(body["database"]["status"], "healthy")
+                self.assertEqual(body["database"]["pool_class"], "NullPool")
+                self.assertIn("viread_ocr_outbox", body["workers"])
+                self.assertNotIn("postgresql+asyncpg://", health_text)
+                self.assertNotIn("isolated-test-key", health_text)
 
 
 class RequirementsCompatibilityTests(unittest.TestCase):
