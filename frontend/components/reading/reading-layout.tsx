@@ -420,7 +420,7 @@ export function ReadingLayout({
           </div>
         )
       ) : latestTranscript ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple-border/50 bg-purple-surface/40 px-4 py-2.5">
+        <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-2.5">
           <span className="text-sm font-semibold text-purple-ink">
             Bản ghi mới nhất
           </span>

@@ -910,6 +910,14 @@ for (const routeGroup of ["parent", "admin"] as const) {
           width,
           height: width === 390 ? 844 : 1000,
         });
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+        );
         await expect(
           page.locator("h1").first(),
           `${path} at ${width}px`,

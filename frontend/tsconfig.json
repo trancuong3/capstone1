@@ -31,7 +31,9 @@
     ".next-e2e/types/**/*.ts",
     ".next-e2e/dev/types/**/*.ts",
     ".next-figma-build/types/**/*.ts",
-    ".next-figma-build/dev/types/**/*.ts"
+    ".next-figma-build/dev/types/**/*.ts",
+    ".next-overnight-build/types/**/*.ts",
+    ".next-overnight-build/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

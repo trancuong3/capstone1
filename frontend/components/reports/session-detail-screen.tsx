@@ -269,7 +269,7 @@ export function SessionDetailScreen({
         ].map(([label, value]) => (
           <Card className="gap-2 bg-white p-4 sm:p-4" key={label}>
             <p className="text-label font-semibold text-muted">{label}</p>
-            <p className="text-[32px] font-extrabold leading-snug text-primary">
+            <p className="text-heading font-extrabold leading-snug text-primary">
               {value}
             </p>
           </Card>

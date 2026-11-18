@@ -125,7 +125,7 @@ export function ProfileAvatarUpload({
         </div>
         <p className="text-sm text-muted">PNG, JPG hoặc WEBP. Tối đa 5 MB.</p>
         {isLowResolution ? (
-          <p className="text-sm text-amber-800" role="status">
+          <p className="text-sm text-warning" role="status">
             Ảnh có độ phân giải thấp và có thể hơi mờ khi hiển thị.
           </p>
         ) : null}

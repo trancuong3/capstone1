@@ -80,7 +80,7 @@ function ParentProfileLoadingState() {
     <section
       aria-busy="true"
       aria-label="Đang tải hồ sơ ba mẹ"
-      className="mx-auto flex w-full max-w-[800px] flex-col gap-6"
+      className="mx-auto flex w-full max-w-[1120px] flex-col gap-6"
     >
       <span className="sr-only" role="status">
         Đang tải…
@@ -132,7 +132,7 @@ export function ParentProfileScreen() {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[800px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
         <StatusMessage title="Chưa tải được hồ sơ ba mẹ" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>

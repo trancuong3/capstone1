@@ -199,7 +199,7 @@ function PageSurface(props: BookPageViewerProps) {
         ) : null}
         {overlay && rect && source ? (
           <div
-            className="relative mt-4 w-full"
+            className="relative mt-4 w-full overflow-hidden"
             style={{ height: frame.height }}
             data-reading-panel="image"
           >

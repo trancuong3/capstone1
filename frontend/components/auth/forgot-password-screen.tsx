@@ -46,7 +46,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
   if (submittedEmail) {
     return (
       <AuthShell>
-        <Card className="mx-auto max-w-[440px] border border-border bg-white">
+        <Card className="border border-border bg-white">
           <div>
             <p className="text-sm font-semibold text-primary">
               Bảo mật tài khoản ViRead
@@ -85,7 +85,7 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[440px] border border-border bg-white">
+      <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
             Bảo mật tài khoản ViRead
