@@ -25,36 +25,28 @@ export function ChildProfileCard({
         ariaLabel={`Ảnh đại diện của ${child.alias}`}
         displayName={child.alias}
         imageUrl={child.avatar_url}
-        size="card"
+        size="md"
       />
-      <span className="text-2xl font-extrabold leading-[1.4] text-ink">
-        {child.alias}
+      <span className="min-w-0 flex-1">
+        <span className="block break-words text-xl font-bold leading-tight text-ink">
+          {child.alias}
+        </span>
+        <span className="text-sm text-muted">Lớp {child.grade}</span>
       </span>
-      <span className="text-label font-semibold text-muted">
-        Lớp {child.grade}
-      </span>
-      <span className="text-label font-semibold text-primary">
-        {selected ? (
-          <span className="inline-flex items-center gap-2">
-            <Check aria-hidden="true" className="size-4" />
-            Đang chọn
-          </span>
-        ) : showEditAction ? (
-          <span className="inline-flex items-center gap-2">
-            <Pencil aria-hidden="true" className="size-4" />
-            Xem và chỉnh sửa
-          </span>
-        ) : (
-          "Sẵn sàng cùng đọc"
-        )}
-      </span>
+      {selected ? (
+        <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
+          <Check aria-hidden="true" className="size-4" /> Đang chọn
+        </span>
+      ) : showEditAction ? (
+        <Pencil aria-hidden="true" className="size-4 shrink-0 text-muted" />
+      ) : null}
     </>
   );
 
   const className =
-    "group relative flex min-h-[280px] w-full flex-col items-center justify-center gap-3 rounded-card border p-6 text-center transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
+    "group relative flex min-h-20 w-full items-center gap-4 rounded-control border px-4 py-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
     (selected
-      ? "border-primary bg-sky ring-2 ring-primary"
+      ? "border-primary bg-sky"
       : "border-border bg-white hover:border-primary/60");
 
   if (onSelect) {

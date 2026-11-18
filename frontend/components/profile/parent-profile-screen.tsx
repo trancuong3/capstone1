@@ -174,7 +174,7 @@ export function ParentProfileScreen() {
     return (
       <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
         <PageHeader eyebrow="HỒ SƠ TÀI KHOẢN" title="Chỉnh sửa hồ sơ" />
-        <Card className="sm:px-8 sm:py-6">
+        <Card className="sm:px-8 sm:py-8">
           <h2 className="text-2xl font-extrabold text-ink">
             Thông tin cá nhân
           </h2>

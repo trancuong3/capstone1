@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -812,10 +813,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         if (duplicate) recognition.onresult?.(finalEvent);
       });
       expect(screen.getByRole("button", { name: "Bé" })).toHaveClass(
-        "bg-green-200",
+        "bg-success-surface",
       );
       expect(screen.getByRole("button", { name: "mèo" })).toHaveClass(
-        "bg-green-200",
+        "bg-success-surface",
       );
       expect(screen.getByRole("button", { name: "nhỏ" })).not.toHaveClass(
         "bg-orange-200",
@@ -1084,6 +1085,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           expect(services.readingService.finish).not.toHaveBeenCalled();
           expect(screen.getByRole("button", { name: "mèo" })).not.toHaveClass(
             "bg-green-200",
+          );
+          expect(screen.getByRole("button", { name: "mèo" })).not.toHaveClass(
+            "bg-success-surface",
           );
         }
         expect(speechServiceMock.transcribe).toHaveBeenLastCalledWith(
@@ -1907,8 +1911,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     const user = userEvent.setup();
     renderReading("ready");
     expect(
-      await screen.findAllByRole("heading", { name: "Sẵn sàng đọc chưa nào?" }),
-    ).not.toHaveLength(0);
+      await screen.findByRole("heading", { level: 1, name: bookFixture.title }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Microphone sẽ bật khi bắt đầu đọc."),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Bắt đầu đọc" }));
     expect(
       await screen.findByRole("navigation", { name: "Điều khiển buổi đọc" }),
@@ -2137,6 +2144,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await screen.findByLabelText("Trang sách 5");
     const nextWord = screen.getByRole("button", { name: "Bé" });
     expect(nextWord.className).not.toContain("bg-green-200");
+    expect(nextWord.className).not.toContain("bg-success-surface");
     expect(speechPlayerMock.play).not.toHaveBeenCalled();
     expect(speechRecorderMock.start).toHaveBeenCalledOnce();
     expect(services.readingService.completeCurrentPage).not.toHaveBeenCalled();
@@ -2606,18 +2614,22 @@ describe("ReadingScreen presentation with typed test-local service responses", (
   it("offers camera retry and safe exit without a manual page picker", async () => {
     const user = userEvent.setup();
     renderReading("page-confidence-low");
-    await screen.findByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Mình chưa nhìn rõ trang sách",
     });
-    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Kết thúc an toàn" }),
+      within(dialog).getByRole("button", { name: "Thử lại" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Chọn trang")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Kết thúc an toàn" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Chọn trang" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("dialog", { name: "Bé đang đọc trang nào?" }),
     ).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Thử lại" }));
+    await user.click(within(dialog).getByRole("button", { name: "Thử lại" }));
     expect(services.pageMatchService.retryCurrentPage).toHaveBeenCalledWith(
       TEST_SESSION_ID,
     );

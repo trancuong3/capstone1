@@ -28,6 +28,7 @@ interface ChildProfileFormProps {
   mode: "create" | "edit";
   onSubmit: (values: ChildProfileCreateDTO) => Promise<void>;
   submitLabel?: string;
+  showOptionalAvatarNote?: boolean;
   avatarUrl?: string | null;
   selectedAvatarFile?: File | null;
   isAvatarRemoved?: boolean;
@@ -40,6 +41,7 @@ export function ChildProfileForm({
   mode,
   onSubmit,
   submitLabel,
+  showOptionalAvatarNote = false,
   avatarUrl = null,
   selectedAvatarFile = null,
   isAvatarRemoved = false,
@@ -80,7 +82,7 @@ export function ChildProfileForm({
         autoComplete="off"
         error={errors.alias?.message}
         label="Tên gọi của bé"
-        placeholder="Ví dụ: Bé An"
+        placeholder="Bé An"
         {...register("alias")}
       />
       <SelectField
@@ -100,6 +102,7 @@ export function ChildProfileForm({
         isRemoved={isAvatarRemoved}
         onRemove={() => onAvatarRemove?.()}
         onSelectFile={(file) => onAvatarFileChange?.(file)}
+        showOptionalNote={showOptionalAvatarNote}
         selectedFile={selectedAvatarFile}
       />
       <Button disabled={!isHydrated} isLoading={isSubmitting} type="submit">

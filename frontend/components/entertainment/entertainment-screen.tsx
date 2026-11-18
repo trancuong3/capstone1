@@ -1,18 +1,16 @@
 import Image from "next/image";
-import { ArrowRight, BookOpenText, Camera, Mic, Music2 } from "lucide-react";
+import { ArrowRight, Music2 } from "lucide-react";
 
 import { ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 
 export function EntertainmentScreen() {
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="activity-library mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <header>
-        <p className="text-label font-bold text-primary">Góc vui học ViRead</p>
-        <h1 className="mt-1 text-heading font-extrabold text-ink">Giải trí</h1>
-        <p className="mt-2 text-body text-muted">
-          Chơi vui một chút, luyện đọc thêm nhiều điều hay.
-        </p>
+        <h1 className="book-title border-b border-border pb-5 text-4xl text-ink">
+          Giải trí
+        </h1>
       </header>
       <div className="grid items-stretch gap-4 md:grid-cols-2">
         <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 sm:p-8">
@@ -34,12 +32,7 @@ export function EntertainmentScreen() {
           </div>
           <h2 className="text-2xl font-extrabold text-ink">Xạ thủ ghép câu</h2>
           <p className="text-body leading-6 text-muted">
-            Bắn các từ và sắp xếp chúng để tạo thành câu hoàn chỉnh. Chọn sách
-            bé yêu thích rồi cùng khám phá nhé!
-          </p>
-          <p className="flex items-center gap-2 text-label text-muted">
-            <BookOpenText aria-hidden="true" className="size-4 text-primary" />{" "}
-            Luyện sắp xếp từ · Nhận sao sau mỗi câu
+            Chọn từ trong sách và ghép lại thành câu theo đúng thứ tự.
           </p>
           <ButtonLink
             href="/entertainment/sentence-shooter"
@@ -66,22 +59,12 @@ export function EntertainmentScreen() {
             Quan sát tranh trong sách hoặc ảnh ba mẹ tải lên. Bé có thể kể bằng
             giọng nói hoặc câu văn để nhận gợi ý từ vựng.
           </p>
-          <div className="flex flex-wrap gap-3 text-label text-muted">
-            <span className="inline-flex items-center gap-2">
-              <Mic aria-hidden="true" className="size-4 text-primary" /> Nói
-              hoặc gõ câu mô tả
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <Camera aria-hidden="true" className="size-4 text-primary" /> Chọn
-              tranh sách hoặc tải ảnh
-            </span>
-          </div>
           <ButtonLink
             href="/entertainment/picture-description"
             size="compact"
             className="mt-auto"
           >
-            Khám phá ngay <ArrowRight aria-hidden="true" className="size-4" />
+            Chọn tranh <ArrowRight aria-hidden="true" className="size-4" />
           </ButtonLink>
         </article>
       </div>
@@ -104,9 +87,6 @@ export function EntertainmentScreen() {
           <ArrowRight aria-hidden="true" className="size-4" />
         </ButtonLink>
       </article>
-      <p className="text-label text-muted">
-        Mỗi lượt chơi dùng các câu đã xác minh trong sách của ViRead.
-      </p>
     </section>
   );
 }

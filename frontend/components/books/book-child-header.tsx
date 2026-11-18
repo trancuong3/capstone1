@@ -1,24 +1,32 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
+import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import { ViReadLogo } from "@/components/common/viread-logo";
 
 interface BookChildHeaderProps {
   backHref?: string;
   child: ChildProfileDTO | null;
+  fullBleedDesktop?: boolean;
   mobileLabel?: string;
 }
 
 export function BookChildHeader({
   backHref = "/dashboard",
   child,
+  fullBleedDesktop = false,
   mobileLabel,
 }: BookChildHeaderProps) {
   const contextLabel = mobileLabel ?? "Chọn sách cho bé";
 
   return (
-    <header className="flex min-h-20 w-full items-center justify-between gap-3 rounded-card bg-white p-4 sm:min-h-24 sm:gap-8 sm:px-8">
+    <header
+      className={cn(
+        "catalog-header flex min-h-20 w-full items-center justify-between gap-3 rounded-card bg-white p-4 sm:min-h-24 sm:gap-8 sm:px-8",
+        fullBleedDesktop && "sm:-mx-8 sm:-mt-8 sm:px-10",
+      )}
+    >
       <span className="sm:hidden">
         <ViReadLogo href="/dashboard" compact />
       </span>

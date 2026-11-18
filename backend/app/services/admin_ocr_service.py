@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import PurePath
 from typing import Any, Callable
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -31,7 +31,16 @@ from app.schemas.admin_ocr import (
     AdminOcrWordInput,
     normalize_ocr_bbox,
 )
-from app.schemas.book import AdminPageLifecycleRead, AdminRevisionDetailRead
+from app.schemas.book import (
+    AdminDocumentPageResultRead,
+    AdminDocumentUploadResponse,
+    AdminPageLifecycleRead,
+    AdminRevisionDetailRead,
+)
+from app.services.document_rasterizer_service import (
+    MAX_DOCUMENT_BYTES,
+    rasterize_uploaded_document,
+)
 from app.services.ocr_adjudication import adjudicate_word
 from app.services.ocr_punctuation import punctuation_status
 from app.services.ocr_evidence import (
@@ -1328,6 +1337,33 @@ class AdminOcrService:
         await self.db.rollback()
 
         data, content_type, extension, width, height = await self._read_validate_image(file)
+        _, result = await self._ingest_validated_page_image(
+            actor_id,
+            book_id,
+            data=data,
+            content_type=content_type,
+            extension=extension,
+            width=width,
+            height=height,
+            upload_id=upload_id,
+            started_at=started_at,
+        )
+        return result
+
+    async def _ingest_validated_page_image(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        *,
+        data: bytes,
+        content_type: str,
+        extension: str,
+        width: int,
+        height: int,
+        upload_id: UUID | None = None,
+        started_at: float | None = None,
+    ) -> tuple[int, AdminRevisionDetailRead]:
+        started_at = started_at if started_at is not None else time.perf_counter()
         image_digest = hashlib.sha256(data).hexdigest()
         page_id = uuid4()
         revision_id = uuid4()
@@ -1353,7 +1389,7 @@ class AdminOcrService:
                     saved_revision = await self.repo.revision(existing.Id, UUID(saved_revision_id)) if saved_revision_id else None
                     if saved_revision is None:
                         raise HTTPException(status_code=409, detail="Upload outcome requires review; reload before retrying")
-                    return await self.revision_detail(existing, saved_revision)
+                    return int(existing.PageNumber), await self.revision_detail(existing, saved_revision)
 
             await self._renumber_active_pages(book_id, lock=True)
             page_number = await self.repo.next_active_page_number(book_id)
@@ -1535,8 +1571,9 @@ class AdminOcrService:
                 await self.db.refresh(page)
                 await self.db.refresh(revision)
                 result = await self.revision_detail(page, revision)
+                assigned_page_number = int(page.PageNumber)
                 await self.db.commit()
-                return result
+                return assigned_page_number, result
             except IntegrityError as exc:
                 log_diagnostic(
                     logger,
@@ -1594,6 +1631,146 @@ class AdminOcrService:
             raise
         finally:
             await self.db.rollback()
+
+    async def upload_document(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        file: UploadFile,
+        *,
+        upload_id: UUID | None = None,
+    ) -> AdminDocumentUploadResponse:
+        started_at = time.perf_counter()
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="admin_ocr_document_upload_started",
+            stage="request_received",
+            book_id=str(book_id),
+        )
+        await self.require_admin(actor_id)
+        await self.db.rollback()
+
+        book = await self.repo.book(book_id)
+        if book is None:
+            await self.db.rollback()
+            raise HTTPException(status_code=404, detail="Book not found")
+        book_lifecycle_status = str(book.LifecycleStatus)
+        await self.db.rollback()
+        if book_lifecycle_status != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
+
+        raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
+        if len(raw_data) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
+
+        bundle = await run_in_threadpool(
+            rasterize_uploaded_document,
+            filename=file.filename,
+            content_type=file.content_type,
+            data=raw_data,
+        )
+
+        results: list[AdminDocumentPageResultRead] = []
+        created_pages_count = 0
+        skipped_empty_count = 0
+        failed_pages_count = 0
+
+        empty_details = {
+            "No usable text was detected; check the image quality",
+            "OCR produced empty text",
+            "OCR did not produce any valid word",
+        }
+        fatal_statuses = {403, 404, 409, 503}
+
+        for index, page_item in enumerate(bundle.pages):
+            page_upload_id = (
+                uuid5(upload_id, f"source-page:{page_item.source_page}:{bundle.source_sha256}")
+                if upload_id is not None
+                else None
+            )
+            try:
+                page_number, revision = await self._ingest_validated_page_image(
+                    actor_id,
+                    book_id,
+                    data=page_item.image_bytes,
+                    content_type=page_item.content_type,
+                    extension=page_item.extension,
+                    width=page_item.width,
+                    height=page_item.height,
+                    upload_id=page_upload_id,
+                    started_at=started_at,
+                )
+                created_pages_count += 1
+                results.append(
+                    AdminDocumentPageResultRead(
+                        source_page=page_item.source_page,
+                        status="SUCCEEDED",
+                        page_id=revision.page_id,
+                        page_number=page_number,
+                        revision=revision,
+                    )
+                )
+            except HTTPException as exc:
+                detail_text = str(exc.detail) if exc.detail is not None else "OCR failed"
+                if exc.status_code == 422 and detail_text in empty_details:
+                    skipped_empty_count += 1
+                    results.append(
+                        AdminDocumentPageResultRead(
+                            source_page=page_item.source_page,
+                            status="SKIPPED_EMPTY",
+                            error_code="EMPTY_PAGE",
+                            error_message="Trang không có chữ nhận dạng được nên đã bỏ qua.",
+                        )
+                    )
+                    continue
+
+                if exc.status_code in fatal_statuses:
+                    if created_pages_count == 0:
+                        raise
+                    for remaining_item in bundle.pages[index:]:
+                        failed_pages_count += 1
+                        results.append(
+                            AdminDocumentPageResultRead(
+                                source_page=remaining_item.source_page,
+                                status="FAILED",
+                                error_code=f"HTTP_{exc.status_code}",
+                                error_message=detail_text,
+                            )
+                        )
+                    break
+
+                failed_pages_count += 1
+                results.append(
+                    AdminDocumentPageResultRead(
+                        source_page=page_item.source_page,
+                        status="FAILED",
+                        error_code=f"HTTP_{exc.status_code}",
+                        error_message=detail_text,
+                    )
+                )
+
+        if created_pages_count == 0:
+            if skipped_empty_count == len(bundle.pages):
+                raise HTTPException(
+                    status_code=422,
+                    detail="No usable text was detected in the uploaded document",
+                )
+            raise HTTPException(
+                status_code=422,
+                detail="Document upload failed to produce any valid OCR page",
+            )
+
+        return AdminDocumentUploadResponse(
+            book_id=book_id,
+            file_name=bundle.file_name,
+            source_format=bundle.source_format,
+            total_source_pages=len(bundle.pages),
+            created_pages_count=created_pages_count,
+            skipped_empty_count=skipped_empty_count,
+            failed_pages_count=failed_pages_count,
+            pages=results,
+        )
 
     async def replace_page_image(
         self, actor_id: UUID, page_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,

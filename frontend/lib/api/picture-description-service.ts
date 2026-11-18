@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
+import { withRequestDeadline } from "@/lib/api/request-deadline";
+import { ServiceError } from "@/lib/api/service-error";
 import type {
   PictureCatalogDTO,
   PictureEvaluateResponseDTO,
@@ -147,29 +149,72 @@ export interface PictureDescriptionService {
   ): Promise<PictureEvaluateResponseDTO>;
 }
 
+const STANDARD_DEADLINE_MS = 20_000;
+const AI_DEADLINE_MS = 45_000;
+
+async function withPictureDeadline<T>(
+  operation: (requestSignal: AbortSignal) => Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  try {
+    return await withRequestDeadline(operation, signal, timeoutMs);
+  } catch (error) {
+    if (
+      !signal?.aborted &&
+      error instanceof DOMException &&
+      error.name === "TimeoutError"
+    ) {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "Cô giáo AI đang phản hồi hơi lâu. Bé hãy bấm Thử lại nhé.",
+        status: 504,
+        request_id: "",
+        retryable: true,
+      });
+    }
+    throw error;
+  }
+}
+
 export function createPictureDescriptionService(): PictureDescriptionService {
   return {
     getCatalog(childId, signal) {
-      return requestApi(
-        `/games/picture-description/catalog${apiQuery({ child_id: childId })}`,
-        catalogSchema,
+      return withPictureDeadline(
+        (requestSignal) =>
+          requestApi(
+            `/games/picture-description/catalog${apiQuery({ child_id: childId })}`,
+            catalogSchema,
+            requestSignal,
+          ),
         signal,
+        STANDARD_DEADLINE_MS,
       );
     },
 
     listSessions(childId, signal) {
-      return requestApi(
-        `/games/picture-description/sessions${apiQuery({ child_id: childId })}`,
-        sessionSummaryListSchema,
+      return withPictureDeadline(
+        (requestSignal) =>
+          requestApi(
+            `/games/picture-description/sessions${apiQuery({ child_id: childId })}`,
+            sessionSummaryListSchema,
+            requestSignal,
+          ),
         signal,
+        STANDARD_DEADLINE_MS,
       );
     },
 
     getSession(sessionId, signal) {
-      return requestApi(
-        `/games/picture-description/sessions/${encodeURIComponent(sessionId)}`,
-        sessionSchema,
+      return withPictureDeadline(
+        (requestSignal) =>
+          requestApi(
+            `/games/picture-description/sessions/${encodeURIComponent(sessionId)}`,
+            sessionSchema,
+            requestSignal,
+          ),
         signal,
+        STANDARD_DEADLINE_MS,
       );
     },
 
@@ -190,26 +235,36 @@ export function createPictureDescriptionService(): PictureDescriptionService {
           input.image_file.name || "picture.jpg",
         );
       }
-      return requestApi(
-        "/games/picture-description/sessions",
-        sessionSchema,
+      return withPictureDeadline(
+        (requestSignal) =>
+          requestApi(
+            "/games/picture-description/sessions",
+            sessionSchema,
+            requestSignal,
+            {
+              method: "POST",
+              body: form,
+            },
+          ),
         signal,
-        {
-          method: "POST",
-          body: form,
-        },
+        AI_DEADLINE_MS,
       );
     },
 
     evaluate(sessionId, input, signal) {
-      return requestApi(
-        `/games/picture-description/sessions/${encodeURIComponent(sessionId)}/evaluate`,
-        evaluateResponseSchema,
+      return withPictureDeadline(
+        (requestSignal) =>
+          requestApi(
+            `/games/picture-description/sessions/${encodeURIComponent(sessionId)}/evaluate`,
+            evaluateResponseSchema,
+            requestSignal,
+            {
+              method: "POST",
+              body: input,
+            },
+          ),
         signal,
-        {
-          method: "POST",
-          body: input,
-        },
+        AI_DEADLINE_MS,
       );
     },
   };

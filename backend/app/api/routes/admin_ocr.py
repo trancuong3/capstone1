@@ -16,7 +16,12 @@ from app.schemas.admin_ocr import (
     AdminOcrVerifyRequest,
     AdminOcrWordInput,
 )
-from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
+from app.schemas.book import (
+    AdminBookMetadataResponse,
+    AdminDocumentUploadResponse,
+    AdminPageLifecycleRead,
+    AdminRevisionDetailRead,
+)
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
@@ -92,6 +97,23 @@ async def upload_admin_page(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminOcrService(db).upload_page(actor_id, book_id, image, upload_id=upload_id)
+
+
+@router.post(
+    "/admin/catalog/{book_id}/documents",
+    response_model=AdminDocumentUploadResponse,
+    status_code=201,
+)
+async def upload_admin_document(
+    book_id: UUID,
+    document: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).upload_document(
+        actor_id, book_id, document, upload_id=upload_id
+    )
 
 
 @router.post(

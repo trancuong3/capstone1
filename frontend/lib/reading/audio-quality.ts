@@ -20,9 +20,59 @@ export interface AudioQualitySnapshot {
   isSpeaking: boolean;
 }
 
+export type AudioQualityMode = "passage" | "short-word";
+
+export interface AudioQualityMonitorOptions {
+  readonly mode?: AudioQualityMode;
+}
+
+interface AudioQualityProfile {
+  readonly calibrationWindowMs: number;
+  readonly minDurationMs: number;
+  readonly minSpeechDurationMs: number;
+  readonly minPeakRms: number;
+  readonly candidateOnsetMs: number;
+  readonly hangoverMs: number;
+  readonly onsetFloor: number;
+  readonly onsetMultiplier: number;
+  readonly offsetFloor: number;
+  readonly offsetMultiplier: number;
+}
+
+const AUDIO_QUALITY_PROFILES: Record<AudioQualityMode, AudioQualityProfile> = {
+  passage: {
+    calibrationWindowMs: 250,
+    minDurationMs: 300,
+    minSpeechDurationMs: 120,
+    minPeakRms: 0.008,
+    candidateOnsetMs: 120,
+    hangoverMs: 350,
+    onsetFloor: 0.003,
+    onsetMultiplier: 2.8,
+    offsetFloor: 0.0015,
+    offsetMultiplier: 1.6,
+  },
+  // Short-word mode captures single Grade-1 syllables ("có", "lo", "dậy")
+  // cleanly within ~160–400ms without early-speech floor poisoning.
+  "short-word": {
+    calibrationWindowMs: 60,
+    minDurationMs: 160,
+    minSpeechDurationMs: 60,
+    minPeakRms: 0.003,
+    candidateOnsetMs: 50,
+    hangoverMs: 220,
+    onsetFloor: 0.0022,
+    onsetMultiplier: 2.4,
+    offsetFloor: 0.0012,
+    offsetMultiplier: 1.4,
+  },
+};
+
 // Activity is an acoustic heuristic, never a pronunciation/confidence score.
 // Keep the entire recording: silence detection must not trim first/last sounds.
 export class AudioQualityMonitor {
+  private readonly mode: AudioQualityMode;
+  private readonly profile: AudioQualityProfile;
   private startedAt: number | null = null;
   private previousAt = 0;
   private candidateMs = 0;
@@ -41,6 +91,11 @@ export class AudioQualityMonitor {
     clipped: false,
     isSpeaking: false,
   };
+
+  constructor(options?: AudioQualityMonitorOptions) {
+    this.mode = options?.mode ?? "passage";
+    this.profile = AUDIO_QUALITY_PROFILES[this.mode];
+  }
 
   addFrame(samples: Float32Array, nowMs: number): AudioQualitySnapshot {
     if (!samples.length || !Number.isFinite(nowMs)) return this.getSnapshot();
@@ -69,19 +124,38 @@ export class AudioQualityMonitor {
     // Calibrate on the opening room sound, then follow quiet frames slowly.
     // Continuous fan noise is not automatically treated as speech.
     let noise = this.snapshot.noiseFloor;
-    if (this.frames === 1) noise = rms;
-    else if (durationMs < 250 || !this.snapshot.isSpeaking) {
-      noise += (rms < noise ? 0.15 : 0.01) * (rms - noise);
+    if (this.frames === 1) {
+      noise = this.mode === "short-word" ? Math.min(rms, 0.008) : rms;
+    } else if (
+      durationMs < this.profile.calibrationWindowMs ||
+      !this.snapshot.isSpeaking
+    ) {
+      const sampleRms =
+        this.mode === "short-word" &&
+        durationMs < this.profile.calibrationWindowMs &&
+        rms >= 0.015
+          ? Math.min(rms, 0.008)
+          : rms;
+      noise += (sampleRms < noise ? 0.15 : 0.01) * (sampleRms - noise);
     }
-    const onset = Math.max(0.003, noise * 2.8);
-    const offset = Math.max(0.0015, noise * 1.6);
+    const onset = Math.max(
+      this.profile.onsetFloor,
+      noise * this.profile.onsetMultiplier,
+    );
+    const offset = Math.max(
+      this.profile.offsetFloor,
+      noise * this.profile.offsetMultiplier,
+    );
+    const calibrated =
+      durationMs >= this.profile.calibrationWindowMs ||
+      (this.mode === "short-word" && rms > Math.max(onset, 0.0055));
     const active =
-      durationMs >= 250 && rms > (this.snapshot.isSpeaking ? offset : onset);
+      calibrated && rms > (this.snapshot.isSpeaking ? offset : onset);
     this.candidateMs = active ? this.candidateMs + elapsed : 0;
     this.quietMs = active ? 0 : this.quietMs + elapsed;
     let speaking = this.snapshot.isSpeaking;
-    if (this.candidateMs >= 120) speaking = true;
-    if (this.quietMs >= 350) speaking = false;
+    if (this.candidateMs >= this.profile.candidateOnsetMs) speaking = true;
+    if (this.quietMs >= this.profile.hangoverMs) speaking = false;
     const speechDurationMs =
       this.snapshot.speechDurationMs + (speaking && active ? elapsed : 0);
     this.snapshot = {
@@ -102,10 +176,13 @@ export class AudioQualityMonitor {
     let status: AudioQualityStatus = "UNKNOWN";
     if (this.invalid || this.snapshot.clipped) status = "INVALID_AUDIO";
     else if (this.frames) {
-      if (this.snapshot.durationMs < 300) status = "AUDIO_TOO_SHORT";
+      if (this.snapshot.durationMs < this.profile.minDurationMs)
+        status = "AUDIO_TOO_SHORT";
       else if (this.maxRms < 0.0001) status = "SILENCE";
-      else if (this.maxRms < 0.008) status = "LOW_VOLUME";
-      else if (this.snapshot.speechDurationMs >= 120)
+      else if (this.maxRms < this.profile.minPeakRms) status = "LOW_VOLUME";
+      else if (
+        this.snapshot.speechDurationMs >= this.profile.minSpeechDurationMs
+      )
         status = "SPEECH_DETECTED";
       else status = "BACKGROUND_NOISE";
     }
@@ -124,5 +201,21 @@ export function hasUnusableAudio(quality?: AudioQualitySnapshot): boolean {
       "AUDIO_TOO_SHORT",
       "INVALID_AUDIO",
     ].includes(quality.status)
+  );
+}
+
+/**
+ * Trong luyện đọc từ ngắn, giọng đọc nhỏ ("LOW_VOLUME") hoặc nền ồn nhẹ
+ * ("BACKGROUND_NOISE") vẫn mang đầy đủ âm vị tiếng Việt để gửi lên STT.
+ * Chỉ chặn âm thanh rỗng, câm hoàn toàn, quá ngắn hoặc bị vỡ tiếng.
+ */
+export function hasShortWordBlockingAudioIssue(
+  quality?: AudioQualitySnapshot,
+): boolean {
+  return (
+    quality !== undefined &&
+    ["NO_AUDIO", "SILENCE", "AUDIO_TOO_SHORT", "INVALID_AUDIO"].includes(
+      quality.status,
+    )
   );
 }

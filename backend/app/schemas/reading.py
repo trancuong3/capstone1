@@ -378,6 +378,7 @@ class ReadingComparisonReportRead(BaseModel):
     alignment: list[dict[str, Any]]
     summary: dict[str, Any]
     created_at: datetime
+    self_corrected_word_ids: list[UUID] = Field(default_factory=list)
 
 
 class ReadingSessionReportsRead(BaseModel):

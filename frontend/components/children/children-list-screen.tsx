@@ -57,7 +57,6 @@ export function ChildrenListScreen() {
         }
         className="mb-0"
         description="Ba mẹ có thể tạo và chỉnh sửa những hồ sơ thuộc tài khoản này."
-        eyebrow="GIA ĐÌNH MÌNH"
         title="Hồ sơ của các bé"
       />
 
@@ -71,7 +70,7 @@ export function ChildrenListScreen() {
             Đang tải…
           </span>
           {[0, 1, 2].map((item) => (
-            <Skeleton className="h-[280px] w-full rounded-card" key={item} />
+            <Skeleton className="h-20 w-full rounded-card" key={item} />
           ))}
         </div>
       ) : null}

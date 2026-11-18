@@ -164,10 +164,19 @@ test("Parent stored history → detail, report counts and words", async ({
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
-  await expect(page.getByRole("heading", { name: "Mèo API" })).toBeVisible();
-  await page.getByRole("button", { name: "Luyện từ" }).click();
+  const wordPracticeButton = page.getByRole("button", {
+    name: /Luyện từ Mèo API/,
+  });
+  await expect(wordPracticeButton).toBeVisible();
+  await wordPracticeButton.click();
   await expect(
-    page.getByText(/Chức năng luyện từ chưa sẵn sàng/),
+    page.getByRole("heading", { name: "Mèo API", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Nghe phát âm mẫu" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Bắt đầu luyện" }),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });

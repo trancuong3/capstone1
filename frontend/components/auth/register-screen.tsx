@@ -77,7 +77,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
       <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
-            BẮT ĐẦU CÙNG VIREAD
+            Tài khoản phụ huynh
           </p>
           <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
             Tạo tài khoản phụ huynh

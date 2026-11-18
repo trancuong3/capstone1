@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import {
@@ -14,6 +14,8 @@ import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 interface BookPageViewerProps {
+  title?: string;
+  illustration?: ReactNode;
   correctWordIds?: Set<string>;
   currentWordId: string | null;
   isTransitioning?: boolean;
@@ -24,6 +26,7 @@ interface BookPageViewerProps {
   selfCorrectedWordIds?: ReadonlySet<string>;
   unresolvedWordIds?: ReadonlySet<string>;
   uncertainWordIds?: ReadonlySet<string>;
+  activeRetryWordId?: string | null;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
@@ -125,6 +128,8 @@ function PageSurface(props: BookPageViewerProps) {
     const id = word.word_id;
     const preview = previewSnapshot?.statusByWordId.get(id)?.status;
     if (props.selfCorrectedWordIds?.has(id)) return "self-corrected";
+    if (props.activeRetryWordId && props.activeRetryWordId === id)
+      return "current";
     if (props.unresolvedWordIds?.has(id)) return "unresolved";
     if (props.uncertainWordIds?.has(id)) return "uncertain";
     if (props.skippedWordIds?.has(id) || preview === "DELETE")
@@ -154,7 +159,7 @@ function PageSurface(props: BookPageViewerProps) {
       aria-busy={isTransitioning || undefined}
       aria-label={`Trang sách ${page.page_number}`}
       className={cn(
-        "mx-auto w-full min-w-0 max-w-[1008px] rounded-card border border-border bg-cream p-3 shadow-sm sm:p-6",
+        "reader-sheet mx-auto w-full min-w-0 max-w-[1104px]",
         isTransitioning && "opacity-60",
       )}
       data-page-id={page.page_id}
@@ -170,11 +175,16 @@ function PageSurface(props: BookPageViewerProps) {
               : "none"
       }
     >
-      <header className="flex items-center justify-between gap-3 text-sm font-semibold text-muted">
-        <span>Trang sách của bé</span>
-        <span>Trang {page.page_number}</span>
+      <header className="reader-bookplate">
+        <div className="min-w-0">
+          <p className="reader-folio">Trang {page.page_number}</p>
+          <h1 className="book-title break-words text-3xl sm:text-4xl">
+            {props.title ?? "Trang sách của bé"}
+          </h1>
+        </div>
+        {props.illustration}
       </header>
-      <div ref={rootRef} className="w-full min-w-0">
+      <div ref={rootRef} className="reader-leaf w-full min-w-0">
         {source && image !== "failed" ? (
           <Image
             key={source}

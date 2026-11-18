@@ -14,7 +14,9 @@ type Props = {
   result: Pick<
     ComparisonResult,
     "alignment" | "summary" | "page_id" | "page_revision_id"
-  >;
+  > & {
+    self_corrected_word_ids?: readonly string[];
+  };
   sessionId: string;
 };
 
@@ -141,7 +143,14 @@ export function ReadingReport({ result, sessionId }: Props) {
                 </span>
               </header>
 
-              <BookPageContent page={page} comparisonResult={result} readOnly />
+              <BookPageContent
+                page={page}
+                comparisonResult={result}
+                selfCorrectedWordIds={
+                  new Set(result.self_corrected_word_ids ?? [])
+                }
+                readOnly
+              />
 
               <p className="mt-2 text-right text-label text-muted">
                 {page.page_number}
@@ -188,6 +197,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       <div className="flex flex-wrap gap-2 border-t border-border pt-3 text-sm">
         {[
           ["Đọc đúng", COLORS.correct],
+          ["Đã đọc lại đúng", "border-green-600 bg-green-200"],
           ["Bỏ từ", COLORS.missing],
           ["Đọc nhầm", COLORS.wrong],
           ["Ngập ngừng", COLORS.hesitation],

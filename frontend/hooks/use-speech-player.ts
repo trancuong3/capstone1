@@ -17,6 +17,7 @@ export interface SpeechPlayer {
   readonly isPlaying: boolean;
   readonly isPaused: boolean;
   readonly state: PlaybackState;
+  readonly fallbackNotice: string | null;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
   playWithWordTimings(
     words: readonly string[],
@@ -38,6 +39,11 @@ export function useSpeechPlayer(): SpeechPlayer {
     player.subscribe,
     player.getState,
     () => "idle" as PlaybackState,
+  );
+  const fallbackNotice = useSyncExternalStore(
+    player.subscribe,
+    player.getFallbackNotice,
+    () => null,
   );
   const actions = useMemo(
     () => ({
@@ -62,7 +68,9 @@ export function useSpeechPlayer(): SpeechPlayer {
   );
   useEffect(() => {
     mounted.current = true;
-    const unsubscribe = subscribeSpeechPreferences(player.stop);
+    const unsubscribe = subscribeSpeechPreferences(
+      player.handlePreferencesChange,
+    );
     return () => {
       mounted.current = false;
       unsubscribe();
@@ -72,6 +80,7 @@ export function useSpeechPlayer(): SpeechPlayer {
   return {
     ...actions,
     state,
+    fallbackNotice,
     isPlaying: ["loading", "playing", "paused", "fallback"].includes(state),
     isPaused: state === "paused",
     pause: player.pause,

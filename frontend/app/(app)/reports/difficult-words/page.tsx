@@ -9,6 +9,7 @@ export const metadata: Metadata = { title: "Từ cần luyện" };
 interface DifficultWordsPageProps {
   readonly searchParams: Promise<{
     childId?: string | string[];
+    word?: string | string[];
   }>;
 }
 
@@ -18,7 +19,10 @@ export default async function DifficultWordsPage({
   const query = await searchParams;
   return (
     <AppServicesProvider>
-      <DifficultWordsScreen requestedChildId={firstQueryValue(query.childId)} />
+      <DifficultWordsScreen
+        requestedChildId={firstQueryValue(query.childId)}
+        requestedPracticeWord={firstQueryValue(query.word)}
+      />
     </AppServicesProvider>
   );
 }

@@ -71,3 +71,5 @@ class TimedSpeechRead(BaseModel):
     content_type: str
     duration_seconds: float = Field(gt=0, allow_inf_nan=False)
     words: list[TimedWordRead]
+    resolved_voice_id: str | None = None
+    used_fallback_voice: bool = False

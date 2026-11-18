@@ -1,4 +1,5 @@
 import type { SpeechService } from "@/lib/api/speech-service";
+import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import type {
   TimedSpeech,
   VoiceStudioService,
@@ -66,16 +67,28 @@ function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const SERVER_FALLBACK_VOICE_NOTICE =
+  "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng mặc định.";
+const BROWSER_FALLBACK_NOTICE =
+  "Giọng đọc máy chủ tạm bận, đang dùng giọng đọc tiếng Việt của trình duyệt.";
+
 /** Owns one synthesis operation, ordered chunk queue and media clock. */
 export class TtsPlayback {
   private state: PlaybackState = "idle";
+  private fallbackNotice: string | null = null;
   private readonly listeners = new Set<() => void>();
   getState = (): PlaybackState => this.state;
+  getFallbackNotice = (): string | null => this.fallbackNotice;
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
+  };
+  private setFallbackNotice = (notice: string | null): void => {
+    if (notice === this.fallbackNotice) return;
+    this.fallbackNotice = notice;
+    this.listeners.forEach((listener) => listener());
   };
   private onState = (state: PlaybackState): void => {
     if (state === this.state) return;
@@ -89,10 +102,22 @@ export class TtsPlayback {
   private timedRetryAfter = 0;
   private readonly cache = new Map<string, TimedSpeech>();
   private cacheBytes = 0;
+  private readonly shortCache = new Map<
+    string,
+    { readonly audio: Blob; readonly usedFallbackVoice: boolean }
+  >();
+  private shortCacheBytes = 0;
   constructor(
     private readonly speech: SpeechService,
     private readonly studio: VoiceStudioService,
   ) {}
+
+  handlePreferencesChange = (): void => {
+    this.serverRetryAfter = 0;
+    this.timedRetryAfter = 0;
+    this.setFallbackNotice(null);
+    this.stop();
+  };
 
   stop = (): void => {
     const operation = this.current;
@@ -105,6 +130,8 @@ export class TtsPlayback {
     this.stop();
     this.cache.clear();
     this.cacheBytes = 0;
+    this.shortCache.clear();
+    this.shortCacheBytes = 0;
   };
   pause = (): void => {
     if (!this.current || this.current.paused) return;
@@ -196,7 +223,17 @@ export class TtsPlayback {
         const onTime = (time: number, duration: number) =>
           options.onTimeUpdate?.(elapsed + time, elapsed + duration);
         let source: Blob | null = null;
-        if (Date.now() >= this.serverRetryAfter) {
+        let usedFallbackVoice = false;
+        const shortKey = JSON.stringify([
+          operation.preferences.voiceId,
+          operation.preferences.speed,
+          chunk.text,
+        ]);
+        const cachedShort = this.shortCache.get(shortKey);
+        if (cachedShort) {
+          source = cachedShort.audio;
+          usedFallbackVoice = cachedShort.usedFallbackVoice;
+        } else if (Date.now() >= this.serverRetryAfter) {
           try {
             source = await this.wait(
               operation,
@@ -207,6 +244,13 @@ export class TtsPlayback {
               }),
             );
             this.ensure(operation);
+            usedFallbackVoice = Boolean(
+              getSynthesizedAudioMeta(source)?.usedFallbackVoice,
+            );
+            this.cacheShort(shortKey, {
+              audio: source,
+              usedFallbackVoice,
+            });
           } catch (error) {
             this.ensure(operation);
             if (isAbort(error)) throw error;
@@ -215,6 +259,9 @@ export class TtsPlayback {
         }
         let duration = 0;
         if (source) {
+          this.setFallbackNotice(
+            usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+          );
           try {
             duration = await this.playAudio(
               operation,
@@ -229,10 +276,13 @@ export class TtsPlayback {
             this.ensure(operation);
             if (isAbort(error) || error instanceof PartialPlaybackError)
               throw error;
+            this.shortCacheBytes -= source.size;
+            this.shortCache.delete(shortKey);
             source = null;
           }
         }
         if (!source) {
+          this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
           this.onState("fallback");
           duration = await this.playBrowser(
             operation,
@@ -291,6 +341,9 @@ export class TtsPlayback {
             this.ensure(operation);
             this.cacheTimed(key, timed);
           }
+          this.setFallbackNotice(
+            timed.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+          );
           elapsed += await this.playAudio(
             operation,
             timed.audio,
@@ -315,6 +368,7 @@ export class TtsPlayback {
             await fallback();
             return;
           }
+          this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
           this.onState("fallback");
           for (const part of splitSpeechText(
             chunk.text,
@@ -334,6 +388,29 @@ export class TtsPlayback {
       this.ensure(operation);
       options.onEnded?.();
     });
+
+  private cacheShort(
+    key: string,
+    entry: { readonly audio: Blob; readonly usedFallbackVoice: boolean },
+  ): void {
+    if (entry.audio.size > 4 * 1024 * 1024) return;
+    const prev = this.shortCache.get(key);
+    if (prev) {
+      this.shortCacheBytes -= prev.audio.size;
+      this.shortCache.delete(key);
+    }
+    this.shortCache.set(key, entry);
+    this.shortCacheBytes += entry.audio.size;
+    while (
+      this.shortCache.size > 16 ||
+      this.shortCacheBytes > 8 * 1024 * 1024
+    ) {
+      const first = this.shortCache.keys().next().value;
+      if (first === undefined) break;
+      this.shortCacheBytes -= this.shortCache.get(first)?.audio.size ?? 0;
+      this.shortCache.delete(first);
+    }
+  }
 
   private cacheTimed(key: string, speech: TimedSpeech): void {
     if (speech.audio.size > 8 * 1024 * 1024) return;
@@ -364,6 +441,8 @@ export class TtsPlayback {
     let audio: HTMLAudioElement;
     try {
       audio = new Audio(url);
+      audio.defaultPlaybackRate = 1;
+      audio.playbackRate = 1;
       this.ensure(operation);
     } catch (error) {
       URL.revokeObjectURL(url);

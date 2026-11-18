@@ -136,7 +136,9 @@ async function enter(page: Page) {
   await page
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
     .click();
-  await page.getByRole("button", { name: "Hát vui", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/entertainment$/);
   await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
   await expect(page).toHaveURL(/\/karaoke$/);
@@ -258,7 +260,9 @@ test("dashboard → selected child → library → native player → leave stops
     });
   });
   await page.goto("/dashboard");
-  await page.getByRole("button", { name: "Hát vui", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(
     page.getByRole("region", { name: "Chọn hồ sơ trẻ" }),
@@ -266,7 +270,9 @@ test("dashboard → selected child → library → native player → leave stops
   await page
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
     .click();
-  await page.getByRole("button", { name: "Hát vui", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
+    .click();
   await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
   await expect(
     page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),

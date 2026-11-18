@@ -345,7 +345,7 @@ function ProgressReportContent({
               thiếu không được tính thành đúng hoặc sai.
             </StatusMessage>
           ) : null}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="report-metrics grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {mapReportMetrics(report).map((metric) => (
               <MetricCard key={metric.id} metric={metric} />
             ))}
