@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_parent_id, get_db
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.schemas.book_content_quality import (
+    BookQualityBookDecisionRead,
+    BookQualityBookDecisionRequest,
     BookContentReportCreate,
     BookContentReportDetail,
     BookContentReportPage,
@@ -121,13 +123,23 @@ async def update_admin_book_report_status(
 @router.get("/admin/quality/books", response_model=BookQualityBookPage)
 async def list_admin_quality_books(
     search: str | None = Query(default=None, max_length=120),
+    approval_status: Literal[
+        "PROCESSING", "SCAN_FAILED", "PENDING_ADMIN_REVIEW", "READY_FOR_CHILDREN",
+        "APPROVED_BY_ADMIN", "REJECTED_FOR_CHILDREN", "STALE",
+    ] | None = Query(default=None),
+    alert_filter: Literal["CHILD_SAFETY", "COPYRIGHT", "BOTH"] | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).list_books(
-        actor_id, search=search, limit=limit, offset=offset
+        actor_id,
+        search=search,
+        limit=limit,
+        offset=offset,
+        status_filter=approval_status,
+        alert_filter=alert_filter,
     )
 
 
@@ -138,6 +150,19 @@ async def get_admin_quality_book(
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).get_book_detail(actor_id, book_id)
+
+
+@router.post(
+    "/admin/quality/books/{book_id}/decision",
+    response_model=BookQualityBookDecisionRead,
+)
+async def decide_admin_quality_book(
+    book_id: UUID,
+    payload: BookQualityBookDecisionRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).decide_book(actor_id, book_id, payload)
 
 
 @router.post(

@@ -53,6 +53,9 @@ tests/
 # Keep Phase 2 regression sources visible without including generated tests.
 !frontend/tests/
 frontend/tests/*
+!frontend/tests/admin/
+frontend/tests/admin/*
+!frontend/tests/admin/admin-book-approval-dashboard.test.tsx
 !frontend/tests/reading/
 frontend/tests/reading/*
 !frontend/tests/reading/audio-quality.test.ts

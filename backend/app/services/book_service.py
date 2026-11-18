@@ -47,6 +47,16 @@ class BookService:
         return await self.repository.create(Book(**values))
 
     async def list_pages(self, book_id: UUID):
+        if await CatalogRepository(self.repository.db).get(book_id) is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if not await CatalogRepository(self.repository.db).is_eligible(book_id):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                    "message": "Sách chưa hoàn tất OCR và Child Safety cho toàn bộ trang hiện tại.",
+                },
+            )
         return await self.repository.list_pages(book_id)
 
 
@@ -70,8 +80,16 @@ class CatalogService:
         book = await self.repository.get(book_id)
         if book is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        if not await self.repository.is_eligible(book_id):
+        if book.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=409, detail={"code": "CONTENT_INACTIVE"})
+        if not await self.repository.is_eligible(book_id):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                    "message": "Sách chưa hoàn tất OCR và Child Safety cho toàn bộ trang hiện tại.",
+                },
+            )
         return CatalogBookResponse.model_validate(book)
 
     async def previews(self, book_id: UUID):

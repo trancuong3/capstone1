@@ -89,6 +89,9 @@ export interface BrowserApiState {
   } | null;
   draftCreateSourceRevisionId: string | null;
   aiCorrectionText: string | null;
+  workflowRequest: Record<string, unknown> | null;
+  candidateRequest: Record<string, unknown> | null;
+  safetyDecisionRequest: Record<string, unknown> | null;
   draftSaveRequest: Record<string, unknown> | null;
   verifyRequest: Record<string, unknown> | null;
 }
@@ -157,6 +160,9 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     createdBook: null,
     draftCreateSourceRevisionId: null,
     aiCorrectionText: null,
+    workflowRequest: null,
+    candidateRequest: null,
+    safetyDecisionRequest: null,
     draftSaveRequest: null,
     verifyRequest: null,
   };
@@ -202,6 +208,45 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       created_at: timestamp,
       verified_at: verified ? timestamp : null,
       verified_by: verified ? ids.parent : null,
+    };
+  }
+  let latestWorkflow: Record<string, unknown> | null = null;
+  function makeReadyWorkflow() {
+    const proofreadHash = "b".repeat(64);
+    return {
+      workflow_id: "99999999-9999-4999-8999-999999999999",
+      page_id: ids.page,
+      book_id: ids.book,
+      page_revision_id: ids.draftRevision,
+      status: "READY_FOR_ADMIN_REVIEW",
+      stage: "READY_FOR_ADMIN_REVIEW",
+      progress: { completed_chunks: 1, total_chunks: 1 },
+      attempts: 1,
+      error_code: null,
+      original_ocr_hash: "a".repeat(64),
+      admin_input_hash: "a".repeat(64),
+      proofread_text: "Văn bản đã sửa",
+      proofread_output_hash: proofreadHash,
+      corrections: [],
+      uncertain_word_indices: [],
+      proofread_metadata: {},
+      safety_metadata: {},
+      candidate_history: [],
+      safety_history: [],
+      review_history: [],
+      candidate_text: "Văn bản đã sửa",
+      candidate_hash: proofreadHash,
+      candidate_version: 0,
+      safety_input_hash: proofreadHash,
+      hash_match: true,
+      suitability: "SUITABLE",
+      safety_status: "PROVISIONAL",
+      findings: [],
+      provider_events: [],
+      ocr_approved_at: null,
+      final_approved_text_hash: null,
+      created_at: timestamp,
+      updated_at: timestamp,
     };
   }
   const difficultPracticeAttempts: Record<string, unknown>[] = [];
@@ -328,6 +373,64 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       );
     }
     if (
+      request.method() === "POST" &&
+      path === `/books/admin/pages/${ids.page}/ai-workflows`
+    ) {
+      state.workflowRequest = request.postDataJSON() as Record<string, unknown>;
+      if (
+        state.workflowRequest.page_revision_id !== ids.draftRevision ||
+        state.workflowRequest.draft_text !== "Văn bản đã lưu"
+      )
+        return respond(route, { detail: "Invalid workflow snapshot" }, 409);
+      latestWorkflow = makeReadyWorkflow();
+      return respond(route, latestWorkflow, 202);
+    }
+    if (
+      request.method() === "PATCH" &&
+      path ===
+        `/books/admin/pages/${ids.page}/ai-workflows/99999999-9999-4999-8999-999999999999/candidate`
+    ) {
+      state.candidateRequest = request.postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      const candidateText = state.candidateRequest.candidate_text;
+      if (!latestWorkflow || candidateText !== "Văn bản đã sửa")
+        return respond(route, { detail: "Invalid candidate" }, 409);
+      latestWorkflow = {
+        ...latestWorkflow,
+        candidate_text: candidateText,
+        candidate_hash: "c".repeat(64),
+        candidate_version: 1,
+        safety_input_hash: "c".repeat(64),
+        hash_match: true,
+      };
+      return respond(route, latestWorkflow);
+    }
+    if (
+      request.method() === "POST" &&
+      path ===
+        `/books/admin/pages/${ids.page}/ai-workflows/99999999-9999-4999-8999-999999999999/safety-decision`
+    ) {
+      state.safetyDecisionRequest = request.postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      if (
+        !latestWorkflow ||
+        state.safetyDecisionRequest.expected_candidate_hash !==
+          latestWorkflow.candidate_hash
+      )
+        return respond(route, { detail: "Stale candidate hash" }, 409);
+      latestWorkflow = {
+        ...latestWorkflow,
+        safety_status: state.safetyDecisionRequest.confirmed
+          ? "CONFIRMED"
+          : "PROVISIONAL",
+      };
+      return respond(route, latestWorkflow);
+    }
+    if (
       request.method() === "PUT" &&
       path ===
         `/books/admin/pages/${ids.page}/revisions/${ids.draftRevision}/draft`
@@ -349,6 +452,15 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         return respond(route, { detail: "Invalid draft revision" }, 409);
       return respond(route, draftDetail());
     }
+    const latestWorkflowPath = `/books/admin/pages/${ids.page}/revisions/${ids.draftRevision}/ai-workflows/latest`;
+    if (request.method() === "GET" && path === latestWorkflowPath)
+      return respond(route, latestWorkflow);
+    if (
+      request.method() === "GET" &&
+      path ===
+        `/books/admin/pages/${ids.page}/revisions/${ids.revision}/ai-workflows/latest`
+    )
+      return respond(route, null);
     // The AI progress card is a separate feature with its own tests; here it
     // only needs to settle quietly ("not enough data" -> no AI call is made).
     const assessmentChild =

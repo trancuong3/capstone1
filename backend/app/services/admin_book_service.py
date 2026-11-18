@@ -100,6 +100,17 @@ class AdminBookService:
                             "message": "Hãy sửa tên sách, tiêu đề và khoảng lớp hợp lệ trước khi kích hoạt sách.",
                         },
                     )
+                if not await self.repository.is_ready_for_children(book_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                            "message": (
+                                "Sách chưa thể vào thư viện trẻ em. Tất cả trang phải có OCR VERIFIED "
+                                "và Child Safety đã xác nhận trên đúng nội dung hiện tại."
+                            ),
+                        },
+                    )
 
             updated = await self.repository.set_lifecycle(book, status)
             return AdminBookMetadataResponse.model_validate(updated)

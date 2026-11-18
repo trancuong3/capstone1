@@ -10,6 +10,16 @@ const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
 // Only deliberately authored backend details are shown to users. Unknown server
 // messages may contain SQL, tokens, file paths, or other private diagnostic data.
 const safeBackendMessages: Record<string, string> = {
+  "Copyright scanner is not configured. Admin must confirm rights before approving this book.":
+    "Chưa có Copyright Detection tự động. Hãy xác nhận quyền sử dụng trước khi phê duyệt.",
+  "Book approval requires current OCR, Proofreading and Child Safety results on every active page.":
+    "Mỗi trang đang hoạt động cần có OCR, Proofreading và Child Safety hợp lệ trước khi duyệt sách.",
+  "High severity or NOT_RECOMMENDED content is blocked by the current child access policy.":
+    "Sách có cảnh báo HIGH hoặc NOT_RECOMMENDED đang bị chính sách trẻ em chặn.",
+  "A page Safety result is stale or incomplete.":
+    "Có trang chưa có kết quả Safety hiện hành. Hãy tải lại đánh giá và quét lại trang đó.",
+  "A category is required for a false-positive decision.":
+    "Hãy nhập category trước khi ghi nhận false positive.",
   ...readingManagementMessages,
   INSUFFICIENT_CONTENT:
     "Cuốn sách này chưa có đủ câu đã xác minh cho lượt chơi. Bé có thể chọn sách hoặc độ khó khác nhé.",

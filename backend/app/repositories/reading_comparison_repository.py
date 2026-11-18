@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reading_comparison_report import ReadingComparisonReport
-from app.models import ReadingSession
+from app.models import Book, ReadingSession
+from app.repositories.book_repository import CatalogRepository
 
 
 class ReadingComparisonRepository:
@@ -17,7 +18,12 @@ class ReadingComparisonRepository:
 
     async def lock_session(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
-            select(ReadingSession).where(ReadingSession.Id == session_id)
+            select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
+            .where(
+                ReadingSession.Id == session_id,
+                CatalogRepository.eligible_book(),
+            )
             .with_for_update().execution_options(populate_existing=True)
         )
 
