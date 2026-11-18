@@ -100,9 +100,7 @@ describe("per-session reading report page", () => {
 
     render(<ReadingReportPage />);
 
-    expect(
-      await screen.findByText(/chưa có báo cáo đối chiếu nào được lưu/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Buổi đọc đã được lưu/)).toBeInTheDocument();
     expect(
       screen.queryByText("Không thể tải báo cáo đọc."),
     ).not.toBeInTheDocument();
@@ -130,9 +128,7 @@ describe("per-session reading report page", () => {
     expect(
       await screen.findByText("Không thể tải báo cáo đọc."),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/chưa có báo cáo đối chiếu nào được lưu/i),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Buổi đọc đã được lưu/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Thử tải lại" }));
 

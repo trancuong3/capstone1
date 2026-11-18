@@ -1,18 +1,17 @@
 # Graph Report - capstone1  (2026-11-18)
 
 ## Corpus Check
-- 1616 files · ~1,413,625 words
+- 1616 files · ~1,414,140 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 3325 file(s) not represented in the graph (top: (none) 3096, .xsd 117, .ttf 54)
-- WARNING: 3325 of 5074 files seen (66%) have no supported extractor and are missing from this graph entirely. It may look complete while representing only part of the codebase.
+- Unclassified: 266 file(s) not represented in the graph (top: .xsd 117, .ttf 54, .csv 43)
 
 ## Summary
-- 17368 nodes · 37463 edges · 1029 communities (696 shown, 333 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 2108 edges (avg confidence: 0.89)
+- 17357 nodes · 37646 edges · 1013 communities (698 shown, 315 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 2225 edges (avg confidence: 0.9)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a63ff32e`
+- Built from commit: `6a4d1436`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,13 +24,13 @@
 - session-catchup.py
 - classify_page
 - False Friends: web idioms → native
-- docx/scripts/office/helpers/pptx_chart.py
+- docx/scripts/office/helpers/__init__.py
 - vitest
 - ocr_engine.py
-- singing-score.ts
+- @playwright/test
 - SentenceShooterScreen
-- comparison-service.ts
-- reading.ts
+- reading_reminder_worker.py
+- reading-screen.tsx
 - ReadingManagementScreen
 - numpy
 - routes/system.py
@@ -42,7 +41,7 @@
 - posixpath
 - admin-ocr-review-screen.tsx
 - routes/profile.py
-- parent-profile-screen.tsx
+- ServiceError
 - pathlib
 - log_diagnostic
 - UUID
@@ -52,7 +51,7 @@
 - reading_management_service.py
 - document_rasterizer_service.py
 - AdminParentService
-- real-data-fixture.ts
+- karaoke-fixtures.ts
 - models/__init__.py
 - BaseSchemaValidator
 - ai.py
@@ -67,7 +66,7 @@
 - env
 - routes/voice_studio.py
 - ReadingReminderWorkerTests
-- tempfile
+- sync_tailwind_docs.py
 - ReadingSessionScreen
 - DifficultWordsRepository
 - test_support_feedback.py
@@ -77,7 +76,7 @@
 - MetadataQualityRepository
 - ._admin
 - FINAL_ACCEPTANCE.md
-- extract_form_field_info.py
+- test_vietocr_v2.py
 - AdminOcrService
 - book-content-quality.ts
 - VireadOcrTrainingService
@@ -91,7 +90,7 @@
 - ReadingComparisonRepository
 - difficult_words_service.py
 - env
-- KaraokeService
+- schemas/karaoke.py
 - ReadingManagementService
 - package.json
 - GCSJobStateStore
@@ -99,12 +98,12 @@
 - FakeSentenceShooterRepository
 - ocr_calibration.py
 - run
-- picture-description-service.ts
+- picture-description-screen.tsx
 - steps
 - HistoryService
 - routes/karaoke.py
 - admin-page-uploader.tsx
-- WindowMetrics
+- get
 - recalc.py
 - routes/reading_management.py
 - BookContentQualityRepository
@@ -116,21 +115,23 @@
 - Best practices
 - fastapi/SKILL.md
 - reading-voice-settings.tsx
-- clean_text
+- add_slide.py
 - test_viread_training_worker_claim.py
 - benchmark.py
+- ElevenLabsStudioProvider
 - service.py
-- supabase/auth-service.ts
+- zod
 - steps
 - UUID
-- difficult-word-practice-panel.tsx
+- tts-playback.ts
 - xlsx/scripts/office/helpers/pptx_chart.py
+- KaraokeRepository
 - schemas/profile.py
 - PDF Processing Advanced Reference
 - slide_search_core.py
 - FakeRepository
-- get
-- test_vietocr_v2.py
+- schemas/book.py
+- contracts.py
 - WebGPU & Three.js for Expo
 - Kế hoạch triển khai Hát vui — Karaoke cho trẻ
 - Tailwind CSS Utility Reference
@@ -147,10 +148,10 @@
 - sever.py
 - ParentBookContentQualityPostgresTests
 - SentenceShooterServiceTests
-- avatar_service.py
+- viread_ocr_training_service.py
 - StorageUploadFailure
 - Phụ lục: Tiến bộ của bé, đánh giá, chấm điểm và nhận xét bằng AI
-- tts-playback.ts
+- TtsPlayback
 - server.cjs
 - TailwindConfigGenerator
 - text_alignment.py
@@ -164,12 +165,12 @@
 - inject-plan.py
 - picture_description_ai.py
 - CompareReadingRequest
-- viread_ocr_outbox_worker.py
-- sentence_shooter_service.py
+- speech-service.ts
+- child-progress-assessment.tsx
 - routes/book_content_quality.py
 - ._make_strict_stateful_service
-- schemas/system.py
-- book_quality_ollama.py
+- routes/system.py
+- createBrowserSupabaseClient
 - Hát vui — triển khai và quản trị karaoke
 - 3. Heal
 - AdminOcrWordInput
@@ -188,8 +189,8 @@
 - color
 - MixedPages
 - Expo Networking
-- Báo cáo chức năng: AI Tutor sinh câu hỏi sau khi bé đọc xong bài
-- _make_pdf_bytes
+- tutor-question-service.ts
+- train.py
 - Next.js Testing Patterns
 - Báo cáo nghiệm thu frontend ReadAlong Vision
 - Task 1 — Lịch sử đọc: kế hoạch triển khai
@@ -202,17 +203,17 @@
 - BrowserTranscriptCollector
 - pptx/scripts/office/helpers/pptx_chart.py
 - Icons (SF Symbols)
-- classify_word
+- .saved_report
 - Skill Creator
 - make_client
 - ViRead Backend Deployment: Render + Supabase Transaction Pooler
-- dev-fixed-port.mjs
+- VoiceProviderError
 - ReadAlong Vision — Frontend
 - Phase 6 — Kiểm tra và bàn giao phạm vi dữ liệu thật
 - requirements.ps1
 - extract_verified_sentences
 - KaraokeStorage
-- _build_context_phrase
+- difficult_words_service.py
 - preview.py
 - is_file
 - Changelog
@@ -225,30 +226,30 @@
 - Rules
 - ReadAlong Vision
 - Test API
-- log_diagnostic
-- GroqOcrProvider
+- re
+- KaraokeService
 - spacing
 - resolve_plan_dir
 - set-active-plan.sh
-- realtime-alignment.ts
+- test_book_content_quality_persistence.py
 - server.ts
 - schemas/reading.py
 - Priority Completion Status
 - book_quality_worker.py
-- KaraokeEditorScreen
-- GeminiPictureDescriptionAI
+- viread_colab_enterprise.py
+- _verified_snapshot
 - 2. Bảng đối chiếu 46 Route (`page.tsx`) ↔ Figma
 - InMemoryPracticeRepo
 - Task 1 — Báo cáo kiểm chứng Lịch sử đọc
-- _reconcile_punctuation
-- BaseSchemaValidator
+- KaraokeServiceTests
+- PPTXSchemaValidator
 - Đóng góp cho ReadAlong Vision
 - Triển khai AI OCR đa nhà cung cấp
 - Hướng dẫn train VietOCR V2 miễn phí bằng Colab Free
 - Performance & Parallelization
 - expo-dom/SKILL.md
 - Báo cáo Phase 5 — Dọn runtime mock trong phạm vi đã chuyển dữ liệu
-- KaraokeStage
+- RevisionRequest
 - 20261019153000_reading_management.sql
 - package_skill.py
 - Storage Management
@@ -258,7 +259,7 @@
 - Task 2 — Tiến bộ đọc: bàn giao Phase 1–5
 - Expect API
 - Code Coverage
-- ocr_color_benchmark.py
+- unicodedata
 - Social login setup: Google and Facebook
 - Phần B — Smoke test và tự động vận hành
 - VietOCR V2: two independent datasets, free interactive Colab or paid Enterprise
@@ -272,18 +273,19 @@
 - ConcurrencyLimitedAsyncSession
 - Django to FastAPI Migration Guide
 - playwright-cli/SKILL.md
+- SamplePictureSpec
 - AdminOcrAuthorizationTests
-- analyze_karaoke_demo.mjs
+- voice-studio-service.ts
 - ParentReadHttpTests
 - Supabase
 - Vi Utilities
-- ViReadPageMatcher
+- MemoryStorage
 - Data and job readiness
 - Describe API
 - .prettierrc.json
 - Book
 - AdminHttpTests
-- picture_description_service.py
+- DOCXSchemaValidator
 - Navigation
 - Bắt đầu nhanh
 - Debugging and Managing Flaky Tests
@@ -313,7 +315,7 @@
 - CatalogHttpTests
 - Test Environments
 - Type Testing
-- AdminSystemService
+- flow2_register.py
 - Commands
 - 1. Chi tiết nguyên nhân & cách khắc phục từng nhóm lỗi (1 → 5)
 - Differential Security Review
@@ -335,13 +337,13 @@
 - Patterns
 - Projects
 - Concurrency & Parallelism
-- thumbnail.py
+- flow2_prepare.py
 - Form Sheets in Expo Router
 - Search
 - Toolbars and headers
 - Running Custom Playwright Code
 - Advanced Patterns
-- PPTXSchemaValidator
+- AdminBookContentQualityScreen
 - Common Vulnerability Patterns
 - Apple Zoom Transitions
 - Dependency Injection
@@ -397,8 +399,8 @@
 - 2. Exact Commands (Windows PowerShell in `F:\c1\capstone1`)
 - Benchmarking (v5)
 - Tailwind CSS Responsive Design
-- BM25
-- dependencies
+- ROOT CAUSE — Hệ thống luyện từ khó & đọc lại từ ngắn tiếng Việt ("có")
+- app/layout.tsx
 - interface
 - Differential Review Methodology
 - Storage
@@ -416,7 +418,7 @@
 - Use Native Navigators for Navigation
 - CI/CD Integration
 - RealOcrIntegration
-- TestStorage
+- test_karaoke_postgres_integration.py
 - interface
 - interface
 - Native Slop: Named Anti-Pattern Tells
@@ -426,7 +428,7 @@
 - interface
 - Figma design to code
 - Ponytail
-- RealOcrIntegration
+- 8. Vòng 2: giảm vàng sai, dấu câu và hình học (2026-11-10)
 - routes/tutor_question.py
 - Web Interface Guidelines
 - Electron Testing
@@ -589,6 +591,9 @@
 - ui-scrollview-content-inset.md
 - ui-styling.md
 - GENERATION.md
+- word_timings
+- ParentProfileDTO
+- admin-metadata-quality-service.ts
 - .test_owned_child_returns_scalar_projection_not_expirable_orm_entity
 - html-token-validator.py
 - Component Specifications
@@ -596,10 +601,11 @@
 - Browser Extension Testing
 - scripts
 - 8. Advanced Patterns
-- useKaraokePlayer
+- .test_verifies_checkpoint_shards_without_buffering_and_persists_candidate
 - Admin Books OCR — triển khai local và Supabase
 - Internationalization (i18n) Testing
 - shadcn/ui Accessibility Patterns
+- .test_locked_test_route_selects_and_uses_locked_dataset_fields
 - .assess
 - chunk_ocr_text
 - DatabaseConcurrencyLimiter
@@ -615,14 +621,16 @@
 - Accessibility Testing
 - Process
 - RedliningValidator
-- FakeBlob
+- resolvePostFinishUiState
 - Path Operations and Routing
 - Pydantic
 - Responses
 - gray
+- Recognition
 - Node/TypeScript MCP Server Implementation Guide
 - iFrame Testing
 - Service Worker Testing
+- .validate_slides
 - Fixtures & Hooks
 - Projects & Dependencies
 - Test Reports & Artifacts
@@ -652,7 +660,7 @@
 - Frontend Accessibility Patterns
 - Python MCP Server Implementation Guide
 - inject-plan.sh
-- OCR color benchmark (measured)
+- .list_voices
 - Test Suite Structure
 - File Upload & Download Testing
 - Patterns
@@ -663,8 +671,8 @@
 - Locator Strategies
 - Browser Console & JavaScript Error Handling
 - Advanced v4 Patterns
-- benchmark_local_ocr.py
-- AdminVireadTrainingScreen
+- math
+- .synthesize_timed
 - generate-slide.py
 - BaseSchemaValidator
 - ._run
@@ -673,12 +681,12 @@
 - Test Data Factories & Generators
 - Vue and Nuxt Testing
 - Performance Testing & Web Vitals
-- DOCXSchemaValidator
+- BaseSchemaValidator
 - zod/AGENTS.md
 - Visual Companion Guide
 - fetch-background.py
 - fontSize
-- analyze_alignment
+- make_service
 - Third-Party Service Mocking
 - CI: CircleCI, Azure DevOps, and Jenkins
 - Patterns
@@ -689,7 +697,7 @@
 - .plan_view
 - 🚀 High-Level Workflow
 - Non-fillable fields
-- DocumentRasterizerTests
+- PersistenceAndCorrection
 - input
 - ViRead Vietnamese OCR Workflow
 - Multi-User & Collaboration Testing
@@ -702,18 +710,17 @@
 - PostgreSQL table design: details
 - react-hook-form/AGENTS.md
 - UI/UX Pro Max - Design Intelligence
-- pretool_cache
+- _StreamingResponse
 - Color Semantics
 - Reference: Manus Context Engineering Principles
 - Planning with Files
 - Mocking Strategy: Real vs Mock Services
 - startServer
-- admin-upload.ts
+- .test_releases_job_row_lock_before_storage_verification
 - Page Object Model (POM)
 - Code Review Reception
 - Grader Agent
 - Testing CLAUDE.md Skills Documentation
-- DatabaseConcurrencyLimiterTests
 - MixedPageScenarios
 - Advanced Patterns
 - auth-implementation-patterns — detailed patterns and worked examples
@@ -743,7 +750,7 @@
 - Task Plan: [Brief Description]
 - Organizing Reusable Test Code
 - Patterns
-- tutor_questions/config.py
+- SpeechService
 - Token Architecture
 - card
 - mcp-builder/SKILL.md
@@ -765,7 +772,7 @@
 - XSS & CSRF Prevention
 - UV Package Manager — Advanced Reference
 - Writing Plans
-- RealOcrAndEndToEndDocumentScenarios
+- System Updates & Improvements Report (Branch: `tu`)
 - Brainstorming
 - embed-tokens.cjs
 - Next.js App Router Patterns
@@ -773,13 +780,13 @@
 - Findings & Decisions
 - BM25
 - zod-4/SKILL.md
-- extract_text_and_boxes
+- session_attached
 - validate_chunk_result
 - .make_service
 - Component Tokens
 - generate-tokens.cjs
 - duration
-- ViReadPageMatcher
+- 3. Flows by request type
 - E2E Testing Patterns
 - code-reviewer.md
 - attest-plan.sh
@@ -821,7 +828,6 @@
 - Security Headers
 - Web Application Testing
 - XLSX creation, editing, and analysis
-- Phase 3 — Lịch sử đọc, báo cáo và từ khó của Parent
 - UI/UX CHANGES — Thiết kế lại `/reports/difficult-words` & đồng bộ Đỏ → Vàng → Xanh
 - stop-server.sh
 - DOCX creation, editing, and analysis
@@ -846,10 +852,9 @@
 - SQLAlchemy & Alembic Expert Best Practices
 - The Task Loop
 - ViRead Architecture & Fast File Routing
-- FamilyReadingDesk
 - PERFORMANCE RESULTS — Số liệu cấu hình thời gian thu âm & hiệu năng đo được
 - SentenceShooterLatencyBundleTests
-- reading-screen.tsx
+- word-practice-engine.ts
 - maybeOpenBrowser
 - DATABASE CHANGES — Schema Migration & Dual-Store `WORD_RETRY` Persistence
 - re
@@ -862,13 +867,14 @@
 - Anti-Patterns
 - Testing All Skill Types
 - RED-GREEN-REFACTOR for Skills
-- extract_form_structure.py
+- OwnershipRepository
 - 13. File thay đổi trong đợt nghiệm thu
 - Zod
-- xlsx/scripts/office/helpers/pptx_slide.py
+- Fresh Figma inspection and dialog correction — 2026-11-17
+- EmptySpeechRecognition
 - skill-hook.sh
 - Security Boundary
-- speech-player.test.tsx
+- Bail
 - Comparison with Other Tools
 - Performance Optimization
 - Core Concepts
@@ -882,7 +888,7 @@
 - Skill Types
 - RouteTests
 - start-server.sh
-- database/config.py
+- get_db
 - emit_unavailable
 - Planning-aware loop tick
 - Best Practices
@@ -959,36 +965,36 @@
 - type-input-vs-output.md
 - type-use-z-infer.md
 - DifficultWordsHttpTests
-- within_root
+- path_is_absolute_ish
 - Nâng cấp karaoke theo từng tiếng — 2026-11-15
-- check_bounding_boxes.py
 - destructive
 - destructive-foreground
 - muted
 - primary-foreground
 - ring
+- ._group_page_sources
 - secondary-foreground
 - white
 - admin-store-provider.tsx
-- _Matcher
+- routes/voice.py
+- ._mark_changes
 - 4. Dữ liệu và vòng đời phiên bản
+- MemoryRepository
 - MigrationVersionTests
 
 ## God Nodes (most connected - your core abstractions)
 1. `Button()` - 161 edges
 2. `react` - 144 edges
-3. `AdminOcrService` - 124 edges
+3. `AdminOcrService` - 141 edges
 4. `StatusMessage()` - 124 edges
 5. `vitest` - 124 edges
 6. `next` - 100 edges
 7. `ReadingSessionScreen()` - 99 edges
 8. `AppServicesProvider()` - 88 edges
 9. `classify_page()` - 88 edges
-10. `get()` - 80 edges
+10. `ButtonLink()` - 80 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Nhóm 5 — Tái xác nhận 3 cơ chế cốt lõi không hồi quy` --references--> `hasShortWordSpeechActivity()`  [INFERRED]
-  docs/antigravity-word-practice-upgrade/BUGFIX_VERIFICATION_REPORT.md → frontend/lib/reading/word-practice-engine.ts
 - `1. Ma trận kết quả Kịch bản A / B / C & Cổng chất lượng` --references--> `ReadingAssessmentMetrics`  [INFERRED]
   docs/antigravity-word-practice-upgrade/E2E_QA_AUDIT_REPORT.md → backend/app/schemas/reading.py
 - `3. Đồng bộ Báo cáo Phiên đọc (`self_corrected_word_ids`)` --references--> `ReadingComparisonReportRead`  [INFERRED]
@@ -997,163 +1003,161 @@
   docs/antigravity-word-practice-upgrade/ROOT_CAUSE.md → backend/app/services/difficult_words_service.py
 - `3. Hiệu năng CPU / Test / Build đo trực tiếp` --references--> `classify_practice_transcript()`  [INFERRED]
   docs/antigravity-word-practice-upgrade/PERFORMANCE_RESULTS.md → backend/app/services/difficult_words_service.py
+- `8. Bảo mật và quyền riêng tư` --references--> `get_current_parent_id()`  [INFERRED]
+  docs/AI_TUTOR_QUESTIONS_REPORT.md → backend/app/api/deps.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (1029 total, 333 thin omitted)
+## Communities (1013 total, 315 thin omitted)
 
 ### Community 0 - "vitest"
-Cohesion: 0.02
-Nodes (191): BookScannerPage(), BookScannerPageProps, firstValue(), metadata, BookDetailPage(), BookDetailPageProps, metadata, BooksPage() (+183 more)
+Cohesion: 0.01
+Nodes (226): Layout(), BookScannerPage(), BookScannerPageProps, firstValue(), metadata, BookDetailPage(), BookDetailPageProps, metadata (+218 more)
 
 ### Community 1 - "lyric-timing-editor.tsx"
-Cohesion: 0.14
-Nodes (35): LyricTimingEditor(), TimingEditorForm, TimingEditorProps, karaokeInputClass, SyllableTimingEditor(), changeUnit(), commit(), keyboard() (+27 more)
+Cohesion: 0.06
+Nodes (62): LyricTimingEditor(), TimingEditorForm, TimingEditorProps, SyllableTimingEditor(), changeUnit(), commit(), keyboard(), mark() (+54 more)
 
 ### Community 2 - "Button"
 Cohesion: 0.02
-Nodes (269): metadata, Page(), ProtectedAdminLayout(), metadata, Page(), metadata, Page(), BookReportsPage() (+261 more)
+Nodes (227): metadata, Page(), metadata, Page(), Page(), metadata, Page(), metadata (+219 more)
 
 ### Community 3 - "os"
 Cohesion: 0.05
-Nodes (15): _auth_provider_status(), get_current_parent_id(), _is_transient_network_error(), _require_training_worker_token(), get_supabase_client(), AdminOcrDraftRequest, AdminBookAuthHttpTests, AdminOcrDraftTextSyncTests (+7 more)
+Nodes (11): _auth_provider_status(), get_current_parent_id(), _is_transient_network_error(), _require_training_worker_token(), AdminOcrDraftRequest, normalize_ocr_bbox(), PreparedLocalOcrCorrection, AdminBookAuthHttpTests (+3 more)
 
 ### Community 4 - "ChildProfileDTO"
 Cohesion: 0.02
-Nodes (133): DifficultWordsPage(), DifficultWordsPageProps, metadata, metadata, ReportsPage(), ReportsPageProps, metadata, SessionsPage() (+125 more)
+Nodes (175): DifficultWordsPage(), DifficultWordsPageProps, metadata, metadata, ReportsPage(), ReportsPageProps, metadata, SessionsPage() (+167 more)
 
 ### Community 5 - "session-catchup.py"
 Cohesion: 0.06
 Nodes (42): _claude_sanitize(), claude_session_cwd(), codex_meta_cwd(), codex_planning_update(), collect_claude_tool_results(), configure_utf8_stdio(), emit_metadata_report(), extract_messages_after() (+34 more)
 
 ### Community 6 - "classify_page"
-Cohesion: 0.05
-Nodes (38): 1. Three-Color Word Evidence Contract (`classify_word_evidence` & `adjudicate_word`), classify_word_evidence(), normalize_word(), build_red_pairs(), classify_page(), completed_crop(), corrupt(), engine_word() (+30 more)
+Cohesion: 0.06
+Nodes (23): classify_page(), classify_word(), engine_word(), _alignment_cases(), ReferenceAlignment, VietnameseTokenRules, api_words(), ClassificationInvariants (+15 more)
 
 ### Community 7 - "False Friends: web idioms → native"
 Cohesion: 0.05
 Nodes (35): Browser & platform APIs, Elements & text, Events & interaction, False Friends: web idioms → native, Navigation & URLs, Networking, React architecture & data (Next.js / SSR apps), Scrolling, keyboard & safe area (+27 more)
 
-### Community 8 - "docx/scripts/office/helpers/pptx_chart.py"
-Cohesion: 0.12
-Nodes (26): part_text(), _canonical_ids(), _check_chart_axis_references(), _check_decimal_settings(), _check_preset_dashes(), _check_series_order(), _check_stacked_label_positions(), _declared_axes() (+18 more)
+### Community 8 - "docx/scripts/office/helpers/__init__.py"
+Cohesion: 0.15
+Nodes (19): main(), folder_entries(), names_another_root(), opc_target(), part_text(), rels_source_part(), rendered_text(), rezip() (+11 more)
 
 ### Community 9 - "vitest"
-Cohesion: 0.01
-Nodes (201): 11. Danh sách file, Rủi ro xung đột khi merge vào `main`, Layout(), metadata, Page(), metadata, Page(), Page() (+193 more)
+Cohesion: 0.02
+Nodes (134): metadata, Page(), AdminBookFormProps, AdminServices, AdminServicesContext, AppServices, 5. Route inventory, 8. Typed mock architecture (+126 more)
 
 ### Community 10 - "ocr_engine.py"
-Cohesion: 0.04
-Nodes (45): _active_viread_model(), align_ocr_tokens(), _attach_tesseract_line_readings(), clean_ocr_punctuation(), _configure_tesseract(), _dewarp_strip_with_safe_border(), _ensure_tesseract_language_data(), _extract_curved_lines_from_items() (+37 more)
+Cohesion: 0.03
+Nodes (49): _active_viread_model(), align_ocr_tokens(), _attach_engine_statuses(), _attach_tesseract_line_readings(), clean_ocr_punctuation(), _configure_tesseract(), _dewarp_strip_with_safe_border(), _ensure_tesseract_language_data() (+41 more)
 
-### Community 11 - "singing-score.ts"
-Cohesion: 0.12
-Nodes (20): accuracyColor(), accuracyLabel(), KaraokeScoreCard(), starCount(), getSpeechRecognition(), KaraokeScoringController, KaraokeScoringState, SpeechRecognitionLike (+12 more)
+### Community 11 - "@playwright/test"
+Cohesion: 0.06
+Nodes (25): installReadingExperience(), readingWords, wav(), historyFixture(), summaries, openScenario(), older, period (+17 more)
 
 ### Community 12 - "SentenceShooterScreen"
 Cohesion: 0.11
 Nodes (15): EntertainmentPage(), firstValue(), SentenceShooterPage(), SentenceShooterPageProps, EntertainmentScreen(), playSound(), SentenceShooterScreen(), animateShot() (+7 more)
 
-### Community 13 - "comparison-service.ts"
-Cohesion: 0.05
-Nodes (66): ReadingReportPage(), handleDeleteReport(), loadReports(), BookPageContent(), BookPageContentProps, BookPageViewer(), BookPageViewerProps, PageSurface() (+58 more)
+### Community 13 - "reading_reminder_worker.py"
+Cohesion: 0.10
+Nodes (15): get_verified_parent_email(), ParentEmailLookupFailed, ParentEmailUnavailable, run_worker(), validate_worker_configuration(), build_reading_reminder_message(), email_delivery_is_configured(), EmailDeliveryNotConfigured (+7 more)
 
-### Community 14 - "reading.ts"
+### Community 14 - "reading-screen.tsx"
 Cohesion: 0.02
-Nodes (113): Nhóm 2 — Xóa toàn bộ 9 ESLint Warnings về **`0 errors, 0 warnings`**, BookPageThumbnailProps, CameraPreview(), CameraPreviewProps, ReadingScreenData, ReadingScreenProps, SessionCompleteProps, eventLabels (+105 more)
+Nodes (164): ReadingReportPage(), handleDeleteReport(), loadReports(), BookPageContent(), BookPageContentProps, BookPageViewer(), BookPageViewerProps, PageSurface() (+156 more)
 
 ### Community 15 - "ReadingManagementScreen"
-Cohesion: 0.04
-Nodes (68): metadata, PageProps, ReadingManagementPage(), BookCardProps, artworkByVariant, ArtworkVariant, BookCoverProps, resolveArtwork() (+60 more)
+Cohesion: 0.05
+Nodes (57): metadata, PageProps, ReadingManagementPage(), dayLabel(), dayNames, goalCycleLabel(), GoalInsights(), isRunningGoal() (+49 more)
 
 ### Community 16 - "numpy"
-Cohesion: 0.07
-Nodes (18): _recognize_uncertain_word_crops(), crop_word_region(), _edit_distance_ratio(), find_split_merge_candidates(), normalize_alignment_token(), _strip_diacritics_for_alignment(), token_alignment_cost(), _deskew() (+10 more)
+Cohesion: 0.03
+Nodes (38): ViReadPageMatcher, crop_word_region(), _edit_distance_ratio(), find_split_merge_candidates(), normalize_alignment_token(), _strip_diacritics_for_alignment(), token_alignment_cost(), _deskew() (+30 more)
 
 ### Community 17 - "routes/system.py"
-Cohesion: 0.11
-Nodes (18): complete_difficult_word_practice(), create_audit_log(), create_consent(), create_report(), _difficult_words_service(), evaluate_difficult_word_direct(), evaluate_difficult_word_practice_audio(), get_admin_audit_logs() (+10 more)
+Cohesion: 0.10
+Nodes (16): complete_difficult_word_practice(), create_audit_log(), create_consent(), create_report(), _difficult_words_service(), evaluate_difficult_word_direct(), evaluate_difficult_word_practice_audio(), get_audit_logs() (+8 more)
 
 ### Community 18 - "karaoke.ts"
-Cohesion: 0.06
-Nodes (44): KaraokeLayout(), KaraokeLayout(), emptyLyrics, issueLabels, metadataFrom(), SongMetadataForm(), Context, KaraokeServicesProvider() (+36 more)
+Cohesion: 0.04
+Nodes (71): KaraokeLayout(), Page(), Page(), Page(), KaraokeLayout(), fingerprint(), KaraokeEditorScreen(), adopt() (+63 more)
 
 ### Community 19 - "prepare_viread_ocr_test_schema.py"
-Cohesion: 0.21
-Nodes (5): _canonical_request(), _signature(), prepare(), _test_database_dsn(), TestDatabaseDsnTests
+Cohesion: 0.29
+Nodes (3): prepare(), _test_database_dsn(), TestDatabaseDsnTests
 
 ### Community 20 - "make_service"
-Cohesion: 0.29
-Nodes (5): ActivePageRenumberingTests, AdminPageRetirementTests, make_page(), make_service(), RetiredPageWriteProtectionTests
+Cohesion: 0.26
+Nodes (6): number(), ActivePageRenumberingTests, AdminPageRetirementTests, make_page(), make_service(), RetiredPageWriteProtectionTests
 
 ### Community 21 - "ReadingContentRepository"
 Cohesion: 0.09
-Nodes (8): ReadingContentRepository, ReadingPageDTO, ReadingSessionPageProgressDTO, SessionSummaryRead, ReadingContentService, fail_after_first_word(), navigate(), ReadingContentRepositoryQueryTests
+Nodes (5): ReadingContentRepository, ReadingSessionPageProgressDTO, ReadingContentService, navigate(), ReadingContentRepositoryQueryTests
 
 ### Community 22 - "posixpath"
-Cohesion: 0.11
-Nodes (29): clean_unused_files(), get_referenced_files(), get_slides_in_sldidlst(), _referenced_by(), RefusedToClean, remove_orphaned_files(), remove_orphaned_rels_files(), remove_orphaned_slides() (+21 more)
+Cohesion: 0.08
+Nodes (36): clean_unused_files(), get_referenced_files(), get_slides_in_sldidlst(), _referenced_by(), RefusedToClean, remove_orphaned_files(), remove_orphaned_rels_files(), remove_orphaned_slides() (+28 more)
 
 ### Community 23 - "admin-ocr-review-screen.tsx"
 Cohesion: 0.04
-Nodes (82): Page(), preparePage(), prepareSourceOcrFallback(), AdminOcrHistoryPanel(), AdminOcrReviewScreen(), applySelectedAiChanges(), correctWithAi(), createEditDraft() (+74 more)
+Nodes (91): Page(), reviewAllPages(), batchControllers, batchListeners, BatchNotice, BatchPageResult, BatchProgress, BatchSession (+83 more)
 
 ### Community 24 - "routes/profile.py"
 Cohesion: 0.08
 Nodes (15): create_admin_parent(), deactivate_admin_parent(), get_admin_parent_detail(), get_admin_parent_directory(), _parent_admin_error_response(), update_admin_parent(), AdminParentRepository, AdminParentAccessDeniedError (+7 more)
 
-### Community 25 - "parent-profile-screen.tsx"
-Cohesion: 0.03
-Nodes (76): ChildProfileCard(), InformationField(), avatarSizes, getAvatarInitial(), ProfileAvatar(), ProfileAvatarProps, ProfileAvatarSize, resolveDisplayName() (+68 more)
+### Community 25 - "ServiceError"
+Cohesion: 0.12
+Nodes (21): createHeaders(), createHttpError(), ErrorPayload, extractErrorMessage(), mapErrorCode(), parseErrorPayload(), request(), createHeaders() (+13 more)
 
 ### Community 26 - "pathlib"
-Cohesion: 0.09
-Nodes (5): ColabWorker, run_next_job_once(), run_worker(), verify_worker_source_lock(), ColabWorkerTests
+Cohesion: 0.13
+Nodes (6): ColabWorker, run_next_job_once(), run_worker(), verify_worker_source_lock(), sha256_file(), ColabWorkerTests
 
 ### Community 27 - "log_diagnostic"
 Cohesion: 0.07
-Nodes (4): BookPage, AdminOcrRepository, AdminRevisionDetailRead, normalize_text_tokens()
+Nodes (3): AdminOcrRepository, AdminRevisionDetailRead, normalize_text_tokens()
 
 ### Community 28 - "UUID"
-Cohesion: 0.14
-Nodes (7): ChildProfileNotFoundError, ChildProfileRepository, ChildProfileService, delete_child(), get_all_children(), get_child(), update_child()
+Cohesion: 0.09
+Nodes (18): ChildProfileNotFoundError, ChildProfileRepository, ChildProfileService, create_child(), delete_child(), get_all_children(), get_child(), remove_child_avatar() (+10 more)
 
 ### Community 29 - "unicodedata"
-Cohesion: 0.10
-Nodes (17): adjudicate_word(), adjudication_token(), _base_letters(), collect_word_readings(), _mark_count(), replace_token_core(), _alignment_cases(), _engine_cases() (+9 more)
+Cohesion: 0.06
+Nodes (19): adjudicate_word(), adjudication_token(), _base_letters(), collect_word_readings(), _mark_count(), replace_token_core(), _adjudicate_disputed_words(), _engine_cases() (+11 more)
 
 ### Community 30 - "tutor_question_service.py"
 Cohesion: 0.08
-Nodes (14): ComprehensionAnswer, ComprehensionQuestion, TutorQuestionRepository, TutorAnswerRequest, TutorAnswerResultRead, TutorChoiceRead, TutorNextQuestionRead, TutorQuestionRead (+6 more)
+Nodes (10): TutorQuestionRepository, TutorAnswerRequest, TutorAnswerResultRead, TutorChoiceRead, TutorNextQuestionRead, TutorQuestionRead, TutorQuestionSetRead, TutorSourceSpanRead (+2 more)
 
 ### Community 31 - "ProfileRepository"
 Cohesion: 0.08
 Nodes (12): create_profile(), delete_profile(), get_current_profile(), get_profile(), get_profiles(), update_current_contact_phone(), update_profile(), Profile (+4 more)
 
 ### Community 32 - "reading_management_service.py"
-Cohesion: 0.09
-Nodes (17): Cycle, day_start_utc(), goal_cycles(), goal_streak(), has_scheduled_day(), item_phase(), local_date(), local_day_bounds() (+9 more)
+Cohesion: 0.08
+Nodes (17): conflict_detail(), Cycle, day_start_utc(), goal_cycles(), goal_streak(), has_scheduled_day(), item_phase(), local_date() (+9 more)
 
 ### Community 33 - "document_rasterizer_service.py"
-Cohesion: 0.18
-Nodes (16): _detect_format_by_magic(), _flatten_to_rgb(), _normalize_pil_frame(), _rasterize_docx_bytes(), advance_page(), allocate_page(), _rasterize_image_bytes(), _rasterize_pdf_bytes() (+8 more)
+Cohesion: 0.07
+Nodes (31): _detect_format_by_magic(), _find_unicode_font_paths(), _flatten_to_rgb(), _normalize_pil_frame(), _rasterize_docx_bytes(), advance_page(), allocate_page(), _rasterize_image_bytes() (+23 more)
 
 ### Community 34 - "AdminParentService"
 Cohesion: 0.08
-Nodes (9): get_supabase_admin_client(), SupabaseAuthCompensationError, SupabaseAuthConflictError, SupabaseAuthContactProvider, SupabaseAuthProviderError, SupabaseAuthProviderNotConfiguredError, SupabaseAuthRateLimitError, AdminParentService (+1 more)
+Nodes (8): SupabaseAuthCompensationError, SupabaseAuthConflictError, SupabaseAuthContactProvider, SupabaseAuthProviderError, SupabaseAuthProviderNotConfiguredError, SupabaseAuthRateLimitError, AdminParentService, AdminParentServiceTests
 
-### Community 35 - "real-data-fixture.ts"
-Cohesion: 0.05
-Nodes (40): ARTIFACT_DIR, installDifficultWordsE2EFixture(), MutableDifficultWord, wavBuffer(), fixture(), silentWav(), fixture(), wav() (+32 more)
+### Community 35 - "karaoke-fixtures.ts"
+Cohesion: 0.09
+Nodes (19): fixture(), silentWav(), fixture(), wav(), child, setRole(), makeService(), previewDetail() (+11 more)
 
 ### Community 36 - "models/__init__.py"
-Cohesion: 0.14
-Nodes (9): BookQualityReportFinding, PageRevision, PageRevisionWord, FluencyAssessment, ReadingSession, ReadingSessionPage, AuditLog, ConsentRecord (+1 more)
-
-### Community 37 - "BaseSchemaValidator"
-Cohesion: 0.07
-Nodes (8): fatal_slide_errors(), is_schema_verdict(), _shape_id(), stranded_animation_targets(), BaseSchemaValidator, _load_schema(), DOCXSchemaValidator, PPTXSchemaValidator
+Cohesion: 0.12
+Nodes (12): BookPage, PageRevision, PageRevisionWord, ComprehensionAnswer, ComprehensionQuestion, PictureDescriptionAttempt, PictureDescriptionSession, ChildProfile (+4 more)
 
 ### Community 38 - "ai.py"
 Cohesion: 0.13
@@ -1161,127 +1165,123 @@ Nodes (12): response_json_schema(), source_text(), user_prompt(), _decode_json()
 
 ### Community 39 - "ReadingContentServiceTests"
 Cohesion: 0.09
-Nodes (7): ReadingEventCreate, ReadingEventResponse, ReadingSessionCreate, ReadingContentServiceTests, select_page(), payload(), ReadingInputSafetyTests
+Nodes (6): ReadingEventCreate, ReadingSessionCreate, ReadingContentServiceTests, select_page(), payload(), ReadingInputSafetyTests
 
 ### Community 40 - "FakeRepository"
-Cohesion: 0.12
-Nodes (8): FakeRepository, goal(), GoalServiceTests, plan(), PlanServiceTests, read(), run(), vn()
+Cohesion: 0.10
+Nodes (11): ReadingManagementService, FakeRepository, goal(), GoalServiceTests, plan(), PlanServiceTests, read(), reminder() (+3 more)
 
 ### Community 41 - "ElevenLabsVoiceProvider"
-Cohesion: 0.03
-Nodes (31): clear_caches(), ElevenLabsStudioProvider, _text_field(), TimedSpeech, _TimedSpeechCache, TimedWord, voice_from_payload(), word_timings() (+23 more)
+Cohesion: 0.09
+Nodes (3): ElevenLabsVoiceProvider, VoiceProviderUnavailable, 4. Operational Review Health Probes for TTS & STT APIs (Vận hành hệ thống)
 
 ### Community 42 - "schemas/reading_management.py"
-Cohesion: 0.07
-Nodes (25): BookSummaryRead, ChildBookCollectionCreate, ChildBookCollectionRead, DeletedResponse, ReadingGoalCreate, ReadingGoalRead, ReadingGoalTransition, ReadingGoalUpdate (+17 more)
+Cohesion: 0.08
+Nodes (24): BookSummaryRead, ChildBookCollectionCreate, ChildBookCollectionRead, DeletedResponse, ReadingGoalCreate, ReadingGoalRead, ReadingGoalTransition, ReadingGoalUpdate (+16 more)
 
 ### Community 43 - "child_progress/metrics.py"
-Cohesion: 0.14
-Nodes (17): ReadingAssessmentMetrics, analyze_first_pass(), compute_window(), inside(), first_pass_reports(), local_date(), ReportRow, RetryEventRow (+9 more)
+Cohesion: 0.13
+Nodes (19): ReadingAssessmentMetrics, analyze_first_pass(), compute_window(), inside(), first_pass_reports(), local_date(), normalize_word(), ReportRow (+11 more)
 
 ### Community 44 - "AdminBookWriteRequest"
-Cohesion: 0.08
-Nodes (10): AdminBookRepository, AdminBookLifecycleRequest, AdminBookWriteRequest, AdminBookMetadataResponse, AdminBookService, AdminBookRepositoryPersistenceTests, AdminBookSchemaTests, AdminBookServiceTests (+2 more)
+Cohesion: 0.10
+Nodes (8): AdminBookRepository, AdminBookWriteRequest, AdminBookService, AdminBookRepositoryPersistenceTests, AdminBookSchemaTests, AdminBookServiceTests, FakeAdminBookRepository, make_book()
 
 ### Community 45 - "sentence_shooter_service.py"
 Cohesion: 0.11
-Nodes (10): GameAttempt, GameRound, GameSession, _BookProjection, _ChildProjection, _PageProjection, _RevisionProjection, SentenceShooterRepository (+2 more)
+Nodes (11): GameAttempt, GameRound, GameSession, _BookProjection, _ChildProjection, _PageProjection, _RevisionProjection, SentenceShooterRepository (+3 more)
 
 ### Community 46 - "routes/reading.py"
-Cohesion: 0.10
-Nodes (28): compare_reading(), complete_session_page(), create_fluency_assessment(), create_reading_event(), create_session(), delete_reading_report(), _fetch_stored_page_bytes(), finish_session() (+20 more)
+Cohesion: 0.08
+Nodes (34): compare_reading(), complete_session_page(), create_fluency_assessment(), create_reading_event(), create_session(), delete_reading_report(), _fetch_stored_page_bytes(), finish_session() (+26 more)
 
 ### Community 47 - "env"
 Cohesion: 0.04
 Nodes (47): defaults, env, name, runs-on, services, steps, timeout-minutes, run (+39 more)
 
 ### Community 48 - "routes/voice_studio.py"
-Cohesion: 0.08
-Nodes (12): provider_http_exception(), list_voices(), timed_text_to_speech(), text_to_speech(), SpeechToTextResponse, SpeechWord, TimedSpeechRead, TimedSpeechRequest (+4 more)
+Cohesion: 0.13
+Nodes (9): provider_http_exception(), list_voices(), timed_text_to_speech(), is_voice_marked_unavailable(), TimedSpeechRead, TimedSpeechRequest, TimedWordRead, VoiceInfoRead (+1 more)
 
 ### Community 49 - "ReadingReminderWorkerTests"
-Cohesion: 0.08
-Nodes (13): ParentEmailUnavailable, validate_worker_configuration(), build_reading_reminder_message(), email_delivery_is_configured(), EmailDeliveryNotConfigured, send_reading_reminder_email(), local_schedule_to_utc(), claim() (+5 more)
+Cohesion: 0.12
+Nodes (7): local_schedule_to_utc(), claim(), FakeRepository, ReadingReminderWorkerTests, recipient(), sender(), recipient()
 
-### Community 50 - "tempfile"
-Cohesion: 0.08
-Nodes (27): accept_changes(), _setup_libreoffice_macro(), _cut_outside_links(), _draws_the_document(), _ensure_shim(), get_soffice_env(), _needs_shim(), run_soffice() (+19 more)
+### Community 50 - "sync_tailwind_docs.py"
+Cohesion: 0.57
+Nodes (5): clone_repo(), main(), run(), update_repo(), write_source_file()
 
 ### Community 51 - "ReadingSessionScreen"
 Cohesion: 0.08
-Nodes (62): getDurationMinutes(), ReadingSessionScreen(), advanceRetryWord(), applyRealtimeSnapshot(), autoCompletePageAfterFinalWord(), beginRetryWord(), buildRetryCandidates(), buildRetryContextPhrase() (+54 more)
-
-### Community 52 - "DifficultWordsRepository"
-Cohesion: 0.12
-Nodes (3): DifficultWordPracticeAttempt, ReadingEvent, DifficultWordsRepository
+Nodes (66): connectionLabel(), getDurationMinutes(), getRetryCaptureTimeMs(), ReadingSessionScreen(), advanceRetryWord(), applyPreviewSnapshot(), applyRealtimeSnapshot(), autoCompletePageAfterFinalWord() (+58 more)
 
 ### Community 53 - "test_support_feedback.py"
-Cohesion: 0.07
-Nodes (9): submit_support_feedback(), SupportFeedbackResponse, SupportEmailDeliveryError, SupportEmailNotConfiguredError, SupportEmailProvider, get_request_id(), SupportFeedbackRequest, SupportService (+1 more)
+Cohesion: 0.09
+Nodes (8): submit_support_feedback(), SupportFeedbackResponse, SupportEmailDeliveryError, SupportEmailNotConfiguredError, SupportEmailProvider, SupportFeedbackRequest, SupportService, SupportFeedbackTests
 
 ### Community 54 - "core.py"
-Cohesion: 0.06
-Nodes (33): _contains_phrase(), detect_domain(), _domain_keywords(), _exact_match_diagnostic(), _exact_row_identity(), _exact_stack_identifier(), _file_signature(), _get_bm25() (+25 more)
+Cohesion: 0.07
+Nodes (32): _contains_phrase(), detect_domain(), _domain_keywords(), _exact_match_diagnostic(), _exact_row_identity(), _exact_stack_identifier(), _file_signature(), _get_bm25() (+24 more)
 
 ### Community 55 - "Native Tabs"
 Cohesion: 0.06
 Nodes (30): After (Native Tabs), Basic Usage, Before (JS Tabs), Behavior Options, Bottom Accessory (SDK 55+), Common Issues, Conditional Tabs, Custom Web Layout (+22 more)
 
 ### Community 56 - "BookContentQualityService"
-Cohesion: 0.12
-Nodes (17): BookContentReportHistory, BookContentReportCreate, BookContentReportDetail, BookContentReportHistoryRead, BookContentReportPage, BookContentReportRead, BookContentReportStatusUpdate, BookQualityBookDetail (+9 more)
+Cohesion: 0.17
+Nodes (15): BookContentReportDetail, BookContentReportHistoryRead, BookContentReportPage, BookContentReportRead, BookContentReportStatusUpdate, BookQualityBookDetail, BookQualityBookPage, BookQualityBookSummary (+7 more)
 
 ### Community 57 - "MetadataQualityRepository"
 Cohesion: 0.09
 Nodes (9): MetadataQualityRepository, MetadataQualityBookIssue, MetadataQualityResponse, MetadataQualitySummary, MetadataQualityService, FakeMetadataQualityRepository, make_client(), MetadataQualityRepositoryTests (+1 more)
 
 ### Community 58 - "._admin"
-Cohesion: 0.08
-Nodes (18): VireadOcrTrainingRepository, DatasetSampleInput, create_signed_image_url(), upload_object(), _canonical(), _canonicalize_legacy_verified_snapshot(), _deduplicate_verified_samples(), _edit_distance() (+10 more)
+Cohesion: 0.15
+Nodes (7): VireadOcrTrainingRepository, create_signed_image_url(), _canonical(), _sha(), verify_object(), ensure_database_capacity(), ensure_storage_capacity()
 
 ### Community 59 - "FINAL_ACCEPTANCE.md"
 Cohesion: 0.06
 Nodes (35): Box geometry correction — 2026-11-11, Existing data and compatibility, Local validation, Reproduced defect, Resulting behavior, Subsequent user acceptance, Correction, Evidence and cause (+27 more)
 
-### Community 60 - "extract_form_field_info.py"
-Cohesion: 0.16
-Nodes (10): get_field_info(), get_full_annotation_field_id(), make_field_dict(), write_field_info(), fill_pdf_fields(), monkeypatch_pydpf_method(), validation_error_for_field_value(), fill_pdf_form() (+2 more)
+### Community 60 - "test_vietocr_v2.py"
+Cohesion: 0.10
+Nodes (20): evaluate_gate(), GatePolicy, _metrics(), test_t03_vocabulary_fingerprint_is_stable(), test_t18_locked_test_manifest_hash_mismatch_fails_closed(), test_t19_small_locked_test_is_insufficient_evidence(), test_t20_non_regression_limit_blocks_promotion(), test_t21_neutral_paired_result_does_not_promote() (+12 more)
 
 ### Community 61 - "AdminOcrService"
-Cohesion: 0.08
-Nodes (10): normalize_ocr_bbox(), AdminOcrService, AdminImageValidationTests, jpeg_bytes(), AdminOcrConfidenceTests, page(), revision(), word() (+2 more)
+Cohesion: 0.09
+Nodes (9): AdminOcrService, AdminImageValidationTests, jpeg_bytes(), AdminOcrConfidenceTests, page(), revision(), word(), create() (+1 more)
 
 ### Community 62 - "book-content-quality.ts"
-Cohesion: 0.06
-Nodes (48): AdminBookContentQualityScreen(), changeReportStatus(), enqueueBookScan(), openBook(), openReport(), openScan(), retryPage(), updateFinding() (+40 more)
+Cohesion: 0.07
+Nodes (34): BookContentReportDialog(), BookContentReportDialogProps, issueLabels, useBookContentReportService(), AdminBookContentQualityService, BookContentReportService, CreateBookContentReportRequest, BookContentIssueType (+26 more)
 
 ### Community 63 - "VireadOcrTrainingService"
-Cohesion: 0.07
-Nodes (43): benchmark_viread_colab_job(), close_unbenchmarked_viread_candidate(), complete_viread_colab_job_run(), complete_viread_training_run(), create_viread_colab_job_run(), create_viread_training_run(), decide_viread_model(), delete_viread_training_job() (+35 more)
+Cohesion: 0.18
+Nodes (30): benchmark_viread_colab_job(), close_unbenchmarked_viread_candidate(), complete_viread_colab_job_run(), complete_viread_training_run(), create_viread_colab_job_run(), create_viread_training_run(), decide_viread_model(), delete_viread_training_job() (+22 more)
 
 ### Community 64 - "test_admin_ocr_multimodel.py"
-Cohesion: 0.12
-Nodes (10): _load_missing_dotenv_values(), OcrCorrectionConfig, _optional_secret(), _read_bool(), _read_int(), _read_model(), OcrConfigurationError, main() (+2 more)
+Cohesion: 0.10
+Nodes (11): _load_missing_dotenv_values(), OcrCorrectionProvider, OcrCorrectionConfig, _optional_secret(), _read_bool(), _read_int(), _read_model(), OcrConfigurationError (+3 more)
 
 ### Community 65 - "child_progress_service.py"
-Cohesion: 0.09
+Cohesion: 0.11
 Nodes (20): create_progress_assessment(), get_progress_assessment(), _service(), ActionRead, AssessmentRequest, AssessmentTextRead, ChildProgressAssessmentRead, ComprehensionTypeRead (+12 more)
 
 ### Community 66 - "test_ocr_punctuation.py"
-Cohesion: 0.06
-Nodes (22): canonical_punctuation(), compare_punctuation(), _is_outer_punctuation(), punctuation_marks(), punctuation_status(), split_surface_token(), SurfaceToken, align_words() (+14 more)
+Cohesion: 0.08
+Nodes (18): _reconcile_punctuation(), canonical_punctuation(), compare_punctuation(), _is_outer_punctuation(), punctuation_marks(), punctuation_status(), split_surface_token(), SurfaceToken (+10 more)
 
 ### Community 67 - "connections.py"
 Cohesion: 0.05
 Nodes (13): create_connection(), MCPConnection, MCPConnectionHTTP, MCPConnectionSSE, MCPConnectionStdio, agent_loop(), evaluate_single_task(), extract_xml_content() (+5 more)
 
 ### Community 68 - "ReadingManagementRepository"
-Cohesion: 0.10
-Nodes (12): deliver_claimed_occurrences(), get_verified_parent_email(), ParentEmailLookupFailed, process_due_reminders_once(), run_worker(), ChildProfile, ChildBookCollection, ReadingGoal (+4 more)
+Cohesion: 0.11
+Nodes (8): deliver_claimed_occurrences(), process_due_reminders_once(), ChildBookCollection, ReadingGoal, ReadingPlan, ReadingReminder, ReadingReminderOccurrence, ReadingManagementRepository
 
 ### Community 69 - "AdminCatalogService"
-Cohesion: 0.19
-Nodes (5): AdminCatalogTests, book_row(), catalog_repo(), page_row(), revision_row()
+Cohesion: 0.13
+Nodes (6): AdminCatalogService, AdminCatalogTests, book_row(), catalog_repo(), page_row(), revision_row()
 
 ### Community 70 - "Test-Driven Development (TDD)"
 Cohesion: 0.06
@@ -1289,87 +1289,79 @@ Nodes (29): Common Rationalizations, Debugging Integration, Example: Bug Fix, Fi
 
 ### Community 71 - "ReadingComparisonRepository"
 Cohesion: 0.11
-Nodes (8): ReadingComparisonReport, ReadingComparisonRepository, ReadingComparisonReportRead, ReadingSessionReportsRead, ReadingComparisonService, ReadingComparisonPostgresRoundTripTests, ReadingComparisonRepositoryTests, ReadingComparisonRepositoryTests
+Nodes (9): ReadingComparisonReport, ReadingComparisonRepository, ReadingComparisonReportRead, ReadingSessionReportsRead, ReadingComparisonService, ReadingComparisonSelfCorrectedTests, ReadingComparisonPostgresRoundTripTests, ReadingComparisonRepositoryTests (+1 more)
 
 ### Community 72 - "difficult_words_service.py"
-Cohesion: 0.08
-Nodes (28): Transcription, DifficultWordPracticeAttemptRead, DifficultWordPracticeCompleteRequest, DifficultWordPracticeHistoryItemRead, DifficultWordPracticeHistoryRead, DifficultWordPracticeStartRequest, DifficultWordProgressSummaryRead, DifficultWordRead (+20 more)
+Cohesion: 0.13
+Nodes (11): Transcription, DifficultWordPracticeAttemptRead, DifficultWordPracticeCompleteRequest, DifficultWordPracticeHistoryItemRead, DifficultWordPracticeHistoryRead, DifficultWordPracticeStartRequest, DifficultWordsService, normalize_vietnamese_practice_word() (+3 more)
 
 ### Community 73 - "env"
 Cohesion: 0.05
 Nodes (38): run, BASE_SHA, BUILD, FORMAT, LINT, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_URL (+30 more)
 
-### Community 74 - "KaraokeService"
-Cohesion: 0.03
-Nodes (61): get_karaoke_service(), KaraokeSong, KaraokeSongVersion, utcnow(), ConcurrentKaraokeUpdate, KaraokeRepository, SongState, AdminDetail (+53 more)
-
-### Community 75 - "ReadingManagementService"
-Cohesion: 0.14
-Nodes (3): weekdays_overlap(), ReadingManagementService, OwnershipRepository
+### Community 74 - "schemas/karaoke.py"
+Cohesion: 0.07
+Nodes (23): AdminDetail, canonical_lyric_text(), clean_text(), Contract, LyricLine, Lyrics, Metadata, Playback (+15 more)
 
 ### Community 76 - "package.json"
 Cohesion: 0.07
-Nodes (36): devDependencies, eslint@9.39.5, eslint-config-next@16.3.4, jsdom@29.0.0, @playwright/test@1.63.0, prettier@3.9.6, tailwindcss@4.3.3, @tailwindcss/postcss@4.3.3 (+28 more)
+Nodes (38): react-dom@19.3.0, devDependencies, eslint@9.39.5, eslint-config-next@16.3.4, jsdom@29.0.0, @playwright/test@1.63.0, prettier@3.9.6, tailwindcss@4.3.3 (+30 more)
 
 ### Community 77 - "GCSJobStateStore"
-Cohesion: 0.19
-Nodes (6): _gcs_location(), GCSJobStateStore, _safe_name(), _sha256(), ColabStateStoreTests, FakeClient
+Cohesion: 0.10
+Nodes (9): _gcs_location(), GCSJobStateStore, _safe_name(), _sha256(), ColabStateStoreTests, FakeBlob, FakeBucket, FakeClient (+1 more)
 
 ### Community 78 - "ChildProgressAI"
-Cohesion: 0.17
-Nodes (8): ChildProgressAI, ChildProgressConfig, AIProviderTests, handler(), handler(), handler(), gemini_body(), groq_body()
+Cohesion: 0.09
+Nodes (16): AssessmentAIError, ChildProgressAI, ChildProgressConfig, parse_assessment(), _text(), _bool(), _int(), _model() (+8 more)
 
 ### Community 79 - "FakeSentenceShooterRepository"
 Cohesion: 0.08
 Nodes (7): FakeSentenceShooterRepository, make_api_client(), fake_db(), SentenceShooterApiTests, create_session(), request_books(), source_rows()
 
 ### Community 80 - "ocr_calibration.py"
-Cohesion: 0.11
-Nodes (17): build_calibration_artifact(), CalibrationDatasetError, choose_green_threshold(), classification_metrics(), expected_calibration_error(), _finite_number(), fit_platt_scaling(), load_jsonl_dataset() (+9 more)
+Cohesion: 0.12
+Nodes (16): build_calibration_artifact(), CalibrationDatasetError, choose_green_threshold(), classification_metrics(), expected_calibration_error(), _finite_number(), fit_platt_scaling(), load_jsonl_dataset() (+8 more)
 
 ### Community 81 - "run"
-Cohesion: 0.13
-Nodes (9): alignment(), CountingAI, FakeRepository, make_service(), report(), run(), ServiceTests, session() (+1 more)
+Cohesion: 0.11
+Nodes (12): analyze_alignment(), alignment(), AlignmentTests, CountingAI, entry(), FakeRepository, make_service(), report() (+4 more)
 
-### Community 82 - "picture-description-service.ts"
+### Community 82 - "picture-description-screen.tsx"
 Cohesion: 0.03
-Nodes (60): AppServicesContext, AssessmentBody(), ChildProgressAssessmentCard(), ComponentBar(), GRADE_STYLES, ListSection(), PERIODS, ScoreRing() (+52 more)
+Nodes (82): PictureDescriptionPage(), ACCEPTED_TYPES, BrowserSpeechRecognitionCtor, CatalogState, collapseDuplicateSpeech(), collectLiveTranscript(), getSpeechRecognitionCtor(), normalizeSpeechUnit() (+74 more)
 
 ### Community 83 - "steps"
 Cohesion: 0.05
 Nodes (36): run, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_URL, defaults, env, name, runs-on (+28 more)
 
 ### Community 84 - "HistoryService"
-Cohesion: 0.09
-Nodes (15): HistoryService, HistorySessionSummaryRead, SessionDetailRead, SessionHistoryRead, history_repo(), HistoryTests, session_row(), event_row() (+7 more)
+Cohesion: 0.11
+Nodes (8): HistoryService, history_repo(), HistoryTests, session_row(), event_row(), HistoryCompatibilityTests, HistoryHttpContractTests, question_row()
 
 ### Community 85 - "routes/karaoke.py"
-Cohesion: 0.22
-Nodes (14): admin_song(), admin_songs(), create_draft(), create_song(), playback(), preview_draft(), publish_song(), save_draft() (+6 more)
+Cohesion: 0.19
+Nodes (16): admin_song(), admin_songs(), create_draft(), create_song(), get_karaoke_service(), playback(), preview_draft(), publish_song() (+8 more)
 
 ### Community 86 - "admin-page-uploader.tsx"
-Cohesion: 0.16
-Nodes (22): AdminPageUploader(), submit(), AdminPageUploaderProps, classifyUploadFile(), DOCUMENT_EXTENSIONS, fileExtension(), GENERIC_MIMES, STANDARD_IMAGE_EXTENSIONS (+14 more)
+Cohesion: 0.11
+Nodes (31): AdminPageUploader(), submit(), AdminPageUploaderProps, classifyUploadFile(), DOCUMENT_EXTENSIONS, fileExtension(), GENERIC_MIMES, STANDARD_IMAGE_EXTENSIONS (+23 more)
 
-### Community 88 - "WindowMetrics"
-Cohesion: 0.44
-Nodes (3): _pct(), WindowMetrics, _metrics_read()
+### Community 88 - "get"
+Cohesion: 0.16
+Nodes (19): create_admin_book(), create_book(), get_admin_book(), get_admin_catalog(), get_admin_image(), get_admin_metadata_quality(), get_admin_pages(), get_admin_processing() (+11 more)
 
 ### Community 89 - "recalc.py"
-Cohesion: 0.08
-Nodes (51): _cut_outside_links(), _draws_the_document(), _ensure_shim(), get_soffice_env(), run_soffice(), _without_outside_links(), _array_cells(), _attr() (+43 more)
+Cohesion: 0.05
+Nodes (69): _cut_outside_links(), _draws_the_document(), _ensure_shim(), get_soffice_env(), _needs_shim(), run_soffice(), _without_outside_links(), _cut_outside_links() (+61 more)
 
 ### Community 90 - "routes/reading_management.py"
-Cohesion: 0.28
-Nodes (23): acknowledge_occurrence(), add_collection(), build_service(), create_goal(), create_plan(), create_reminder(), delete_reminder(), due_reminders() (+15 more)
-
-### Community 91 - "BookContentQualityRepository"
-Cohesion: 0.11
-Nodes (4): BookContentReport, BookQualityFinding, BookQualityScanRun, BookContentQualityRepository
+Cohesion: 0.29
+Nodes (22): acknowledge_occurrence(), add_collection(), build_service(), create_goal(), create_plan(), create_reminder(), delete_reminder(), due_reminders() (+14 more)
 
 ### Community 92 - "PictureDescriptionService"
-Cohesion: 0.16
-Nodes (5): _load_sample_bytes(), _normalize_mime_type(), PictureDescriptionService, _build(), SamplePictureSpec
+Cohesion: 0.17
+Nodes (15): PictureAttemptRead, PictureBookPageItem, PictureCatalogRead, PictureEvaluateRequest, PictureEvaluateResponse, PictureEvaluationFeedbackRead, PictureGuideRead, PictureSampleItem (+7 more)
 
 ### Community 93 - "docx/scripts/office/validate.py"
 Cohesion: 0.07
@@ -1377,15 +1369,15 @@ Nodes (21): _as_argument(), _count(), _fail(), _has_tracked_changes(), main(), _
 
 ### Community 94 - "validate_data.py"
 Cohesion: 0.10
-Nodes (38): _catalog_date(), _check_app_interface_contract(), _check_catalog_contract(), _check_catalog_summary(), _check_chart_contract(), _check_color_contract(), _check_core_data_contract(), _check_file() (+30 more)
+Nodes (37): _catalog_date(), _check_app_interface_contract(), _check_catalog_contract(), _check_catalog_summary(), _check_chart_contract(), _check_color_contract(), _check_core_data_contract(), _check_file() (+29 more)
 
 ### Community 95 - "pathlib"
-Cohesion: 0.06
-Nodes (21): main(), aggregate_results(), calculate_stats(), generate_benchmark(), generate_markdown(), load_run_results(), main(), generate_html() (+13 more)
+Cohesion: 0.04
+Nodes (41): main(), main(), accept_changes(), _setup_libreoffice_macro(), get_bounding_box_messages(), RectAndField, create_validation_image(), get_field_info() (+33 more)
 
 ### Community 96 - "OcrProviderError"
-Cohesion: 0.20
-Nodes (10): OcrTextChunk, OcrCorrectionProvider, OllamaOcrProvider, chunk_prompt(), response_json_schema(), ChunkCorrectionResult, OcrChunkInput, decode_and_validate_content() (+2 more)
+Cohesion: 0.13
+Nodes (13): OcrTextChunk, OcrProviderError, GeminiOcrProvider, GroqOcrProvider, OllamaOcrProvider, chunk_prompt(), response_json_schema(), ChunkCorrectionResult (+5 more)
 
 ### Community 97 - "Best practices"
 Cohesion: 0.04
@@ -1396,64 +1388,76 @@ Cohesion: 0.33
 Nodes (3): Cloud tasks, FastAPI Cloud, Get started
 
 ### Community 99 - "reading-voice-settings.tsx"
-Cohesion: 0.06
-Nodes (41): formatSpeed(), GENDER_LABELS, LoadState, ReadingVoiceSettings(), ReadingVoiceSettingsProps, SPEED_PRESETS, voiceDetails(), voiceTitle() (+33 more)
+Cohesion: 0.11
+Nodes (25): SERVER_SNAPSHOT, useSpeechPreferences(), clampSpeed(), DEFAULT_PREFERENCES, DEFAULT_SPEED, getSpeechPreferences(), Listener, listeners (+17 more)
+
+### Community 100 - "add_slide.py"
+Cohesion: 0.17
+Nodes (24): add_slide(), _add_slide_title(), add_slide_to_package(), _add_to_content_types(), _add_to_presentation_rels(), _count_slide_in_app_properties(), create_slide_from_layout(), _die() (+16 more)
 
 ### Community 101 - "test_viread_training_worker_claim.py"
-Cohesion: 0.12
-Nodes (11): claim_viread_colab_training_job(), _colab_worker_failure_state(), retry_failed_viread_colab_training_job(), TrainingWorkerClaim, _EmptyMappings, _EmptyResult, _RecordingSession, _RowResult (+3 more)
+Cohesion: 0.11
+Nodes (10): claim_viread_colab_training_job(), _colab_worker_failure_state(), TrainingWorkerClaim, _EmptyMappings, _EmptyResult, _RecordingSession, _RowResult, _Mappings (+2 more)
 
 ### Community 102 - "benchmark.py"
-Cohesion: 0.12
-Nodes (25): main(), _predictor(), _preprocess_v2_candidate_image(), run_locked_benchmark(), aggregate_error(), benchmark_metrics(), edit_distance(), paired_group_bootstrap() (+17 more)
+Cohesion: 0.19
+Nodes (14): _predictor(), _preprocess_v2_candidate_image(), run_locked_benchmark(), aggregate_error(), benchmark_metrics(), edit_distance(), paired_group_bootstrap(), PairedLine (+6 more)
+
+### Community 103 - "ElevenLabsStudioProvider"
+Cohesion: 0.19
+Nodes (7): clear_caches(), ElevenLabsStudioProvider, fake_client(), json_response(), ProviderTests, RouteTests, run()
 
 ### Community 104 - "service.py"
 Cohesion: 0.16
 Nodes (14): _authorize(), _client(), handler(), _json_response(), build_create_request(), canonical_request(), config_from_env(), DispatcherError (+6 more)
 
-### Community 105 - "supabase/auth-service.ts"
-Cohesion: 0.04
-Nodes (77): ForgotPasswordPage(), ForgotPasswordPageProps, metadata, LoginPage(), LoginPageProps, metadata, metadata, RegisterPage() (+69 more)
+### Community 105 - "zod"
+Cohesion: 0.02
+Nodes (179): ProtectedAdminLayout(), ParentAppLayout(), ForgotPasswordPage(), ForgotPasswordPageProps, metadata, LoginPage(), LoginPageProps, metadata (+171 more)
 
 ### Community 106 - "steps"
 Cohesion: 0.06
 Nodes (31): run, NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_URL, defaults, name, runs-on, steps (+23 more)
 
 ### Community 107 - "UUID"
-Cohesion: 0.14
-Nodes (21): AdminOcrAiCorrectionJobRead, AdminOcrAiCorrectRequest, AdminOcrAiCorrectResponse, ai_correct_page_text(), cancel_ai_correct_page_job(), create_admin_book(), create_admin_page_edit_draft(), get_ai_correct_page_job() (+13 more)
+Cohesion: 0.16
+Nodes (20): AdminOcrAiCorrectionJobRead, AdminOcrAiCorrectRequest, AdminOcrAiCorrectResponse, ai_correct_page_text(), cancel_ai_correct_page_job(), create_admin_book(), create_admin_page_edit_draft(), get_ai_correct_page_job() (+12 more)
 
-### Community 108 - "difficult-word-practice-panel.tsx"
-Cohesion: 0.06
-Nodes (35): 2. Thành phần Frontend, ASSESSMENT_LABELS, BrowserSpeechRecognitionEventLike, BrowserSpeechRecognitionLike, CapturedAttemptPayload, createRequestUuid(), DifficultWordPracticePanel(), formatDateTimeVn() (+27 more)
+### Community 108 - "tts-playback.ts"
+Cohesion: 0.11
+Nodes (17): SpeechPlayer, WordTiming, SpeechPreferences, Operation, PartialPlaybackError, PlaybackState, SpeechPlayOptions, WordTimedPlayOptions (+9 more)
 
 ### Community 109 - "xlsx/scripts/office/helpers/pptx_chart.py"
-Cohesion: 0.15
-Nodes (18): folder_entries(), names_another_root(), one_line(), opc_target(), part_text(), rels_source_part(), rezip(), safe_extract() (+10 more)
+Cohesion: 0.09
+Nodes (32): folder_entries(), names_another_root(), opc_target(), part_text(), rels_source_part(), rezip(), safe_extract(), _canonical_ids() (+24 more)
+
+### Community 110 - "KaraokeRepository"
+Cohesion: 0.16
+Nodes (5): KaraokeRepository, DraftRequest, DraftWrite, KaraokePostgresTests, write()
 
 ### Community 111 - "schemas/profile.py"
-Cohesion: 0.12
-Nodes (19): create_child(), _parent_detail_response(), AdminParentCreateRequest, AdminParentDetailChild, AdminParentDetailResponse, AdminParentListItem, AdminParentListResponse, AdminParentSoftDeleteResponse (+11 more)
+Cohesion: 0.13
+Nodes (18): _parent_detail_response(), AdminParentCreateRequest, AdminParentDetailChild, AdminParentDetailResponse, AdminParentListItem, AdminParentListResponse, AdminParentSoftDeleteResponse, AdminParentUpdateRequest (+10 more)
 
 ### Community 112 - "PDF Processing Advanced Reference"
 Cohesion: 0.04
 Nodes (46): 1. For Large PDFs, 2. For Text Extraction, 3. For Image Extraction, 4. For Form Filling, 5. Memory Management, Advanced Command-Line Operations, Advanced Encryption, Advanced Image Conversion (+38 more)
 
 ### Community 113 - "slide_search_core.py"
-Cohesion: 0.11
-Nodes (16): format_context(), format_result(), main(), calculate_pattern_break(), detect_domain(), get_background_config(), get_color_for_emotion(), get_layout_for_goal() (+8 more)
+Cohesion: 0.08
+Nodes (17): format_context(), format_result(), main(), BM25, calculate_pattern_break(), detect_domain(), get_background_config(), get_color_for_emotion() (+9 more)
 
 ### Community 114 - "FakeRepository"
 Cohesion: 0.11
 Nodes (5): FakeRepository, make_service(), RouteTests, run(), ServiceTests
 
-### Community 115 - "get"
-Cohesion: 0.06
-Nodes (45): create_admin_book(), create_book(), get_admin_book(), get_admin_catalog(), get_admin_image(), get_admin_metadata_quality(), get_admin_pages(), get_admin_processing() (+37 more)
+### Community 115 - "schemas/book.py"
+Cohesion: 0.11
+Nodes (26): AdminBookMetadataResponse, AdminCatalogBookDetailResponse, AdminCatalogBookResponse, AdminDocumentPageResultRead, AdminDocumentUploadResponse, AdminOcrWordEvidenceRead, AdminPageImageRead, AdminPageLifecycleRead (+18 more)
 
-### Community 116 - "test_vietocr_v2.py"
-Cohesion: 0.04
-Nodes (72): create_validation_image(), hook_identity(), assemble_shards(), shard_file(), assert_original_vocabulary(), canonical_sha256(), DatasetContractError, DatasetRow (+64 more)
+### Community 116 - "contracts.py"
+Cohesion: 0.12
+Nodes (23): DatasetContractError, DatasetRow, load_jsonl(), normalize_label(), stable_split(), validate_rows(), write_jsonl(), test_manifest_round_trip_keeps_rows_and_file_hash() (+15 more)
 
 ### Community 117 - "WebGPU & Three.js for Expo"
 Cohesion: 0.08
@@ -1472,20 +1476,20 @@ Cohesion: 0.24
 Nodes (12): add_comment(), _append_xml(), _encode_smart_quotes(), _ensure_comment_content_types(), _ensure_comment_relationships(), _find_para_id(), _generate_hex_id(), _get_next_rid() (+4 more)
 
 ### Community 121 - "useSpeechRecorder"
-Cohesion: 0.07
-Nodes (21): 1. Từ ngắn tiếng Việt (`"có"`) bị chờ quá lâu (3.5s–12s) hoặc báo `AUDIO_TOO_SHORT` / `NO_CLEAR_AUDIO`, Cách đã sửa, Nguyên nhân tại `AudioQualityMonitor` ([audio-quality.ts](file:///F:/c1/capstone1/frontend/lib/reading/audio-quality.ts)), SKILLS USED — Các Agent Skills đã áp dụng trong phiên làm việc, microphoneConstraints(), preferredMimeTypes, SpeechRecorder, SpeechRecorderStartOptions (+13 more)
+Cohesion: 0.08
+Nodes (17): SKILLS USED — Các Agent Skills đã áp dụng trong phiên làm việc, microphoneConstraints(), preferredMimeTypes, SpeechRecorder, SpeechRecorderStartOptions, stopTracks(), AUDIO_QUALITY_PROFILES, AudioQualityMode (+9 more)
 
 ### Community 122 - "SourcePage"
-Cohesion: 0.12
-Nodes (13): generate_rule_based(), _is_target(), _sentences(), _stable_random(), find_subsequence(), normalize_text(), tokenize(), DraftQuestion (+5 more)
+Cohesion: 0.11
+Nodes (16): generate_rule_based(), _is_target(), _sentences(), _stable_random(), find_subsequence(), normalize_text(), tokenize(), DraftQuestion (+8 more)
 
 ### Community 123 - "ViRead Figma alignment audit"
-Cohesion: 0.12
-Nodes (16): Corrective screen-by-screen pass after the latest Figma review, Direction, Figma material reviewed, Final results for the latest working tree, Findings against the starting implementation, Follow-up from user screenshot review, Fresh Figma inspection and dialog correction — 2026-11-17, Implemented Figma alignment (+8 more)
+Cohesion: 0.17
+Nodes (12): Corrective screen-by-screen pass after the latest Figma review, Direction, Figma material reviewed, Findings against the starting implementation, Follow-up from user screenshot review, Implemented Figma alignment, Route inventory at the starting point, Safe starting point (+4 more)
 
 ### Community 124 - "design_system.py"
-Cohesion: 0.05
-Nodes (29): ansi_ljust(), build_design_tokens(), _css_font_family(), _detect_page_type(), _flatten_tokens(), format_ascii_box(), add_wrapped(), wrap_text() (+21 more)
+Cohesion: 0.06
+Nodes (26): ansi_ljust(), build_design_tokens(), _css_font_family(), _detect_page_type(), _flatten_tokens(), format_ascii_box(), add_wrapped(), wrap_text() (+18 more)
 
 ### Community 125 - "Karaoke — Kiểm chứng triển khai"
 Cohesion: 0.07
@@ -1496,96 +1500,96 @@ Cohesion: 0.16
 Nodes (5): AdminOcrCorrectionJob, AdminOcrCorrectionJobManager, OcrCorrectionQueueFull, AdminOcrJobTests, operation()
 
 ### Community 127 - "admin_ocr_local.py"
-Cohesion: 0.11
-Nodes (20): _crop_chunk_image(), _decode_chunk_response(), LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector, run_chunks(), _prepare_source_image(), PreparedOcrImage (+12 more)
+Cohesion: 0.07
+Nodes (32): _crop_chunk_image(), _decode_chunk_response(), LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector, run_chunks(), _prepare_source_image(), PreparedOcrImage (+24 more)
 
 ### Community 128 - "AdminCatalogRepository"
-Cohesion: 0.06
-Nodes (7): AdminCatalogRepository, BookRepository, CatalogRepository, CatalogService, AdminCatalogActivePageListTests, book_row(), CatalogTests
+Cohesion: 0.08
+Nodes (6): AdminCatalogRepository, CatalogRepository, CatalogService, AdminCatalogActivePageListTests, book_row(), CatalogTests
 
 ### Community 129 - "ConfigureUbuntuAptTests"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (6): configure(), direct_archives(), probe_release(), select_archive(), ConfigureUbuntuAptTests, probe()
 
 ### Community 130 - "sever.py"
 Cohesion: 0.04
-Nodes (23): probe_database_connection(), warmup_ocr_engines(), database_api_exception_handler(), database_connection_exception_handler(), get_health(), http_exception_diagnostic_handler(), lifespan(), request_diagnostic_middleware() (+15 more)
+Nodes (25): probe_database_connection(), run_worker(), run_active_viread_model_worker(), warmup_ocr_engines(), database_api_exception_handler(), database_connection_exception_handler(), get_health(), http_exception_diagnostic_handler() (+17 more)
 
 ### Community 131 - "ParentBookContentQualityPostgresTests"
-Cohesion: 0.16
-Nodes (6): _exception_candidates(), is_book_report_idempotency_violation(), postgres_integrity_error_metadata(), _safe_value(), ParentBookContentQualityPostgresTests, report_payload()
+Cohesion: 0.18
+Nodes (3): BookContentReportCreate, ParentBookContentQualityPostgresTests, report_payload()
 
 ### Community 132 - "SentenceShooterServiceTests"
-Cohesion: 0.16
-Nodes (4): SentenceShooterSessionCreate, CommitExpiringSentenceShooterRepository, SentenceShooterServiceTests, Id()
+Cohesion: 0.17
+Nodes (3): SentenceShooterSessionCreate, CommitExpiringSentenceShooterRepository, SentenceShooterServiceTests
 
-### Community 133 - "avatar_service.py"
+### Community 133 - "viread_ocr_training_service.py"
 Cohesion: 0.14
-Nodes (12): remove_child_avatar(), remove_current_parent_avatar(), upload_child_avatar(), upload_current_parent_avatar(), AvatarFileValidationError, AvatarResourceNotFoundError, AvatarService, _cleanup_object() (+4 more)
+Nodes (17): _register_candidate(), BenchmarkCreate, CandidateEvaluationRequest, DatasetImport, DatasetSampleInput, ModelDecisionRequest, TrainingRunComplete, TrainingRunCreate (+9 more)
 
 ### Community 134 - "StorageUploadFailure"
-Cohesion: 0.16
-Nodes (7): StorageUploadFailure, AvatarStorageLifecycleTests, clear(), persist(), upload(), image_bytes(), flaky_upload()
+Cohesion: 0.17
+Nodes (7): normalize_avatar_image(), AvatarImageValidationTests, AvatarStorageLifecycleTests, clear(), persist(), upload(), image_bytes()
 
 ### Community 135 - "Phụ lục: Tiến bộ của bé, đánh giá, chấm điểm và nhận xét bằng AI"
 Cohesion: 0.07
 Nodes (26): A. Vấn đề trước đây, A. Vấn đề trước đây, B. Giải pháp, B. Nguyên tắc thiết kế, C. Chọn giọng và tốc độ, C. Kiến trúc, Cache, Các điểm chính (+18 more)
 
-### Community 136 - "tts-playback.ts"
-Cohesion: 0.07
-Nodes (30): withRequestDeadline(), accessToken(), failure(), request(), TimedSpeechOptions, timedSpeechSchema, voiceListSchema, voiceSchema (+22 more)
+### Community 136 - "TtsPlayback"
+Cohesion: 0.18
+Nodes (6): ActiveMedia, isAbort(), stopped(), TtsPlayback, unavailable(), splitSpeechText()
 
 ### Community 137 - "server.cjs"
 Cohesion: 0.07
 Nodes (38): bootstrapPage(), brandMarkup(), clients, CONTENT_DIR, crypto, debounceTimers, escapeHtmlText(), frameTemplate (+30 more)
 
 ### Community 139 - "text_alignment.py"
-Cohesion: 0.21
-Nodes (10): 1. Key Modules, 3. Targeted Verification, ViRead Speech & Reading Assessment Workflow, align_text(), detect_hesitations(), detect_repeated_words(), normalize_text(), summarize_alignment() (+2 more)
+Cohesion: 0.33
+Nodes (7): align_text(), detect_hesitations(), detect_repeated_words(), normalize_text(), summarize_alignment(), summarize_hesitations(), TextAlignmentTests
 
 ### Community 140 - "TutorQuestionGenerator"
-Cohesion: 0.12
-Nodes (13): TutorQuestionConfig, TutorQuestionGenerator, GenerationResult, gemini_body(), GeneratorTests, handler(), handler(), handler() (+5 more)
+Cohesion: 0.14
+Nodes (10): TutorQuestionConfig, TutorQuestionGenerator, GenerationResult, gemini_body(), GeneratorTests, handler(), handler(), handler() (+2 more)
 
 ### Community 141 - "json"
-Cohesion: 0.06
-Nodes (39): main(), _run(), _active_parent(), _available_ram_bytes(), _benchmark_candidate(), _claim_local_job(), colab_failure_action(), dataset_snapshot_count_matches() (+31 more)
+Cohesion: 0.05
+Nodes (40): main(), _run(), _claim_one(), _finish(), _line_crops(), _process(), _release_claim_on_cancel(), run_worker() (+32 more)
 
 ### Community 142 - "AdminOcrUploadFailureTests"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (6): AdminImageWorkflowTests, AdminOcrUploadFailureTests, ocr_side_effect(), upload_side_effect(), make_page(), ocr_result()
 
 ### Community 143 - "playwright-auth-fixture.ts"
-Cohesion: 0.07
-Nodes (18): createPlaywrightAuthFixtureHeaders(), HeaderReader, PLAYWRIGHT_AUTH_ROLE_HEADER, PLAYWRIGHT_AUTH_TOKEN_HEADER, PlaywrightAuthFixtureEnvironment, tokensMatch(), installReadingExperience(), readingWords (+10 more)
+Cohesion: 0.10
+Nodes (18): createPlaywrightAuthFixtureHeaders(), HeaderReader, PLAYWRIGHT_AUTH_ROLE_HEADER, PLAYWRIGHT_AUTH_TOKEN_HEADER, PlaywrightAuthFixtureEnvironment, readPlaywrightAuthFixture(), tokensMatch(), getRoleHome() (+10 more)
 
 ### Community 144 - "steps"
 Cohesion: 0.08
 Nodes (24): run, defaults, runs-on, steps, jobs, format-feature-files, name, on (+16 more)
 
 ### Community 146 - "merge_runs.py"
-Cohesion: 0.10
-Nodes (33): _can_merge(), _consolidate_text(), _consolidate_text_elements(), _element_text(), _find_elements(), traverse(), _find_runs(), _first_child_run() (+25 more)
+Cohesion: 0.16
+Nodes (24): _can_merge(), _consolidate_text(), _consolidate_text_elements(), _element_text(), _find_elements(), traverse(), _find_runs(), _first_child_run() (+16 more)
 
 ### Community 147 - "inject-plan.py"
-Cohesion: 0.11
-Nodes (10): Bail, _descriptor_final_path(), _identity(), _inside(), normalize_wall_clock(), _normalized_windows_final(), safe_snapshot(), secure_progress_marker() (+2 more)
+Cohesion: 0.15
+Nodes (11): _descriptor_final_path(), hook_identity(), hook_is_main(), _identity(), _inside(), main(), _normalized_windows_final(), parse_args() (+3 more)
 
 ### Community 148 - "picture_description_ai.py"
-Cohesion: 0.18
-Nodes (14): PictureVocabItem, _clean_string_list(), _clean_text(), _clean_vocab_items(), _compute_stars(), _evaluation_schema(), _extract_candidate_text(), get_picture_ai_config() (+6 more)
+Cohesion: 0.12
+Nodes (24): PictureVocabItem, _clean_string_list(), _clean_text(), _clean_vocab_items(), _compute_stars(), _evaluation_schema(), _extract_candidate_text(), GeminiPictureDescriptionAI (+16 more)
 
 ### Community 149 - "CompareReadingRequest"
 Cohesion: 0.21
 Nodes (7): CompareReadingRequest, FinalAssessmentTests, persist(), page_dto(), ReadingComparisonServiceTests, saved_report(), service_with_mocks()
 
-### Community 150 - "viread_ocr_outbox_worker.py"
-Cohesion: 0.11
-Nodes (9): _claim_one(), _finish(), _line_crops(), _process(), _release_claim_on_cancel(), run_worker(), _stable_split(), _wait_for_stop_or_timeout() (+1 more)
+### Community 150 - "speech-service.ts"
+Cohesion: 0.09
+Nodes (17): accessToken(), failure(), speechRequest(), SpeechToTextOptions, SpeechTranscript, TextToSpeechOptions, transcriptionSchema, wordTimestampSchema (+9 more)
 
-### Community 151 - "sentence_shooter_service.py"
-Cohesion: 0.26
-Nodes (12): SentenceShooterAbandonRead, SentenceShooterBookRead, SentenceShooterHintRead, SentenceShooterNextRoundRead, SentenceShooterResultRead, SentenceShooterRoundRead, SentenceShooterRoundToken, SentenceShooterSessionRead (+4 more)
+### Community 151 - "child-progress-assessment.tsx"
+Cohesion: 0.13
+Nodes (21): AppServicesContext, AssessmentBody(), ChildProgressAssessmentCard(), ComponentBar(), GRADE_STYLES, ListSection(), PERIODS, ScoreRing() (+13 more)
 
 ### Community 152 - "routes/book_content_quality.py"
 Cohesion: 0.28
@@ -1595,13 +1599,13 @@ Nodes (14): create_parent_book_report(), enqueue_admin_book_scan(), get_admin_bo
 Cohesion: 0.09
 Nodes (9): active_pages_for_renumber(), delete_page(), fake_revision_detail(), find_page(), find_page_for_upload(), find_revision(), next_active_page_number(), stage_bundle() (+1 more)
 
-### Community 154 - "schemas/system.py"
-Cohesion: 0.15
-Nodes (22): AdminAuditLogRead, AdminAuditPageRead, AdminHealthItemRead, AdminHealthRead, AssessmentCoverage, AuditLogBase, AuditLogCreate, AuditLogResponse (+14 more)
+### Community 154 - "routes/system.py"
+Cohesion: 0.11
+Nodes (30): AdminSystemRepository, AdminSystemService, get_admin_audit_logs(), get_admin_health(), get_owned_progress(), get_owned_progress_periods(), ProgressService, AdminAuditLogRead (+22 more)
 
-### Community 155 - "book_quality_ollama.py"
-Cohesion: 0.15
-Nodes (11): analyse_with_ollama(), _decode_model_response(), _json_schema(), OllamaAnalysisResult, OllamaFindingEvidence, OllamaTextFinding, OllamaTextResponse, _prompt() (+3 more)
+### Community 155 - "createBrowserSupabaseClient"
+Cohesion: 0.13
+Nodes (16): createSupportService(), SupportFeedbackError, SupportService, createIsolatedReauthenticationClient(), createBrowserSupabaseClient(), getApiBaseUrl(), getSupabasePublicConfig(), requireEnvironmentValue() (+8 more)
 
 ### Community 156 - "Hát vui — triển khai và quản trị karaoke"
 Cohesion: 0.09
@@ -1612,7 +1616,7 @@ Cohesion: 0.09
 Nodes (23): 0. How generation works, 1.1 Prerequisite: workspace, 1.2 Prerequisite: seed test, 1.3 Explore the app, 1.4 Write the spec file, 1. Planning, 2.1 Inputs, 2.2 Generate one scenario (+15 more)
 
 ### Community 158 - "AdminOcrWordInput"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (6): AdminOcrProofreadAuditInput, AdminOcrProofreadSuggestionInput, AdminOcrWordInput, AdminOcrSchemaTests, AdminOcrBoundingBoxContractTests, _bbox_word()
 
 ### Community 159 - "Debugging & Troubleshooting"
@@ -1624,11 +1628,11 @@ Cohesion: 0.05
 Nodes (35): CI/CD Integration, Configuration Files, Pattern 10: Property-Based Testing, Pattern 6: Testing Async Code, Pattern 7: Monkeypatch for Testing, Pattern 8: Temporary Files and Directories, Pattern 9: Custom Fixtures and Conftest, Python Testing Patterns — Advanced Reference (+27 more)
 
 ### Community 161 - "frontend/proxy.ts"
-Cohesion: 0.13
-Nodes (20): readPlaywrightAuthFixture(), getProtectedRouteArea(), getProtectedRouteRedirect(), getRoleHome(), matchesRoutePrefix(), parentRoutePrefixes, ProtectedRouteArea, AppIdentity (+12 more)
+Cohesion: 0.17
+Nodes (14): getProtectedRouteArea(), getProtectedRouteRedirect(), matchesRoutePrefix(), parentRoutePrefixes, ProtectedRouteArea, preserveSupabaseAuthResponse(), refreshResponseHeaders, refreshSupabaseAuth() (+6 more)
 
 ### Community 162 - "RealtimeAlignmentEngine"
-Cohesion: 0.19
+Cohesion: 0.21
 Nodes (4): RealtimeAlignmentEngine, tokenizeRealtimeText(), engine(), statuses()
 
 ### Community 163 - "Phase 1 — Nối dữ liệu thật theo mẫu Dashboard"
@@ -1636,8 +1640,8 @@ Cohesion: 0.09
 Nodes (21): 10. Tiến độ triển khai sau yêu cầu hoàn thành các phase, 11. Đối chiếu metadata database thật — gate trước Phase 3–5, 1.1 Luồng frontend phải theo mẫu Dashboard, 1. Mẫu thực tế trên main, 2. Hiện trạng API và nguồn dữ liệu, 4. API đọc — ưu tiên router/schema hiện có, 5.1 Manifest app → component → hook/service của Parent, 5.3 Trình tự sửa ít xung đột cho mỗi domain (+13 more)
 
 ### Community 164 - "PictureDescriptionRepository"
-Cohesion: 0.15
-Nodes (7): PictureDescriptionAttempt, PictureDescriptionSession, AttemptProjection, BookPageCandidateProjection, ChildProjection, PictureDescriptionRepository, SessionProjection
+Cohesion: 0.18
+Nodes (4): AttemptProjection, BookPageCandidateProjection, PictureDescriptionRepository, SessionProjection
 
 ### Community 165 - "ViRead Overnight Development — Handoff Document"
 Cohesion: 0.20
@@ -1648,8 +1652,8 @@ Cohesion: 0.11
 Nodes (14): args, backend(), { chromium, expect: baseExpect }, { createServerClient }, detail(), expect, lyrics, lyricsPath (+6 more)
 
 ### Community 167 - "verify_karaoke_live.mjs"
-Cohesion: 0.11
-Nodes (14): args, bundle, { chromium, expect: baseExpect }, { createServerClient }, evidenceFile, expect, lyrics, metadata (+6 more)
+Cohesion: 0.05
+Nodes (32): @vitejs/plugin-react@6.1.1, child, forwardedArgs, frontendDirectory, hasExplicitPort, nextCli, scriptDirectory, ARTIFACT_DIR (+24 more)
 
 ### Community 168 - "Mocking"
 Cohesion: 0.09
@@ -1660,28 +1664,28 @@ Cohesion: 0.11
 Nodes (18): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, module (+10 more)
 
 ### Community 170 - "public.profiles"
-Cohesion: 0.14
-Nodes (17): on_auth_user_created_readalong, public.handle_new_readalong_user(), public.handle_new_readalong_user(), public.handle_new_readalong_user(), public.viread_ocr_active_model, public.viread_ocr_benchmarks, public.viread_ocr_checkpoint_chunks, public.viread_ocr_dataset_versions (+9 more)
+Cohesion: 0.16
+Nodes (15): on_auth_user_created_readalong, public.handle_new_readalong_user(), public.handle_new_readalong_user(), public.handle_new_readalong_user(), public.viread_ocr_active_model, public.viread_ocr_benchmarks, public.viread_ocr_checkpoint_chunks, public.viread_ocr_dataset_versions (+7 more)
 
 ### Community 171 - "color"
 Cohesion: 0.11
 Nodes (19): $type, $value, background, foreground, muted-foreground, primary, primary-hover, secondary (+11 more)
 
 ### Community 172 - "MixedPages"
-Cohesion: 0.14
+Cohesion: 0.13
 Nodes (4): counts(), build(), MixedPages, spaced()
 
 ### Community 173 - "Expo Networking"
 Cohesion: 0.09
 Nodes (20): Offline Support, Offline Support & Request Cancellation, Request Cancellation, 1. Basic Fetch Usage, 2. React Query (TanStack Query), 3. Error Handling, 4. Authentication, 5. Offline Support (+12 more)
 
-### Community 174 - "Báo cáo chức năng: AI Tutor sinh câu hỏi sau khi bé đọc xong bài"
-Cohesion: 0.11
-Nodes (18): 10. Kiểm thử, 12. Hạn chế và hướng phát triển, 13. Cách chạy và kiểm tra, 1. Mục tiêu và phạm vi, 3. Công nghệ sử dụng, 4.1 Luồng end-to-end, 4.2 Sinh câu hỏi (generator), 4.3 Chấm điểm (+10 more)
+### Community 174 - "tutor-question-service.ts"
+Cohesion: 0.09
+Nodes (21): 11. Danh sách file, 12. Hạn chế và hướng phát triển, 13. Cách chạy và kiểm tra, 1. Mục tiêu và phạm vi, 2. Tổng quan kiến trúc, 3. Công nghệ sử dụng, 5. API, 6. Dữ liệu (+13 more)
 
-### Community 175 - "_make_pdf_bytes"
-Cohesion: 0.27
-Nodes (3): AdminDocumentUploadServiceAndRouteTests, _fake_ocr_result(), _make_pdf_bytes()
+### Community 175 - "train.py"
+Cohesion: 0.16
+Nodes (18): assert_original_vocabulary(), canonical_sha256(), vocabulary_fingerprint(), test_t30_resume_refuses_best_weights_without_the_matching_training_state(), _architecture(), _assert_original_config(), _label_for_locked_vocabulary(), main() (+10 more)
 
 ### Community 176 - "Next.js Testing Patterns"
 Cohesion: 0.05
@@ -1696,28 +1700,28 @@ Cohesion: 0.11
 Nodes (18): 1. Mục tiêu và giới hạn, 3. Kết quả khảo sát database chỉ đọc, 4. Hợp đồng đọc sẽ áp dụng trong Phase 2–4, 5. File dự kiến và ranh giới chống conflict, 6. Các phase tiếp theo và điều kiện hoàn tất, 7. Baseline đã chạy ở Phase 1, 8. Cập nhật triển khai Phase 2–5, Chi tiết tùy chọn (+10 more)
 
 ### Community 179 - "AGENT HANDOVER & ARCHITECTURE GUIDE (Agent.md)"
-Cohesion: 0.15
-Nodes (13): 1. TỔNG QUAN DỰ ÁN (PROJECT OVERVIEW), 2. QUY TẮC BẤT KHẢ XÂM PHẠM (CRITICAL GUARDRAILS & RULES), 4. CẤU TRÚC THƯ MỤC CHÍNH (DIRECTORY STRUCTURE), 5. CÁCH CHẠY VÀ KIỂM THỬ (RUN & TEST INSTRUCTIONS), 6. LỊCH SỬ CÁC THAY ĐỔI GẦN ĐÂY TRÊN NHÁNH `tu`, 7. LỜI KHUYÊN DÀNH CHO AI TIẾP THEO (TIPS & BEST PRACTICES), AGENT HANDOVER & ARCHITECTURE GUIDE (Agent.md), Chạy Test Suite (BẮT BUỘC CHẠY TRƯỚC KHI COMMIT): (+5 more)
+Cohesion: 0.12
+Nodes (16): 1. Luồng OCR Sách của Admin (Admin Book OCR), 1. TỔNG QUAN DỰ ÁN (PROJECT OVERVIEW), 2. Luồng Bé Luyện Đọc (Child Live Reading), 2. QUY TẮC BẤT KHẢ XÂM PHẠM (CRITICAL GUARDRAILS & RULES), 3. CÁC LUỒNG NGHIỆP VỤ CỐT LÕI (CORE DOMAIN WORKFLOWS), 4. CẤU TRÚC THƯ MỤC CHÍNH (DIRECTORY STRUCTURE), 5. CÁCH CHẠY VÀ KIỂM THỬ (RUN & TEST INSTRUCTIONS), 6. LỊCH SỬ CÁC THAY ĐỔI GẦN ĐÂY TRÊN NHÁNH `tu` (+8 more)
 
 ### Community 180 - "OcrOrchestrationError"
-Cohesion: 0.14
-Nodes (4): OcrOrchestrationError, AdminOcrCorrectionApiTests, _make_app(), replace()
+Cohesion: 0.13
+Nodes (5): OcrOrchestrationError, run(), AdminOcrCorrectionApiTests, _make_app(), replace()
 
 ### Community 181 - "OcrCorrectionOrchestrator"
-Cohesion: 0.29
-Nodes (9): OcrProviderError, OcrCorrectionOrchestrator, _boxes(), _config(), _image(), OcrFallbackOrchestratorTests, correct_chunk(), primary_result() (+1 more)
+Cohesion: 0.21
+Nodes (10): OcrCorrectionOrchestrator, _boxes(), CloudProviderBoundaryTests, handler(), _config(), _image(), OcrFallbackOrchestratorTests, correct_chunk() (+2 more)
 
 ### Community 182 - "Canvas Design System"
 Cohesion: 0.06
 Nodes (35): 1. Visual Communication First, 2. Minimal Text Integration, 3. Expert Craftsmanship, 4. Systematic Patterns, Analog Meditation, Approach, Canvas Boundaries, Canvas Design System (+27 more)
 
 ### Community 183 - "BACKEND_FLOW_STANDARD"
-Cohesion: 0.14
-Nodes (14): 1. Standard flow, 2. Layer responsibilities, 3. Flows by request type, 4. Mock flow vs real database flow, 5. Mandatory API tracing, 6. Required review format, 7. Golden rule, BACKEND_FLOW_STANDARD (+6 more)
+Cohesion: 0.25
+Nodes (8): 1. Standard flow, 2. Layer responsibilities, 4. Mock flow vs real database flow, 5. Mandatory API tracing, 6. Required review format, 7. Golden rule, BACKEND_FLOW_STANDARD, Purpose
 
 ### Community 185 - "BrowserTranscriptCollector"
 Cohesion: 0.07
-Nodes (23): 1. Luồng OCR Sách của Admin (Admin Book OCR), 2. Luồng Bé Luyện Đọc (Child Live Reading), 3. CÁC LUỒNG NGHIỆP VỤ CỐT LÕI (CORE DOMAIN WORKFLOWS), 1. Zero-Cost Packaging Decision Checklist, 2. Required Android Runtime Permissions & Responsive Checks, 3. Local `0 VND` APK Build & `adb` Verification (No Paid Cloud CI), ViRead Zero-Cost (0 VND) Android APK Preparation & Verification, 1. Web-to-Android Architecture Tradeoffs for ViRead (+15 more)
+Nodes (20): 1. Zero-Cost Packaging Decision Checklist, 2. Required Android Runtime Permissions & Responsive Checks, 3. Local `0 VND` APK Build & `adb` Verification (No Paid Cloud CI), ViRead Zero-Cost (0 VND) Android APK Preparation & Verification, 1. Web-to-Android Architecture Tradeoffs for ViRead, 2. Mandatory Android Permissions (All Paths), 3. Zero-Cost Direct APK Build Workflows, 4. Related Installed Skills (+12 more)
 
 ### Community 186 - "pptx/scripts/office/helpers/pptx_chart.py"
 Cohesion: 0.11
@@ -1727,9 +1731,9 @@ Nodes (30): _canonical_ids(), _check_chart_axis_references(), _check_decimal_set
 Cohesion: 0.10
 Nodes (20): Android: Material Icons, Animated Symbols, Animation Effects, Basic Usage, Best Practices, Camera, Common Icons, Communication (+12 more)
 
-### Community 188 - "classify_word"
-Cohesion: 0.15
-Nodes (5): _adjudicate_disputed_words(), classify_word(), EnginePipelineAdjudication, ClassificationInvariants, _random_word()
+### Community 188 - ".saved_report"
+Cohesion: 0.18
+Nodes (5): ProgressTests, report_payload(), option(), row(), SavedProgressMappingTests
 
 ### Community 189 - "Skill Creator"
 Cohesion: 0.06
@@ -1739,9 +1743,9 @@ Nodes (34): Advanced: Blind comparison, Anatomy of a Skill, Capture Intent, Clau
 Cohesion: 0.14
 Nodes (13): 1. Get the correct Supabase connection string, 2. Render environment variables, 3. Start command and initial scaling, 4. How the concurrency limit works, 5. Transaction boundaries, 6. Local development and CI, 7.1. Interrupted page-upload reservations, 7. Staging smoke test (+5 more)
 
-### Community 192 - "dev-fixed-port.mjs"
+### Community 192 - "VoiceProviderError"
 Cohesion: 0.14
-Nodes (8): @vitejs/plugin-react@6.1.1, child, forwardedArgs, frontendDirectory, hasExplicitPort, nextCli, scriptDirectory, @vitejs/plugin-react
+Nodes (5): SynthesizedAudio, VoiceProviderError, make_client(), run_mocked_transcription(), VoiceRouteTests
 
 ### Community 193 - "ReadAlong Vision — Frontend"
 Cohesion: 0.14
@@ -1756,20 +1760,20 @@ Cohesion: 0.33
 Nodes (13): Add-OllamaToSessionPath(), Ensure-Ollama(), Ensure-Tesseract(), Ensure-VietnameseTessdata(), Get-CommandPath(), Get-NodeRuntime(), Get-OllamaExecutable(), Get-OllamaVersion() (+5 more)
 
 ### Community 196 - "extract_verified_sentences"
-Cohesion: 0.22
-Nodes (7): extract_verified_sentences(), ExtractedSentence, _looks_like_sentence(), normalize_token(), _sentence_spans(), SentenceToken, SentenceExtractionTests
+Cohesion: 0.15
+Nodes (9): stars_for_round(), extract_verified_sentences(), ExtractedSentence, _looks_like_sentence(), normalize_token(), _sentence_spans(), SentenceToken, SentenceExtractionTests (+1 more)
 
-### Community 198 - "_build_context_phrase"
-Cohesion: 0.09
-Nodes (19): _build_context_phrase(), source_meta_for(), 1. Sơ đồ luồng xử lý tổng thể, 3. Thành phần Backend & Hợp đồng API, ARCHITECTURE — Kiến trúc hệ thống Luyện Từ & Đọc Lại Từ Ngắn (ViRead / ReadAlong Vision), 2. STT trả về nhãn không phải lời nói (`[tiếng đập] có`) hoặc lặp âm (`có có`) gây đánh sai, 3. Lỗi `503` *"Chưa lưu được kết quả. Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ"* & yêu cầu 2 lần đọc cứng nhắc, 4. Thiếu đồng bộ Đỏ → Vàng → Xanh và thiếu ngữ cảnh sách/trang nguồn (+11 more)
+### Community 198 - "difficult_words_service.py"
+Cohesion: 0.07
+Nodes (27): DifficultWordProgressSummaryRead, DifficultWordSourceRead, build_child_friendly_feedback(), _build_context_phrase(), classify_practice_transcript(), compute_word_practice_progress(), _contains_subslice(), acc_for() (+19 more)
 
 ### Community 199 - "preview.py"
-Cohesion: 0.09
-Nodes (20): _button_outline_text_color(), _contrast_ratio(), _derive_dark_palette(), _palette_is_dark(), _relative_luminance(), safe_slug(), _select_palette_for_mode(), _write_persisted_file() (+12 more)
+Cohesion: 0.10
+Nodes (19): _button_outline_text_color(), _contrast_ratio(), _derive_dark_palette(), _palette_is_dark(), _relative_luminance(), _select_palette_for_mode(), _write_persisted_file(), _attr() (+11 more)
 
 ### Community 200 - "is_file"
-Cohesion: 0.16
-Nodes (8): cache_dir(), ClaudeDispatcher, hook_json(), inject(), json_string(), path_is_absolute_ish(), shell_pwd(), system_message_json()
+Cohesion: 0.22
+Nodes (7): ClaudeDispatcher, hook_json(), inject(), is_file(), json_string(), shell_pwd(), system_message_json()
 
 ### Community 201 - "Changelog"
 Cohesion: 0.10
@@ -1780,8 +1784,8 @@ Cohesion: 0.41
 Nodes (6): create_picture_session(), evaluate_picture_description(), get_picture_catalog(), get_picture_session(), list_picture_sessions(), _service()
 
 ### Community 203 - "20261107120000_book_content_quality.sql"
-Cohesion: 0.17
-Nodes (20): uq_bookpages_active_book_pagenumber, ix_bookcontentreporthistory_report_created, ix_bookcontentreports_book_created, ix_bookcontentreports_page_created, ix_bookcontentreports_reporter_created, ix_bookcontentreports_status_created, ix_bookqualityfindings_book_status, ix_bookqualityfindings_page_revision (+12 more)
+Cohesion: 0.20
+Nodes (19): ix_bookcontentreporthistory_report_created, ix_bookcontentreports_book_created, ix_bookcontentreports_page_created, ix_bookcontentreports_reporter_created, ix_bookcontentreports_status_created, ix_bookqualityfindings_book_status, ix_bookqualityfindings_page_revision, ix_bookqualityfindings_pagescan (+11 more)
 
 ### Community 204 - "_make_service"
 Cohesion: 0.27
@@ -1811,37 +1815,37 @@ Nodes (12): Backend Profile API, Bảo mật và dữ liệu, Chức năng hiệ
 Cohesion: 0.10
 Nodes (20): Async Tests, Basic Test, Benchmarks (v5), Concurrent Tests, Custom Test with Fixtures, Failing Tests, Focus Tests, Key Points (+12 more)
 
-### Community 211 - "log_diagnostic"
-Cohesion: 0.07
-Nodes (15): log_diagnostic(), _safe_error_code(), _safe_status(), runtime_configuration_diagnostics(), _bucket_name(), delete_object(), hash_storage_object(), _safe_error_code() (+7 more)
+### Community 211 - "re"
+Cohesion: 0.04
+Nodes (28): assemble_shards(), shard_file(), test_checkpoint_shards_round_trip_and_preserve_original(), test_corrupt_checkpoint_shard_is_rejected(), _bool_env(), _float_env(), _int_env(), get_supabase_admin_client() (+20 more)
 
-### Community 212 - "GroqOcrProvider"
-Cohesion: 0.15
-Nodes (5): GeminiOcrProvider, GroqOcrProvider, CloudProviderBoundaryTests, handler(), ProviderHttpErrorClassificationTests
+### Community 212 - "KaraokeService"
+Cohesion: 0.24
+Nodes (5): AdminList, AdminSongSummary, DraftPreview, VersionRead, KaraokeService
 
 ### Community 213 - "spacing"
 Cohesion: 0.06
 Nodes (34): $type, $value, $type, $value, $type, $value, $type, $value (+26 more)
 
 ### Community 214 - "resolve_plan_dir"
-Cohesion: 0.16
-Nodes (9): is_dir(), is_link(), mtime_seconds(), pin_is_absolute(), plan_is_ambiguous(), resolve_plan_dir(), found(), strip_ws() (+1 more)
+Cohesion: 0.12
+Nodes (13): is_dir(), is_link(), mtime_seconds(), pin_is_absolute(), plan_is_ambiguous(), canonicalize(), norm_slashes(), resolve_plan_dir() (+5 more)
 
 ### Community 215 - "set-active-plan.sh"
 Cohesion: 0.19
 Nodes (33): archived_count(), can_open(), canonicalize(), canonicalize_into(), current_active(), device_of(), fail(), file_metadata() (+25 more)
 
-### Community 216 - "realtime-alignment.ts"
+### Community 216 - "test_book_content_quality_persistence.py"
 Cohesion: 0.18
-Nodes (19): Cách đã sửa, IndexedBookWord, normalizeRealtimeWord(), RealtimeHesitation, RealtimeRepeatedItem, RealtimeSpokenWord, RealtimeWordState, RealtimeWordStatus (+11 more)
+Nodes (8): _exception_candidates(), is_book_report_idempotency_violation(), postgres_integrity_error_metadata(), _safe_value(), BookContentReportHistory, BookQualityFinding, BookQualityReportFinding, BookQualityScanRun
 
 ### Community 217 - "server.ts"
-Cohesion: 0.19
-Nodes (7): GET(), redirectToLogin(), signOutQuietly(), createServerSupabaseClient(), { createServerSupabaseClientMock }, { cookieStore, cookiesMock, createServerClientMock, serverClient }, TestedCookieAdapter
+Cohesion: 0.16
+Nodes (9): GET(), redirectToLogin(), signOutQuietly(), createServerSupabaseClient(), @supabase/ssr@^0.12.7, { createServerSupabaseClientMock }, { cookieStore, cookiesMock, createServerClientMock, serverClient }, TestedCookieAdapter (+1 more)
 
 ### Community 218 - "schemas/reading.py"
 Cohesion: 0.13
-Nodes (30): FluencyAssessmentBase, FluencyAssessmentCreate, FluencyAssessmentResponse, HistoryAnswerRead, HistoryAvailabilityRead, HistoryComprehensionRead, HistoryEventRead, HistoryFluencyMetricsRead (+22 more)
+Nodes (34): FluencyAssessmentBase, FluencyAssessmentCreate, FluencyAssessmentResponse, HistoryAnswerRead, HistoryAvailabilityRead, HistoryComprehensionRead, HistoryEventRead, HistoryFluencyMetricsRead (+26 more)
 
 ### Community 219 - "Priority Completion Status"
 Cohesion: 0.22
@@ -1849,15 +1853,15 @@ Nodes (8): P0 — UI/Figma Alignment ✅ VERIFIED & REGRESSIONS FIXED, P1 — Re
 
 ### Community 220 - "book_quality_worker.py"
 Cohesion: 0.13
-Nodes (20): _add_cross_page_findings(), _finalize_scan(), _finding_row(), _heartbeat(), main(), _poll_seconds(), _process_claimed_scan(), _process_page_scan() (+12 more)
+Nodes (19): _add_cross_page_findings(), _finalize_scan(), _finding_row(), _heartbeat(), main(), _poll_seconds(), _process_claimed_scan(), _process_page_scan() (+11 more)
 
-### Community 221 - "KaraokeEditorScreen"
-Cohesion: 0.15
-Nodes (15): Page(), Page(), Page(), fingerprint(), KaraokeEditorScreen(), adopt(), loadPreview(), reload() (+7 more)
+### Community 221 - "viread_colab_enterprise.py"
+Cohesion: 0.19
+Nodes (8): _canonical_request(), ColabEnterpriseConfigurationError, ColabEnterpriseDispatcher, ColabEnterpriseDispatchError, enterprise_configuration(), new_execution_id(), _signature(), ColabEnterpriseDispatchTests
 
-### Community 222 - "GeminiPictureDescriptionAI"
-Cohesion: 0.21
-Nodes (10): GeminiPictureDescriptionAI, PictureDescriptionAiConfig, _evaluation_json_payload(), _guide_json_payload(), _sample_png_bytes(), TestGeminiPictureDescriptionAI, handler(), handler() (+2 more)
+### Community 222 - "_verified_snapshot"
+Cohesion: 0.14
+Nodes (6): _canonicalize_legacy_verified_snapshot(), _deduplicate_verified_samples(), _gate(), _verified_snapshot(), _verified_snapshot_db_rows(), VireadDualTrainingContracts
 
 ### Community 223 - "2. Bảng đối chiếu 46 Route (`page.tsx`) ↔ Figma"
 Cohesion: 0.20
@@ -1866,6 +1870,10 @@ Nodes (9): 1. Design System Tokens (`frontend/app/globals.css`), 2.1. Tài kho�
 ### Community 225 - "Task 1 — Báo cáo kiểm chứng Lịch sử đọc"
 Cohesion: 0.20
 Nodes (9): Checklist nghiệm thu để tham chiếu khi review, Hành vi đã triển khai và bằng chứng, Kiểm tra database thật — chỉ đọc, Kết quả kiểm tra kỹ thuật, Lệnh frontend để chạy lại, Lỗi nền đã đối chiếu với base, Phase 6 — Bàn giao Git, Task 1 — Báo cáo kiểm chứng Lịch sử đọc (+1 more)
+
+### Community 226 - "KaraokeServiceTests"
+Cohesion: 0.21
+Nodes (3): VisibilityRequest, read_upload(), KaraokeServiceTests
 
 ### Community 228 - "Đóng góp cho ReadAlong Vision"
 Cohesion: 0.22
@@ -1891,9 +1899,9 @@ Nodes (18): Assets, Basic DOM Component, Common `dom` Prop Options, CSS in DOM C
 Cohesion: 0.22
 Nodes (8): Backend, Báo cáo Phase 5 — Dọn runtime mock trong phạm vi đã chuyển dữ liệu, File Phase 5 sửa hoặc tạo, Frontend, Giới hạn và phần giữ lại có chủ ý, Kiểm tra thực tế, Kết quả, Rà soát source
 
-### Community 234 - "KaraokeStage"
-Cohesion: 0.22
-Nodes (9): BrowserSpeechRecognitionLike, KaraokeStage(), cancelPreparation(), keyboard(), practice(), prepare(), tick(), restartSong() (+1 more)
+### Community 234 - "RevisionRequest"
+Cohesion: 0.24
+Nodes (4): RevisionRequest, lyrics_v2(), SyllableContractTests, SyllableServiceTests
 
 ### Community 235 - "20261019153000_reading_management.sql"
 Cohesion: 0.23
@@ -1927,9 +1935,9 @@ Nodes (18): Assertion Count, Asymmetric Matchers, Basic Assertions, Chai-Style S
 Cohesion: 0.11
 Nodes (18): CI Integration, Code Coverage, Configuration, Coverage with Sharding, Ignoring Code, Istanbul, Istanbul, Key Points (+10 more)
 
-### Community 244 - "ocr_color_benchmark.py"
-Cohesion: 0.11
-Nodes (22): geometry_quality(), authored_tokens(), build_fixtures(), _confusion_table(), evaluate_fixture(), find_font(), _fraction(), _has_marks() (+14 more)
+### Community 244 - "unicodedata"
+Cohesion: 0.09
+Nodes (24): classify_word_evidence(), normalize_word(), build_red_pairs(), completed_crop(), corrupt(), _nfc(), _nfd(), _swap() (+16 more)
 
 ### Community 245 - "Social login setup: Google and Facebook"
 Cohesion: 0.29
@@ -1979,9 +1987,9 @@ Nodes (32): 1. Async/Await Mistakes, 2. Missing `from_attributes` (orm_mode), 3.
 Cohesion: 0.14
 Nodes (9): Examples, Inspecting Element Attributes, Debugging Playwright Tests, Running Playwright Tests, Attaching Screenshots and Videos to Pull Requests, From a local session, From CI, Limits (+1 more)
 
-### Community 260 - "analyze_karaoke_demo.mjs"
-Cohesion: 0.22
-Nodes (6): audio, cache, { chromium }, out, requireFrontend, root
+### Community 260 - "voice-studio-service.ts"
+Cohesion: 0.14
+Nodes (13): withPictureDeadline(), withRequestDeadline(), accessToken(), failure(), request(), TimedSpeechOptions, timedSpeechSchema, VoiceList (+5 more)
 
 ### Community 262 - "Supabase"
 Cohesion: 0.11
@@ -1990,6 +1998,10 @@ Nodes (15): Fix suggestion, Source, What happened, Skill Feedback, Steps, Core P
 ### Community 263 - "Vi Utilities"
 Cohesion: 0.11
 Nodes (18): Assertion Helpers — vi.defineHelper (4.1+), Conditional Mocking — vi.when (v5), Dynamic Mocking, Fake Timers, Global/Env Mocking, Global Mock Management, Hoisted Code, Key Points (+10 more)
+
+### Community 264 - "MemoryStorage"
+Cohesion: 0.18
+Nodes (4): KaraokeApiTests, MemoryStorage, mp3_fixture(), SyllableApiTests
 
 ### Community 266 - "Data and job readiness"
 Cohesion: 0.40
@@ -2003,9 +2015,9 @@ Nodes (17): Basic Usage, Concurrent Suites, Describe API, describe.each, describ
 Cohesion: 0.40
 Nodes (4): semi, singleQuote, tabWidth, trailingComma
 
-### Community 272 - "picture_description_service.py"
-Cohesion: 0.28
-Nodes (11): PictureAttemptRead, PictureBookPageItem, PictureCatalogRead, PictureEvaluateRequest, PictureEvaluateResponse, PictureEvaluationFeedbackRead, PictureGuideRead, PictureSampleItem (+3 more)
+### Community 270 - "Book"
+Cohesion: 0.16
+Nodes (3): Book, BookRepository, BookService
 
 ### Community 273 - "Navigation"
 Cohesion: 0.12
@@ -2028,7 +2040,7 @@ Cohesion: 0.12
 Nodes (16): 1. Start Tracing Before the Problem, 2. Clean Up Old Traces, Analyzing Performance, Basic Usage, Best Practices, Capturing Evidence, Debugging Failed Actions, Limitations (+8 more)
 
 ### Community 282 - "router.py"
-Cohesion: 0.20
+Cohesion: 0.19
 Nodes (9): create_answer(), create_question(), get_questions(), ComprehensionAnswerBase, ComprehensionAnswerCreate, ComprehensionAnswerResponse, ComprehensionQuestionBase, ComprehensionQuestionCreate (+1 more)
 
 ### Community 285 - "Changelog"
@@ -2044,8 +2056,8 @@ Cohesion: 0.44
 Nodes (7): ix_gameattempts_round_created, ix_gamerounds_session_status, ix_gamesessions_book_status, ix_gamesessions_child_started, public.gameattempts, public.gamerounds, public.gamesessions
 
 ### Community 288 - "build_service"
-Cohesion: 0.39
-Nodes (10): abandon_session(), build_service(), create_game_session(), get_result(), list_game_books(), next_round(), request_hint(), shoot_word() (+2 more)
+Cohesion: 0.23
+Nodes (20): abandon_session(), build_service(), create_game_session(), get_result(), list_game_books(), next_round(), request_hint(), shoot_word() (+12 more)
 
 ### Community 289 - "React Composition Patterns"
 Cohesion: 0.12
@@ -2056,8 +2068,8 @@ Cohesion: 0.21
 Nodes (3): Advanced, Core, Features
 
 ### Community 291 - "test_child_progress.py"
-Cohesion: 0.12
-Nodes (17): AssessmentFacts, _encouragement(), facts_payload(), _headline(), rule_based_assessment(), weakest_comprehension_type(), AnswerRow, top_difficult_words() (+9 more)
+Cohesion: 0.11
+Nodes (15): _encouragement(), _headline(), rule_based_assessment(), weakest_comprehension_type(), AnswerRow, _pct(), WindowMetrics, _clamp() (+7 more)
 
 ### Community 292 - "Test Filtering"
 Cohesion: 0.12
@@ -2107,17 +2119,17 @@ Nodes (15): Available Environments, Browser Mode (Separate from Environments), C
 Cohesion: 0.12
 Nodes (16): assertType, Branded Types, Configuration, Equality vs Matching, expectTypeOf API, Function Types, Generic Types, Key Points (+8 more)
 
-### Community 306 - "AdminSystemService"
-Cohesion: 0.18
-Nodes (4): AdminSystemRepository, AdminSystemService, AdminSystemTests, LocalOcrHealthTests
+### Community 306 - "flow2_register.py"
+Cohesion: 0.27
+Nodes (8): _api_call(), _content_type(), _locked_test_rows(), main(), _read_trdg_provenance(), register_datasets(), test_t23_locked_test_registration_requires_human_verified_source(), test_t24_trdg_provenance_must_be_explicit_and_unique()
 
 ### Community 316 - "Commands"
 Cohesion: 0.12
 Nodes (16): Command Line Interface, Commands, Common Options, Key Points, Package.json Scripts, Sharding for CI, `vitest`, `vitest bench` (+8 more)
 
 ### Community 317 - "1. Chi tiết nguyên nhân & cách khắc phục từng nhóm lỗi (1 → 5)"
-Cohesion: 0.22
-Nodes (8): 1. Chi tiết nguyên nhân & cách khắc phục từng nhóm lỗi (1 → 5), 2. Kết quả cổng kiểm định sau chỉnh sửa cuối, 3. Liên kết kiểm chứng giao diện mới (sau khi chỉnh `<BookCover />` & Font Cambria), BUGFIX & ZERO-DEFECT VERIFICATION REPORT — Khắc phục triệt để 5 nhóm lỗi Audit (ViRead), Nhóm 1 — Xử lý 4 ca FAIL trong [reading-screen.test.tsx](file:///F:/c1/capstone1/frontend/tests/reading/reading-screen.test.tsx) (`58/62` → **`62/62 PASS`**), Nhóm 3 — Xóa cảnh báo DeprecationWarning Backend, Nhóm 4 — Khắc phục hiển thị `<BookCover />` & Font tiêu đề tiếng Việt, Nhóm 5 — Tái xác nhận 3 cơ chế cốt lõi không hồi quy
+Cohesion: 0.18
+Nodes (10): 1. Chi tiết nguyên nhân & cách khắc phục từng nhóm lỗi (1 → 5), 2. Kết quả cổng kiểm định sau chỉnh sửa cuối, 3. Liên kết kiểm chứng giao diện mới (sau khi chỉnh `<BookCover />` & Font Cambria), BUGFIX & ZERO-DEFECT VERIFICATION REPORT — Khắc phục triệt để 5 nhóm lỗi Audit (ViRead), Nhóm 1 — Xử lý 4 ca FAIL trong [reading-screen.test.tsx](file:///F:/c1/capstone1/frontend/tests/reading/reading-screen.test.tsx) (`58/62` → **`62/62 PASS`**), Nhóm 2 — Xóa toàn bộ 9 ESLint Warnings về **`0 errors, 0 warnings`**, Nhóm 3 — Xóa cảnh báo DeprecationWarning Backend, Nhóm 4 — Khắc phục hiển thị `<BookCover />` & Font tiêu đề tiếng Việt (+2 more)
 
 ### Community 318 - "Differential Security Review"
 Cohesion: 0.13
@@ -2164,8 +2176,8 @@ Cohesion: 0.13
 Nodes (15): Basic Snapshot, Concurrent Test Snapshots, Custom Serializers, Custom Snapshot Matchers (4.1+), Error Snapshots, File Snapshots, Inline Snapshots, Key Points (+7 more)
 
 ### Community 329 - "ProgressRepository"
-Cohesion: 0.08
-Nodes (10): ProgressRepository, ProgressService, ProgressTests, report_payload(), option(), row(), SavedProgressHttpTests, SavedProgressMappingTests (+2 more)
+Cohesion: 0.10
+Nodes (4): ProgressRepository, SavedProgressHttpTests, SavedProgressQueryTests, SavedProgressTests
 
 ### Community 330 - "Route Structure"
 Cohesion: 0.14
@@ -2195,9 +2207,9 @@ Nodes (14): Basic Projects Setup, Browser + Node Projects, Different Environment
 Cohesion: 0.14
 Nodes (14): Bail on Failure, CI Example (GitHub Actions), Concurrency & Parallelism, Concurrent Tests, File Parallelism, Isolation, Key Points, Max Concurrency (+6 more)
 
-### Community 337 - "thumbnail.py"
-Cohesion: 0.29
-Nodes (8): build_slide_list(), convert_to_images(), create_grid(), create_grids(), create_hidden_placeholder(), get_slide_info(), _is_hidden(), main()
+### Community 337 - "flow2_prepare.py"
+Cohesion: 0.26
+Nodes (6): _box_bounds(), _iou(), _load_dbnet_detector(), main(), match_external_annotations(), test_t27_invalid_external_boxes_go_to_review_instead_of_becoming_crops()
 
 ### Community 338 - "Form Sheets in Expo Router"
 Cohesion: 0.15
@@ -2218,6 +2230,10 @@ Nodes (13): Clipboard, Complex Workflows, Error Handling, File Downloads, Frames
 ### Community 342 - "Advanced Patterns"
 Cohesion: 0.15
 Nodes (12): 1. Infer Keyword, 2. Type Guards, 3. Assertion Functions, Advanced Patterns, Pattern 1: Type-Safe Event Emitter, Pattern 2: Type-Safe API Client, Pattern 3: Builder Pattern with Type Safety, Pattern 4: Deep Readonly/Partial (+4 more)
+
+### Community 343 - "AdminBookContentQualityScreen"
+Cohesion: 0.26
+Nodes (12): metadata, MetadataQualityPage(), AdminBookContentQualityScreen(), changeReportStatus(), enqueueBookScan(), openBook(), openReport(), openScan() (+4 more)
 
 ### Community 344 - "Common Vulnerability Patterns"
 Cohesion: 0.17
@@ -2435,9 +2451,13 @@ Nodes (8): Benchmarking (v5), Comparing Implementations, Custom Provider (experi
 Cohesion: 0.06
 Nodes (32): 1. Mobile-First Design, 2. Consistent Breakpoint Usage, 3. Test at Breakpoint Boundaries, 4. Use Container for Content Width, 5. Progressive Enhancement, 6. Avoid Too Many Breakpoints, Best Practices, Breakpoint System (+24 more)
 
-### Community 400 - "dependencies"
-Cohesion: 0.12
-Nodes (14): metadata, dependencies, @fontsource-variable/nunito@5.3.0, @hookform/resolvers@5.9.1, lucide-react@1.45.0, next@16.3.4, react@19.3.0, react-dom@19.3.0 (+6 more)
+### Community 399 - "ROOT CAUSE — Hệ thống luyện từ khó & đọc lại từ ngắn tiếng Việt ("có")"
+Cohesion: 0.17
+Nodes (11): 1. Từ ngắn tiếng Việt (`"có"`) bị chờ quá lâu (3.5s–12s) hoặc báo `AUDIO_TOO_SHORT` / `NO_CLEAR_AUDIO`, 2. STT trả về nhãn không phải lời nói (`[tiếng đập] có`) hoặc lặp âm (`có có`) gây đánh sai, 3. Lỗi `503` *"Chưa lưu được kết quả. Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ"* & yêu cầu 2 lần đọc cứng nhắc, 4. Thiếu đồng bộ Đỏ → Vàng → Xanh và thiếu ngữ cảnh sách/trang nguồn, Cách đã sửa, Cách đã sửa, Nguyên nhân, Nguyên nhân tại `AudioQualityMonitor` ([audio-quality.ts](file:///F:/c1/capstone1/frontend/lib/reading/audio-quality.ts)) (+3 more)
+
+### Community 400 - "app/layout.tsx"
+Cohesion: 0.33
+Nodes (3): metadata, @fontsource-variable/nunito@5.3.0, @fontsource-variable/nunito
 
 ### Community 401 - "interface"
 Cohesion: 0.29
@@ -2477,7 +2497,7 @@ Nodes (6): Báo cáo thiết lập Coding Agent trên Windows, Các lệnh đã 
 
 ### Community 410 - ".test_book_page_session_and_evaluate_attempt_lifecycle"
 Cohesion: 0.22
-Nodes (3): _normalize_upload_image(), TestPictureDescriptionService, fake_create()
+Nodes (4): ChildProjection, _normalize_upload_image(), TestPictureDescriptionService, fake_create()
 
 ### Community 411 - "button"
 Cohesion: 0.20
@@ -2502,6 +2522,10 @@ Nodes (5): Prefer Native Header Options Over Custom Components, Stack Navigation
 ### Community 416 - "CI/CD Integration"
 Cohesion: 0.06
 Nodes (32): Basic Workflow, Best Practices, Cache Node Modules, Cache Playwright Browsers, Caching, CI/CD Integration, CI Configuration Reference, CI-Specific Reporter (+24 more)
+
+### Community 418 - "test_karaoke_postgres_integration.py"
+Cohesion: 0.16
+Nodes (7): SongCreate, KaraokeSchemaTests, lyrics(), connect(), prepare_database(), test_url(), TestStorage
 
 ### Community 420 - "interface"
 Cohesion: 0.40
@@ -2539,9 +2563,9 @@ Nodes (4): Context, Figma design to code, Implementation, Verification
 Cohesion: 0.40
 Nodes (4): Before you write, Levels, Ponytail, The smallest complete change
 
-### Community 429 - "RealOcrIntegration"
-Cohesion: 0.08
-Nodes (19): RealOcrFixtureGate, 1. Ý nghĩa ba màu, 2. Thứ tự ưu tiên (`classify_word_evidence`), 3. Nguyên nhân gốc đã tìm thấy, 4. Những gì đã thay đổi, 5. Kết quả đo, 6. Chạy lại, 8. Vòng 2: giảm vàng sai, dấu câu và hình học (2026-11-10) (+11 more)
+### Community 429 - "8. Vòng 2: giảm vàng sai, dấu câu và hình học (2026-11-10)"
+Cohesion: 0.05
+Nodes (37): 1. Three-Color Word Evidence Contract (`classify_word_evidence` & `adjudicate_word`), 2. VietOCR v2 Preprocessing, Offline Weights & Tesseract `vie`, 3. Targeted OCR Verification Commands, ViRead Vietnamese OCR Development, Adjudication & Benchmarking, geometry_quality(), By image condition (no reference), Colors with the ground truth as verified reference, Colors without a reference (right after OCR) (+29 more)
 
 ### Community 430 - "routes/tutor_question.py"
 Cohesion: 0.33
@@ -2591,9 +2615,25 @@ Nodes (3): 1.1 Never Use && with Potentially Falsy Values, 1.2 Wrap Strings in T
 Cohesion: 0.67
 Nodes (3): 8.1 Destructure Functions Early in Render (React Compiler), 8.2 Use .get() and .set() for Reanimated Shared Values (not .value), 8. React Compiler
 
+### Community 444 - "Agent.md"
+Cohesion: 0.20
+Nodes (5): 1. Verified ViRead Design Tokens, 2. Component & Asset Reuse Rules, 3. Parity & Responsive Verification Workflow, ViRead Figma Parity & UI Guidelines, This is NOT the Next.js you know
+
 ### Community 445 - "Optimization Patterns"
 Cohesion: 0.06
 Nodes (30): Advanced Optimization, Benchmarking Tools, Custom Benchmark Decorator, Database Optimization, Memory Optimization, Pattern 11: NumPy for Numerical Operations, Pattern 12: Caching with functools.lru_cache, Pattern 13: Using __slots__ for Memory (+22 more)
+
+### Community 593 - "word_timings"
+Cohesion: 0.36
+Nodes (4): TimedWord, word_timings(), alignment_for(), WordTimingTests
+
+### Community 594 - "ParentProfileDTO"
+Cohesion: 0.25
+Nodes (4): ParentProfileFormProps, ProfileService, ParentProfileDTO, ParentProfileUpdateInput
+
+### Community 595 - "admin-metadata-quality-service.ts"
+Cohesion: 0.24
+Nodes (8): issueTypeSchema, responseSchema, MetadataQualityBookIssueDTO, MetadataQualityDashboardDTO, MetadataQualityIssueType, MetadataQualityLifecycleStatus, MetadataQualityQuery, MetadataQualitySummaryDTO
 
 ### Community 597 - "html-token-validator.py"
 Cohesion: 0.12
@@ -2619,10 +2659,6 @@ Nodes (12): scripts, build, dev, format, format:check, lint, start, test (+4 mor
 Cohesion: 0.40
 Nodes (5): 8.1 Do Not Put Effect Events in Dependency Arrays, 8.2 Initialize App Once, Not Per Mount, 8.3 Store Event Handlers in Refs, 8.4 useEffectEvent for Stable Callback Refs, 8. Advanced Patterns
 
-### Community 603 - "useKaraokePlayer"
-Cohesion: 0.16
-Nodes (14): KaraokeControls(), AudioSource, KaraokePlayer(), PlayerSession(), KaraokePlayerController, useKaraokePlayer(), onEnded(), onPause() (+6 more)
-
 ### Community 604 - "Admin Books OCR — triển khai local và Supabase"
 Cohesion: 0.22
 Nodes (9): Admin Books OCR — triển khai local và Supabase, Bảo vệ Admin và API, Chẩn đoán lỗi upload HTTP 503, Cấu hình Backend, Kiểm thử và xác minh dữ liệu, Kiểm tra cấu hình mà tiến trình Python nhìn thấy, OCR cục bộ: PaddleOCR + VietOCR + Tesseract fallback, PostgreSQL migration (+1 more)
@@ -2636,8 +2672,12 @@ Cohesion: 0.07
 Nodes (28): Accordion, Alert, ARIA Labels, Checkbox and Radio, Color Contrast, Command Palette Navigation, Component-Specific Patterns, Dialog/Modal Navigation (+20 more)
 
 ### Community 609 - "chunk_ocr_text"
-Cohesion: 0.15
-Nodes (14): _boundary_kind(), chunk_ocr_text(), ChunkingConfig, ChunkingError, _context_after(), _context_before(), OcrChunkPlan, OcrToken (+6 more)
+Cohesion: 0.16
+Nodes (12): _boundary_kind(), chunk_ocr_text(), ChunkingConfig, ChunkingError, _context_after(), _context_before(), OcrChunkPlan, OcrToken (+4 more)
+
+### Community 610 - "DatabaseConcurrencyLimiter"
+Cohesion: 0.27
+Nodes (4): DatabaseConcurrencyLimiter, DatabaseConcurrencyLimitExceeded, DatabaseConcurrencyLimiterTests, 10. Kiểm thử
 
 ### Community 611 - "radius"
 Cohesion: 0.11
@@ -2648,12 +2688,12 @@ Cohesion: 0.07
 Nodes (27): Doc Co-Authoring Workflow, Exit Condition (Both Approaches), Final Review, Info Dumping, Initial Questions, Near Completion, Quality Checking, Stage 1: Context Gathering (+19 more)
 
 ### Community 613 - "public.difficult_word_practice_attempts"
-Cohesion: 0.14
-Nodes (7): ix_readingsessionpages_session_status, public.readingsessionpages, ix_pagerevisionwords_revision_line_word_id, ix_difficult_word_practice_book_session, ix_difficult_word_practice_child_completed, ix_difficult_word_practice_child_word_created, public.difficult_word_practice_attempts
+Cohesion: 0.16
+Nodes (10): ix_readingsessionpages_session_status, public.readingsessionpages, uq_bookpages_active_book_pagenumber, public.viread_ocr_outbox, viread_ocr_outbox_poll_idx, ix_pagerevisionwords_revision_line_word_id, ix_difficult_word_practice_book_session, ix_difficult_word_practice_child_completed (+2 more)
 
 ### Community 614 - "reading/[sessionId]/page.tsx"
-Cohesion: 0.26
-Nodes (11): firstValue(), metadata, ReadingPage(), ReadingPageProps, ReadingScreen(), firstValue(), isEvidenceSuspended(), parseReadingUiState() (+3 more)
+Cohesion: 0.24
+Nodes (12): 5. Lỗi thực tế phát hiện được & đã tự động khắc phục ngay trong quá trình Audit, firstValue(), metadata, ReadingPage(), ReadingPageProps, ReadingScreen(), firstValue(), isEvidenceSuspended() (+4 more)
 
 ### Community 615 - "MCP Server Best Practices"
 Cohesion: 0.07
@@ -2684,12 +2724,12 @@ Cohesion: 0.07
 Nodes (27): Analyzing Benchmark Results, Categories for Suggestions, Guidelines, Guidelines, Inputs, Inputs, Output Format, Post-hoc Analyzer Agent (+19 more)
 
 ### Community 622 - "RedliningValidator"
-Cohesion: 0.13
+Cohesion: 0.17
 Nodes (3): RedliningValidator, group(), text_of()
 
-### Community 623 - "FakeBlob"
-Cohesion: 0.17
-Nodes (3): FakeBlob, FakeBucket, extract_embedded_images()
+### Community 623 - "resolvePostFinishUiState"
+Cohesion: 0.25
+Nodes (7): 4.1 Luồng end-to-end, 4.2 Sinh câu hỏi (generator), 4.3 Chấm điểm, 4.4 Trải nghiệm trên giao diện, 4. Cách hoạt động, QUESTION_PREPARE_TIMEOUT_MS, resolvePostFinishUiState()
 
 ### Community 624 - "Path Operations and Routing"
 Cohesion: 0.50
@@ -2719,6 +2759,10 @@ Nodes (27): Accessing Cross-Origin Content, Accessing Nested Frames, Anti-Patter
 Cohesion: 0.07
 Nodes (27): Anti-Patterns to Avoid, Background Sync, Cache Testing, Getting Service Worker State, Mocking Push Subscription, Offline Testing, Push Notifications, Registration & Lifecycle (+19 more)
 
+### Community 632 - ".validate_slides"
+Cohesion: 0.39
+Nodes (4): fatal_slide_errors(), is_schema_verdict(), _shape_id(), stranded_animation_targets()
+
 ### Community 633 - "Fixtures & Hooks"
 Cohesion: 0.07
 Nodes (27): Anti-Patterns to Avoid, Auth Fixture, Authentication Patterns, Automatic Fixtures, Basic Custom Fixture, beforeAll / afterAll, beforeEach / afterEach, Built-in Fixtures (+19 more)
@@ -2736,12 +2780,12 @@ Cohesion: 0.07
 Nodes (27): Anti-Patterns to Avoid, Canvas Basics, Canvas Screenshot Testing, Canvas & WebGL Testing, Chart.js Testing, Chart Libraries, Checking WebGL Support, Click on Canvas (+19 more)
 
 ### Community 637 - "generate_review.py"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (10): build_run(), embed_file(), find_runs(), _find_runs_recursive(), generate_html(), get_mime_type(), _kill_port(), load_previous_iteration() (+2 more)
 
 ### Community 638 - "DesignSystemGenerator"
-Cohesion: 0.12
-Nodes (3): DesignSystemGenerator, _filter_anti_patterns_for_mode(), _resolve_dial()
+Cohesion: 0.08
+Nodes (8): DesignSystemGenerator, _filter_anti_patterns_for_mode(), _resolve_dial(), apply_decision_rules(), _object_without_duplicates(), parse_decision_rules(), _validate_action(), _check_reasoning_contract()
 
 ### Community 639 - "color"
 Cohesion: 0.18
@@ -2835,9 +2879,9 @@ Nodes (23): Async/Await Best Practices, Code Best Practices, Code Composability 
 Cohesion: 0.20
 Nodes (22): bounded_view(), cleanup_snapshot(), cleanup_snapshot_file(), emit_plan_head(), frame_file(), is_windowsapps_path(), is_within_root(), mode_has() (+14 more)
 
-### Community 662 - "OCR color benchmark (measured)"
-Cohesion: 0.17
-Nodes (12): By image condition (no reference), Colors with the ground truth as verified reference, Colors without a reference (right after OCR), Consonant confusions, Correct words still shown YELLOW (no reference), Engines against the same ground truth, OCR color benchmark (measured), Punctuation confusions (+4 more)
+### Community 662 - ".list_voices"
+Cohesion: 0.36
+Nodes (3): _text_field(), voice_from_payload(), VoiceMappingTests
 
 ### Community 663 - "Test Suite Structure"
 Cohesion: 0.09
@@ -2875,25 +2919,21 @@ Nodes (22): Anti-Patterns to Avoid, Attach Console to Report, Auto-Fail Fixture,
 Cohesion: 0.09
 Nodes (20): Advanced v4 Patterns, Best Practices, Container Queries, Custom Utilities with `@utility`, Do's, Don'ts, Namespace Overrides, Pattern 5: Native CSS Animations (v4) (+12 more)
 
-### Community 673 - "benchmark_local_ocr.py"
-Cohesion: 0.31
-Nodes (6): _distance(), _evaluate(), _load_cases(), main(), _normalized_text(), _percentile()
-
-### Community 674 - "AdminVireadTrainingScreen"
-Cohesion: 0.22
-Nodes (3): AdminVireadTrainingPage(), AdminVireadTrainingScreen(), trainingProfileName()
+### Community 673 - "math"
+Cohesion: 0.15
+Nodes (10): AudioMetadata, inspect_audio(), normalize_cover(), KaraokeMediaTests, _distance(), _evaluate(), _load_cases(), main() (+2 more)
 
 ### Community 675 - "generate-slide.py"
 Cohesion: 0.14
-Nodes (11): _e(), generate_chart_slide(), generate_cta_slide(), generate_deck(), generate_metrics_slide(), generate_problem_slide(), generate_solution_slide(), generate_testimonial_slide() (+3 more)
+Nodes (10): _e(), generate_chart_slide(), generate_cta_slide(), generate_deck(), generate_metrics_slide(), generate_problem_slide(), generate_solution_slide(), generate_testimonial_slide() (+2 more)
 
 ### Community 676 - "BaseSchemaValidator"
 Cohesion: 0.07
-Nodes (8): fatal_slide_errors(), is_schema_verdict(), _shape_id(), stranded_animation_targets(), BaseSchemaValidator, _load_schema(), DOCXSchemaValidator, PPTXSchemaValidator
+Nodes (9): one_line(), fatal_slide_errors(), is_schema_verdict(), _shape_id(), stranded_animation_targets(), BaseSchemaValidator, _load_schema(), DOCXSchemaValidator (+1 more)
 
 ### Community 677 - "._run"
-Cohesion: 0.24
-Nodes (7): Injector, file_has_token(), mode_has(), mode_relax_allowed(), is_file(), slug_is_valid(), read_bytes()
+Cohesion: 0.15
+Nodes (9): cache_dir(), Injector, file_has_token(), mode_has(), mode_relax_allowed(), normalize_wall_clock(), slug_is_valid(), read_bytes() (+1 more)
 
 ### Community 678 - "Complex Authentication Flow Patterns"
 Cohesion: 0.10
@@ -2915,6 +2955,10 @@ Nodes (20): Anti-Patterns, Capturing Vue Warnings, Commands, Component Testing, 
 Cohesion: 0.10
 Nodes (21): Anti-Patterns to Avoid, Budget Fixture, CI Performance Monitoring, Core Web Vitals, Define Budgets, Lighthouse Integration, Lighthouse with Config, Measure LCP, FID, CLS (+13 more)
 
+### Community 683 - "BaseSchemaValidator"
+Cohesion: 0.07
+Nodes (8): one_line(), fatal_slide_errors(), is_schema_verdict(), _shape_id(), stranded_animation_targets(), BaseSchemaValidator, DOCXSchemaValidator, PPTXSchemaValidator
+
 ### Community 684 - "zod/AGENTS.md"
 Cohesion: 0.10
 Nodes (8): Rule Title Here, Return False Instead of Throwing in Refine, Use Discriminated Unions for Type Narrowing, Avoid Double Validation, Handle All Validation Issues Not Just First, Validate at System Boundaries, Use Coercion for Form and Query Data, Export Both Schemas and Inferred Types
@@ -2924,16 +2968,16 @@ Cohesion: 0.10
 Nodes (19): Browser Events Format, Cards (visual designs), Cleaning Up, CSS Classes Available, Design Tips, File Naming, How It Works, Mock elements (wireframe building blocks) (+11 more)
 
 ### Community 686 - "fetch-background.py"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (9): generate_css_for_background(), get_background_image(), get_curated_images(), get_overlay_css(), get_pexels_search_url(), load_backgrounds_config(), load_brand_colors(), main() (+1 more)
 
 ### Community 687 - "fontSize"
 Cohesion: 0.11
 Nodes (20): $type, $value, $type, $value, $type, $value, $type, $value (+12 more)
 
-### Community 688 - "analyze_alignment"
-Cohesion: 0.31
-Nodes (4): analyze_alignment(), normalize_word(), AlignmentTests, entry()
+### Community 688 - "make_service"
+Cohesion: 0.39
+Nodes (5): AdminOcrDraftTextSyncTests, make_page(), make_payload(), make_revision(), make_service()
 
 ### Community 689 - "Third-Party Service Mocking"
 Cohesion: 0.10
@@ -2971,17 +3015,13 @@ Nodes (19): 1.1 Understand Modern MCP Design, 1.2 Study MCP Protocol Documentati
 Cohesion: 0.11
 Nodes (18): A.1: Analyze the Structure, A.2: Check for Missing Elements, A.3: Create fields.json with PDF Coordinates, A.4: Validate Bounding Boxes, Approach A: Structure-Based Coordinates (Preferred), Approach B: Visual Estimation (Fallback), B.1: Convert PDF to Images, B.2: Initial Field Identification (+10 more)
 
-### Community 699 - "DocumentRasterizerTests"
-Cohesion: 0.31
-Nodes (5): DocumentRasterizerTests, _make_bmp_bytes(), _make_docx_bytes(), _make_png_bytes(), _make_tiff_bytes()
-
 ### Community 700 - "input"
 Cohesion: 0.29
 Nodes (8): padding-x, input, $type, $value, focus-ring, padding-x, $type, $value
 
 ### Community 701 - "ViRead Vietnamese OCR Workflow"
-Cohesion: 0.17
-Nodes (8): 1. Key Modules, 2. Mandatory OCR Engineering Rules, 3. Safe Diagnostics & Testing, ViRead Vietnamese OCR Workflow, 2. VietOCR v2 Preprocessing, Offline Weights & Tesseract `vie`, 3. Targeted OCR Verification Commands, ViRead Vietnamese OCR Development, Adjudication & Benchmarking, Correct words shown YELLOW without a reference
+Cohesion: 0.33
+Nodes (4): 1. Key Modules, 2. Mandatory OCR Engineering Rules, 3. Safe Diagnostics & Testing, ViRead Vietnamese OCR Workflow
 
 ### Community 702 - "Multi-User & Collaboration Testing"
 Cohesion: 0.11
@@ -3023,10 +3063,6 @@ Nodes (8): Rule Title Here, Use Single useFieldArray Instance Per Field Name, Wi
 Cohesion: 0.11
 Nodes (18): Before Delivering App UI, Example Workflow, If a search returns 0 results, Output Formats, Query Contract, Rule Categories by Priority, Running the search tool, Step 1: Analyze User Requirements (+10 more)
 
-### Community 712 - "pretool_cache"
-Cohesion: 0.25
-Nodes (4): hook_is_main(), main(), parse_args(), pretool_cache()
-
 ### Community 713 - "Color Semantics"
 Cohesion: 0.11
 Nodes (17): Accent, Applying Semantic Tokens, Background & Foreground, Border & Ring, Color Semantics, Dark Mode Overrides, Destructive, Interactive States (+9 more)
@@ -3047,10 +3083,6 @@ Nodes (18): Anti-Patterns, Blocking Unwanted Requests, Core Principle, Decision 
 Cohesion: 0.14
 Nodes (15): broadcast(), chmodOwnerOnly(), computeAcceptKey(), decodeFrame(), encodeFrame(), generateToken(), handleMessage(), handleUpgrade() (+7 more)
 
-### Community 718 - "admin-upload.ts"
-Cohesion: 0.31
-Nodes (8): allowedTypes, isAllowedType(), MAX_PAGE_IMAGE_DIMENSION, MAX_PAGE_UPLOAD_BYTES, ValidatedUploadFileUI, validateUploadDimensions(), validateUploadFile(), validateUploadInput()
-
 ### Community 719 - "Page Object Model (POM)"
 Cohesion: 0.12
 Nodes (17): Basic Structure, Best Practices, Component Objects, Composition Patterns, Directory Structure, Do, Don't, Factory Functions (+9 more)
@@ -3068,7 +3100,7 @@ Cohesion: 0.12
 Nodes (16): Documentation Variants to Test, Expected Results, Next Steps, NULL (Baseline - no skills doc), Scenario 1: Time Pressure + Confidence, Scenario 2: Sunk Cost + Works Already, Scenario 3: Authority + Speed Bias, Scenario 4: Familiarity + Efficiency (+8 more)
 
 ### Community 724 - "MixedPageScenarios"
-Cohesion: 0.16
+Cohesion: 0.17
 Nodes (3): build_page(), MixedPageScenarios, _spaced_states()
 
 ### Community 725 - "Advanced Patterns"
@@ -3183,10 +3215,6 @@ Nodes (14): Anti-Patterns, Combined Project Structure, Custom Fixtures, Helper F
 Cohesion: 0.14
 Nodes (14): Anti-Patterns, Authenticated GraphQL Fixture, Authorization Errors, Basic Query with Variables, "Cannot query field X on type Y", GraphQL Helper Function, GraphQL returns 200 but data is null, GraphQL Testing (+6 more)
 
-### Community 753 - "tutor_questions/config.py"
-Cohesion: 0.46
-Nodes (4): _bool(), _int(), _model(), _secret()
-
 ### Community 754 - "Token Architecture"
 Cohesion: 0.15
 Nodes (12): Categories, Dark Mode, File Organization, Layer 1: Primitive Tokens, Layer 2: Semantic Tokens, Layer 3: Component Tokens, Layer Overview, Migration from Flat Tokens (+4 more)
@@ -3271,9 +3299,9 @@ Nodes (12): Command Reference, Common Issues, Essential Commands, From pip + req
 Cohesion: 0.17
 Nodes (11): Execution Handoff, File Structure, Overview, Plan Document Header, Scope Check, Self-Review, Step Granularity, Task Right-Sizing (+3 more)
 
-### Community 775 - "RealOcrAndEndToEndDocumentScenarios"
-Cohesion: 0.46
-Nodes (3): _find_unicode_font_paths(), RealOcrAndEndToEndDocumentScenarios, _render_vietnamese_image()
+### Community 775 - "System Updates & Improvements Report (Branch: `tu`)"
+Cohesion: 0.29
+Nodes (6): 1. “Read Sample” Feature (Text-to-Speech - TTS), 2. Speech Recognition for Children’s Reading (Speech-to-Text - STT), 3. Major Improvements to the Book Text Scanning System (OCR Engine), 5. Testing & Quality Assurance Results, 6. Git Branch Workflow, System Updates & Improvements Report (Branch: `tu`)
 
 ### Community 776 - "Brainstorming"
 Cohesion: 0.18
@@ -3299,13 +3327,9 @@ Nodes (10): Data Sources, Findings & Decisions, Hypothesis Log, Issues Encounter
 Cohesion: 0.18
 Nodes (10): Arrays and Records, Basic Schemas, Breaking Changes from Zod 3, Error Handling, Object Schemas, Optional and Nullable, React Hook Form Integration, Refinements (+2 more)
 
-### Community 783 - "extract_text_and_boxes"
-Cohesion: 0.09
-Nodes (5): _attach_engine_statuses(), extract_text_and_boxes(), DualEngineOcrTests, sample_png_bytes(), PageTextKeepsPunctuation
-
 ### Community 784 - "validate_chunk_result"
-Cohesion: 0.29
-Nodes (3): _punctuation_boundary(), validate_chunk_result(), OcrStructuredValidationTests
+Cohesion: 0.26
+Nodes (4): punctuation_signature(), _punctuation_boundary(), validate_chunk_result(), OcrStructuredValidationTests
 
 ### Community 786 - "Component Tokens"
 Cohesion: 0.20
@@ -3318,6 +3342,10 @@ Nodes (9): flattenTokens(), fs, generateCSS(), generateTailwind(), main(), parse
 ### Community 788 - "duration"
 Cohesion: 0.20
 Nodes (10): fast, normal, slow, $type, $value, $type, $value, duration (+2 more)
+
+### Community 789 - "3. Flows by request type"
+Cohesion: 0.33
+Nodes (6): 3. Flows by request type, DELETE / RETIRE, Error flow, GET, POST / CREATE, PUT / PATCH / UPDATE
 
 ### Community 790 - "E2E Testing Patterns"
 Cohesion: 0.20
@@ -3360,8 +3388,8 @@ Cohesion: 0.60
 Nodes (5): $type, $value, 700, 700, 700
 
 ### Community 800 - "E2E QA AUDIT REPORT — Kiểm thử cấp độ cao quy trình đọc lại từ sai (`"một"`), bảo toàn lỗi lần đầu & tối giản thao tác "Từ cần luyện""
-Cohesion: 0.29
-Nodes (6): 1. Ma trận kết quả Kịch bản A / B / C & Cổng chất lượng, 2. Bảng đối chứng "Tô xanh đối xứng vs. Giữ nguyên lỗi lần đầu" (`"Bé có một bông hoa."`, sai từ `"một"` thành `"mốt"`), 3. Bảng đo giảm thao tác & Độ nhạy thu âm thực tế (UX Friction & Latency Audit), 4. Bảng kiểm chứng độ nhạy & chống nhận vơ cho từ `"một"` (`context_phrase = "Bé có một bông hoa."`), 5. Lỗi thực tế phát hiện được & đã tự động khắc phục ngay trong quá trình Audit, E2E QA AUDIT REPORT — Kiểm thử cấp độ cao quy trình đọc lại từ sai (`"một"`), bảo toàn lỗi lần đầu & tối giản thao tác "Từ cần luyện"
+Cohesion: 0.33
+Nodes (5): 1. Ma trận kết quả Kịch bản A / B / C & Cổng chất lượng, 2. Bảng đối chứng "Tô xanh đối xứng vs. Giữ nguyên lỗi lần đầu" (`"Bé có một bông hoa."`, sai từ `"một"` thành `"mốt"`), 3. Bảng đo giảm thao tác & Độ nhạy thu âm thực tế (UX Friction & Latency Audit), 4. Bảng kiểm chứng độ nhạy & chống nhận vơ cho từ `"một"` (`context_phrase = "Bé có một bông hoa."`), E2E QA AUDIT REPORT — Kiểm thử cấp độ cao quy trình đọc lại từ sai (`"một"`), bảo toàn lỗi lần đầu & tối giản thao tác "Từ cần luyện"
 
 ### Community 801 - "Authentication & Authorization Implementation Patterns"
 Cohesion: 0.22
@@ -3483,10 +3511,6 @@ Nodes (7): Best Practices, Common Pitfall, Decision Tree: Choosing Your Approach
 Cohesion: 0.25
 Nodes (7): Choosing formulas that survive verification, Dependencies, Financial models, openpyxl gotchas, Recalculate (mandatory whenever the file contains formulas), Requirements for every output, XLSX creation, editing, and analysis
 
-### Community 831 - "Phase 3 — Lịch sử đọc, báo cáo và từ khó của Parent"
-Cohesion: 0.29
-Nodes (6): Command và kết quả thực tế, File chỉnh sửa/tạo trong lượt Phase 3, Giới hạn và bàn giao, Hoàn thiện trong lượt này, Phase 3 — Lịch sử đọc, báo cáo và từ khó của Parent, Đối chiếu database thật — chỉ đọc
-
 ### Community 832 - "UI/UX CHANGES — Thiết kế lại `/reports/difficult-words` & đồng bộ Đỏ → Vàng → Xanh"
 Cohesion: 0.25
 Nodes (7): 1. Màn hình `/reports/difficult-words` nhóm theo sách ([difficult-words-screen.tsx](file:///F:/c1/capstone1/frontend/components/reports/difficult-words-screen.tsx)), 2. Sân khấu luyện 1 chạm rảnh tay ([difficult-word-practice-panel.tsx](file:///F:/c1/capstone1/frontend/components/reports/difficult-word-practice-panel.tsx)), 3. Đồng bộ Đỏ → Vàng → Xanh trong đọc sách & báo cáo phiên, 4. Ảnh chụp kiểm thử giao diện (Desktop 1440px & Mobile 390px), Sau nâng cấp, Trước đây, UI/UX CHANGES — Thiết kế lại `/reports/difficult-words` & đồng bộ Đỏ → Vàng → Xanh
@@ -3579,17 +3603,13 @@ Nodes (6): 1. Dispatch the implementer, 2. Handle the report, 3. Review the task
 Cohesion: 0.40
 Nodes (5): 1. Progressive Context Discovery (Save Tokens), 2. Critical Guardrails (Never Violate), 3. Domain-to-File Map, 4. Post-Edit Maintenance, ViRead Architecture & Fast File Routing
 
-### Community 857 - "FamilyReadingDesk"
-Cohesion: 0.33
-Nodes (5): FamilyReadingDesk(), child, openDesk(), session, sessionService
-
 ### Community 858 - "PERFORMANCE RESULTS — Số liệu cấu hình thời gian thu âm & hiệu năng đo được"
 Cohesion: 0.33
 Nodes (5): 1. Tối ưu cửa sổ thu âm & VAD cho từ đơn (`"có"`), 2. Giảm số vòng gọi HTTP & ngưỡng hoàn thành, 3. Hiệu năng CPU / Test / Build đo trực tiếp, Bộ hẹn giờ dừng thu tự động (`SHORT_WORD_CAPTURE_CONFIG` tại [word-practice-engine.ts](file:///F:/c1/capstone1/frontend/lib/reading/word-practice-engine.ts)), PERFORMANCE RESULTS — Số liệu cấu hình thời gian thu âm & hiệu năng đo được
 
-### Community 860 - "reading-screen.tsx"
-Cohesion: 0.07
-Nodes (42): BrowserSpeechErrorEvent, BrowserSpeechEvent, BrowserSpeechRecognition, connectionLabel(), FrozenPageAssessment, getRetryCaptureTimeMs(), LoadState, PageTranscriptBucket (+34 more)
+### Community 860 - "word-practice-engine.ts"
+Cohesion: 0.12
+Nodes (31): 2. Thành phần Frontend, Cách đã sửa, load(), hasShortWordBlockingAudioIssue(), hasHighConfidenceKeytermResult(), hasUsableBrowserConfidence(), hasUsableTranscript(), isRetryWordRecognized() (+23 more)
 
 ### Community 861 - "maybeOpenBrowser"
 Cohesion: 0.40
@@ -3598,10 +3618,6 @@ Nodes (4): browserLauncherForPlatform(), companionUrl(), maybeOpenBrowser(), url
 ### Community 862 - "DATABASE CHANGES — Schema Migration & Dual-Store `WORD_RETRY` Persistence"
 Cohesion: 0.33
 Nodes (5): 1. Cập nhật Migration SQL & SQLAlchemy Model, 2. Hợp đồng Dual-Store Fallback (`public.readingevents` `Type = 'WORD_RETRY'`), 3. Đồng bộ Báo cáo Phiên đọc (`self_corrected_word_ids`), Các cột provenance bổ sung (Idempotent `add column if not exists`), DATABASE CHANGES — Schema Migration & Dual-Store `WORD_RETRY` Persistence
-
-### Community 863 - "re"
-Cohesion: 0.08
-Nodes (23): add_slide(), _add_slide_title(), add_slide_to_package(), _add_to_content_types(), _add_to_presentation_rels(), _count_slide_in_app_properties(), create_slide_from_layout(), _die() (+15 more)
 
 ### Community 864 - "The Task Loop"
 Cohesion: 0.40
@@ -3647,9 +3663,9 @@ Nodes (5): 13. File thay đổi trong đợt nghiệm thu, API, mock, mapper và
 Cohesion: 0.40
 Nodes (5): Abstract, References, Source Files, Table of Contents, Zod
 
-### Community 878 - "xlsx/scripts/office/helpers/pptx_slide.py"
+### Community 878 - "Fresh Figma inspection and dialog correction — 2026-11-17"
 Cohesion: 0.50
-Nodes (3): is_schema_verdict(), _shape_id(), stranded_animation_targets()
+Nodes (4): Final results for the latest working tree, Fresh Figma inspection and dialog correction — 2026-11-17, Latest changes, Scope and verification limits
 
 ### Community 882 - "skill-hook.sh"
 Cohesion: 0.83
@@ -3658,10 +3674,6 @@ Nodes (3): select_python(), select_python_into_var(), skill-hook.sh script
 ### Community 883 - "Security Boundary"
 Cohesion: 0.50
 Nodes (4): Data and control boundary, Security Boundary, Two layers of defense, v3 hardening
-
-### Community 884 - "speech-player.test.tsx"
-Cohesion: 0.18
-Nodes (6): createObjectURL, FakeAudio, FakeSpeechSynthesisUtterance, revokeObjectURL, { speechServiceMock }, speechSynthesisMock
 
 ### Community 885 - "Comparison with Other Tools"
 Cohesion: 0.50
@@ -3707,9 +3719,9 @@ Nodes (4): File Organization, Self-Contained Skill, Skill with Heavy Reference, 
 Cohesion: 0.50
 Nodes (4): Pattern, Reference, Skill Types, Technique
 
-### Community 898 - "database/config.py"
-Cohesion: 0.05
-Nodes (19): _bool_env(), _float_env(), _int_env(), get_db(), _init_supabase_client(), reset_supabase_client(), DatabaseEngineConfigurationTests, RequestScopedSessionDependencyTests (+11 more)
+### Community 898 - "get_db"
+Cohesion: 0.11
+Nodes (7): get_db(), RequestScopedSessionDependencyTests, ClosedConnectionDatabase, override_closed_connection_database(), override_roleless_database(), RequestIdDiagnosticsTests, RolelessDatabase
 
 ### Community 902 - "Best Practices"
 Cohesion: 0.67
@@ -3747,10 +3759,6 @@ Nodes (4): $type, $value, 800, 800
 Cohesion: 0.67
 Nodes (4): padding-y, padding-y, $type, $value
 
-### Community 996 - "within_root"
-Cohesion: 0.50
-Nodes (4): canonicalize(), norm_slashes(), within(), within_root()
-
 ### Community 997 - "Nâng cấp karaoke theo từng tiếng — 2026-11-15"
 Cohesion: 0.40
 Nodes (5): Nâng cấp karaoke theo từng tiếng — 2026-11-15, Phạm vi file và kiểm thử, Thiết kế dữ liệu và đồng bộ, Trải nghiệm admin Phase 3, Trải nghiệm bé Phase 4 và nội dung thật Phase 5
@@ -3783,29 +3791,37 @@ Nodes (3): secondary-foreground, $type, $value
 Cohesion: 0.67
 Nodes (3): white, $type, $value
 
+### Community 1016 - "routes/voice.py"
+Cohesion: 0.11
+Nodes (5): speech_to_text(), text_to_speech(), SpeechToTextResponse, SpeechWord, TextToSpeechRequest
+
 ### Community 1025 - "4. Dữ liệu và vòng đời phiên bản"
 Cohesion: 0.50
 Nodes (4): 4.1. `public.karaoke_songs`, 4.2. `public.karaoke_song_versions`, 4.3. Luồng trạng thái, 4. Dữ liệu và vòng đời phiên bản
 
+### Community 1026 - "MemoryRepository"
+Cohesion: 0.13
+Nodes (6): KaraokeSong, KaraokeSongVersion, utcnow(), SongState, KaraokeRepositoryTests, MemoryRepository
+
 ## Knowledge Gaps
 - **2 isolated node(s):** `RFC-6455`, `./tsconfig.json`
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 8060 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **333 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 8042 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **315 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `get_current_parent_id()` connect `os` to `database/config.py`, `routes/system.py`, `picture_description_ai.py`, `routes/book_content_quality.py`, `tutor_question_service.py`, `build_service`, `test_child_progress.py`, `models/__init__.py`, `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard`, `ElevenLabsVoiceProvider`, `routes/reading.py`, `Báo cáo chức năng: AI Tutor sinh câu hỏi sau khi bé đọc xong bài`, `routes/voice_studio.py`, `test_support_feedback.py`, `VireadOcrTrainingService`, `child_progress_service.py`, `difficult_words_service.py`, `routes/picture_description.py`, `KaraokeService`, `log_diagnostic`, `routes/karaoke.py`, `routes/reading_management.py`, `UUID`, `schemas/profile.py`, `get`, `SourcePage`?**
-  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+- **Why does `get_current_parent_id()` connect `os` to `get_db`, `picture_description_ai.py`, `routes/book_content_quality.py`, `routes/system.py`, `tutor_question_service.py`, `build_service`, `math`, `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard`, `models/__init__.py`, `routes/reading.py`, `tutor-question-service.ts`, `routes/voice_studio.py`, `test_support_feedback.py`, `VireadOcrTrainingService`, `child_progress_service.py`, `routes/picture_description.py`, `schemas/karaoke.py`, `run`, `re`, `routes/karaoke.py`, `get`, `routes/reading_management.py`, `UUID`, `schemas/profile.py`, `routes/voice.py`?**
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
 - **What connects `RFC-6455`, `./tsconfig.json` to the rest of the system?**
   _2 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `vitest` be split into smaller, more focused modules?**
-  _Cohesion score 0.016246668848473516 - nodes in this community are weakly interconnected._
-- **Why does `1. Mẫu thực tế trên main` connect `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard` to `Button`, `os`, `schemas/profile.py`, `parent-profile-screen.tsx`, `ProfileRepository`?**
-  _High betweenness centrality (0.050) - this node is a cross-community bridge._
+  _Cohesion score 0.014663350833563599 - nodes in this community are weakly interconnected._
+- **Why does `1. Mẫu thực tế trên main` connect `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard` to `Button`, `os`, `zod`, `schemas/profile.py`, `ServiceError`, `ProfileRepository`?**
+  _High betweenness centrality (0.065) - this node is a cross-community bridge._
 - **Should `lyric-timing-editor.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.13535353535353536 - nodes in this community are weakly interconnected._
-- **Why does `ServiceError` connect `parent-profile-screen.tsx` to `vitest`, `Button`, `real-data-fixture.ts`, `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard`, `tts-playback.ts`, `vitest`, `ReadingManagementScreen`, `picture-description-service.ts`, `karaoke.ts`, `reading-screen.tsx`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+  _Cohesion score 0.06142728093947606 - nodes in this community are weakly interconnected._
+- **Why does `ServiceError` connect `ServiceError` to `vitest`, `Button`, `karaoke-fixtures.ts`, `voice-studio-service.ts`, `Phase 1 — Nối dữ liệu thật theo mẫu Dashboard`, `vitest`, `tutor-question-service.ts`, `ReadingManagementScreen`, `picture-description-screen.tsx`, `karaoke.ts`, `speech-service.ts`?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
 - **Should `Button` be split into smaller, more focused modules?**
-  _Cohesion score 0.019789157720192203 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.021227100901424833 - nodes in this community are weakly interconnected._

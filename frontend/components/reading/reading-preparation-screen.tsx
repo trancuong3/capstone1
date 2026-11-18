@@ -543,6 +543,12 @@ export function ReadingPreparationScreen({
               {data.endPage.page_number}
             </p>
           ) : null}
+          {data.startPage && data.confidence !== null ? (
+            <p className="text-sm text-primary">
+              Trang OCR xác nhận: Trang {data.startPage.page_number} · Độ tin
+              cậy {Math.round(data.confidence * 100)}%
+            </p>
+          ) : null}
           {data.explicitPageInvalid ? (
             <StatusMessage
               title="Không tìm thấy trang được nhận diện"

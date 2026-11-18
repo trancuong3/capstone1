@@ -66,7 +66,7 @@ test("Phase 7: digital silence never reaches STT or consumes a retry", async ({
   await page.waitForTimeout(3300);
   await page.getByRole("button", { name: stopName }).click();
   await expect(
-    page.getByText("ViRead chưa nghe rõ từ này.", { exact: true }),
+    page.getByText("Thử lại · ViRead chưa nghe rõ", { exact: true }),
   ).toBeVisible();
   expect(fixture.sttCalls()).toBe(0);
   expect(fixture.events).toEqual([]);

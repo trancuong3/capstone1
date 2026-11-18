@@ -101,7 +101,7 @@ describe("DashboardScreen with real API adapters", () => {
     renderDashboard();
     expect(
       await screen.findByRole("heading", {
-        name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+        name: "Góc đọc gia đình",
       }),
     ).toBeInTheDocument();
 
@@ -119,7 +119,7 @@ describe("DashboardScreen with real API adapters", () => {
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        `Đang chọn: ${childFixture.alias} – Lớp ${childFixture.grade}`,
+        `Mở tủ sách và chọn một cuốn cho ${childFixture.alias}.`,
       ),
     ).toBeInTheDocument();
 
@@ -129,16 +129,16 @@ describe("DashboardScreen with real API adapters", () => {
     expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(1);
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(
-      screen.getByText(
-        `Đang chọn: ${secondChild.alias} – Lớp ${secondChild.grade}`,
-      ),
+      screen.getByText(`Mở tủ sách và chọn một cuốn cho ${secondChild.alias}.`),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Quét sách" }));
     await user.click(screen.getByRole("button", { name: "Chọn sách" }));
     expect(routerPushMock).toHaveBeenNthCalledWith(1, "/book-scanner");
     expect(routerPushMock).toHaveBeenNthCalledWith(2, "/books");
-    await user.click(screen.getByRole("button", { name: "Hát vui" }));
+    await user.click(
+      screen.getByRole("button", { name: "Trò chơi và âm nhạc" }),
+    );
     expect(routerPushMock).toHaveBeenNthCalledWith(3, "/entertainment");
     expect(screen.getByRole("link", { name: "Tạo hồ sơ bé" })).toHaveAttribute(
       "href",
@@ -151,7 +151,7 @@ describe("DashboardScreen with real API adapters", () => {
     const user = userEvent.setup();
     renderDashboard();
     await screen.findByRole("heading", {
-      name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+      name: "Góc đọc gia đình",
     });
 
     await user.click(screen.getByRole("button", { name: "Quét sách" }));
@@ -161,18 +161,18 @@ describe("DashboardScreen with real API adapters", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Chạm vào hồ sơ của bé bên dưới để chọn người sẽ đọc hoặc chơi.",
-      ),
+      screen.getByText("Chọn hồ sơ của bé để mở tủ sách riêng."),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Chọn hồ sơ trẻ" })).toHaveClass(
-      "ring-4",
+      "family-profiles-prompt",
     );
     expect(routerPushMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Chọn sách" }));
     expect(routerPushMock).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Hát vui" }));
+    await user.click(
+      screen.getByRole("button", { name: "Trò chơi và âm nhạc" }),
+    );
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(
       screen.getByText(
@@ -187,9 +187,7 @@ describe("DashboardScreen with real API adapters", () => {
     );
     renderDashboard();
     expect(
-      await screen.findByRole("heading", {
-        name: "Gia đình mình chưa có hồ sơ bé",
-      }),
+      await screen.findByText(/Gia đình mình chưa có hồ sơ bé/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Tạo hồ sơ đầu tiên" }),
@@ -212,7 +210,7 @@ describe("DashboardScreen with real API adapters", () => {
       </AppStoreProvider>,
     );
     await screen.findByRole("heading", {
-      name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+      name: "Góc đọc gia đình",
     });
     expect(
       await screen.findByText(/Hồ sơ đã thay đổi hoặc không còn khả dụng/),
@@ -234,7 +232,7 @@ describe("DashboardScreen with real API adapters", () => {
     expect(alert).not.toHaveTextContent("Private database details");
   });
 
-  it("exposes an accessible loading state until both responses arrive", async () => {
+  it("exposes an accessible loading state until the child response arrives", async () => {
     let release: () => void = () => undefined;
     const pending = new Promise<void>((resolve) => {
       release = resolve;
@@ -245,11 +243,11 @@ describe("DashboardScreen with real API adapters", () => {
     });
     renderDashboard();
     expect(screen.getByRole("status")).toHaveTextContent("Đang tải");
-    await waitFor(() => expect(apiFetchFixture).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiFetchFixture).toHaveBeenCalledTimes(1));
     await act(async () => release());
     expect(
       await screen.findByRole("heading", {
-        name: `Chào ${profile.display_name}, hôm nay mình đọc gì cùng bé?`,
+        name: "Góc đọc gia đình",
       }),
     ).toBeInTheDocument();
   });

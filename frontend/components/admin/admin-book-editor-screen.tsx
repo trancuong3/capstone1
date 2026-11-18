@@ -37,6 +37,12 @@ export function AdminBookEditorScreen({
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [notice, setNotice] = useState<{
+    tone: "info" | "error";
+    title: string;
+    message: string;
+  } | null>(null);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -81,6 +87,54 @@ export function AdminBookEditorScreen({
       router.push(`/admin/books/${encodeURIComponent(bookId)}`);
     }
     router.refresh();
+  }
+
+  async function changeLifecycle() {
+    if (!book || statusBusy) return;
+    const nextStatus =
+      book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
+    const confirmation =
+      nextStatus === "RETIRED"
+        ? "Ngừng hoạt động sách này? Trang sách và lịch sử đọc sẽ được giữ nguyên."
+        : "Kích hoạt lại sách này trong catalog dành cho phụ huynh?";
+    if (!window.confirm(confirmation)) return;
+
+    setStatusBusy(true);
+    setNotice(null);
+    try {
+      const updated = await books.updateStatus(bookId, { status: nextStatus });
+      if (updated.id !== bookId || updated.lifecycle_status !== nextStatus) {
+        throw new Error("Unexpected lifecycle response");
+      }
+      setBook(updated);
+      setNotice({
+        tone: "info",
+        title:
+          nextStatus === "RETIRED"
+            ? "Đã ngừng hoạt động sách"
+            : "Đã kích hoạt lại sách",
+        message:
+          nextStatus === "RETIRED"
+            ? "Sách không còn xuất hiện trong catalog Parent. Metadata, trang sách, revision và lịch sử đọc vẫn được giữ nguyên."
+            : "Trạng thái mới đã được lưu. Kho sách và dashboard sẽ đọc lại dữ liệu từ API khi mở hoặc tải lại.",
+      });
+    } catch (cause) {
+      setNotice({
+        tone: "error",
+        title:
+          nextStatus === "ACTIVE"
+            ? "Không thể kích hoạt sách"
+            : "Không thể ngừng hoạt động sách",
+        message:
+          nextStatus === "ACTIVE" &&
+          isServiceError(cause) &&
+          cause.status === 422
+            ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
+            : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+      });
+    } finally {
+      setStatusBusy(false);
+    }
   }
 
   if (loading) return <AdminLoading label="Đang tải metadata sách…" />;
@@ -142,6 +196,24 @@ export function AdminBookEditorScreen({
         >
           Kiểm tra trường liên quan bên dưới. Dashboard chỉ xóa cảnh báo sau khi
           tải lại dữ liệu từ Backend và điều kiện đó đã được khắc phục.
+        </StatusMessage>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-4">
+        <Button
+          className="sm:w-auto"
+          disabled={statusBusy}
+          isLoading={statusBusy}
+          onClick={() => void changeLifecycle()}
+          variant="secondary"
+        >
+          {book.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động"
+            : "Kích hoạt lại"}
+        </Button>
+      </div>
+      {notice ? (
+        <StatusMessage tone={notice.tone} title={notice.title}>
+          {notice.message}
         </StatusMessage>
       ) : null}
       <Card className="w-full bg-white sm:px-8 sm:py-8">

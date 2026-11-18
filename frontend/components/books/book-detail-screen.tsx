@@ -361,6 +361,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <h1 className="text-heading font-extrabold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
+          {targetPageId &&
+          targetConfidence !== null &&
+          targetConfidence >= 0 &&
+          targetConfidence <= 1 ? (
+            <p className="text-sm text-primary">
+              Độ tin cậy {Math.round(targetConfidence * 100)}%
+            </p>
+          ) : null}
           <div
             aria-label="Báo cáo nội dung sách"
             role="group"

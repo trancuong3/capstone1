@@ -975,7 +975,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
       await user.click(retryConsent);
       await screen.findByText(/Bé đọc lại từ/);
-      expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === "P" &&
+            element.textContent === "Từ cần luyện mèo",
+        ),
+      ).toBeInTheDocument();
       await waitFor(() => {
         expect(services.readingService.navigateToPage).toHaveBeenCalledWith(
           TEST_SESSION_ID,
@@ -1016,7 +1022,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await waitFor(() =>
           expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
         );
-        expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+        expect(
+          screen.getByText(
+            (_, element) =>
+              element?.tagName === "P" &&
+              element.textContent === "Từ cần luyện mèo",
+          ),
+        ).toBeInTheDocument();
         expect(speechPlayerMock.play).toHaveBeenCalledTimes(4);
         expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
         return;
@@ -1118,7 +1130,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             );
           }
         }
-        await screen.findByText("Từ cần luyện: “nhỏ”");
+        await screen.findByText(
+          (_, element) =>
+            element?.tagName === "P" &&
+            element.textContent === "Từ cần luyện nhỏ",
+        );
         await waitFor(() =>
           expect(speechRecorderMock.start).toHaveBeenCalledTimes(5),
         );
@@ -1233,9 +1249,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           ],
         });
       });
-      expect(
-        screen.getByText("Đang nghe bé đọc từ này..."),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Đang nghe bé")).toBeInTheDocument();
       if (outcome === "technical-error") {
         await user.click(
           screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
@@ -1495,7 +1509,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       );
     });
     expect(services.readingService.navigateToPage).toHaveBeenCalledOnce();
-    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Từ cần luyện mèo",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Chưa mở lại được trang 4/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Thử mở lại trang" }),
@@ -1522,14 +1542,20 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         pageFour.page_revision_id,
       );
     });
-    expect(screen.getByText("Từ cần luyện: “mèo”")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent === "Từ cần luyện mèo",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(/Chưa mở lại được trang 4/),
     ).not.toBeInTheDocument();
     const skipWordButton = screen.getByRole("button", {
       name: "Bỏ qua từ này",
     });
-    expect(skipWordButton).toBeEnabled();
+    await waitFor(() => expect(skipWordButton).toBeEnabled());
     expect(screen.getByText(/Bé đọc lại từ ·/)).toHaveTextContent("1/1");
     await user.click(skipWordButton);
 

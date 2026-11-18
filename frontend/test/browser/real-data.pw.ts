@@ -246,8 +246,13 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
     page.getByRole("heading", { name: "Kiểm tra OCR · R2" }),
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
+  await page
+    .getByText("Thông tin chi tiết từ OCR và lịch sử revision", {
+      exact: true,
+    })
+    .click();
   await expect(
-    page.getByRole("button", { name: "Chạy lại OCR" }),
+    page.getByRole("button", { name: /Chạy lại OCR từ ảnh đã lưu/ }),
   ).toBeEnabled();
   await page.getByRole("button", { name: /Revision R1/ }).click();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue(
@@ -323,7 +328,9 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   await page
     .getByRole("button", { name: /Xác nhận nội dung và hoàn tất VERIFIED/ })
     .click();
-  await expect(page.getByText(/Đã xác minh revision/)).toBeVisible();
+  await expect(
+    page.getByText("Đã xác minh revision", { exact: true }),
+  ).toBeVisible();
   expect(api.verifyRequest?.corrected_text).toBe("Văn bản đã sửa");
   expect(api.verifyRequest?.proofread_audit).toMatchObject({
     mode: "AI_CHECKED",
@@ -446,10 +453,13 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
             .__deviceProbe.cameraRequests,
       ),
     ).toBe(1);
-    await page.getByRole("link", { name: "Về tổng quan", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" })
+      .getByRole("link", { name: "Tổng quan", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", {
-        name: "Chào Ba mẹ API, hôm nay mình đọc gì cùng bé?",
+        name: "Góc đọc gia đình",
       }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Chọn sách" }).click();

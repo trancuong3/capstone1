@@ -176,9 +176,10 @@ describe("Phase 5 real-data runtime cleanup", () => {
       screen.getByRole("combobox", { name: "Khối lớp lớn nhất *" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tạo sách" })).toBeEnabled();
-    expect(
-      screen.getByRole("link", { name: /Hủy và quay lại/ }),
-    ).toHaveAttribute("href", "/admin/books");
+    expect(screen.getByRole("link", { name: "Hủy" })).toHaveAttribute(
+      "href",
+      "/admin/books",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("uploader accepts multiple page images and exposes the real upload action", () => {

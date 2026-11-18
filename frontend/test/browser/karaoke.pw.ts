@@ -266,7 +266,7 @@ test("dashboard → selected child → library → native player → leave stops
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(
     page.getByRole("region", { name: "Chọn hồ sơ trẻ" }),
-  ).toHaveClass(/ring-4/);
+  ).toHaveClass(/family-profiles-prompt/);
   await page
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
     .click();
