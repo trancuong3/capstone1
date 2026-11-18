@@ -299,6 +299,212 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_compute_stars(3, True), 1)
         self.assertEqual(_compute_stars(1, False), 0)
 
+    async def test_evaluate_description_falls_back_to_local_ollama_when_gemini_fails(self):
+        calls: list[tuple[str, str]] = []
+        ollama_body: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal ollama_body
+            calls.append((request.url.host, request.url.path))
+            if request.url.host == "generativelanguage.googleapis.com":
+                if "gemini-3.5-flash-lite" in request.url.path:
+                    return httpx.Response(429, json={"error": {"message": "quota exceeded"}})
+                return httpx.Response(
+                    200,
+                    json={
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [{"text": '{"is_relevant":'}]  # truncated JSON
+                                }
+                            }
+                        ]
+                    },
+                )
+            if request.url.host == "127.0.0.1" and request.url.path == "/api/chat":
+                ollama_body = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(
+                    200,
+                    json={
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                _evaluation_json_payload(score_out_of_10=8),
+                                ensure_ascii=False,
+                            ),
+                        }
+                    },
+                )
+            return httpx.Response(503)
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-gemini-key",
+                primary_model="gemini-3.5-flash-lite",
+                fallback_model="gemini-3.1-flash-lite",
+                timeout_seconds=10,
+                ollama_enabled=True,
+                ollama_base_url="http://127.0.0.1:11434",
+                ollama_model="qwen3-vl:4b-instruct-q4_K_M",
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(1024, 768),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn đầy nắng",
+            guiding_questions=["Bé thấy gì?"],
+            child_transcript="Trong tranh có chú mèo cam ngủ trên ghế gỗ cạnh hoa hướng dương.",
+        )
+
+        self.assertEqual(model_used, "ollama:qwen3-vl:4b-instruct-q4_K_M")
+        self.assertEqual(feedback.score_out_of_10, 8)
+        self.assertEqual(feedback.stars, 3)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[2], ("127.0.0.1", "/api/chat"))
+        self.assertFalse(ollama_body["think"])
+        self.assertFalse(ollama_body["stream"])
+        self.assertEqual(ollama_body["model"], "qwen3-vl:4b-instruct-q4_K_M")
+        self.assertEqual(ollama_body["format"]["type"], "object")
+        self.assertEqual(len(ollama_body["messages"][1]["images"]), 1)
+
+    async def test_evaluate_description_uses_local_ollama_when_cloud_key_missing(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "127.0.0.1" and request.url.path == "/api/chat":
+                return httpx.Response(
+                    200,
+                    json={
+                        "message": {
+                            "content": json.dumps(_evaluation_json_payload(), ensure_ascii=False)
+                        }
+                    },
+                )
+            raise AssertionError(f"Unexpected non-local call: {request.url}")
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key=None,
+                groq_api_key=None,
+                ollama_enabled=True,
+                ollama_base_url="http://127.0.0.1:11434",
+                ollama_model="qwen3-vl:4b-instruct-q4_K_M",
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai trong tranh?"],
+            child_transcript="Chú mèo đang ngủ trên ghế.",
+        )
+
+        self.assertEqual(model_used, "ollama:qwen3-vl:4b-instruct-q4_K_M")
+        self.assertEqual(feedback.score_out_of_10, 9)
+
+    async def test_thought_parts_are_ignored_when_extracting_gemini_json(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {"thought": True, "text": "Internal reasoning not JSON..."},
+                                    {"text": json.dumps(_evaluation_json_payload(score_out_of_10=10), ensure_ascii=False)},
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.5-flash-lite",
+                fallback_model=None,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript="Chú mèo cam ngủ trên ghế.",
+        )
+
+        self.assertEqual(model_used, "gemini-3.5-flash-lite")
+        self.assertEqual(feedback.score_out_of_10, 10)
+
+    async def test_rubric_caps_isolated_words_and_copied_sample_sentences(self):
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            _evaluation_json_payload(score_out_of_10=10),
+                                            ensure_ascii=False,
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.5-flash-lite",
+                fallback_model=None,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        # 1-2 isolated words cannot receive 3 stars even if the LLM returns 10/10.
+        short_fb, _ = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript="mèo cam",
+        )
+        self.assertLessEqual(short_fb.score_out_of_10, 4)
+        self.assertEqual(short_fb.stars, 1)
+
+        # Copying a model sample sentence verbatim is capped at 2 stars (<= 7/10).
+        sample_sentence = "Chú mèo màu cam đang ngủ ngon lành trên chiếc ghế gỗ."
+        copied_fb, _ = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript=sample_sentence,
+            model_sample_sentences=[sample_sentence],
+        )
+        self.assertLessEqual(copied_fb.score_out_of_10, 7)
+        self.assertEqual(copied_fb.stars, 2)
+        self.assertIn("câu mẫu", copied_fb.improvement_tip)
+
 
 class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
     def _make_repo_mock(self, *, role: str = "parent", grade: int = 2) -> MagicMock:

@@ -343,6 +343,8 @@ class PictureDescriptionService:
                         session_id=row.Id,
                         child_id=row.ChildProfileId,
                         source_type=row.SourceType,  # type: ignore[arg-type]
+                        sample_key=row.SampleKey,
+                        book_page_id=row.BookPageId,
                         scene_title=row.SceneTitle,
                         image_url=image_url,
                         status=row.Status,  # type: ignore[arg-type]
@@ -494,7 +496,7 @@ class PictureDescriptionService:
             BestStars=0,
             BestScore=0,
             AttemptsCount=0,
-            AiModelUsed=model_used,
+            AiModelUsed=model_used[:64] if model_used else None,
             CreatedAt=now,
             UpdatedAt=now,
         )
@@ -523,6 +525,21 @@ class PictureDescriptionService:
             )
 
         guide = PictureGuideRead.model_validate(session.PromptPayload)
+        previous_transcript: str | None = None
+        previous_score: int | None = None
+        previous_tip: str | None = None
+        if int(session.AttemptsCount) > 0:
+            prior_attempts = await self.repository.list_attempts(session.Id)
+            await self.repository.db.rollback()
+            if prior_attempts:
+                latest_prior = prior_attempts[0]
+                previous_transcript = latest_prior.TranscriptText
+                previous_score = int(latest_prior.ScoreOutOf10)
+                if isinstance(latest_prior.FeedbackPayload, dict):
+                    raw_tip = latest_prior.FeedbackPayload.get("improvement_tip")
+                    if isinstance(raw_tip, str) and raw_tip.strip():
+                        previous_tip = raw_tip.strip()
+
         image_bytes, image_mime = await self._load_bytes_for_session(session)
 
         try:
@@ -533,6 +550,10 @@ class PictureDescriptionService:
                 scene_title=session.SceneTitle,
                 guiding_questions=guide.guiding_questions,
                 child_transcript=payload.transcript_text,
+                model_sample_sentences=guide.model_sample_sentences,
+                previous_transcript=previous_transcript,
+                previous_score=previous_score,
+                previous_tip=previous_tip,
             )
         except PictureAiError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -540,7 +561,12 @@ class PictureDescriptionService:
         now = datetime.now(timezone.utc)
         new_best_stars = max(int(session.BestStars), int(feedback.stars))
         new_best_score = max(int(session.BestScore), int(feedback.score_out_of_10))
-        new_status = "COMPLETED" if new_best_stars >= 1 or session.Status == "COMPLETED" else "ACTIVE"
+        achieved_completion = feedback.is_relevant and new_best_stars >= 2
+        new_status = (
+            "COMPLETED"
+            if achieved_completion or session.Status == "COMPLETED"
+            else "ACTIVE"
+        )
         input_mode: InputMode = payload.input_mode
 
         orm_attempt = PictureDescriptionAttempt(
@@ -552,7 +578,7 @@ class PictureDescriptionService:
             ScoreOutOf10=feedback.score_out_of_10,
             Stars=feedback.stars,
             FeedbackPayload=feedback.model_dump(mode="json"),
-            AiModelUsed=model_used,
+            AiModelUsed=model_used[:64] if model_used else None,
             CreatedAt=now,
         )
         updated_session, saved_attempt = await self.repository.save_attempt_and_update_session(

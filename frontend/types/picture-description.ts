@@ -84,6 +84,8 @@ export interface PictureSessionSummaryDTO {
   readonly session_id: string;
   readonly child_id: string;
   readonly source_type: PictureSourceType;
+  readonly sample_key?: string | null;
+  readonly book_page_id?: string | null;
   readonly scene_title: string;
   readonly image_url: string;
   readonly status: PictureSessionStatus;

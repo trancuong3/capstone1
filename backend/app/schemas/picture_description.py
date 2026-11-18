@@ -96,6 +96,8 @@ class PictureSessionSummaryRead(BaseModel):
     session_id: UUID
     child_id: UUID
     source_type: SourceType
+    sample_key: str | None = None
+    book_page_id: UUID | None = None
     scene_title: str
     image_url: str
     status: SessionStatus

@@ -6,17 +6,21 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Eraser,
   Eye,
   EyeOff,
   History,
   ImagePlus,
   Lightbulb,
   Mic,
+  PenLine,
+  Plus,
   RefreshCw,
   Send,
   Sparkles,
   Square,
   Star,
+  TrendingUp,
   Upload,
   Volume2,
   VolumeX,
@@ -89,12 +93,42 @@ const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const defaultGameError =
   "Chưa kết nối được góc Kể chuyện qua tranh. Ba mẹ và bé hãy thử lại nhé.";
 
+const STORYTELLING_STEPS = [
+  {
+    step: "1",
+    title: "Trong tranh có ai, vật gì?",
+    detail: "Gọi tên nhân vật, con vật hoặc đồ vật nổi bật.",
+  },
+  {
+    step: "2",
+    title: "Đang làm gì, ở đâu?",
+    detail: "Kể hoạt động đang diễn ra và khung cảnh xung quanh.",
+  },
+  {
+    step: "3",
+    title: "Màu sắc, cảm nghĩ ra sao?",
+    detail: "Thêm màu sắc, thời tiết hoặc cảm xúc của bé.",
+  },
+] as const;
+
 function normalizeSpeechUnit(value: string): string {
   return value
     .trim()
     .replace(/[.!?,;:…]+$/g, "")
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function countMeaningfulWords(value: string): number {
+  const matches = value.trim().match(/\p{L}+/gu);
+  return matches ? matches.length : 0;
+}
+
+function descriptionContainsTerm(description: string, term: string): boolean {
+  const normalizedDesc = normalizeSpeechUnit(description);
+  const normalizedTerm = normalizeSpeechUnit(term);
+  if (!normalizedDesc || !normalizedTerm) return false;
+  return ` ${normalizedDesc} `.includes(` ${normalizedTerm} `);
 }
 
 function collapseDuplicateSpeech(text: string): string {
@@ -179,6 +213,38 @@ function sourceLabel(source: PictureSessionSummaryDTO["source_type"]): string {
   }
 }
 
+function readinessHint(
+  wordCount: number,
+  grade: number,
+): {
+  readonly label: string;
+  readonly readyFor3Stars: boolean;
+} {
+  const targetWords = grade >= 3 ? 7 : 5;
+  if (wordCount === 0) {
+    return {
+      label: "Bé hãy bấm Nói bằng Micro hoặc gõ câu mô tả bức tranh nhé.",
+      readyFor3Stars: false,
+    };
+  }
+  if (wordCount <= 2) {
+    return {
+      label: `Mới có ${wordCount} từ rời — bé hãy ghép thành 1 câu trọn vẹn nhé!`,
+      readyFor3Stars: false,
+    };
+  }
+  if (wordCount < targetWords) {
+    return {
+      label: `Đã có ${wordCount} từ — kể thêm 1–2 chi tiết nữa để săn đủ 3 sao nhé!`,
+      readyFor3Stars: false,
+    };
+  }
+  return {
+    label: `Bài kể đã có ${wordCount} từ rất đầy đặn — sẵn sàng gửi cô giáo AI chấm!`,
+    readyFor3Stars: true,
+  };
+}
+
 function renderStars(count: number) {
   return (
     <span
@@ -235,7 +301,7 @@ export function PictureDescriptionScreen() {
 
   const [descriptionText, setDescriptionText] = useState("");
   const [inputMode, setInputMode] = useState<PictureInputMode>("TEXT");
-  const [latestAttempt, setLatestAttempt] = useState<PictureAttemptDTO | null>(
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(
     null,
   );
 
@@ -307,6 +373,36 @@ export function PictureDescriptionScreen() {
     };
   }, [catalogRefreshKey, childId, pictureService]);
 
+  const sampleSessionMap = useMemo(() => {
+    const map = new Map<string, PictureSessionSummaryDTO>();
+    if (catalogState.status !== "ready") return map;
+    for (const item of catalogState.sessions) {
+      if (
+        item.source_type === "SAMPLE" &&
+        item.sample_key &&
+        !map.has(item.sample_key)
+      ) {
+        map.set(item.sample_key, item);
+      }
+    }
+    return map;
+  }, [catalogState]);
+
+  const bookPageSessionMap = useMemo(() => {
+    const map = new Map<string, PictureSessionSummaryDTO>();
+    if (catalogState.status !== "ready") return map;
+    for (const item of catalogState.sessions) {
+      if (
+        item.source_type === "BOOK_PAGE" &&
+        item.book_page_id &&
+        !map.has(item.book_page_id)
+      ) {
+        map.set(item.book_page_id, item);
+      }
+    }
+    return map;
+  }, [catalogState]);
+
   const stopSpeechPlayback = useCallback(() => {
     speechPlayer.stop();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -354,12 +450,15 @@ export function PictureDescriptionScreen() {
   );
 
   const openSession = useCallback(
-    (loaded: PictureSessionDTO) => {
+    (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
       isRecordingVoiceRef.current = false;
+      const newestAttempt = loaded.attempts[0] ?? null;
       setSession(loaded);
-      setLatestAttempt(loaded.attempts[0] ?? null);
-      setPracticeTab("PRACTICE");
+      setSelectedAttemptId(newestAttempt?.attempt_id ?? null);
+      setPracticeTab(
+        initialTab === "RESULT" && newestAttempt ? "RESULT" : "PRACTICE",
+      );
       setSelectedVocabWord(null);
       setShowHints(false);
       setShowSampleSentences(false);
@@ -372,7 +471,35 @@ export function PictureDescriptionScreen() {
     [stopSpeechPlayback],
   );
 
-  const handleStartSample = async (sample: PictureSampleItemDTO) => {
+  const handleResumeSession = async (
+    sessionId: string,
+    preferredTab?: PracticeTab,
+  ) => {
+    if (!pictureService || isAnalyzing) return;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+
+    setActionError(null);
+    setIsAnalyzing(true);
+    try {
+      const loaded = await pictureService.getSession(
+        sessionId,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      const targetTab =
+        preferredTab ?? (loaded.attempts.length > 0 ? "RESULT" : "PRACTICE");
+      openSession(loaded, targetTab);
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return;
+      setActionError(isServiceError(error) ? error.message : defaultGameError);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleCreateSampleSession = async (sample: PictureSampleItemDTO) => {
     if (!childId || !pictureService || isAnalyzing) return;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -390,7 +517,7 @@ export function PictureDescriptionScreen() {
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      openSession(created);
+      openSession(created, "PRACTICE");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -400,7 +527,19 @@ export function PictureDescriptionScreen() {
     }
   };
 
-  const handleStartBookPage = async (page: PictureBookPageItemDTO) => {
+  const handleStartSample = async (sample: PictureSampleItemDTO) => {
+    const existing = sampleSessionMap.get(sample.sample_key);
+    if (existing) {
+      await handleResumeSession(
+        existing.session_id,
+        existing.attempts_count > 0 ? "RESULT" : "PRACTICE",
+      );
+      return;
+    }
+    await handleCreateSampleSession(sample);
+  };
+
+  const handleCreateBookPageSession = async (page: PictureBookPageItemDTO) => {
     if (!childId || !pictureService || isAnalyzing) return;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -418,7 +557,7 @@ export function PictureDescriptionScreen() {
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      openSession(created);
+      openSession(created, "PRACTICE");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
@@ -426,6 +565,18 @@ export function PictureDescriptionScreen() {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleStartBookPage = async (page: PictureBookPageItemDTO) => {
+    const existing = bookPageSessionMap.get(page.page_id);
+    if (existing) {
+      await handleResumeSession(
+        existing.session_id,
+        existing.attempts_count > 0 ? "RESULT" : "PRACTICE",
+      );
+      return;
+    }
+    await handleCreateBookPageSession(page);
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -473,31 +624,8 @@ export function PictureDescriptionScreen() {
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      openSession(created);
+      openSession(created, "PRACTICE");
       setCatalogRefreshKey((value) => value + 1);
-    } catch (error: unknown) {
-      if (controller.signal.aborted) return;
-      setActionError(isServiceError(error) ? error.message : defaultGameError);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleResumeSession = async (sessionId: string) => {
-    if (!pictureService || isAnalyzing) return;
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-
-    setActionError(null);
-    setIsAnalyzing(true);
-    try {
-      const loaded = await pictureService.getSession(
-        sessionId,
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      openSession(loaded);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
       setActionError(isServiceError(error) ? error.message : defaultGameError);
@@ -629,6 +757,22 @@ export function PictureDescriptionScreen() {
     }
   };
 
+  const handleInsertVocabWord = (word: string) => {
+    setDescriptionText((previous) => {
+      if (descriptionContainsTerm(previous, word)) return previous;
+      const trimmedEnd = previous.replace(/\s+$/g, "");
+      return trimmedEnd ? `${trimmedEnd} ${word}` : word;
+    });
+  };
+
+  const handleClearDraft = () => {
+    stopSpeechPlayback();
+    setDescriptionText("");
+    setInputMode("TEXT");
+    setVoiceMessage(null);
+    setActionError(null);
+  };
+
   const handleEvaluate = async () => {
     if (!session || !pictureService || isEvaluating) return;
     const trimmed = descriptionText.trim();
@@ -655,7 +799,8 @@ export function PictureDescriptionScreen() {
       );
       if (controller.signal.aborted) return;
       setSession(response.session);
-      setLatestAttempt(response.latest_attempt);
+      setSelectedAttemptId(response.latest_attempt.attempt_id);
+      setVoiceMessage(null);
       setPracticeTab("RESULT");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
@@ -696,10 +841,35 @@ export function PictureDescriptionScreen() {
   }
 
   const selectedChild = childState.child;
-  const activeAttempt = latestAttempt ?? session?.attempts[0] ?? null;
+  const latestAttempt = session?.attempts[0] ?? null;
+  const activeAttempt: PictureAttemptDTO | null = session
+    ? (session.attempts.find((item) => item.attempt_id === selectedAttemptId) ??
+      latestAttempt)
+    : null;
+  const previousAttemptForActive: PictureAttemptDTO | null =
+    session && activeAttempt
+      ? (session.attempts.find(
+          (item) => item.attempt_number === activeAttempt.attempt_number - 1,
+        ) ?? null)
+      : null;
+  const scoreDelta =
+    activeAttempt && previousAttemptForActive
+      ? activeAttempt.score_out_of_10 - previousAttemptForActive.score_out_of_10
+      : null;
+
   const hasSubmittedAttempt = Boolean(
-    session && (session.attempts_count >= 1 || activeAttempt),
+    session && (session.attempts_count >= 1 || latestAttempt),
   );
+  const draftWordCount = countMeaningfulWords(descriptionText);
+  const draftReadiness = readinessHint(
+    draftWordCount,
+    session?.child_grade ?? selectedChild.grade,
+  );
+  const usedVocabCount = session
+    ? session.guide.suggested_vocabulary.filter((item) =>
+        descriptionContainsTerm(descriptionText, item.word),
+      ).length
+    : 0;
 
   return (
     <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
@@ -738,7 +908,7 @@ export function PictureDescriptionScreen() {
               setShowSampleSentences(false);
               setPracticeTab("PRACTICE");
               setSession(null);
-              setLatestAttempt(null);
+              setSelectedAttemptId(null);
               setActionError(null);
             }}
             size="compact"
@@ -853,40 +1023,69 @@ export function PictureDescriptionScreen() {
               <div className="mt-6">
                 {activeTab === "SAMPLE" ? (
                   <div className="grid gap-5 md:grid-cols-3">
-                    {catalogState.catalog.samples.map((sample) => (
-                      <article
-                        className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm transition-transform hover:-translate-y-0.5"
-                        key={sample.sample_key}
-                      >
-                        <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/40">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            alt={sample.title}
-                            className="h-full w-full object-cover"
-                            src={sample.image_url}
-                          />
-                          <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
-                            {sample.theme}
-                          </span>
-                        </div>
-                        <div className="flex flex-1 flex-col justify-between gap-4 p-4">
-                          <div>
-                            <h2 className="text-lg font-extrabold text-ink">
-                              {sample.title}
-                            </h2>
-                            <p className="mt-1 text-sm text-muted">
-                              Quan sát tranh và kể lại theo cách nghĩ của bé.
-                            </p>
+                    {catalogState.catalog.samples.map((sample) => {
+                      const existing = sampleSessionMap.get(sample.sample_key);
+                      const hasPriorAttempt = Boolean(
+                        existing && existing.attempts_count > 0,
+                      );
+                      return (
+                        <article
+                          className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm transition-transform hover:-translate-y-0.5"
+                          key={sample.sample_key}
+                        >
+                          <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/40">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              alt={sample.title}
+                              className="h-full w-full object-cover"
+                              src={sample.image_url}
+                            />
+                            <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
+                              {sample.theme}
+                            </span>
+                            {hasPriorAttempt && existing ? (
+                              <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                {existing.best_stars}/3 sao
+                              </span>
+                            ) : null}
                           </div>
-                          <Button
-                            onClick={() => void handleStartSample(sample)}
-                            type="button"
-                          >
-                            Khám phá tranh này
-                          </Button>
-                        </div>
-                      </article>
-                    ))}
+                          <div className="flex flex-1 flex-col justify-between gap-4 p-4">
+                            <div>
+                              <h2 className="text-lg font-extrabold text-ink">
+                                {sample.title}
+                              </h2>
+                              <p className="mt-1 text-sm text-muted">
+                                {hasPriorAttempt && existing
+                                  ? `Bé đã kể ${existing.attempts_count} lượt (cao nhất ${existing.best_score}/10).`
+                                  : "Quan sát tranh và kể lại theo cách nghĩ của bé."}
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                onClick={() => void handleStartSample(sample)}
+                                type="button"
+                              >
+                                {hasPriorAttempt
+                                  ? "Xem kết quả & Kể tiếp"
+                                  : "Khám phá tranh này"}
+                              </Button>
+                              {hasPriorAttempt ? (
+                                <Button
+                                  onClick={() =>
+                                    void handleCreateSampleSession(sample)
+                                  }
+                                  size="compact"
+                                  type="button"
+                                  variant="secondary"
+                                >
+                                  Tạo bộ gợi ý mới
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 ) : null}
 
@@ -971,37 +1170,67 @@ export function PictureDescriptionScreen() {
                 {activeTab === "BOOK_PAGE" ? (
                   catalogState.catalog.book_pages.length > 0 ? (
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                      {catalogState.catalog.book_pages.map((page) => (
-                        <article
-                          className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
-                          key={page.page_id}
-                        >
-                          <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              alt={`${page.book_title} - Trang ${page.page_number}`}
-                              className="h-full w-full object-cover"
-                              src={page.image_url}
-                            />
-                          </div>
-                          <div className="flex flex-1 flex-col justify-between gap-3 p-4">
-                            <div>
-                              <h2 className="line-clamp-1 text-base font-extrabold text-ink">
-                                {page.book_title}
-                              </h2>
-                              <p className="text-sm font-semibold text-muted">
-                                Trang {page.page_number}
-                              </p>
+                      {catalogState.catalog.book_pages.map((page) => {
+                        const existing = bookPageSessionMap.get(page.page_id);
+                        const hasPriorAttempt = Boolean(
+                          existing && existing.attempts_count > 0,
+                        );
+                        return (
+                          <article
+                            className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
+                            key={page.page_id}
+                          >
+                            <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                alt={`${page.book_title} - Trang ${page.page_number}`}
+                                className="h-full w-full object-cover"
+                                src={page.image_url}
+                              />
+                              {hasPriorAttempt && existing ? (
+                                <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                  {existing.best_stars}/3 sao
+                                </span>
+                              ) : null}
                             </div>
-                            <Button
-                              onClick={() => void handleStartBookPage(page)}
-                              type="button"
-                            >
-                              Mô tả trang này
-                            </Button>
-                          </div>
-                        </article>
-                      ))}
+                            <div className="flex flex-1 flex-col justify-between gap-3 p-4">
+                              <div>
+                                <h2 className="line-clamp-1 text-base font-extrabold text-ink">
+                                  {page.book_title}
+                                </h2>
+                                <p className="text-sm font-semibold text-muted">
+                                  Trang {page.page_number}
+                                  {hasPriorAttempt && existing
+                                    ? ` • Đã kể ${existing.attempts_count} lượt`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  onClick={() => void handleStartBookPage(page)}
+                                  type="button"
+                                >
+                                  {hasPriorAttempt
+                                    ? "Xem kết quả & Kể tiếp"
+                                    : "Mô tả trang này"}
+                                </Button>
+                                {hasPriorAttempt ? (
+                                  <Button
+                                    onClick={() =>
+                                      void handleCreateBookPageSession(page)
+                                    }
+                                    size="compact"
+                                    type="button"
+                                    variant="secondary"
+                                  >
+                                    Tạo bộ gợi ý mới
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
                   ) : (
                     <EmptyState
@@ -1040,8 +1269,10 @@ export function PictureDescriptionScreen() {
                         {item.scene_title}
                       </p>
                       <p className="text-xs font-semibold text-muted">
-                        {sourceLabel(item.source_type)} • {item.attempts_count}{" "}
-                        lượt kể
+                        {sourceLabel(item.source_type)} •{" "}
+                        {item.attempts_count > 0
+                          ? `${item.attempts_count} lượt kể`
+                          : "Chưa gửi lượt kể"}
                       </p>
                       <div className="mt-1 flex items-center gap-2">
                         {renderStars(item.best_stars)}
@@ -1049,7 +1280,11 @@ export function PictureDescriptionScreen() {
                           <span className="text-xs font-extrabold text-primary">
                             {item.best_score}/10 điểm
                           </span>
-                        ) : null}
+                        ) : (
+                          <span className="text-xs font-semibold text-muted">
+                            Đang mở
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -1076,7 +1311,9 @@ export function PictureDescriptionScreen() {
               <div className="flex flex-col items-end gap-1">
                 {renderStars(session.best_stars)}
                 <span className="text-xs font-bold text-muted">
-                  Đã kể {session.attempts_count} lượt
+                  {session.attempts_count > 0
+                    ? `Kỷ lục ${session.best_score}/10 • ${session.attempts_count} lượt`
+                    : "Chưa có lượt chấm"}
                 </span>
               </div>
             </div>
@@ -1090,10 +1327,25 @@ export function PictureDescriptionScreen() {
               />
             </div>
 
-            <p className="rounded-control bg-sky/30 px-4 py-3 text-sm font-semibold text-ink">
-              Bé hãy tự quan sát từng chi tiết trong tranh và kể lại theo cách
-              hiểu của riêng mình nhé.
-            </p>
+            <div className="rounded-control bg-sky/25 p-3.5">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                Bố cục 3 bước kể chuyện hay
+              </p>
+              <ol className="mt-2 grid gap-2 sm:grid-cols-3">
+                {STORYTELLING_STEPS.map((item) => (
+                  <li
+                    className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
+                    key={item.step}
+                  >
+                    <span className="font-extrabold text-primary">
+                      Bước {item.step}:
+                    </span>{" "}
+                    <span className="font-bold text-ink">{item.title}</span>
+                    <p className="mt-0.5 text-muted">{item.detail}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
           </div>
 
           {/* Interactive Recording + Optional Collapsed Hints + Evaluation Column */}
@@ -1141,7 +1393,7 @@ export function PictureDescriptionScreen() {
               >
                 <Star aria-hidden="true" className="size-4" />
                 Kết quả chấm điểm
-                {activeAttempt ? (
+                {latestAttempt ? (
                   <span
                     className={
                       "rounded-full px-2 py-0.5 text-xs font-extrabold " +
@@ -1150,7 +1402,7 @@ export function PictureDescriptionScreen() {
                         : "bg-success-surface text-success-ink")
                     }
                   >
-                    {activeAttempt.score_out_of_10}/10
+                    {latestAttempt.score_out_of_10}/10
                   </span>
                 ) : null}
               </button>
@@ -1158,38 +1410,92 @@ export function PictureDescriptionScreen() {
 
             {practiceTab === "PRACTICE" ? (
               <>
+                {/* Coaching Reminder from Previous Attempt so Child Knows What to Improve */}
+                {latestAttempt ? (
+                  <section
+                    aria-label="Gợi ý từ lượt chấm trước"
+                    className="rounded-card border border-primary/25 bg-sky/20 p-4"
+                  >
+                    <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
+                      <Lightbulb aria-hidden="true" className="size-4" />
+                      Lời dặn của cô giáo từ Lượt #
+                      {latestAttempt.attempt_number}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-ink">
+                      {latestAttempt.feedback.improvement_tip}
+                    </p>
+                    {latestAttempt.feedback.missed_details.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-muted">
+                          Chi tiết có thể kể thêm:
+                        </span>
+                        {latestAttempt.feedback.missed_details.map((detail) => (
+                          <span
+                            className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-ink shadow-2xs"
+                            key={detail}
+                          >
+                            {detail}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
                 {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
                 <section className="rounded-card border border-border bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-extrabold text-ink">
-                      Phần mô tả của bé
+                      {latestAttempt
+                        ? `Phần mô tả lượt #${session.attempts_count + 1} của bé`
+                        : "Phần mô tả của bé"}
                     </h2>
                     <div className="flex flex-wrap items-center gap-2">
                       {descriptionText.trim() ? (
-                        <Button
-                          disabled={isRecordingVoice || isTranscribing}
-                          onClick={() =>
-                            void speakVietnamese(
-                              descriptionText,
-                              "draft-description",
-                            )
-                          }
-                          size="compact"
-                          type="button"
-                          variant="secondary"
-                        >
-                          {playingSpeechKey === "draft-description" ? (
-                            <>
-                              <VolumeX aria-hidden="true" className="size-4" />
-                              Dừng nghe
-                            </>
-                          ) : (
-                            <>
-                              <Volume2 aria-hidden="true" className="size-4" />
-                              Nghe lại
-                            </>
-                          )}
-                        </Button>
+                        <>
+                          <Button
+                            disabled={
+                              isRecordingVoice || isTranscribing || isEvaluating
+                            }
+                            onClick={handleClearDraft}
+                            size="compact"
+                            type="button"
+                            variant="secondary"
+                          >
+                            <Eraser aria-hidden="true" className="size-4" />
+                            Xóa nháp
+                          </Button>
+                          <Button
+                            disabled={isRecordingVoice || isTranscribing}
+                            onClick={() =>
+                              void speakVietnamese(
+                                descriptionText,
+                                "draft-description",
+                              )
+                            }
+                            size="compact"
+                            type="button"
+                            variant="secondary"
+                          >
+                            {playingSpeechKey === "draft-description" ? (
+                              <>
+                                <VolumeX
+                                  aria-hidden="true"
+                                  className="size-4"
+                                />
+                                Dừng nghe
+                              </>
+                            ) : (
+                              <>
+                                <Volume2
+                                  aria-hidden="true"
+                                  className="size-4"
+                                />
+                                Nghe lại
+                              </>
+                            )}
+                          </Button>
+                        </>
                       ) : null}
 
                       {!isRecordingVoice ? (
@@ -1277,8 +1583,11 @@ export function PictureDescriptionScreen() {
                       id="picture-description-input"
                       maxLength={2000}
                       onChange={(event) => {
-                        setDescriptionText(event.target.value);
-                        if (inputMode !== "VOICE") setInputMode("TEXT");
+                        const nextValue = event.target.value;
+                        setDescriptionText(nextValue);
+                        if (!nextValue.trim() || inputMode !== "VOICE") {
+                          setInputMode("TEXT");
+                        }
                       }}
                       placeholder="Bé hãy nói qua Micro hoặc viết 1–3 câu tự kể những gì bé nhìn thấy trong tranh nhé..."
                       value={descriptionText}
@@ -1286,9 +1595,21 @@ export function PictureDescriptionScreen() {
                   </label>
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-xs font-semibold text-muted">
-                      {descriptionText.trim().length}/2000 ký tự
-                    </span>
+                    <div className="space-y-0.5">
+                      <p
+                        className={
+                          "text-xs font-bold " +
+                          (draftReadiness.readyFor3Stars
+                            ? "text-success-ink"
+                            : "text-muted")
+                        }
+                      >
+                        {draftReadiness.label}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {descriptionText.trim().length}/2000 ký tự
+                      </p>
+                    </div>
                     <Button
                       disabled={
                         isEvaluating ||
@@ -1310,13 +1631,21 @@ export function PictureDescriptionScreen() {
                 {/* Optional Guiding Questions & Vocabulary (Collapsed by default so child thinks independently) */}
                 <section className="rounded-card border border-border bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
-                      <Lightbulb
-                        aria-hidden="true"
-                        className="size-5 text-[#E5A913]"
-                      />
-                      Gợi ý thêm (khi bé cần)
-                    </h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
+                        <Lightbulb
+                          aria-hidden="true"
+                          className="size-5 text-[#E5A913]"
+                        />
+                        Gợi ý thêm (khi bé cần)
+                      </h2>
+                      {usedVocabCount > 0 ? (
+                        <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold text-success-ink">
+                          Đã dùng {usedVocabCount}/
+                          {session.guide.suggested_vocabulary.length} từ gợi ý
+                        </span>
+                      ) : null}
+                    </div>
                     <Button
                       aria-expanded={showHints}
                       onClick={() => setShowHints((value) => !value)}
@@ -1387,18 +1716,24 @@ export function PictureDescriptionScreen() {
 
                       <div className="mt-4">
                         <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                          Từ vựng gợi ý (nhấn vào từ để nghe)
+                          Từ vựng gợi ý (nhấn vào từ để nghe giải nghĩa)
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {session.guide.suggested_vocabulary.map((item) => {
                             const active = selectedVocabWord === item.word;
+                            const used = descriptionContainsTerm(
+                              descriptionText,
+                              item.word,
+                            );
                             return (
                               <button
                                 className={
                                   "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                                   (active
                                     ? "border-primary bg-primary text-white"
-                                    : "border-border bg-white text-ink hover:border-primary hover:bg-sky/30")
+                                    : used
+                                      ? "border-success-ink/40 bg-success-surface/60 text-success-ink"
+                                      : "border-border bg-white text-ink hover:border-primary hover:bg-sky/30")
                                 }
                                 key={item.word}
                                 onClick={() => {
@@ -1410,24 +1745,49 @@ export function PictureDescriptionScreen() {
                                 }}
                                 type="button"
                               >
-                                <Volume2
-                                  aria-hidden="true"
-                                  className="size-3.5"
-                                />
+                                {used && !active ? (
+                                  <CheckCircle2
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                ) : (
+                                  <Volume2
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                )}
                                 {item.word}
                               </button>
                             );
                           })}
                         </div>
                         {selectedVocabWord ? (
-                          <p className="mt-2 rounded-control bg-warning-surface/60 px-3 py-2 text-sm font-semibold text-ink">
-                            <strong>{selectedVocabWord}:</strong>{" "}
-                            {
-                              session.guide.suggested_vocabulary.find(
-                                (item) => item.word === selectedVocabWord,
-                              )?.hint
-                            }
-                          </p>
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-control bg-warning-surface/60 px-3 py-2 text-sm font-semibold text-ink">
+                            <p>
+                              <strong>{selectedVocabWord}:</strong>{" "}
+                              {
+                                session.guide.suggested_vocabulary.find(
+                                  (item) => item.word === selectedVocabWord,
+                                )?.hint
+                              }
+                            </p>
+                            {!descriptionContainsTerm(
+                              descriptionText,
+                              selectedVocabWord,
+                            ) ? (
+                              <Button
+                                onClick={() =>
+                                  handleInsertVocabWord(selectedVocabWord)
+                                }
+                                size="compact"
+                                type="button"
+                                variant="secondary"
+                              >
+                                <Plus aria-hidden="true" className="size-3.5" />
+                                Chèn vào bài kể
+                              </Button>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
 
@@ -1464,12 +1824,32 @@ export function PictureDescriptionScreen() {
                             {showSampleSentences ? (
                               <ul className="mt-2 flex flex-col gap-2">
                                 {session.guide.model_sample_sentences.map(
-                                  (sentence) => (
+                                  (sentence, idx) => (
                                     <li
-                                      className="rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
+                                      className="flex items-center justify-between gap-2 rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
                                       key={sentence}
                                     >
-                                      “{sentence}”
+                                      <span>“{sentence}”</span>
+                                      <Button
+                                        onClick={() =>
+                                          void speakVietnamese(
+                                            sentence,
+                                            `sample-sentence:${idx}`,
+                                          )
+                                        }
+                                        size="compact"
+                                        type="button"
+                                        variant="secondary"
+                                      >
+                                        <Volume2
+                                          aria-hidden="true"
+                                          className="size-3.5"
+                                        />
+                                        {playingSpeechKey ===
+                                        `sample-sentence:${idx}`
+                                          ? "Dừng"
+                                          : "Nghe"}
+                                      </Button>
                                     </li>
                                   ),
                                 )}
@@ -1484,7 +1864,7 @@ export function PictureDescriptionScreen() {
               </>
             ) : null}
 
-            {/* Gemini Feedback Card (Dedicated Result Tab) */}
+            {/* AI Teacher Feedback Card (Dedicated Result Tab) */}
             {practiceTab === "RESULT" && activeAttempt ? (
               <section
                 aria-labelledby="tab-picture-result"
@@ -1492,8 +1872,40 @@ export function PictureDescriptionScreen() {
                 className="rounded-card border-2 border-primary/25 bg-white p-5 shadow-sm"
                 role="tabpanel"
               >
+                {session.attempts.length > 1 ? (
+                  <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border pb-3">
+                    <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                      Lịch sử các lượt:
+                    </span>
+                    {session.attempts.map((attempt, index) => {
+                      const isSelected =
+                        attempt.attempt_id === activeAttempt.attempt_id;
+                      return (
+                        <button
+                          aria-pressed={isSelected}
+                          className={
+                            "rounded-full px-3 py-1 text-xs font-extrabold transition-colors " +
+                            (isSelected
+                              ? "bg-primary text-white shadow-2xs"
+                              : "bg-sky/40 text-ink hover:bg-sky")
+                          }
+                          key={attempt.attempt_id}
+                          onClick={() =>
+                            setSelectedAttemptId(attempt.attempt_id)
+                          }
+                          type="button"
+                        >
+                          Lượt #{attempt.attempt_number}
+                          {index === 0 ? " (Mới nhất)" : ""} •{" "}
+                          {attempt.score_out_of_10}/10
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {renderStars(activeAttempt.stars)}
                     <span className="rounded-full bg-success-surface px-3 py-1 text-sm font-extrabold text-success-ink">
                       {activeAttempt.score_out_of_10}/10 điểm
@@ -1501,6 +1913,12 @@ export function PictureDescriptionScreen() {
                     <span className="text-xs font-bold text-muted">
                       Lượt #{activeAttempt.attempt_number}
                     </span>
+                    {scoreDelta !== null && scoreDelta > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800">
+                        <TrendingUp aria-hidden="true" className="size-3.5" />+
+                        {scoreDelta} điểm so với lượt trước!
+                      </span>
+                    ) : null}
                   </div>
                   <Button
                     onClick={() =>
@@ -1594,29 +2012,100 @@ export function PictureDescriptionScreen() {
                       </p>
                       <ul className="mt-1.5 flex flex-col gap-1.5">
                         {activeAttempt.feedback.upgraded_sentences.map(
-                          (sentence) => (
+                          (sentence, index) => (
                             <li
-                              className="rounded-control bg-sky/25 px-3 py-2 text-sm font-bold text-ink"
+                              className="flex items-center justify-between gap-2 rounded-control bg-sky/25 px-3 py-2 text-sm font-bold text-ink"
                               key={sentence}
                             >
-                              “{sentence}”
+                              <span>“{sentence}”</span>
+                              <Button
+                                onClick={() =>
+                                  void speakVietnamese(
+                                    sentence,
+                                    `upgraded:${activeAttempt.attempt_id}:${index}`,
+                                  )
+                                }
+                                size="compact"
+                                type="button"
+                                variant="secondary"
+                              >
+                                <Volume2
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                                {playingSpeechKey ===
+                                `upgraded:${activeAttempt.attempt_id}:${index}`
+                                  ? "Dừng"
+                                  : "Nghe"}
+                              </Button>
                             </li>
                           ),
                         )}
                       </ul>
                     </div>
                   ) : null}
+
+                  {activeAttempt.feedback.vocabulary_highlights.length > 0 ? (
+                    <div className="mt-3 border-t border-border pt-3">
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                        Từ ngữ miêu tả hay cô tặng bé (nhấn để nghe)
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {activeAttempt.feedback.vocabulary_highlights.map(
+                          (word) => (
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
+                              key={word}
+                              onClick={() =>
+                                void speakVietnamese(
+                                  word,
+                                  `highlight:${activeAttempt.attempt_id}:${word}`,
+                                )
+                              }
+                              type="button"
+                            >
+                              <Volume2
+                                aria-hidden="true"
+                                className="size-3.5"
+                              />
+                              {word}
+                            </button>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex flex-wrap justify-end gap-2.5">
                   <Button
-                    onClick={() => setPracticeTab("PRACTICE")}
+                    onClick={() => {
+                      stopSpeechPlayback();
+                      setDescriptionText(activeAttempt.transcript_text);
+                      setInputMode("TEXT");
+                      setVoiceMessage(null);
+                      setPracticeTab("PRACTICE");
+                    }}
                     size="compact"
                     type="button"
                     variant="secondary"
                   >
+                    <PenLine aria-hidden="true" className="size-4" />
+                    Sửa & bổ sung bài vừa kể
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      stopSpeechPlayback();
+                      setDescriptionText("");
+                      setInputMode("TEXT");
+                      setVoiceMessage(null);
+                      setPracticeTab("PRACTICE");
+                    }}
+                    size="compact"
+                    type="button"
+                  >
                     <RefreshCw aria-hidden="true" className="size-4" />
-                    Quay lại mô tả lượt mới
+                    Kể lại từ đầu (lượt mới)
                   </Button>
                 </div>
               </section>

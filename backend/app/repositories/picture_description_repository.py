@@ -104,6 +104,9 @@ class PictureDescriptionRepository:
         *,
         limit: int = 12,
     ) -> list[BookPageCandidateProjection]:
+        # Fetch a wider pool and interleave round-robin across books so a single
+        # 20-page book never crowds out all other books for the child's grade.
+        pool_limit = max(limit * 4, 48)
         query = (
             select(
                 Book.Id,
@@ -122,21 +125,42 @@ class PictureDescriptionRepository:
                 BookPage.ImagePath != "",
             )
             .order_by(Book.Title.asc(), BookPage.PageNumber.asc(), BookPage.Id.asc())
-            .limit(limit)
+            .limit(pool_limit)
         )
         result = await self.db.execute(query)
         rows = result.all()
         await self.db.rollback()
-        return [
-            BookPageCandidateProjection(
+
+        by_book: dict[UUID, list[BookPageCandidateProjection]] = {}
+        book_order: list[UUID] = []
+        for row in rows:
+            candidate = BookPageCandidateProjection(
                 BookId=row[0],
                 BookTitle=row[1],
                 PageId=row[2],
                 PageNumber=row[3],
                 ImagePath=row[4],
             )
-            for row in rows
-        ]
+            if candidate.BookId not in by_book:
+                by_book[candidate.BookId] = []
+                book_order.append(candidate.BookId)
+            by_book[candidate.BookId].append(candidate)
+
+        diversified: list[BookPageCandidateProjection] = []
+        round_idx = 0
+        while len(diversified) < limit and book_order:
+            progressed = False
+            for book_id in book_order:
+                bucket = by_book[book_id]
+                if round_idx < len(bucket):
+                    diversified.append(bucket[round_idx])
+                    progressed = True
+                    if len(diversified) >= limit:
+                        break
+            if not progressed:
+                break
+            round_idx += 1
+        return diversified
 
     async def get_book_page_for_grade(
         self,

@@ -96,6 +96,8 @@ const sessionSummarySchema = z.object({
   session_id: z.uuid(),
   child_id: z.uuid(),
   source_type: sourceTypeSchema,
+  sample_key: z.string().nullish(),
+  book_page_id: z.uuid().nullish(),
   scene_title: z.string(),
   image_url: z.string(),
   status: statusSchema,
