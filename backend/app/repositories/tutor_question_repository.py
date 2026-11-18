@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    Book,
     ChildProfile,
     ComprehensionAnswer,
     ComprehensionQuestion,
@@ -15,6 +16,7 @@ from app.models import (
     ReadingSessionPage,
     BookPage,
 )
+from app.repositories.book_repository import CatalogRepository
 
 
 class TutorQuestionRepository:
@@ -26,8 +28,13 @@ class TutorQuestionRepository:
     async def owned_session(self, session_id: UUID, parent_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ReadingSession.Id == session_id, ChildProfile.ParentId == parent_id)
+            .where(
+                ReadingSession.Id == session_id,
+                ChildProfile.ParentId == parent_id,
+                CatalogRepository.eligible_book(),
+            )
         )
 
     async def owned_session_for_update(
@@ -35,8 +42,13 @@ class TutorQuestionRepository:
     ) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ReadingSession.Id == session_id, ChildProfile.ParentId == parent_id)
+            .where(
+                ReadingSession.Id == session_id,
+                ChildProfile.ParentId == parent_id,
+                CatalogRepository.eligible_book(),
+            )
             .with_for_update(of=ReadingSession)
         )
 

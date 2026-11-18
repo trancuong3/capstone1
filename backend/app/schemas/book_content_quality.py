@@ -197,6 +197,49 @@ class BookQualityBookSummary(BaseModel):
     finding_count: int
     needs_review_finding_count: int
     latest_scan: BookQualityScanRead | None
+    assessment: "BookApprovalAssessment"
+
+
+class BookApprovalAssessment(BaseModel):
+    status: Literal[
+        "PROCESSING",
+        "SCAN_FAILED",
+        "PENDING_ADMIN_REVIEW",
+        "READY_FOR_CHILDREN",
+        "APPROVED_BY_ADMIN",
+        "REJECTED_FOR_CHILDREN",
+        "STALE",
+    ]
+    page_count: int
+    ocr_completed_pages: int
+    ocr_approval_valid_pages: int
+    proofreading_status: str
+    proofreading_completed_pages: int
+    proofreading_suggestion_count: int
+    child_safety_status: str
+    child_safety_completed_pages: int
+    processing_pages: int
+    failed_pages: int
+    stale_pages: int
+    copyright_status: str
+    copyright_finding_count: int | None = None
+    finding_count: int
+    high_finding_count: int
+    medium_finding_count: int
+    warning_page_count: int
+    failed_or_unscanned_page_count: int
+    finding_groups: list[dict] = Field(default_factory=list)
+    assessment_hash: str
+    assessed_at: datetime
+    admin_approved_at: datetime | None = None
+    admin_approved_by: UUID | None = None
+    admin_approved_by_name: str | None = None
+    admin_reason: str | None = None
+    rights_confirmed: bool = False
+    blockers: list[str] = Field(default_factory=list)
+
+
+BookQualityBookSummary.model_rebuild()
 
 
 class BookQualityBookPage(BaseModel):
@@ -204,6 +247,8 @@ class BookQualityBookPage(BaseModel):
     total: int
     limit: int
     offset: int
+    summary: dict[str, int] = Field(default_factory=dict)
+    alert_summary: dict[str, int] = Field(default_factory=dict)
 
 
 class BookQualityBookDetail(BaseModel):
@@ -213,3 +258,35 @@ class BookQualityBookDetail(BaseModel):
     scans: list[BookQualityScanRead]
     latest_scan_detail: BookQualityScanDetail | None
     ai_workflows: list[AdminAiWorkflowRead] = Field(default_factory=list)
+    ai_workflow_summary: dict[str, int] = Field(default_factory=dict)
+    assessment: BookApprovalAssessment
+    decision_history: list[dict] = Field(default_factory=list)
+
+
+class BookQualityBookDecisionRequest(BaseModel):
+    decision: Literal["APPROVE", "REJECT", "REQUEST_RESCAN", "FALSE_POSITIVE"]
+    reason: str = Field(min_length=1, max_length=2000)
+    rights_confirmed: bool = False
+    category: str | None = Field(default=None, max_length=80)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Reason is required")
+        return normalized
+
+    @field_validator("category")
+    @classmethod
+    def normalize_category(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        return normalized or None
+
+
+class BookQualityBookDecisionRead(BaseModel):
+    book_id: UUID
+    assessment: BookApprovalAssessment
+    decision_history: list[dict] = Field(default_factory=list)

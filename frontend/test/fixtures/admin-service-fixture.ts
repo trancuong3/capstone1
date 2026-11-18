@@ -27,6 +27,7 @@ const workflowFixture: AdminAiWorkflowDTO = {
   status: "READY_FOR_ADMIN_REVIEW",
   stage: "READY_FOR_ADMIN_REVIEW",
   progress: { completed_chunks: 1, total_chunks: 1 },
+  attempts: 1,
   error_code: null,
   original_ocr_hash: "a".repeat(64),
   admin_input_hash: "b".repeat(64),
@@ -154,6 +155,9 @@ function createBookContentQualityServiceFixture() {
       .mockRejectedValue(unavailable()),
     getBook: vi
       .fn<AdminServices["bookContentQuality"]["getBook"]>()
+      .mockRejectedValue(unavailable()),
+    decideBook: vi
+      .fn<AdminServices["bookContentQuality"]["decideBook"]>()
       .mockRejectedValue(unavailable()),
     enqueueScan: vi
       .fn<AdminServices["bookContentQuality"]["enqueueScan"]>()

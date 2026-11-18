@@ -140,9 +140,13 @@ export function AdminBooksScreen() {
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
-          cause.status === 422
-            ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
-            : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
+          cause.status === 409
+            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            : nextStatus === "ACTIVE" &&
+                isServiceError(cause) &&
+                cause.status === 422
+              ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
+              : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
       });
     } finally {
       setLifecycleBusyBookId(null);
@@ -285,6 +289,10 @@ export function AdminBooksScreen() {
                         {item.parent_catalog_eligible ? (
                           <span className="rounded-full bg-sky px-3 py-1 text-sm font-extrabold text-primary-hover">
                             Có trong thư viện ba mẹ
+                          </span>
+                        ) : book.lifecycle_status === "ACTIVE" ? (
+                          <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-extrabold text-amber-950">
+                            Chưa đủ điều kiện thư viện trẻ em · OCR / Safety
                           </span>
                         ) : null}
                       </div>

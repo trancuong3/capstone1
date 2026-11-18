@@ -11,8 +11,10 @@ os.environ["SUPABASE_KEY"] = "isolated-test-key"
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 from app.api.deps import get_current_parent_id, get_db
+from app.models import Book
 from app.repositories.book_repository import CatalogRepository
 from app.services.book_service import CatalogService
 from app.api.routes.book import router
@@ -25,6 +27,24 @@ REVISION = UUID("44444444-4444-4444-8444-444444444444")
 
 def book_row():
     return SimpleNamespace(Id=BOOK, Title="Tên sách database", Author=None, MinGrade=1, MaxGrade=3, LifecycleStatus="ACTIVE")
+
+
+class CatalogSafetySqlTests(unittest.TestCase):
+    def test_processing_page_reservations_block_whole_book(self):
+        query = select(Book.Id).where(
+            Book.Id == BOOK,
+            CatalogRepository.eligible_book(),
+        ).compile(dialect=postgresql.dialect())
+        sql = str(query)
+        self.assertIn("bookpages.lifecyclestatus IN", sql)
+        self.assertIn("bookpages.lifecyclestatus !=", sql)
+        self.assertIn("adminaiworkflows.safetyconfirmedby", sql)
+        self.assertIn("adminaiworkflows.findings @>", sql)
+        self.assertIn("JOIN pagerevisions ON pagerevisions.id = bookpages.currentverifiedrevisionid", sql)
+        self.assertNotIn("FROM pagerevisions, bookpages", sql)
+        self.assertTrue(
+            any(value == ["ACTIVE", "PROCESSING"] for value in query.params.values())
+        )
 
 
 class CatalogTests(unittest.IsolatedAsyncioTestCase):
@@ -52,10 +72,19 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("EXISTS", sql)
         self.assertIn("pagerevisions.pageid = bookpages.id", sql)
         self.assertIn("bookpages.currentverifiedrevisionid", sql)
+        self.assertIn("adminaiworkflows.safetystatus", sql)
+        self.assertIn(
+            "adminaiworkflows.safetyinputhash = adminaiworkflows.candidatehash",
+            sql,
+        )
+        self.assertIn("adminaiworkflows.finalapprovedtexthash", sql)
+        self.assertIn("adminaiworkflows.findings @>", sql)
         self.assertIn("books.mingrade <=", sql)
         self.assertIn("books.maxgrade >=", sql)
         self.assertIn("ACTIVE", query.params.values())
         self.assertIn("VERIFIED", query.params.values())
+        self.assertIn("CONFIRMED", query.params.values())
+        self.assertIn("NOT_RECOMMENDED", query.params.values())
         self.assertIn("%mèo\\_\\%%", query.params.values())
 
     async def test_missing_book_returns_404(self):
@@ -65,14 +94,16 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
             await CatalogService(repository=repository).get(BOOK)
         self.assertEqual(caught.exception.status_code, 404)
 
-    async def test_ineligible_book_returns_existing_content_inactive_code(self):
+    async def test_ineligible_book_returns_child_safety_block_code(self):
         repository = MagicMock()
         repository.get = AsyncMock(return_value=book_row())
         repository.is_eligible = AsyncMock(return_value=False)
         with self.assertRaises(HTTPException) as caught:
             await CatalogService(repository=repository).get(BOOK)
         self.assertEqual(caught.exception.status_code, 409)
-        self.assertEqual(caught.exception.detail, {"code": "CONTENT_INACTIVE"})
+        self.assertEqual(
+            caught.exception.detail["code"], "BOOK_BLOCKED_BY_CHILD_SAFETY"
+        )
 
     async def test_relative_image_does_not_create_a_fake_preview_url(self):
         repository = MagicMock()

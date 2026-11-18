@@ -45,6 +45,14 @@ class AdminAiCandidateUpdate(BaseModel):
 class AdminAiSafetyDecision(BaseModel):
     confirmed: bool
     expected_candidate_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class AdminAiWorkflowRead(BaseModel):
@@ -55,6 +63,7 @@ class AdminAiWorkflowRead(BaseModel):
     status: WorkflowStatus
     stage: WorkflowStage
     progress: dict[str, int]
+    attempts: int = Field(ge=0)
     error_code: str | None
     original_ocr_hash: str
     admin_input_hash: str

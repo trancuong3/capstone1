@@ -93,6 +93,7 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       status: "READY_FOR_ADMIN_REVIEW",
       stage: "READY_FOR_ADMIN_REVIEW",
       progress: { completed_chunks: 1, total_chunks: 1 },
+      attempts: 1,
       error_code: null,
       original_ocr_hash: "a".repeat(64),
       admin_input_hash: "b".repeat(64),
@@ -1452,6 +1453,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(
       await screen.findByText(/AI chưa phát hiện lỗi chính tả cần chỉnh sửa/),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
+    );
     await user.click(
       screen.getByRole("button", {
         name: /XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG/,

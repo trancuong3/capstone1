@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
+from app.diagnostic_logging import log_diagnostic
 from app.schemas.admin_book import AdminBookWriteRequest
 from app.schemas.admin_ocr import (
     AdminOcrCreateDraftRequest,
@@ -34,6 +36,7 @@ from app.services.admin_ocr_jobs import (
 from app.services.admin_ai_workflow_service import AdminAiWorkflowService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class AdminOcrAiCorrectRequest(BaseModel):
@@ -98,7 +101,47 @@ async def upload_admin_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).upload_page(actor_id, book_id, image, upload_id=upload_id)
+    detail = await AdminOcrService(db).upload_page(
+        actor_id, book_id, image, upload_id=upload_id
+    )
+    # OCR is complete and persisted at this point. Enqueue this page's durable
+    # proofreading workflow immediately so book processing can advance page by
+    # page; the worker performs inference after this request's transaction.
+    if detail.verification_status == "NEEDS_REVIEW" and detail.draft_text:
+        try:
+            workflow_request = AdminAiWorkflowCreate(
+                page_revision_id=detail.page_revision_id,
+                idempotency_key=detail.page_revision_id,
+                draft_text=detail.draft_text,
+                words=[
+                    AdminOcrWordInput(
+                        word_index=word.word_index,
+                        line_index=word.line_index,
+                        text=word.text,
+                        normalized_text=word.normalized_text,
+                        bbox=word.bbox,
+                        ocr_confidence=word.ocr_confidence,
+                    )
+                    for word in detail.words
+                ],
+            )
+            await AdminAiWorkflowService(db).start(
+                actor_id, detail.page_id, workflow_request
+            )
+        except Exception as exc:
+            # Keep successful OCR available for Admin review if automatic
+            # proofreading cannot be safely prepared (for example bad alignment).
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ai_workflow_auto_enqueue_failed",
+                stage="post_ocr_enqueue",
+                page_id=str(detail.page_id),
+                page_revision_id=str(detail.page_revision_id),
+                http_status=exc.status_code if isinstance(exc, HTTPException) else None,
+                exception=exc,
+            )
+    return detail
 
 
 @router.post(

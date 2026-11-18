@@ -57,6 +57,7 @@ export const adminAiWorkflowSchema = z.object({
     completed_chunks: z.number().int().nonnegative(),
     total_chunks: z.number().int().positive(),
   }),
+  attempts: z.number().int().nonnegative(),
   error_code: z.string().nullable(),
   original_ocr_hash: z.string().regex(/^[a-f0-9]{64}$/u),
   admin_input_hash: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -152,6 +153,7 @@ export interface OcrReviewService {
     workflowId: string,
     candidateHash: string,
     confirmed: boolean,
+    reason?: string,
   ): Promise<AdminAiWorkflowDTO>;
   retryWorkflow(pageId: string, workflowId: string): Promise<AdminAiWorkflowDTO>;
 }
@@ -467,14 +469,14 @@ export function createOcrReviewService(): OcrReviewService {
           },
         },
       ),
-    decideWorkflowSafety: (pageId, workflowId, candidateHash, confirmed) =>
+    decideWorkflowSafety: (pageId, workflowId, candidateHash, confirmed, reason) =>
       requestApi(
         workflowPath(pageId, workflowId) + "/safety-decision",
         adminAiWorkflowSchema,
         undefined,
         {
           method: "POST",
-          body: { expected_candidate_hash: candidateHash, confirmed },
+          body: { expected_candidate_hash: candidateHash, confirmed, reason },
         },
       ),
     retryWorkflow: (pageId, workflowId) =>

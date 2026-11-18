@@ -56,6 +56,7 @@ class FakeAdminBookRepository:
         self.get = AsyncMock(return_value=self.book)
         self.update_metadata = AsyncMock(side_effect=self._update)
         self.set_lifecycle = AsyncMock(side_effect=self._set_lifecycle)
+        self.is_ready_for_children = AsyncMock(return_value=True)
 
     async def role(self, actor_id):
         return self.role_value
@@ -201,6 +202,25 @@ class AdminBookServiceTests(unittest.IsolatedAsyncioTestCase):
                 ADMIN_ID, BOOK_ID, "ACTIVE"
             )
         self.assertEqual(caught.exception.status_code, 422)
+        repository.set_lifecycle.assert_not_awaited()
+        self.assertEqual(row.LifecycleStatus, "RETIRED")
+
+    async def test_reactivation_is_blocked_until_all_pages_pass_child_safety(self):
+        row = make_book(LifecycleStatus="RETIRED")
+        repository = FakeAdminBookRepository(book=row)
+        repository.is_ready_for_children.return_value = False
+
+        with self.assertRaises(HTTPException) as caught:
+            await AdminBookService(repository).update_lifecycle(
+                ADMIN_ID, BOOK_ID, "ACTIVE"
+            )
+
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(
+            caught.exception.detail["code"],
+            "BOOK_BLOCKED_BY_CHILD_SAFETY",
+        )
+        repository.is_ready_for_children.assert_awaited_once_with(BOOK_ID)
         repository.set_lifecycle.assert_not_awaited()
         self.assertEqual(row.LifecycleStatus, "RETIRED")
 

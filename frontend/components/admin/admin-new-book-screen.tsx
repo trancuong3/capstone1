@@ -85,7 +85,7 @@ export function AdminNewBookScreen() {
       <AdminPageHeader
         eyebrow="Kho sách"
         title="Tạo sách mới"
-        description="Tạo đầu sách trong PostgreSQL trước khi tải ảnh các trang và chạy OCR."
+        description="Tạo đầu sách trước khi tải ảnh trang, chạy OCR và hoàn tất Child Safety."
       />
       <Link
         className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
@@ -94,6 +94,9 @@ export function AdminNewBookScreen() {
         <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
       </Link>
       <Card className="max-w-3xl bg-white">
+        <StatusMessage className="mb-5" tone="info" title="Sách chưa được đưa vào thư viện trẻ em">
+          Sau khi tạo, hãy tải các trang và hoàn tất OCR, Proofreading, Child Safety cùng xác nhận của Admin cho từng trang. Backend sẽ chỉ cho trẻ truy cập khi toàn bộ nội dung hiện tại đã được xác minh và không có finding mức HIGH hoặc suitability NOT_RECOMMENDED.
+        </StatusMessage>
         {error ? (
           <StatusMessage className="mb-5" tone="error">
             {error}

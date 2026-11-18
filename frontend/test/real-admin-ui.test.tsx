@@ -67,6 +67,52 @@ let manualDraftCreated = false;
 let aiReviewDraftEnabled = false;
 let aiCorrectionResult = "Xin chào";
 let aiCorrectionUnavailable = false;
+let aiSafetyFailed = false;
+let aiSafetyFindings: Record<string, unknown>[] = [];
+let latestAiWorkflow: Record<string, unknown> | null = null;
+
+function aiWorkflowResponse(candidateText = aiCorrectionResult) {
+  const candidateHash = "b".repeat(64);
+  return {
+    workflow_id: "66666666-6666-4666-8666-666666666666",
+    page_id: pageId,
+    book_id: bookId,
+    page_revision_id: newRevisionId,
+    status: "READY_FOR_ADMIN_REVIEW",
+    stage: "READY_FOR_ADMIN_REVIEW",
+    progress: { completed_chunks: 1, total_chunks: 1 },
+    attempts: 1,
+    error_code: null,
+    original_ocr_hash: "a".repeat(64),
+    admin_input_hash: "a".repeat(64),
+    proofread_text: candidateText,
+    proofread_output_hash: candidateHash,
+    corrections: [],
+    uncertain_word_indices: [],
+    proofread_metadata: {
+      run_id: "66666666-6666-4666-8666-666666666666",
+      prompt_version: "test-proofread-v1",
+      processing_time_ms: 1,
+    },
+    safety_metadata: { prompt_version: "test-safety-v1" },
+    candidate_history: [],
+    safety_history: [],
+    review_history: [],
+    candidate_text: candidateText,
+    candidate_hash: candidateHash,
+    candidate_version: 1,
+    safety_input_hash: candidateHash,
+    hash_match: true,
+    suitability: "SUITABLE",
+    safety_status: "PROVISIONAL",
+    findings: aiSafetyFindings,
+    provider_events: [],
+    ocr_approved_at: null,
+    final_approved_text_hash: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
 
 function readyResponse(url: string): Response {
   if (new URL(url, "http://localhost").pathname.endsWith("/image"))
@@ -159,6 +205,9 @@ beforeEach(() => {
   aiReviewDraftEnabled = false;
   aiCorrectionResult = "Xin chào";
   aiCorrectionUnavailable = false;
+  aiSafetyFailed = false;
+  aiSafetyFindings = [];
+  latestAiWorkflow = null;
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
     const target = String(url);
@@ -212,25 +261,113 @@ beforeEach(() => {
       );
     }
     if (
-      target.endsWith(`/admin/pages/${pageId}/ai-correct/jobs`) &&
+      target.endsWith(`/books/admin/pages/${pageId}/ai-workflows`) &&
       options?.method === "POST"
     ) {
       if (aiCorrectionUnavailable)
         return Response.json(
-          { detail: "AI OCR is not configured" },
+          { detail: "AI workflow is not configured" },
           { status: 503 },
         );
-      return Response.json({
-        job_id: "66666666-6666-4666-8666-666666666666",
-        page_id: pageId,
-        status: "SUCCEEDED",
-        completed_chunks: 1,
-        total_chunks: 1,
-        result: aiCorrectionResult,
-        error: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      });
+      latestAiWorkflow = aiWorkflowResponse();
+      if (aiSafetyFailed) {
+        latestAiWorkflow = {
+          ...latestAiWorkflow,
+          status: "FAILED",
+          stage: "CHILD_SAFETY_SCANNING",
+          error_code: "INVALID_EVIDENCE",
+          attempts: 3,
+          safety_status: "FAILED",
+          safety_input_hash: null,
+          hash_match: false,
+          suitability: null,
+          findings: [],
+          provider_events: [{
+            provider: "gemini_primary",
+            model: "gemini-test",
+            stage: "CHILD_SAFETY_SCANNING",
+            availability: false,
+            http_status: 200,
+            error_code: "INVALID_EVIDENCE",
+            duration_ms: 12,
+          }],
+        };
+      }
+      return Response.json(latestAiWorkflow);
+    }
+    if (target.endsWith("/ai-workflows/latest") && options?.method !== "POST") {
+      if (latestAiWorkflow?.status === "QUEUED") {
+        latestAiWorkflow = {
+          ...latestAiWorkflow,
+          status: "READY_FOR_ADMIN_REVIEW",
+          stage: "READY_FOR_ADMIN_REVIEW",
+          progress: { completed_chunks: 1, total_chunks: 1 },
+          safety_input_hash: latestAiWorkflow.candidate_hash,
+          hash_match: true,
+          suitability: "SUITABLE",
+          safety_status: "PROVISIONAL",
+        };
+      }
+      return Response.json(latestAiWorkflow);
+    }
+    if (
+      target.endsWith("/ai-workflows/66666666-6666-4666-8666-666666666666") &&
+      options?.method !== "POST"
+    ) {
+      if (
+        latestAiWorkflow?.status === "QUEUED" ||
+        latestAiWorkflow?.stage === "CHILD_SAFETY_SCANNING"
+      ) {
+        latestAiWorkflow = {
+          ...latestAiWorkflow,
+          status: "READY_FOR_ADMIN_REVIEW",
+          stage: "READY_FOR_ADMIN_REVIEW",
+          progress: { completed_chunks: 1, total_chunks: 1 },
+          safety_input_hash: latestAiWorkflow.candidate_hash,
+          hash_match: true,
+          suitability: "SUITABLE",
+          safety_status: "PROVISIONAL",
+        };
+      }
+      return Response.json(latestAiWorkflow);
+    }
+    if (
+      target.endsWith(
+        "/ai-workflows/66666666-6666-4666-8666-666666666666/candidate",
+      ) &&
+      options?.method === "PATCH"
+    ) {
+      const body = JSON.parse(String(options.body));
+      const candidateText = String(body.candidate_text);
+      const ready = aiWorkflowResponse(candidateText);
+      const changed = candidateText !== aiCorrectionResult;
+      latestAiWorkflow = changed
+        ? {
+            ...ready,
+            status: "QUEUED",
+            stage: "CHILD_SAFETY_SCANNING",
+            progress: { completed_chunks: 0, total_chunks: 1 },
+            candidate_version: 2,
+            safety_input_hash: null,
+            hash_match: false,
+            suitability: null,
+            safety_status: "STALE",
+          }
+        : ready;
+      return Response.json(latestAiWorkflow);
+    }
+    if (
+      target.endsWith(
+        "/ai-workflows/66666666-6666-4666-8666-666666666666/safety-decision",
+      ) &&
+      options?.method === "POST"
+    ) {
+      const body = JSON.parse(String(options.body));
+      latestAiWorkflow = {
+        ...latestAiWorkflow,
+        safety_status: body.confirmed ? "CONFIRMED" : "PROVISIONAL",
+      };
+      return Response.json(latestAiWorkflow);
     }
     if (
       target.endsWith(`/admin/pages/${pageId}/verify`) &&
@@ -260,7 +397,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     fetchMock.mockResolvedValue(
       Response.json([
         {
-          book: { ...book, id: storedId },
+          book: { ...book, id: storedId, lifecycle_status: "ACTIVE" },
           page_count: 1,
           processing_count: 0,
           needs_review_count: 0,
@@ -283,6 +420,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       screen.queryByText("Không thể tải kho sách"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Chưa đủ điều kiện thư viện trẻ em · OCR \/ Safety/),
+    ).toBeInTheDocument();
   });
   it("renders retired admin books and links to the real create-book flow", async () => {
     render(
@@ -450,7 +590,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     { accept: false, expectedText: "Xin chao", decision: "REJECTED" },
     { accept: true, expectedText: "Xin chào", decision: "ACCEPTED" },
   ])(
-    "requires Admin to review AI suggestions before VERIFIED (accept=$accept)",
+    "requires Admin to review combined AI suggestions before VERIFIED (accept=$accept)",
     async ({ accept, expectedText, decision }) => {
       aiReviewDraftEnabled = true;
       const user = userEvent.setup();
@@ -467,7 +607,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       await waitFor(() => expect(textArea).toHaveValue("Xin chao"));
 
       await user.click(
-        screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+        screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
       );
       expect(await screen.findByText("Rà soát đề xuất AI")).toBeInTheDocument();
       expect(textArea).toHaveValue("Xin chao");
@@ -487,17 +627,44 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       await user.click(
         screen.getByRole("button", { name: /Xác nhận lựa chọn gợi ý/ }),
       );
+      expect(
+        screen.getByRole("button", {
+          name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
+        }),
+      ).toBeDisabled();
       await waitFor(() =>
         expect(
-          screen.getByRole("button", {
-            name: "Xác nhận nội dung và hoàn tất VERIFIED",
-          }),
+          fetchMock.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith(
+                "/ai-workflows/66666666-6666-4666-8666-666666666666/candidate",
+              ) &&
+              (init as RequestInit | undefined)?.method === "PATCH",
+          ),
+        ).toBe(true),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
         ).toBeEnabled(),
+        { timeout: 5000 },
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
+      );
+      await waitFor(
+        () =>
+          expect(
+            screen.getByRole("button", {
+              name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
+            }),
+          ).toBeEnabled(),
+        { timeout: 5000 },
       );
       expect(textArea).toHaveValue(expectedText);
       await user.click(
         screen.getByRole("button", {
-          name: "Xác nhận nội dung và hoàn tất VERIFIED",
+          name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
         }),
       );
       await waitFor(() => {
@@ -513,6 +680,79 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       });
     },
   );
+
+  it("shows compact Safety findings as collapsible cards and highlights HIGH", async () => {
+    aiReviewDraftEnabled = true;
+    aiSafetyFindings = [{
+      finding_id: "finding-1",
+      category: "SEXUAL_CONTENT",
+      content_type: "DESCRIPTION",
+      severity: "HIGH",
+      evidence_text: "mô tả hành vi xâm hại tình dục trực diện",
+      evidence_start: 12,
+      evidence_end: 54,
+      explanation:
+        "Nội dung mô tả xâm hại tình dục trực diện, không phù hợp với học sinh lớp 1–5.",
+      recommendation: "Không phê duyệt sách cho thư viện trẻ em.",
+    }];
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+      </AdminServicesProvider>,
+    );
+    await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+    await user.click(
+      screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+    );
+    await screen.findByLabelText("Nội dung trang");
+    await user.click(
+      screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
+    );
+
+    expect(await screen.findByText("SEXUAL CONTENT")).toBeInTheDocument();
+    expect(screen.getByText("HIGH", { exact: true })).toHaveClass(
+      "bg-red-700",
+    );
+    expect(
+      screen.getByText("Mở chi tiết").closest("details"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Nội dung mô tả xâm hại tình dục trực diện, không phù hợp với học sinh lớp 1–5.",
+      ),
+    ).not.toBeVisible();
+    await user.click(screen.getByText("Mở chi tiết"));
+    expect(
+      await screen.findByText(
+        "Nội dung mô tả xâm hại tình dục trực diện, không phù hợp với học sinh lớp 1–5.",
+      ),
+    ).toBeInTheDocument();
+    const safetyReason = screen.getByLabelText(
+      /Lý do Admin xem xét Safety · bắt buộc/,
+    );
+    const safetyConfirm = screen.getByRole("button", {
+      name: "Xác nhận kết quả Safety",
+    });
+    expect(safetyConfirm).toBeDisabled();
+    await user.type(safetyReason, "Admin đã xem ngữ cảnh và giữ trạng thái chặn.");
+    expect(safetyConfirm).toBeEnabled();
+    await user.click(safetyConfirm);
+    await waitFor(() => {
+      const decisionCall = fetchMock.mock.calls.find(([url]) =>
+        String(url).endsWith("/safety-decision"),
+      );
+      expect(decisionCall).toBeDefined();
+      expect(JSON.parse(String((decisionCall?.[1] as RequestInit).body)).reason).toBe(
+        "Admin đã xem ngữ cảnh và giữ trạng thái chặn.",
+      );
+    });
+    expect(
+      screen.getByRole("button", {
+        name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
+      }),
+    ).toBeDisabled();
+  });
 
   it("reports a clean AI check but still waits for final Admin confirmation", async () => {
     aiReviewDraftEnabled = true;
@@ -531,10 +771,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Xin chao"),
     );
     await user.click(
-      screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+      screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
     );
     expect(
-      await screen.findByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+      await screen.findByText(/AI chưa phát hiện lỗi chính tả cần chỉnh sửa/),
     ).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(
@@ -544,8 +784,11 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       ),
     ).toBe(false);
     await user.click(
+      screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
+    );
+    await user.click(
       screen.getByRole("button", {
-        name: "Xác nhận nội dung và hoàn tất VERIFIED",
+        name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
       }),
     );
     await waitFor(() => {
@@ -561,6 +804,46 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         suggestions: [],
       });
     });
+  });
+
+  it("explains Child Safety INVALID_EVIDENCE and keeps final approval disabled", async () => {
+    aiReviewDraftEnabled = true;
+    aiSafetyFailed = true;
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+      </AdminServicesProvider>,
+    );
+    await screen.findByRole("heading", { name: "Kiểm tra OCR · R2" });
+    await user.click(
+      screen.getByRole("button", { name: "Tạo bản nháp để sửa nội dung" }),
+    );
+    await screen.findByLabelText("Nội dung trang");
+    await user.click(
+      screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "AI trả về evidence không thể đối chiếu chính xác với Candidate",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("INVALID_EVIDENCE");
+    expect(screen.getByRole("alert")).toHaveTextContent("gemini_primary");
+    expect(
+      screen.getByRole("button", { name: "Thử lại Child Safety" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
+      }),
+    ).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith(`/admin/pages/${pageId}/verify`) &&
+          (init as RequestInit | undefined)?.method === "POST",
+      ),
+    ).toBe(false);
   });
 
   it("does not claim a clean result when AI is unavailable and audits manual fallback", async () => {
@@ -580,7 +863,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       expect(screen.getByLabelText("Nội dung trang")).toHaveValue("Xin chao"),
     );
     await user.click(
-      screen.getByRole("button", { name: "AI kiểm tra trước khi xác minh" }),
+      screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
     );
     await user.click(
       await screen.findByRole("button", { name: "Tiếp tục xác minh thủ công" }),
@@ -592,7 +875,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", {
-        name: "Xác nhận nội dung và hoàn tất VERIFIED",
+        name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
       }),
     );
     await waitFor(() => {

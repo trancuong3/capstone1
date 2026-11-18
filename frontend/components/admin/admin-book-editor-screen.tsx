@@ -133,9 +133,13 @@ export function AdminBookEditorScreen({
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
-          cause.status === 422
-            ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
-            : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+          cause.status === 409
+            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            : nextStatus === "ACTIVE" &&
+                isServiceError(cause) &&
+                cause.status === 422
+              ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
+              : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
       });
     } finally {
       setStatusBusy(false);

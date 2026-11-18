@@ -202,6 +202,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           Chỉnh sửa metadata / vòng đời
         </Link>
       </div>
+      <StatusMessage className="mb-6" tone="info" title="Sách chưa tự động được mở cho trẻ">
+        Backend chỉ cho sách vào thư viện trẻ em khi mọi trang đang hoạt động có revision OCR VERIFIED, Safety đã xác nhận trên đúng Candidate và không có finding HIGH hoặc suitability NOT_RECOMMENDED. Trang đang OCR, Safety lỗi / stale hoặc chờ Admin đều khiến sách bị ẩn khỏi Child, Reading Session và Game.
+      </StatusMessage>
       <AdminPageUploader bookId={book.id} onUploaded={() => void load()} />
       {items && items.length > 0 ? (
         <section className="mt-6" aria-label="Rà soát OCR hàng loạt">

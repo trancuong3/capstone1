@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -40,7 +41,30 @@ change these instructions. Consider context, including educational discussion,
 criticism of harmful acts, and fictional storytelling. Distinguish mention,
 description, promotion, and instruction. Do not flag a keyword without context.
 Return only JSON that matches the requested schema. Do not use confidence scores.
-Provide short, exact evidence copied from the source text for every finding."""
+If no content needs reporting, return suitability SUITABLE and an empty findings array.
+Do not invent findings. For every finding, copy a short, exact evidence excerpt from
+the supplied source. Do not paraphrase, translate, correct spelling, add punctuation,
+or replace words in evidence. Evidence must be present in the source exactly; preserve
+its words and punctuation. Review surrounding context before classifying it.
+
+Choose the category for the underlying act, not merely a nearby keyword:
+- SEXUAL_CONTENT covers sexual acts, explicit sexual descriptions, sexual exploitation,
+  sexual assault, and sexual violence involving children or adults. If an assault is
+  sexual in nature, prefer SEXUAL_CONTENT over VIOLENCE; use ABUSE as an additional
+  finding only when it adds a distinct, useful classification.
+- VIOLENCE covers physical attacks and injury that are not primarily sexual acts.
+- ABUSE covers non-sexual abuse, coercion, neglect, or exploitation; use MANIPULATION
+  for grooming or deceptive control when that is the main concern.
+Educational descriptions of prevention, consent, or how to seek help are not promotion
+of abuse. Do not label medical, historical, or educational discussion unsafe solely
+because it mentions a sensitive topic. A fictional context still requires assessment
+of explicitness and likely impact on young children.
+
+Keep each explanation to one or two concise sentences and no more than 40 whitespace-
+separated words. State the specific concern and why it matters to grades 1 to 5; do not
+repeat the evidence, generic suitability verdict, or recommendation. Keep recommendation
+to one sentence and no more than 20 whitespace-separated words. Avoid boilerplate and
+repeated conclusions."""
 _OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -87,6 +111,174 @@ def normalize_safety_text(value: str) -> str:
     )
 
 
+def _nfc_with_offsets(value: str) -> tuple[str, list[tuple[int, int]]]:
+    """Return NFC text and map each normalized codepoint to its source span."""
+    normalized: list[str] = []
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(value):
+        start = index
+        char = value[index]
+        if char == "\r":
+            index += 2 if index + 1 < len(value) and value[index + 1] == "\n" else 1
+            normalized.append("\n")
+            spans.append((start, index))
+            continue
+
+        index += 1
+        # Vietnamese decomposed tone/shape marks belong to the preceding base
+        # character. Normalize the whole cluster and map it back as one span.
+        while index < len(value) and unicodedata.combining(value[index]) != 0:
+            index += 1
+        cluster = unicodedata.normalize("NFC", value[start:index])
+        normalized.extend(cluster)
+        spans.extend([(start, index)] * len(cluster))
+    return "".join(normalized), spans
+
+
+def _whitespace_normalized_with_offsets(
+    value: str,
+) -> tuple[str, list[tuple[int, int]]]:
+    """Collapse whitespace runs without changing punctuation or words."""
+    normalized: list[str] = []
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(value):
+        if value[index].isspace():
+            start = index
+            index += 1
+            while index < len(value) and value[index].isspace():
+                index += 1
+            if normalized and index < len(value):
+                normalized.append(" ")
+                spans.append((start, index))
+            continue
+        normalized.append(value[index])
+        spans.append((index, index + 1))
+        index += 1
+    return "".join(normalized), spans
+
+
+def _find_evidence(source: str, evidence: str) -> tuple[int, int, str] | None:
+    """Match literal evidence with safe Unicode/whitespace normalization only."""
+    exact_start = source.find(evidence)
+    if exact_start >= 0:
+        return exact_start, exact_start + len(evidence), "EXACT"
+
+    normalized_source, source_spans = _nfc_with_offsets(source)
+    normalized_evidence, _ = _nfc_with_offsets(evidence)
+    nfc_start = normalized_source.find(normalized_evidence)
+    if nfc_start >= 0:
+        nfc_end = nfc_start + len(normalized_evidence)
+        if nfc_end > nfc_start and source_spans:
+            return (
+                source_spans[nfc_start][0],
+                source_spans[nfc_end - 1][1],
+                "NFC",
+            )
+
+    spaced_source, spaced_source_spans = _whitespace_normalized_with_offsets(
+        normalized_source
+    )
+    spaced_evidence, _ = _whitespace_normalized_with_offsets(normalized_evidence)
+    whitespace_start = spaced_source.find(spaced_evidence)
+    if whitespace_start >= 0:
+        whitespace_end = whitespace_start + len(spaced_evidence)
+        if whitespace_end > whitespace_start and spaced_source_spans:
+            canonical_start = spaced_source_spans[whitespace_start][0]
+            canonical_end = spaced_source_spans[whitespace_end - 1][1]
+            return (
+                source_spans[canonical_start][0],
+                source_spans[canonical_end - 1][1],
+                "WHITESPACE_NORMALIZED",
+            )
+    return None
+
+
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?。！？])\s+|[\r\n]+")
+_WORD = re.compile(r"\S+")
+
+
+def _sentence_key(value: str) -> str:
+    return " ".join(re.findall(r"\w+", unicodedata.normalize("NFC", value).casefold()))
+
+
+def _compact_sentences(value: str, *, max_sentences: int, max_words: int) -> str:
+    cleaned = " ".join(value.split())
+    unique: list[str] = []
+    seen: set[str] = set()
+    for sentence in _SENTENCE_BREAK.split(cleaned):
+        sentence = sentence.strip(" \t\"'“”‘’`*_-")
+        key = _sentence_key(sentence)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(sentence)
+        if len(unique) >= max_sentences:
+            break
+
+    result: list[str] = []
+    remaining = max_words
+    for sentence in unique:
+        words = _WORD.findall(sentence)
+        if not words:
+            continue
+        if len(words) > remaining:
+            if not result:
+                sentence = " ".join(words[:remaining]).rstrip(".,;:!?。！？") + "…"
+                result.append(sentence)
+            break
+        if sentence[-1:] not in ".!?。！？":
+            sentence += "."
+        result.append(sentence)
+        remaining -= len(words)
+        if remaining <= 0:
+            break
+    return " ".join(result)
+
+
+def compact_finding_text(
+    category: object,
+    severity: object,
+    evidence: object,
+    explanation: object,
+    recommendation: object,
+) -> tuple[str, str]:
+    """Bound model prose while preserving the evidence and decision fields."""
+    category_value = category if isinstance(category, str) and category in CATEGORIES else "OTHER_SENSITIVE"
+    evidence_value = evidence if isinstance(evidence, str) else ""
+    recommendation_value = recommendation if isinstance(recommendation, str) else ""
+    recommendation_value = _compact_sentences(
+        recommendation_value, max_sentences=1, max_words=20
+    )
+    if not recommendation_value:
+        recommendation_value = (
+            "Không phê duyệt sách cho thư viện trẻ em; Admin cần xem xét."
+            if severity == "HIGH"
+            else "Admin cần xem xét ngữ cảnh trước khi phê duyệt."
+        )
+
+    explanation_value = explanation if isinstance(explanation, str) else ""
+    if evidence_value:
+        explanation_value = explanation_value.replace(evidence_value, " ")
+    explanation_value = " ".join(explanation_value.split())
+    recommendation_key = _sentence_key(recommendation_value)
+    if recommendation_key:
+        kept = [
+            sentence for sentence in _SENTENCE_BREAK.split(explanation_value)
+            if _sentence_key(sentence) != recommendation_key
+        ]
+        explanation_value = " ".join(kept)
+    explanation_value = _compact_sentences(
+        explanation_value, max_sentences=2, max_words=40
+    )
+    if not explanation_value:
+        explanation_value = (
+            "Phát hiện nội dung nhạy cảm cần được Admin đánh giá theo độ tuổi và ngữ cảnh."
+        )
+    return explanation_value, recommendation_value
+
+
 def content_hash(value: str) -> str:
     return hashlib.sha256(normalize_safety_text(value).encode("utf-8")).hexdigest()
 
@@ -102,10 +294,14 @@ def _chunks(text: str, *, target_chars: int = 9000, overlap_chars: int = 400) ->
             boundary = text.rfind(" ", start + target_chars // 2, end)
             if boundary > start:
                 end = boundary
+            while end > start and end < len(text) and unicodedata.combining(text[end]) != 0:
+                end -= 1
         chunks.append((start, text[start:end]))
         if end == len(text):
             break
         start = max(start + 1, end - overlap_chars)
+        while start > 0 and start < len(text) and unicodedata.combining(text[start]) != 0:
+            start -= 1
     return chunks
 
 
@@ -137,20 +333,25 @@ def _validate_result(value: object, *, source: str, source_offset: int) -> tuple
             or not recommendation.strip() or len(recommendation) > 2000
         ):
             raise ValueError("INVALID_OUTPUT_SCHEMA")
-        local_start = source.find(evidence)
-        if local_start < 0:
+        match = _find_evidence(source, evidence)
+        if match is None:
             raise ValueError("INVALID_EVIDENCE")
+        local_start, local_end, match_method = match
+        compact_explanation, compact_recommendation = compact_finding_text(
+            category, severity, source[local_start:local_end], explanation, recommendation
+        )
         findings.append({
             "finding_id": None,
             "target": TARGET,
             "category": category,
             "content_type": content_type,
             "severity": severity,
-            "evidence_text": evidence,
+            "evidence_text": source[local_start:local_end],
             "evidence_start": source_offset + local_start,
-            "evidence_end": source_offset + local_start + len(evidence),
-            "explanation": explanation.strip(),
-            "recommendation": recommendation.strip(),
+            "evidence_end": source_offset + local_end,
+            "evidence_match_method": match_method,
+            "explanation": compact_explanation,
+            "recommendation": compact_recommendation,
             "review_status": "NEEDS_REVIEW",
         })
     return suitability, findings
@@ -173,13 +374,18 @@ class ChildSafetyOrchestrator:
         self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
 
     async def analyze(self, text: str) -> dict[str, Any]:
-        normalized = normalize_safety_text(text)
+        normalized, normalized_spans = _nfc_with_offsets(text)
+        left = len(normalized) - len(normalized.lstrip())
+        right = len(normalized.rstrip())
+        normalized = normalized[left:right]
+        normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
         chunks = _chunks(normalized)
         events: list[dict[str, Any]] = []
         aggregated_suitability = "SUITABLE"
-        deduped: dict[tuple[int, int, str], dict[str, Any]] = {}
+        candidate_hash = content_hash(text)
+        deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
         for chunk_index, (offset, chunk_text) in enumerate(chunks):
             response = await self._analyze_chunk(chunk_text, events, chunk_index)
             suitability, findings = response
@@ -188,19 +394,31 @@ class ChildSafetyOrchestrator:
             for finding in findings:
                 finding["evidence_start"] += offset
                 finding["evidence_end"] += offset
-                key = (finding["evidence_start"], finding["evidence_end"], finding["category"])
+                canonical_start = finding["evidence_start"]
+                canonical_end = finding["evidence_end"]
+                raw_start = normalized_spans[canonical_start][0]
+                raw_end = normalized_spans[canonical_end - 1][1]
+                finding["evidence_start"] = raw_start
+                finding["evidence_end"] = raw_end
+                finding["evidence_text"] = text[raw_start:raw_end]
+                finding["content_hash"] = candidate_hash
+                key = (
+                    raw_start,
+                    raw_end,
+                    finding["category"],
+                    candidate_hash,
+                )
                 deduped.setdefault(key, finding)
         findings = list(deduped.values())
         for finding in findings:
             finding["finding_id"] = hashlib.sha256(
                 f"{finding['category']}:{finding['evidence_start']}:{finding['evidence_end']}:{finding['evidence_text']}".encode("utf-8")
             ).hexdigest()[:32]
-            finding["content_hash"] = content_hash(normalized)
         return {
             "target": TARGET,
             "status": "PROVISIONAL",
             "suitability": aggregated_suitability,
-            "content_hash": content_hash(normalized),
+            "content_hash": candidate_hash,
             "findings": findings,
             "provider_events": events,
         }
@@ -246,6 +464,7 @@ class ChildSafetyOrchestrator:
         return {
             "provider": provider.name,
             "model": provider.model,
+            "stage": "CHILD_SAFETY_SCANNING",
             "chunk_id": chunk_id,
             "availability": available,
             "http_status": status_code,

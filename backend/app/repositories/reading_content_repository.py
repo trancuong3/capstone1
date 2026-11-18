@@ -10,6 +10,7 @@ from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
     PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
+from app.repositories.book_repository import CatalogRepository
 
 
 class ReadingContentRepository:
@@ -60,6 +61,7 @@ class ReadingContentRepository:
                 BookPage.Id == page_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -67,6 +69,16 @@ class ReadingContentRepository:
         if book_id is not None:
             query = query.where(BookPage.BookId == book_id)
         return await self.db.scalar(query)
+
+    async def book_is_eligible(self, book_id: UUID) -> bool:
+        return (
+            await self.db.scalar(
+                select(Book.Id).where(
+                    Book.Id == book_id,
+                    CatalogRepository.eligible_book(),
+                )
+            )
+        ) is not None
 
     async def first_verified_page(self, book_id: UUID) -> BookPage | None:
         return await self.db.scalar(
@@ -77,6 +89,7 @@ class ReadingContentRepository:
                 BookPage.BookId == book_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -135,6 +148,7 @@ class ReadingContentRepository:
                 BookPage.PageNumber <= end_page_number,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -187,21 +201,32 @@ class ReadingContentRepository:
     async def session_for_update(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .where(ReadingSession.Id == session_id)
+            .where(CatalogRepository.eligible_book())
             .with_for_update()
             .execution_options(populate_existing=True)
         )
 
     async def session(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
-            select(ReadingSession).where(ReadingSession.Id == session_id)
+            select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
+            .where(
+                ReadingSession.Id == session_id,
+                CatalogRepository.eligible_book(),
+            )
         )
 
     async def sessions_for_parent(self, parent_id: UUID) -> list[ReadingSession]:
         result = await self.db.execute(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ChildProfile.ParentId == parent_id)
+            .where(
+                ChildProfile.ParentId == parent_id,
+                CatalogRepository.eligible_book(),
+            )
             .order_by(ReadingSession.StartedAt.desc(), ReadingSession.Id.desc())
         )
         return list(result.scalars().all())

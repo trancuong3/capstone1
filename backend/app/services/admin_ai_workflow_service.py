@@ -20,7 +20,10 @@ from app.schemas.admin_ai_workflow import (
     AdminAiWorkflowRead,
 )
 from app.services.admin_ocr_service import AdminOcrService
-from app.services.ocr_ai.child_safety import normalize_safety_text
+from app.services.ocr_ai.child_safety import (
+    compact_finding_text,
+    normalize_safety_text,
+)
 
 
 class AdminAiWorkflowService:
@@ -51,9 +54,54 @@ class AdminAiWorkflowService:
         row.SafetyHistory = history
 
     @staticmethod
+    def validate_safety_decision_reason(
+        row: AdminAiWorkflow, payload: AdminAiSafetyDecision
+    ) -> None:
+        requires_reason = bool(row.Findings) or row.Suitability != "SUITABLE"
+        if payload.confirmed and requires_reason and not payload.reason:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "SAFETY_REVIEW_REASON_REQUIRED",
+                    "message": "Hãy ghi lý do Admin xác nhận kết quả Safety có finding hoặc cần xem xét.",
+                },
+            )
+
+    @staticmethod
+    def _compact_findings(value: object) -> list[dict[str, object]]:
+        findings: list[dict[str, object]] = []
+        if not isinstance(value, list):
+            return findings
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            compact = dict(item)
+            explanation, recommendation = compact_finding_text(
+                compact.get("category"),
+                compact.get("severity"),
+                compact.get("evidence_text"),
+                compact.get("explanation"),
+                compact.get("recommendation"),
+            )
+            compact["explanation"] = explanation
+            compact["recommendation"] = recommendation
+            findings.append(compact)
+        return findings
+
+    @staticmethod
     def _read(row: AdminAiWorkflow) -> AdminAiWorkflowRead:
         candidate_hash = row.CandidateHash
         safety_hash = row.SafetyInputHash
+        findings = AdminAiWorkflowService._compact_findings(row.Findings)
+        safety_history: list[dict[str, object]] = []
+        for item in row.SafetyHistory or []:
+            if not isinstance(item, dict):
+                continue
+            compact = dict(item)
+            compact["findings"] = AdminAiWorkflowService._compact_findings(
+                compact.get("findings")
+            )
+            safety_history.append(compact)
         return AdminAiWorkflowRead(
             workflow_id=row.Id,
             page_id=row.PageId,
@@ -62,6 +110,7 @@ class AdminAiWorkflowService:
             status=row.Status,
             stage=row.Stage,
             progress={"completed_chunks": row.CompletedChunks, "total_chunks": row.TotalChunks},
+            attempts=int(row.Attempts or 0),
             error_code=row.ErrorCode,
             original_ocr_hash=row.OriginalOcrHash,
             admin_input_hash=row.AdminInputHash,
@@ -72,7 +121,7 @@ class AdminAiWorkflowService:
             proofread_metadata=dict(row.ProofreadMetadata or {}),
             safety_metadata=dict(row.SafetyMetadata or {}),
             candidate_history=list(row.CandidateHistory or []),
-            safety_history=list(row.SafetyHistory or []),
+            safety_history=safety_history,
             review_history=list(row.ReviewEvents or []),
             candidate_text=row.CandidateText,
             candidate_hash=candidate_hash,
@@ -81,7 +130,7 @@ class AdminAiWorkflowService:
             hash_match=bool(candidate_hash and safety_hash and candidate_hash == safety_hash),
             suitability=row.Suitability,
             safety_status=row.SafetyStatus,
-            findings=list(row.Findings or []),
+            findings=findings,
             provider_events=list(row.ProviderEvents or []),
             ocr_approved_at=row.OcrApprovedAt,
             final_approved_text_hash=row.FinalApprovedTextHash,
@@ -107,8 +156,8 @@ class AdminAiWorkflowService:
         )
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision does not belong to this page")
-        if revision.VerificationStatus != "NEEDS_REVIEW":
-            raise HTTPException(status_code=409, detail="AI workflow requires a revision awaiting review")
+        if revision.VerificationStatus not in {"NEEDS_REVIEW", "VERIFIED"}:
+            raise HTTPException(status_code=409, detail="AI workflow requires a reviewable OCR revision")
         revision_text = unicodedata.normalize(
             "NFC", revision.OriginalOcrText or revision.DraftText or revision.VerifiedText or ""
         )
@@ -117,6 +166,11 @@ class AdminAiWorkflowService:
         page = await AdminOcrRepository(self.db).page(page_id, lock=True)
         if page is None or page.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=409, detail="Page is no longer active")
+        if (
+            revision.VerificationStatus == "VERIFIED"
+            and page.CurrentVerifiedRevisionId != revision.Id
+        ):
+            raise HTTPException(status_code=409, detail="Verified OCR revision is no longer current")
         input_text = prepared.draft_text
         input_hash = self._hash(input_text)
         existing_snapshot = await self.repo.by_input_snapshot(
@@ -252,15 +306,34 @@ class AdminAiWorkflowService:
             raise HTTPException(status_code=409, detail="Candidate text is unavailable")
         if row.Stage not in {"PROOFREADING", "CHILD_SAFETY_SCANNING"}:
             raise HTTPException(status_code=409, detail="Workflow stage cannot be retried")
+        self.prepare_retry(row, actor_id, datetime.now(timezone.utc))
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._read(row)
+
+    @staticmethod
+    def prepare_retry(
+        row: AdminAiWorkflow, actor_id: UUID, now: datetime
+    ) -> None:
+        """Queue a failed workflow row inside a caller-owned transaction."""
+        if row.Status != "FAILED":
+            raise HTTPException(status_code=409, detail="Only a failed workflow stage can be retried")
+        if row.Stage == "CHILD_SAFETY_SCANNING" and (not row.CandidateText or not row.CandidateHash):
+            raise HTTPException(status_code=409, detail="Candidate text is unavailable")
+        if row.Stage not in {"PROOFREADING", "CHILD_SAFETY_SCANNING"}:
+            raise HTTPException(status_code=409, detail="Workflow stage cannot be retried")
         retry_stage = row.Stage
         row.Status = "QUEUED"
         if retry_stage == "CHILD_SAFETY_SCANNING":
-            self._archive_safety_result(row, datetime.now(timezone.utc))
+            AdminAiWorkflowService._archive_safety_result(row, now)
             row.SafetyStatus = "STALE"
             row.SafetyInputHash = None
             row.Suitability = None
             row.Findings = []
         else:
+            # Keep a valid scan of the immutable OCR input. The worker reuses it
+            # if proofreading retries to the same text hash, and only rescans
+            # when the corrected candidate differs.
             row.CandidateText = None
             row.CandidateHash = None
             row.CandidateVersion = 0
@@ -268,7 +341,8 @@ class AdminAiWorkflowService:
             row.ProofreadText = None
             row.ProofreadOutputHash = None
             row.CorrectionSuggestions = []
-            row.SafetyStatus = "PENDING"
+            if not row.SafetyInputHash:
+                row.SafetyStatus = "PENDING"
         row.Stage = retry_stage
         row.Attempts = 0
         row.ErrorCode = None
@@ -282,12 +356,42 @@ class AdminAiWorkflowService:
             "event": "WORKFLOW_STAGE_RETRY_QUEUED",
             "actor_id": str(actor_id),
             "stage": retry_stage,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
         }]
-        row.UpdatedAt = datetime.now(timezone.utc)
-        await self.db.commit()
-        await self.db.refresh(row)
-        return self._read(row)
+        row.UpdatedAt = now
+
+    @staticmethod
+    def prepare_safety_rescan(
+        row: AdminAiWorkflow, actor_id: UUID, now: datetime, reason: str
+    ) -> None:
+        """Queue only Child Safety for a current, otherwise valid candidate."""
+        if not row.CandidateText or not row.CandidateHash:
+            raise HTTPException(status_code=409, detail="Candidate text is unavailable")
+        if row.Status in {"QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"}:
+            raise HTTPException(status_code=409, detail="Workflow is already processing")
+        AdminAiWorkflowService._archive_safety_result(row, now)
+        row.Status = "QUEUED"
+        row.Stage = "CHILD_SAFETY_SCANNING"
+        row.SafetyStatus = "STALE"
+        row.SafetyInputHash = None
+        row.Suitability = None
+        row.Findings = []
+        row.SafetyConfirmedAt = None
+        row.SafetyConfirmedBy = None
+        row.Attempts = 0
+        row.ErrorCode = None
+        row.RetryAfter = None
+        row.WorkerId = None
+        row.LeaseExpiresAt = None
+        row.CompletedChunks = 0
+        row.TotalChunks = 1
+        row.ReviewEvents = list(row.ReviewEvents or []) + [{
+            "event": "BOOK_LEVEL_SAFETY_RESCAN_QUEUED",
+            "actor_id": str(actor_id),
+            "reason": reason,
+            "created_at": now.isoformat(),
+        }]
+        row.UpdatedAt = now
 
     async def decide_safety(
         self, actor_id: UUID, page_id: UUID, workflow_id: UUID,
@@ -301,6 +405,7 @@ class AdminAiWorkflowService:
             raise HTTPException(status_code=409, detail="Candidate changed; reload the safety review")
         if row.SafetyStatus not in {"PROVISIONAL", "CONFIRMED"} or row.SafetyInputHash != row.CandidateHash:
             raise HTTPException(status_code=409, detail="Safety scan is stale or incomplete")
+        self.validate_safety_decision_reason(row, payload)
         if payload.confirmed:
             row.SafetyStatus = "CONFIRMED"
             row.SafetyConfirmedAt = datetime.now(timezone.utc)
@@ -316,6 +421,7 @@ class AdminAiWorkflowService:
             "event": event_name,
             "actor_id": str(actor_id),
             "candidate_hash": row.CandidateHash,
+            "reason": payload.reason,
             "created_at": now.isoformat(),
         }]
         row.UpdatedAt = now

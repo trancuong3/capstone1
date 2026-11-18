@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AdminAiWorkflow
 
 
+MAX_WORKFLOW_ATTEMPTS = 3
+
+
 class AdminAiWorkflowRepository:
     """Database access for durable Admin AI workflow state."""
 
@@ -85,6 +88,25 @@ class AdminAiWorkflowRepository:
         row = await self.db.scalar(query)
         if row is None:
             return None
+        if int(row.Attempts or 0) >= MAX_WORKFLOW_ATTEMPTS:
+            row.Status = "FAILED"
+            row.ErrorCode = "WORKER_ATTEMPTS_EXHAUSTED"
+            row.WorkerId = None
+            row.LeaseExpiresAt = None
+            row.RetryAfter = None
+            if row.Stage == "CHILD_SAFETY_SCANNING":
+                row.SafetyStatus = "FAILED"
+            row.ReviewEvents = list(row.ReviewEvents or []) + [{
+                "event": "WORKFLOW_STAGE_FAILED",
+                "actor_id": "SYSTEM",
+                "stage": row.Stage,
+                "error_code": row.ErrorCode,
+                "attempt": int(row.Attempts or 0),
+                "created_at": now.isoformat(),
+            }]
+            row.UpdatedAt = now
+            await self.db.commit()
+            return None
         if row.Stage not in {"PROOFREADING", "CHILD_SAFETY_SCANNING"}:
             row.Status = "FAILED"
             row.ErrorCode = "INVALID_WORKFLOW_STAGE"
@@ -107,13 +129,31 @@ class AdminAiWorkflowRepository:
         *, lease_seconds: int,
     ) -> bool:
         row = await self.get(workflow_id, lock=True)
-        if row is None or row.WorkerId != worker_id:
+        now = datetime.now(timezone.utc)
+        if (
+            row is None
+            or row.WorkerId != worker_id
+            or row.LeaseExpiresAt is None
+            or row.LeaseExpiresAt <= now
+        ):
             await self.db.rollback()
             return False
-        now = datetime.now(timezone.utc)
         row.CompletedChunks = min(max(0, completed), max(1, total))
         row.TotalChunks = max(1, total)
         row.LeaseExpiresAt = now + timedelta(seconds=lease_seconds)
         row.UpdatedAt = now
+        await self.db.commit()
+        return True
+
+    async def release_claim(self, workflow_id: UUID, worker_id: str) -> bool:
+        row = await self.get(workflow_id, lock=True)
+        if row is None or row.WorkerId != worker_id:
+            await self.db.rollback()
+            return False
+        row.Status = "QUEUED"
+        row.WorkerId = None
+        row.LeaseExpiresAt = None
+        row.RetryAfter = None
+        row.UpdatedAt = datetime.now(timezone.utc)
         await self.db.commit()
         return True

@@ -861,6 +861,7 @@ export function AdminOcrReviewScreen({
     null,
   );
   const [aiWorkflow, setAiWorkflow] = useState<AdminAiWorkflowDTO | null>(null);
+  const [safetyDecisionReason, setSafetyDecisionReason] = useState("");
   const [candidateEditPending, setCandidateEditPending] = useState(false);
   const [busy, setBusy] = useState<
     "edit" | "save" | "verify" | "reprocess" | "reupload" | "ai_correct" | "workflow" | null
@@ -1483,6 +1484,12 @@ export function AdminOcrReviewScreen({
 
   async function decideSafety(confirmed: boolean) {
     if (!aiWorkflow?.candidate_hash || !aiWorkflow.hash_match || busy !== null) return;
+    const reason = safetyDecisionReason.trim();
+    const reasonRequired = Boolean(aiWorkflow.findings.length) || aiWorkflow.suitability !== "SUITABLE";
+    if (confirmed && reasonRequired && !reason) {
+      setNotice("Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả Safety.");
+      return;
+    }
     setBusy("workflow");
     setNotice(null);
     try {
@@ -1492,6 +1499,7 @@ export function AdminOcrReviewScreen({
           aiWorkflow.workflow_id,
           aiWorkflow.candidate_hash,
           confirmed,
+          reason || undefined,
         ),
       );
     } catch (cause) {
@@ -1930,6 +1938,19 @@ export function AdminOcrReviewScreen({
         revision.page_revision_id === detail?.page_revision_id &&
         revision.is_current_verified,
     ) === true;
+  const workflowHasHighRisk = Boolean(
+    aiWorkflow &&
+      (aiWorkflow.suitability === "NOT_RECOMMENDED" ||
+        aiWorkflow.findings.some(
+          (finding) => String(finding.severity ?? "").toUpperCase() === "HIGH",
+        )),
+  );
+  const workflowFinalApprovalBlocked = Boolean(
+    aiWorkflow?.proofread_text &&
+      (aiWorkflow.safety_status !== "CONFIRMED" ||
+        !aiWorkflow.hash_match ||
+        workflowHasHighRisk),
+  );
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
 
@@ -2258,7 +2279,7 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend chạy Proofreading theo cấu hình Gemini Primary → Gemini Fallback → Groq Qwen, rồi tự động chạy Child Safety trên Candidate. Ollama chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ. AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
+              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend bắt đầu Proofreading và Child Safety song song trên cùng OCR snapshot. Nếu Proofreading đổi nội dung, Safety tự quét lại Candidate theo hash mới. Ollama chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ. AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2541,6 +2562,8 @@ export function AdminOcrReviewScreen({
                       detail.lifecycle_status !== "ACTIVE" ||
                       words.length === 0 ||
                       wordSyncError !== null ||
+                      candidateEditPending ||
+                      workflowFinalApprovalBlocked ||
                       aiSuggestion !== null ||
                       (aiWorkflow !== null &&
                         ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
@@ -2562,6 +2585,15 @@ export function AdminOcrReviewScreen({
                         ? "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG"
                         : "XÁC NHẬN & CHẠY AI"}
                   </Button>
+                  {aiWorkflow?.proofread_text && workflowFinalApprovalBlocked ? (
+                    <p className="basis-full text-sm text-amber-900" role="status">
+                      {workflowHasHighRisk
+                        ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
+                        : aiWorkflow.safety_status !== "CONFIRMED"
+                          ? "Cần Admin xác nhận kết quả Child Safety khớp Candidate hiện tại trước khi lưu VERIFIED."
+                          : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
+                    </p>
+                  ) : null}
                   {aiCheckUnavailable && proofreadAudit === null ? (
                     <Button
                       className="sm:w-auto"
@@ -2652,6 +2684,41 @@ export function AdminOcrReviewScreen({
                 </div>
               </dl>
 
+              {aiWorkflow.status === "FAILED" || aiWorkflow.safety_status === "FAILED" ? (() => {
+                const failureEvent = [...aiWorkflow.provider_events]
+                  .reverse()
+                  .find((event) =>
+                    Boolean(event.error_code) &&
+                    (!event.stage || event.stage === aiWorkflow.stage),
+                  );
+                const failureMessage = aiWorkflow.error_code === "INVALID_EVIDENCE"
+                  ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
+                  : aiWorkflow.error_code === "INVALID_JSON"
+                    ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
+                    : aiWorkflow.error_code === "INVALID_OUTPUT_SCHEMA"
+                      ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
+                      : "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn.";
+                return (
+                  <div className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950" role="alert">
+                    <p className="font-bold">
+                      {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                        ? "Child Safety chưa hoàn tất."
+                        : "Proofreading chưa hoàn tất."}
+                    </p>
+                    <p className="mt-1">{failureMessage}</p>
+                    <p className="mt-1">
+                      Lỗi: {aiWorkflow.error_code ?? "UNKNOWN"}
+                      {failureEvent?.provider ? ` · Provider ${String(failureEvent.provider)}` : ""}
+                      {failureEvent?.model ? ` · Model ${String(failureEvent.model)}` : ""}
+                      {failureEvent?.duration_ms != null ? ` · ${String(failureEvent.duration_ms)} ms` : ""}
+                      {` · Lần thử ${aiWorkflow.attempts}`}
+                      {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
+                    </p>
+                    <p className="mt-1">Có thể thử lại riêng giai đoạn Safety; không chạy lại Proofreading.</p>
+                  </div>
+                );
+              })() : null}
+
               <div className="mt-4 flex flex-wrap gap-2">
                 {aiWorkflow.status === "FAILED" ? (
                   <Button
@@ -2662,13 +2729,34 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <RefreshCw aria-hidden className="size-4" /> Thử lại giai đoạn lỗi
+                    <RefreshCw aria-hidden className="size-4" />
+                    {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                      ? "Thử lại Child Safety"
+                      : "Thử lại Proofreading"}
                   </Button>
+                ) : null}
+                {aiWorkflow.safety_status === "PROVISIONAL" &&
+                aiWorkflow.hash_match &&
+                (aiWorkflow.findings.length > 0 || aiWorkflow.suitability !== "SUITABLE") ? (
+                  <label className="basis-full text-sm font-bold text-ink">
+                    Lý do Admin xem xét Safety · bắt buộc
+                    <textarea
+                      className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
+                      maxLength={500}
+                      onChange={(event) => setSafetyDecisionReason(event.target.value)}
+                      value={safetyDecisionReason}
+                    />
+                  </label>
                 ) : null}
                 {aiWorkflow.safety_status === "PROVISIONAL" && aiWorkflow.hash_match ? (
                   <Button
                     className="h-10 w-auto px-3"
-                    disabled={busy !== null || candidateEditPending}
+                    disabled={
+                      busy !== null ||
+                      candidateEditPending ||
+                      ((Boolean(aiWorkflow.findings.length) || aiWorkflow.suitability !== "SUITABLE") &&
+                        !safetyDecisionReason.trim())
+                    }
                     isLoading={busy === "workflow"}
                     onClick={() => void decideSafety(true)}
                     type="button"
@@ -2694,21 +2782,48 @@ export function AdminOcrReviewScreen({
                 <h3 className="font-extrabold">Safety findings</h3>
                 {aiWorkflow.findings.length ? (
                   <ul className="mt-2 grid gap-3">
-                    {aiWorkflow.findings.map((finding, index) => (
-                      <li className="rounded-control border border-border p-3" key={String(finding.finding_id ?? index)}>
-                        <p className="font-bold">
-                          {String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.content_type ?? "MENTION")} · {String(finding.severity ?? "REVIEW")}
-                        </p>
-                        <blockquote className="mt-2 border-l-2 border-primary pl-3 text-sm">
-                          “{String(finding.evidence_text ?? "")}”
-                          <span className="ml-2 font-mono text-xs text-muted">
-                            [{String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}]
-                          </span>
-                        </blockquote>
-                        <p className="mt-2 text-sm">{String(finding.explanation ?? "")}</p>
-                        <p className="mt-1 text-sm text-muted">{String(finding.recommendation ?? "")}</p>
-                      </li>
-                    ))}
+                    {aiWorkflow.findings.map((finding, index) => {
+                      const severity = String(finding.severity ?? "REVIEW").toUpperCase();
+                      const category = String(finding.category ?? "OTHER_SENSITIVE").replaceAll("_", " ");
+                      const evidence = String(finding.evidence_text ?? "");
+                      const compactEvidence = evidence.length > 240
+                        ? evidence.slice(0, 240).trimEnd() + "…"
+                        : evidence;
+                      const high = severity === "HIGH";
+                      return (
+                        <li key={String(finding.finding_id ?? index)}>
+                          <details className={"rounded-control border p-3 " + (high ? "border-red-400 bg-red-50" : "border-border bg-white")}>
+                            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-3 focus-visible:outline-primary">
+                              <span className="font-extrabold">{category}</span>
+                              <span className="text-xs text-muted">{String(finding.content_type ?? "MENTION").replaceAll("_", " ")}</span>
+                              <span className={"rounded-full px-2.5 py-1 text-xs font-extrabold " + (high ? "bg-red-700 text-white" : "bg-canvas text-ink")}>
+                                {severity}
+                              </span>
+                              <span className="ml-auto text-xs text-muted">Mở chi tiết</span>
+                            </summary>
+                            <div className="mt-3 border-t border-border pt-3">
+                              <p className="text-xs font-bold uppercase tracking-wide text-muted">Bằng chứng</p>
+                              <blockquote className="mt-1 border-l-2 border-primary pl-3 text-sm">
+                                “{compactEvidence}”
+                                <span className="ml-2 font-mono text-xs text-muted">
+                                  [{String(finding.evidence_start ?? "?")}–{String(finding.evidence_end ?? "?")}]
+                                </span>
+                              </blockquote>
+                              {evidence.length > 240 ? (
+                                <details className="mt-2 text-sm">
+                                  <summary className="cursor-pointer font-bold text-primary">Xem toàn bộ trích dẫn nguyên văn ({evidence.length} ký tự)</summary>
+                                  <blockquote className="mt-2 border-l-2 border-primary pl-3">“{evidence}”</blockquote>
+                                </details>
+                              ) : null}
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">Giải thích</p>
+                              <p className="mt-1 text-sm">{String(finding.explanation ?? "")}</p>
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">Khuyến nghị</p>
+                              <p className="mt-1 text-sm text-muted">{String(finding.recommendation ?? "")}</p>
+                            </div>
+                          </details>
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="mt-2 text-sm text-muted">
@@ -2718,6 +2833,48 @@ export function AdminOcrReviewScreen({
                   </p>
                 )}
               </section>
+
+              {aiWorkflow.safety_history.length > 0 ? (
+                <section className="mt-5">
+                  <h3 className="font-extrabold">Safety history · kết quả cũ</h3>
+                  <p className="mt-1 text-xs text-muted">
+                    Các scan này chỉ phục vụ audit; không áp dụng cho Candidate hiện tại.
+                  </p>
+                  <div className="mt-2 grid gap-2">
+                    {aiWorkflow.safety_history.map((scan, scanIndex) => {
+                      const historicalFindings = Array.isArray(scan.findings)
+                        ? scan.findings.filter(
+                            (item): item is Record<string, unknown> =>
+                              typeof item === "object" &&
+                              item !== null &&
+                              !Array.isArray(item),
+                          )
+                        : [];
+                      return (
+                        <details className="rounded-control border border-border p-3" key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}>
+                          <summary className="cursor-pointer text-sm font-bold">
+                            {String(scan.status ?? "UNKNOWN")} · {String(scan.suitability ?? "Chưa có suitability")}
+                            {` · ${historicalFindings.length} finding`}
+                            {scan.content_hash ? ` · hash ${String(scan.content_hash).slice(0, 12)}…` : " · chưa có hash"}
+                          </summary>
+                          {historicalFindings.length ? (
+                            <ul className="mt-2 grid gap-2">
+                              {historicalFindings.map((finding, findingIndex) => {
+                                return (
+                                  <li className="border-l-2 border-border pl-3 text-sm" key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}>
+                                    <p className="font-bold">{String(finding.category ?? "OTHER_SENSITIVE")} · {String(finding.severity ?? "UNKNOWN")}</p>
+                                    <p>“{String(finding.evidence_text ?? "")}”</p>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ) : <p className="mt-2 text-sm">Không có finding trong scan lịch sử.</p>}
+                        </details>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
 
               <section className="mt-5">
                 <h3 className="font-extrabold">Provider và model provenance</h3>
@@ -2746,7 +2903,7 @@ export function AdminOcrReviewScreen({
               </section>
 
               <p className="mt-4 text-xs text-muted">
-                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. OCR và Safety là hai quyết định độc lập; có thể lưu VERIFIED khi Safety còn PENDING.
+                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận Safety cho đúng Candidate hiện tại.
               </p>
             </Card>
           ) : null}

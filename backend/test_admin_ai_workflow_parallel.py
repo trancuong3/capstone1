@@ -1,0 +1,273 @@
+"""Proofreading and Child Safety overlap on one immutable OCR snapshot."""
+from __future__ import annotations
+
+import asyncio
+import os
+import unittest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
+
+from app.jobs import admin_ai_workflow_worker as worker
+
+
+class _Session:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+
+class _Repository:
+    row = None
+    released = []
+
+    def __init__(self, _session):
+        pass
+
+    async def get(self, _workflow_id, lock=False):
+        return self.row
+
+    async def release_claim(self, workflow_id, worker_id):
+        self.released.append((workflow_id, worker_id))
+        return True
+
+
+class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_stage_releases_its_durable_claim(self):
+        workflow_id = uuid4()
+        _Repository.released = []
+        snapshot = {"id": workflow_id, "worker_id": "worker-shutdown", "stage": "PROOFREADING"}
+        started = asyncio.Event()
+
+        async def wait_for_shutdown(*_args):
+            started.set()
+            await asyncio.Event().wait()
+
+        with (
+            patch.object(worker, "_load", new=AsyncMock(return_value=snapshot)),
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_run_proofreading", side_effect=wait_for_shutdown),
+        ):
+            task = asyncio.create_task(worker._process(workflow_id, "worker-shutdown"))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+            except Exception:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(_Repository.released, [(workflow_id, "worker-shutdown")])
+
+    async def test_worker_shutdown_cancels_active_workflow_tasks(self):
+        workflow_id = uuid4()
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class _QueueRepository:
+            claims = 0
+
+            def __init__(self, _session):
+                pass
+
+            async def claim_next(self, _worker_id, lease_seconds):
+                type(self).claims += 1
+                return workflow_id if type(self).claims == 1 else None
+
+        async def active_workflow(*_args):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        with (
+            patch.object(worker, "_configured_enabled", return_value=True),
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _QueueRepository),
+            patch.object(worker, "_process", side_effect=active_workflow),
+        ):
+            task = asyncio.create_task(worker.run_worker(poll_seconds=1))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+            except Exception:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertTrue(cancelled.is_set())
+
+    async def test_safety_starts_before_proofreading_finishes_and_stale_hash_is_requeued(self):
+        workflow_id = uuid4()
+        row = SimpleNamespace(
+            Id=workflow_id,
+            WorkerId="worker-1",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateHistory=[],
+            CorrectionSuggestions=[],
+            UncertainWordIndices=[],
+            ProofreadMetadata={},
+            CandidateVersion=0,
+            SafetyInputHash=None,
+            SafetyStatus="PENDING",
+            Suitability=None,
+            Stage="PROOFREADING",
+            Status="PROOFREADING",
+            Attempts=1,
+        )
+        _Repository.row = row
+        safety_started = asyncio.Event()
+        proofreading_waited_for_safety = asyncio.Event()
+
+        async def correct(*_args, **_kwargs):
+            await safety_started.wait()
+            proofreading_waited_for_safety.set()
+            return "corrected text"
+
+        class _Safety:
+            async def analyze(self, value):
+                self.input_text = value
+                safety_started.set()
+                await proofreading_waited_for_safety.wait()
+                return {
+                    "suitability": "REVIEW_REQUIRED",
+                    "findings": [{"evidence_text": "original text"}],
+                    "provider_events": [],
+                }
+
+        snapshot = {
+            "id": workflow_id,
+            "page_id": uuid4(),
+            "revision_id": uuid4(),
+            "input_text": "original text",
+            "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
+            "image_path": "books/test/page.png",
+            "stage": "PROOFREADING",
+            "total_chunks": 1,
+            "candidate_text": None,
+            "candidate_hash": None,
+            "safety_input_hash": None,
+            "safety_status": "PENDING",
+            "worker_id": "worker-1",
+            "attempts": 1,
+            "provider_events": [],
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker.OcrCorrectionConfig, "from_environment", return_value=object()),
+            patch.object(worker.AdminOcrService, "run_prepared_ai_correction", side_effect=correct),
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+        ):
+            await worker._run_proofreading(snapshot, "worker-1")
+
+        self.assertTrue(proofreading_waited_for_safety.is_set())
+        self.assertEqual(row.CandidateText, "corrected text")
+        self.assertEqual(row.Stage, "CHILD_SAFETY_SCANNING")
+        self.assertEqual(row.Status, "QUEUED")
+        self.assertEqual(row.SafetyStatus, "STALE")
+        self.assertIsNone(row.SafetyInputHash)
+        self.assertEqual(row.Findings, [])
+        self.assertEqual(row.SafetyHistory[0]["content_hash"], worker.content_hash("original text"))
+
+    async def test_safety_failure_keeps_successful_proofreading_and_retries_only_safety(self):
+        workflow_id = uuid4()
+        row = SimpleNamespace(
+            Id=workflow_id,
+            WorkerId="worker-2",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateHistory=[],
+            CorrectionSuggestions=[],
+            UncertainWordIndices=[],
+            ProofreadMetadata={},
+            CandidateVersion=0,
+            SafetyInputHash=None,
+            SafetyStatus="PENDING",
+            Suitability=None,
+            Stage="PROOFREADING",
+            Status="PROOFREADING",
+            Attempts=1,
+            ErrorCode=None,
+        )
+        _Repository.row = row
+
+        class _Safety:
+            async def analyze(self, _value):
+                raise worker.ChildSafetyError("ALL_PROVIDERS_FAILED", [])
+
+        async def correct(*_args, **_kwargs):
+            return "same text"
+
+        snapshot = {
+            "id": workflow_id,
+            "page_id": uuid4(),
+            "revision_id": uuid4(),
+            "input_text": "same text",
+            "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
+            "image_path": "books/test/page.png",
+            "stage": "PROOFREADING",
+            "total_chunks": 1,
+            "candidate_text": None,
+            "candidate_hash": None,
+            "safety_input_hash": None,
+            "safety_status": "PENDING",
+            "worker_id": "worker-2",
+            "attempts": 1,
+            "provider_events": [],
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker.OcrCorrectionConfig, "from_environment", return_value=object()),
+            patch.object(worker.AdminOcrService, "run_prepared_ai_correction", side_effect=correct),
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+        ):
+            await worker._run_proofreading(snapshot, "worker-2")
+
+        self.assertEqual(row.ProofreadText, "same text")
+        self.assertEqual(row.CandidateText, "same text")
+        self.assertEqual(row.Stage, "CHILD_SAFETY_SCANNING")
+        self.assertEqual(row.Status, "QUEUED")
+        self.assertEqual(row.SafetyStatus, "FAILED")
+        self.assertEqual(row.ErrorCode, "ALL_PROVIDERS_FAILED")
+        self.assertEqual(row.ReviewEvents[-1]["stage"], "CHILD_SAFETY_SCANNING")
+
+
+class AsyncMockProgress:
+    async def __call__(self, *_args):
+        return None
+
+
+if __name__ == "__main__":
+    unittest.main()
