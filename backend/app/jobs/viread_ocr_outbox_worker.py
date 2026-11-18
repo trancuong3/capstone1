@@ -241,12 +241,12 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
                 if poll_seconds >= 1
                 else poll_seconds
             )
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=sleep_for)
-            except TimeoutError:
-                pass
+            await _wait_for_stop_or_timeout(stop, sleep_for)
             continue
+
         idle_streak = 0
+        attempts = int(event["attempts"])
+        process_completed = False
         try:
             await _process(event)
             process_completed = True

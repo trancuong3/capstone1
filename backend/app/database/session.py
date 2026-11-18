@@ -4,6 +4,7 @@ import asyncio
 import logging
 import socket
 import ssl
+import sys
 import time
 from typing import Any
 
@@ -207,8 +208,13 @@ if DATABASE_SSL_REQUIRED:
         raise RuntimeError("Database SSL context must verify CA and hostname")
     asyncpg_connect_args["ssl"] = ssl_context
 
+_running_test_cli = any(
+    runner in (sys.argv[0] if sys.argv else "")
+    for runner in ("unittest", "pytest")
+)
 _use_null_pool = (
     APP_ENVIRONMENT == "test"
+    or _running_test_cli
     or (
         DATABASE_POOLER_MODE == "local"
         and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}
@@ -250,3 +256,52 @@ async def get_db():
     """Yield one request-scoped session; permits are held only during DB transactions."""
     async with AsyncSessionLocal() as session:
         yield session
+
+
+async def probe_database_connection(*, timeout: float | None = None) -> dict[str, Any]:
+    """Verify DNS resolution and read-only SELECT 1 connectivity without exposing secrets."""
+    effective_timeout = (
+        DATABASE_CONNECT_TIMEOUT if timeout is None else max(0.5, float(timeout))
+    )
+    started_at = time.perf_counter()
+    host = sqlalchemy_database_url.host
+    port = sqlalchemy_database_url.port or 5432
+    dns_resolved = False
+
+    try:
+        if host:
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.getaddrinfo(host, port, type=socket.SOCK_STREAM),
+                timeout=effective_timeout,
+            )
+        dns_resolved = True
+
+        async def _select_one() -> bool:
+            async with AsyncSessionLocal() as session:
+                return (await session.scalar(text("SELECT 1"))) == 1
+
+        ok = await asyncio.wait_for(_select_one(), timeout=effective_timeout)
+        return {
+            "ok": bool(ok),
+            "dns_resolved": dns_resolved,
+            "ssl_enabled": "ssl" in asyncpg_connect_args,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": DATABASE_POOLER_MODE,
+            "port": port,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error_type": None if ok else "UnexpectedProbeResult",
+        }
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        return {
+            "ok": False,
+            "dns_resolved": dns_resolved,
+            "ssl_enabled": "ssl" in asyncpg_connect_args,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": DATABASE_POOLER_MODE,
+            "port": port,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error_type": type(exc).__name__,
+        }
