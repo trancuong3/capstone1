@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
+from app.database.role_cache import get_cached_profile_role
+from app.models import Book, BookPage, PageRevision, PageRevisionWord
 
 
 class AdminOcrRepository:
@@ -13,15 +15,45 @@ class AdminOcrRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self._pending_word_batches: list[dict[str, object]] = []
+
+    @staticmethod
+    def _build_word_row(revision_id: UUID, word: dict[str, object]) -> dict[str, object]:
+        return {
+            "Id": uuid4(),
+            "PageRevisionId": revision_id,
+            "WordIndex": int(word["word_index"]),
+            "LineIndex": int(word["line_index"]),
+            "Text": str(word["text"]),
+            "NormalizedText": str(word["normalized_text"]),
+            "BoundingBox": list(word["bbox"]),
+            "OCRConfidence": word.get("ocr_confidence"),
+        }
+
+    async def _flush_pending_words(self) -> None:
+        if not self._pending_word_batches:
+            return
+        rows = self._pending_word_batches
+        self._pending_word_batches = []
+        if not isinstance(self.db, AsyncSession):
+            for item in rows:
+                self.db.add(PageRevisionWord(**item))
+            return
+        for start in range(0, len(rows), 500):
+            await self.db.execute(
+                pg_insert(PageRevisionWord).values(rows[start : start + 500])
+            )
 
     async def page_for_upload(self, book_id: UUID, upload_id: UUID) -> BookPage | None:
         return await self.db.scalar(
-            select(BookPage).where(BookPage.BookId == book_id,
-                BookPage.ProcessingMeta["upload_id"].astext == str(upload_id))
+            select(BookPage).where(
+                BookPage.BookId == book_id,
+                BookPage.ProcessingMeta["upload_id"].astext == str(upload_id),
+            )
         )
 
     async def role(self, profile_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
         query = select(Book).where(Book.Id == book_id)
@@ -34,20 +66,13 @@ class AdminOcrRepository:
         revision: PageRevision,
         words: list[dict[str, object]],
     ) -> None:
-        """Stage a new OCR revision and its word boxes without committing."""
+        """Stage a new OCR revision and queue its word boxes for bulk insert."""
+        if revision.Id is None:
+            revision.Id = uuid4()
         self.db.add(revision)
-        for word in words:
-            self.db.add(
-                PageRevisionWord(
-                    PageRevisionId=revision.Id,
-                    WordIndex=int(word["word_index"]),
-                    LineIndex=int(word["line_index"]),
-                    Text=str(word["text"]),
-                    NormalizedText=str(word["normalized_text"]),
-                    BoundingBox=list(word["bbox"]),
-                    OCRConfidence=word.get("ocr_confidence"),
-                )
-            )
+        self._pending_word_batches.extend(
+            self._build_word_row(revision.Id, word) for word in words
+        )
 
     @staticmethod
     def update_revision_draft(
@@ -119,12 +144,6 @@ class AdminOcrRepository:
         return value is not None
 
     async def next_active_page_number(self, book_id: UUID) -> int:
-        """Return the next number after ACTIVE pages and committed upload placeholders.
-
-        Callers serialize allocation by locking the owning Book row first.
-        PROCESSING rows reserve their position while Storage/OCR work happens
-        outside a database transaction.
-        """
         value = await self.db.scalar(
             select(func.max(BookPage.PageNumber)).where(
                 BookPage.BookId == book_id,
@@ -150,8 +169,9 @@ class AdminOcrRepository:
         return list(result.scalars().all())
 
     async def flush(self) -> None:
-        """Flush staged ORM changes while leaving transaction ownership to the Service."""
+        """Flush staged ORM changes first, then bulk-insert queued words in one roundtrip."""
         await self.db.flush()
+        await self._flush_pending_words()
 
     @staticmethod
     def set_page_number(page: BookPage, page_number: int) -> BookPage:
@@ -175,26 +195,13 @@ class AdminOcrRepository:
         revision: PageRevision,
         words: list[dict[str, object]],
     ) -> None:
-        """Stage the Admin-uploaded page, initial OCR revision and word boxes.
-
-        The Service owns the surrounding Storage/Database transaction because it
-        must also clean up the uploaded Storage object if the commit fails.
-        This method performs persistence staging only; it does not decide whether
-        the page should be created or verified.
-        """
+        """Stage the Admin-uploaded page, initial OCR revision and word boxes."""
+        if revision.Id is None:
+            revision.Id = uuid4()
         self.db.add_all([page, revision])
-        for word in words:
-            self.db.add(
-                PageRevisionWord(
-                    PageRevisionId=revision.Id,
-                    WordIndex=int(word["word_index"]),
-                    LineIndex=int(word["line_index"]),
-                    Text=str(word["text"]),
-                    NormalizedText=str(word["normalized_text"]),
-                    BoundingBox=list(word["bbox"]),
-                    OCRConfidence=word.get("ocr_confidence"),
-                )
-            )
+        self._pending_word_batches.extend(
+            self._build_word_row(revision.Id, word) for word in words
+        )
 
     async def revisions(self, page_id: UUID) -> list[PageRevision]:
         result = await self.db.execute(
@@ -202,10 +209,6 @@ class AdminOcrRepository:
             .where(PageRevision.PageId == page_id)
             .order_by(PageRevision.CreatedAt.desc(), PageRevision.Id.desc())
         )
-        # revisionno is TEXT in the established schema. Sort valid numeric strings
-        # numerically after retrieval so same-timestamp inserts cannot reorder history
-        # lexically or by random UUID. Invalid legacy values remain visible at the end
-        # and are rejected by the service contract instead of being silently rewritten.
         rows = list(result.scalars().all())
 
         def revision_order(row: PageRevision) -> tuple[int, int]:
@@ -247,20 +250,39 @@ class AdminOcrRepository:
         existing = await self.words(revision_id)
         by_index = {row.WordIndex: row for row in existing}
         keep = {int(word["word_index"]) for word in words}
-        for row in existing:
-            if row.WordIndex not in keep:
-                await self.db.delete(row)
+        removed_indices = [row.WordIndex for row in existing if row.WordIndex not in keep]
+        if removed_indices:
+            if isinstance(self.db, AsyncSession):
+                await self.db.execute(
+                    delete(PageRevisionWord).where(
+                        PageRevisionWord.PageRevisionId == revision_id,
+                        PageRevisionWord.WordIndex.in_(removed_indices),
+                    )
+                )
+            else:
+                for row in existing:
+                    if row.WordIndex not in keep:
+                        await self.db.delete(row)
+
+        new_rows: list[dict[str, object]] = []
         for word in words:
             index = int(word["word_index"])
             row = by_index.get(index)
             if row is None:
-                row = PageRevisionWord(PageRevisionId=revision_id, WordIndex=index, LineIndex=int(word["line_index"]),
-                    Text=str(word["text"]), NormalizedText=str(word["normalized_text"]),
-                    BoundingBox=list(word["bbox"]), OCRConfidence=word.get("ocr_confidence"))
-                self.db.add(row)
+                new_rows.append(self._build_word_row(revision_id, word))
             else:
                 row.LineIndex = int(word["line_index"])
                 row.Text = str(word["text"])
                 row.NormalizedText = str(word["normalized_text"])
                 row.BoundingBox = list(word["bbox"])
                 row.OCRConfidence = word.get("ocr_confidence")
+
+        if new_rows:
+            if isinstance(self.db, AsyncSession):
+                for start in range(0, len(new_rows), 500):
+                    await self.db.execute(
+                        pg_insert(PageRevisionWord).values(new_rows[start : start + 500])
+                    )
+            else:
+                for item in new_rows:
+                    self.db.add(PageRevisionWord(**item))

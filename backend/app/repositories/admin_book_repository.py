@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, Profile
+from app.database.role_cache import get_cached_profile_role
+from app.models import Book
 
 
 class AdminBookRepository:
@@ -14,7 +15,7 @@ class AdminBookRepository:
         self.db = db
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def get(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
@@ -61,4 +62,3 @@ class AdminBookRepository:
             await self.db.rollback()
             raise
         return book
-

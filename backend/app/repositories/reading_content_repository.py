@@ -4,12 +4,13 @@ from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.reading_comparison_report import ReadingComparisonReport
 
+from app.database.role_cache import get_cached_profile_role
 from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
-    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
+    PageRevisionWord, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
+from app.models.reading_comparison_report import ReadingComparisonReport
 
 
 class ReadingContentRepository:
@@ -40,7 +41,7 @@ class ReadingContentRepository:
         return None
 
     async def profile_role(self, profile_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def child_belongs_to_parent(self, child_id: UUID, parent_id: UUID) -> bool:
         found = await self.db.scalar(
@@ -103,7 +104,7 @@ class ReadingContentRepository:
         result = await self.db.execute(
             select(PageRevisionWord)
             .where(PageRevisionWord.PageRevisionId == revision_id)
-            .order_by(PageRevisionWord.WordIndex)
+            .order_by(PageRevisionWord.WordIndex, PageRevisionWord.Id)
         )
         return list(result.scalars().all())
 
@@ -227,8 +228,6 @@ class ReadingContentRepository:
         self, session_id: UUID, page_id: UUID, revision_id: UUID,
         word_id: UUID, event_type: str, attempt: int,
     ) -> ReadingEvent | None:
-        # The caller holds the session row lock until commit, so concurrent
-        # requests using this write path cannot insert the same attempt twice.
         return await self.db.scalar(
             select(ReadingEvent).where(
                 ReadingEvent.SessionId == session_id,

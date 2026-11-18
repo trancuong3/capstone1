@@ -17,9 +17,8 @@ class AdminParentRepository:
 
     async def role(self, actor_id: UUID) -> str | None:
         """Return the persisted role of an authenticated actor."""
-        return await self.db.scalar(
-            select(Profile.Role).where(Profile.Id == actor_id)
-        )
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def get_parent_record(self, parent_id: UUID) -> dict[str, Any] | None:
         """Return only the profile fields supported by the current schema."""
