@@ -19,7 +19,13 @@ from sqlalchemy.pool import NullPool
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.router import api_router
-from app.models import AdminAiWorkflow, BookPage, PageRevision, PageRevisionWord
+from app.models import (
+    AdminAiWorkflow,
+    AuditLog,
+    BookPage,
+    PageRevision,
+    PageRevisionWord,
+)
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.admin_ocr_service import AdminOcrService
@@ -146,6 +152,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             for statement in statements:
                 await connection.execute(text(statement))
+            await connection.run_sync(
+                lambda sync_connection: AuditLog.__table__.create(sync_connection)
+            )
             await connection.run_sync(
                 lambda sync_connection: AdminAiWorkflow.__table__.create(sync_connection)
             )
@@ -481,20 +490,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 reading_repository = ReadingContentRepository(session)
                 reading = ReadingContentService(reading_repository)
                 reading_page = await reading.repository.verified_page(PAGE_ID, BOOK_ID)
-                self.assertIsNotNone(reading_page)
-                current_revision = await reading.repository.verified_revision(
-                    PAGE_ID, reading_page.CurrentVerifiedRevisionId
-                )
-                self.assertIsNotNone(current_revision)
-                page_content = await reading._build_page_dto(
-                    reading_page, current_revision
-                )
-                self.assertEqual(page_content.text, "Ngày xưa có em.")
-                self.assertEqual(
-                    [word.text for word in page_content.words],
-                    ["Ngày", "xưa", "có", "em."],
-                )
-                self.assertEqual(page_content.page_revision_id, UUID(r2["page_revision_id"]))
+                # OCR verification is not book-level child approval. This
+                # fixture has no current book.children.approved audit decision,
+                # so the public reading path must continue to block the book.
+                self.assertIsNone(reading_page)
 
             second_draft = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/revisions/draft",
