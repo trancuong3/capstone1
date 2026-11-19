@@ -14,27 +14,17 @@ Resume work with the smallest possible context load. Do **not** rediscover the w
 
 1. Read `AGENTS.md`.
 2. Read `.codex/skills/graphify/PROJECT_STATE.md`.
-3. Run only these cheap Git commands first:
+3. Run only:
    - `git status --short`
-   - `git log -5 --oneline`
-   - `git diff --stat`
    - `git diff --name-only`
-4. If the checkpoint says `COMMITTED_MAIN` and the working tree is clean:
-   - `git pull --ff-only origin main`
-   - continue from **Next exact actions**.
-5. If the checkpoint says `COMMITTED_BRANCH`:
-   - fetch/switch to the named branch; do not assume main contains the work.
-6. If the checkpoint says `LOCAL_UNPUSHED`:
-   - preserve the dirty working tree;
-   - never reset/checkout over it;
-   - inspect only the changed files plus their direct dependencies.
-7. If architecture context is needed, run **one narrow Graphify query** with a small token budget before any broad grep or file reading.
-8. Read raw source only for:
-   - files listed in **Files changed**;
-   - files named by the Graphify result;
-   - direct dependencies needed to complete the next exact action.
-9. Run the smallest relevant test first. Do not start with the entire test suite.
-10. Continue implementation. Do not repeat already verified work unless a regression or conflicting diff requires it.
+   - `git log -3 --oneline`
+4. If **Next exact actions** already names the next file/action, continue directly. Do not run Graphify first.
+5. If architecture/file ownership is unknown, run one narrow Graphify query with `--budget 600`.
+6. Read only changed files, checkpoint-named files, Graphify-located files, and direct dependencies needed for the next action.
+7. Run the smallest relevant test first.
+8. Continue implementation without repeating verified work.
+
+If the tree is clean and the checkpoint says `COMMITTED_MAIN`, pull with fast-forward only before continuing. If the tree is dirty, preserve local changes and never reset/overwrite them.
 
 ## Forbidden resume behavior
 
@@ -61,17 +51,16 @@ When the latest commit SHA recorded in the checkpoint differs from the current b
 
 ## Mandatory checkpoint writes
 
-Update `PROJECT_STATE.md`:
-- after every meaningful implementation milestone;
-- after a focused test becomes green;
-- after changing architectural direction;
-- before launching a long test/build;
+Update `PROJECT_STATE.md` automatically:
+- after a meaningful milestone;
+- when the next action changes materially;
 - before voluntarily stopping;
-- whenever remaining context/token budget looks low.
+- before token/rate-limit exhaustion when practical;
+- before commit/merge.
 
-A checkpoint update should take less than ~30 lines.
+Do **not** update it after every tiny edit.
 
-Record only:
+Keep the active checkpoint compact (target ~30–60 lines). Record only:
 - Goal
 - Completed
 - Files changed
@@ -80,14 +69,9 @@ Record only:
 - Decisions
 - Next exact actions
 - latest relevant commit SHA
-- location status: `COMMITTED_MAIN`, `COMMITTED_BRANCH:<name>`, or `LOCAL_UNPUSHED`
+- location status
 
-Never paste:
-- full diffs;
-- full logs;
-- entire source files;
-- long stack traces;
-- broad architecture explanations already available in Graphify.
+Never paste full diffs, logs, stack traces, or source code.
 
 ## Before committing/merging completed work
 
