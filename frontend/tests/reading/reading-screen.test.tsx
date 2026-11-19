@@ -514,7 +514,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     it("uses the final browser words when quiet windows trigger passage help", async () => {
-      renderReading("reading");
+      // The page's passive effect creates the alignment engine. Flush loading
+      // before installing the fake clock or starting a capture of that engine.
+      await act(async () => {
+        renderReading("reading");
+      });
       const start = await screen.findByRole("button", {
         name: "Bé đọc với nhận diện giọng nói",
       });
@@ -522,6 +526,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       try {
         await act(async () => fireEvent.click(start));
         act(() => Recognition.instances[0].say(["Bé mèo"]));
+        for (const name of ["Bé", "mèo"]) {
+          expect(screen.getByRole("button", { name })).toHaveClass(
+            "bg-success-surface",
+          );
+        }
         await act(async () => vi.advanceTimersByTimeAsync(10_000));
         expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
         expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {

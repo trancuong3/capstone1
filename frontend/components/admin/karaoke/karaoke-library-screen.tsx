@@ -8,6 +8,8 @@ import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
+import { isServiceError } from "@/lib/api/service-error";
+import { processingStatusLabels } from "@/components/admin/karaoke/karaoke-processing-status";
 import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 import type { AdminKaraokeList } from "@/types/karaoke";
 
@@ -32,21 +34,60 @@ export function KaraokeLibraryScreen() {
   useEffect(() => () => mutation.current?.abort(), []);
   useEffect(() => {
     const controller = new AbortController();
-    service
-      .list({ ...query, status: query.status || undefined }, controller.signal)
-      .then((result) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false,
+      pollNeeded = false,
+      authStopped = false;
+    async function load() {
+      if (controller.signal.aborted || inFlight || authStopped) return;
+      inFlight = true;
+      try {
+        const result = await service.list(
+          { ...query, status: query.status || undefined },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setData(result);
+        setError("");
+        setLoading(false);
+        pollNeeded = result.items.some(
+          (item) =>
+            item.processing_summary &&
+            ["QUEUED", "RUNNING", "READY", "NEEDS_REVIEW"].includes(
+              item.processing_summary.status,
+            ),
+        );
+      } catch (error) {
         if (!controller.signal.aborted) {
-          setData(result);
+          setError(karaokeErrorMessage(error));
           setLoading(false);
+          if (isServiceError(error) && [401, 403].includes(error.status))
+            authStopped = true;
         }
-      })
-      .catch((e: unknown) => {
-        if (!controller.signal.aborted) {
-          setError(karaokeErrorMessage(e));
-          setLoading(false);
-        }
-      });
-    return () => controller.abort();
+      } finally {
+        inFlight = false;
+        if (
+          !controller.signal.aborted &&
+          !authStopped &&
+          pollNeeded &&
+          !document.hidden
+        )
+          timer = setTimeout(() => {
+            void load();
+          }, 5000);
+      }
+    }
+    function visible() {
+      clearTimeout(timer);
+      if (!document.hidden && pollNeeded) void load();
+    }
+    document.addEventListener("visibilitychange", visible);
+    void load();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visible);
+    };
   }, [service, query, reload]);
   function refresh() {
     setError("");
@@ -168,6 +209,12 @@ export function KaraokeLibraryScreen() {
                     <h2 className="break-words text-xl font-extrabold">
                       {item.title || "Bài hát chưa đặt tên"}
                     </h2>
+                    {item.processing_summary && (
+                      <p className="rounded-control bg-sky px-3 py-2 text-sm font-bold text-primary-hover">
+                        Xử lý:{" "}
+                        {processingStatusLabels[item.processing_summary.status]}
+                      </p>
+                    )}
                     <p className="break-words text-muted">
                       {item.author || "Chưa có tác giả"} · Lớp {item.min_grade}–
                       {item.max_grade}
@@ -183,7 +230,19 @@ export function KaraokeLibraryScreen() {
                         variant="secondary"
                         className="sm:w-auto"
                       >
-                        Chi tiết / Chỉnh sửa
+                        {item.processing_summary &&
+                        ["READY", "NEEDS_REVIEW"].includes(
+                          item.processing_summary.status,
+                        )
+                          ? "Xem kết quả"
+                          : item.processing_summary &&
+                              ["QUEUED", "RUNNING"].includes(
+                                item.processing_summary.status,
+                              )
+                            ? "Tiếp tục tạo"
+                            : item.processing_summary?.status === "FAILED"
+                              ? "Xem lỗi / Thử lại"
+                              : "Chi tiết / Chỉnh sửa"}
                       </ButtonLink>
                       {item.published_version_id && (
                         <Button

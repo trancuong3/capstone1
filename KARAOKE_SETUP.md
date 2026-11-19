@@ -1,5 +1,15 @@
 # Hát vui — triển khai và quản trị karaoke
 
+> Nâng cấp nhập tự động đang được phát triển riêng, mặc định tắt. Trạng thái tại
+> [karaoke-auto-import/STATUS](docs/karaoke-auto-import/STATUS.md), hướng dẫn worker
+> local tại [README engine](ai/karaoke_processing/README.md).
+> Nâng cấp này có migration additive hai bảng jobs/operations; không áp dụng
+> câu “không thêm bảng/migration” của bản nâng cấp từng tiếng cũ bên dưới cho nó.
+> Wizard admin và review đã có code/kiểm thử. Ngày 2026-11-19 chủ dự án cho
+> phép bỏ qua benchmark/nghe duyệt để bàn giao source qua PR nháp; chất lượng
+> vẫn NOT_VERIFIED, chưa cho phép rollout. Xem [bàn giao](docs/karaoke-auto-import/RELEASE.md).
+> **Phải áp dụng migration auto-import trước backend mới**, kể cả khi flags tắt.
+
 Module độc lập với đọc sách: admin tải nhạc và lời lên, căn thời gian, nghe thử,
 xuất bản; parent chọn bé rồi mở **Tổng quan → Hát vui**. Thêm bài không cần sửa
 code, thêm SQL cho từng bài hoặc build lại ứng dụng. Không thu âm, xin quyền
@@ -259,8 +269,10 @@ lưu vẫn lưu toàn bộ lời, không chỉ trang đang thấy. Bộ phát d�
 đổi trang chỉnh lời không đổi vị trí nhạc.
 
 Thay nhạc nháp sẽ xóa toàn bộ timing nháp; text được giữ. Không tái sử dụng
-timing của file khác mà chưa kiểm tra. Chỉ nghe thử không tự xuất bản. Không có
-autosave; lưu nháp và kiểm tra thông báo trước khi đóng tab.
+timing của file khác mà chưa kiểm tra. Chỉ nghe thử không tự xuất bản. Editor
+thủ công/advanced không có autosave; phải lưu nháp trước khi đóng tab. Wizard
+auto-import có hàng đợi autosave; chờ trạng thái đã lưu, xử lý lỗi/conflict trước
+khi rời trang. Hai luồng đều phải nghe duyệt và qua điều kiện xuất bản.
 
 ### Sửa bài đang hiển thị
 
@@ -306,23 +318,59 @@ Các lỗi Storage riêng có mã log `karaoke_storage_upload_failed`,
 
 ### Object mồ côi
 
-Upload và transaction DB không nguyên tử. Backend cố dọn object mới nếu ghi DB
-thất bại và xác minh chắc chắn không có version tham chiếu. Nếu trạng thái
-commit/DB mơ hồ, giữ object và kiểm tra thủ công. Danh sách path đang dùng:
+Upload và transaction DB không nguyên tử. Backend chỉ cố dọn đúng object mới
+nếu ghi DB thất bại và xác minh chắc chắn không còn tham chiếu. Khi commit/DB
+mơ hồ, giữ object. Sau migration auto-import, kiểm kê chỉ đọc gồm:
 
 ```sql
-SELECT song_id, id AS version_id, state, audio_path, cover_path
+SELECT song_id, id AS version_id, state, audio_path, cover_path,
+       reference_audio_path
 FROM public.karaoke_song_versions
 ORDER BY song_id, version_no;
+
+SELECT id AS job_id, song_id, status, input_audio_path,
+       input_reference_path, result_audio_path
+FROM public.karaoke_processing_jobs;
+
+SELECT id AS operation_id, job_id, state, artifact_paths
+FROM public.karaoke_processing_operations;
 ```
 
-Chỉ so sánh object trong `viread-karaoke` với **tất cả version**, kể cả nháp và
-SUPERSEDED. Chỉ xóa một object cụ thể sau khi xác minh không được tham chiếu,
-đã nhận diện lần upload lỗi và có phép của chủ project. Không xóa theo prefix,
+Phải giữ mọi path được tham chiếu bởi **tất cả version, job và operation**,
+kể cả nháp/SUPERSEDED, job đã kết thúc và operation UNKNOWN. `artifact_paths`
+là mảng JSON, không được bỏ qua. Kiểm kê này không chứng minh một object an
+toàn để xóa: còn phải xác minh upload/commit đang diễn ra và tình trạng DB.
+Không dùng query version cũ làm căn cứ dọn auto-import. Chỉ xóa một object cụ
+thể sau khi kiểm tra đầy đủ, nhận diện lần upload lỗi và có phép chủ project.
+Lượt bàn giao này không thực hiện xóa dữ liệu. Không xóa theo prefix,
 không reset bucket, không thêm cron dọn dữ liệu vào task này. Muốn gỡ demo hãy
 ẩn bài qua UI, không DROP bảng hay xóa dữ liệu đọc.
 
 ## 7. Kiểm thử lại
+
+### Nhánh karaoke-auto-import (chưa bật production)
+
+Wizard đơn giản dùng cùng routes admin hiện có. Nó chỉ hiện luồng tự động khi
+API capabilities cho phép; máy chủ chưa bật/cấu hình hoặc backend cũ sẽ giữ
+editor thủ công. Không bật flags chỉ để thấy UI: quality gate cho engine local
+vẫn chưa đạt và weights tiếng Việt hiện có giới hạn NC. Xem bằng chứng và các
+điều kiện còn thiếu ở [trạng thái auto-import](docs/karaoke-auto-import/STATUS.md).
+`?mode=advanced` giữ chế độ căn thủ công, không bỏ qua review gate của backend.
+
+Trong wizard, ký hiệu `×2`, `x2`, `(×2)` hoặc `[x2]` ở cuối một câu có nút
+**Mở rộng câu lặp**. Số lần hỗ trợ từ 2–9, tính cả lần đầu. Chỉ sau xác nhận,
+hệ thống mới nhân chính câu đó; không đoán việc lặp cả đoạn hoặc thay lời bằng
+nhận dạng AI. Có **Hoàn tác mở rộng lời** khi nội dung chưa bị sửa tiếp; thao tác
+này khôi phục chữ, không hứa khôi phục mốc cũ đã bị vô hiệu. Ký hiệu trên dòng
+riêng cần admin viết đầy đủ đoạn lặp. Mở rộng không tự tạo bài, gửi job hay publish.
+
+Nếu kết quả chỉ xác định được mốc bắt đầu có hỗ trợ âm học, bản nháp giữ mốc đó
+và để trống mốc kết thúc kèm cảnh báo. Đây là dữ liệu cần chỉnh/duyệt, không phải
+một tiếng đã căn hoàn chỉnh và chưa đủ điều kiện xuất bản.
+
+Bộ `test/browser/karaoke-wizard.pw.ts` kiểm tra wizard bằng HTTP/media giả, không
+phải lệnh chạy worker hoặc nghiệm thu bài hát thật. Không tự áp dụng migration
+hay tạo phiên đăng nhập thật để chạy bộ test này.
 
 Frontend tại `frontend`:
 

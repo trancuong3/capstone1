@@ -54,9 +54,18 @@ const issueLabels: Record<KaraokeValidation["issues"][number]["code"], string> =
     CONTENT_INVALID: "Dữ liệu nội dung chưa hợp lệ",
     SYLLABLES_REQUIRED: "Chưa tách tiếng cho câu",
     SYLLABLE_TEXT_MISMATCH: "Nội dung tiếng chưa khớp lời câu",
+    PROCESSING_IN_PROGRESS: "Đang có kết quả karaoke cần xử lý hoặc áp dụng",
+    PROCESSING_REVIEW_REQUIRED:
+      "Cần nghe và xác nhận bản karaoke tự động trước khi xuất bản",
   };
 
-export function KaraokeEditorScreen({ songId }: { songId?: string }) {
+export function KaraokeEditorScreen({
+  songId,
+  simpleHref,
+}: {
+  songId?: string;
+  simpleHref?: string;
+}) {
   const service = useAdminKaraoke();
   const router = useRouter();
   const [detail, setDetail] = useState<AdminKaraokeDetail | null>(null);
@@ -305,6 +314,22 @@ export function KaraokeEditorScreen({ songId }: { songId?: string }) {
         }
       />
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
+      {simpleHref && (
+        <ButtonLink
+          href={detail ? `/admin/karaoke/${detail.song_id}/edit` : simpleHref}
+          variant="quiet"
+          className="sm:w-auto"
+        >
+          Về chế độ tạo karaoke đơn giản
+        </ButtonLink>
+      )}
+      {detail?.processing_review?.required &&
+        !detail.processing_review.reviewed && (
+          <StatusMessage tone="info">
+            Bản nháp này có kết quả xử lý tự động. Lưu thay đổi, rồi về chế độ
+            đơn giản để nghe và xác nhận đúng nội dung trước khi xuất bản.
+          </StatusMessage>
+        )}
       {conflict && (
         <details className="rounded-control border border-border bg-white p-4">
           <summary className="cursor-pointer font-bold">

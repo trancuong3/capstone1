@@ -21,9 +21,11 @@ from app.api.routes import (
 )
 from app.api.routes import admin_viread_training
 from app.api.routes import karaoke
+from app.api.routes import karaoke_processing
 
 api_router = APIRouter()
 api_router.include_router(karaoke.router, prefix="/karaoke", tags=["Karaoke"])
+api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["Karaoke processing"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
 api_router.include_router(book.router, prefix="/books", tags=["Books"])

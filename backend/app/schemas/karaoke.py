@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_serializer, model_validator
+from app.schemas.karaoke_processing_types import ProcessingReviewRead, ProcessingSummary
 
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 MAX_COVER_BYTES = 2 * 1024 * 1024
@@ -117,7 +118,7 @@ class Metadata(Contract):
 
 
 class SongCreate(Metadata):
-    pass
+    creation_request_id: UUID | None = None
 
 
 class RevisionRequest(Contract):
@@ -142,6 +143,9 @@ class VersionRead(Metadata):
     state: Literal["DRAFT", "PUBLISHED", "SUPERSEDED"]
     has_audio: bool
     has_cover: bool
+    audio_sha256: str | None = None
+    has_reference_audio: bool = False
+    reference_audio_sha256: str | None = None
     duration_ms: int | None
     audio_size_bytes: int | None
     lyrics: Lyrics
@@ -158,6 +162,8 @@ class AdminDetail(Contract):
     published: VersionRead | None
     created_at: datetime
     updated_at: datetime
+    processing_summary: ProcessingSummary | None = None
+    processing_review: ProcessingReviewRead = Field(default_factory=ProcessingReviewRead)
 
 
 class AdminSongSummary(Contract):
@@ -175,6 +181,7 @@ class AdminSongSummary(Contract):
     has_cover: bool
     created_at: datetime
     updated_at: datetime
+    processing_summary: ProcessingSummary | None = None
 
 
 class AdminList(Contract):
@@ -189,6 +196,7 @@ IssueCode = Literal[
     "LYRICS_REQUIRED", "TIMING_REQUIRED", "TIMING_INVALID", "TIMING_OVERLAP",
     "TIMING_OUT_OF_RANGE", "TIMING_AUDIO_MISMATCH", "MEDIA_UNAVAILABLE",
     "CONTENT_INVALID", "SYLLABLES_REQUIRED", "SYLLABLE_TEXT_MISMATCH",
+    "PROCESSING_IN_PROGRESS", "PROCESSING_REVIEW_REQUIRED",
 ]
 
 

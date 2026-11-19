@@ -29,6 +29,25 @@ function silentWav(seconds = 20) {
 async function fixture(page: Page) {
   await installApiFixture(page);
   await setRole(page, "admin");
+  await page
+    .context()
+    .route(
+      "http://127.0.0.1:8000/karaoke/admin/processing-capabilities",
+      async (route) => {
+        await route.fulfill({
+          status: route.request().method() === "OPTIONS" ? 204 : 404,
+          headers: {
+            "access-control-allow-origin": "http://127.0.0.1:3106",
+            "access-control-allow-headers": "authorization,content-type,accept",
+          },
+          contentType: "application/json",
+          body:
+            route.request().method() === "OPTIONS"
+              ? undefined
+              : JSON.stringify({ detail: "Old backend fixture" }),
+        });
+      },
+    );
   const data = songDetail();
   const state = { data, conflict: false, requests: [] as string[] };
   async function respond(route: Route, json: unknown, status = 200) {

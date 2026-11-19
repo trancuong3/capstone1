@@ -1,6 +1,7 @@
 """Private karaoke bucket adapter; never accepts legacy/external object URLs."""
 import logging
 import re
+import httpx
 from urllib.parse import unquote, urlsplit
 
 from fastapi import HTTPException
@@ -92,3 +93,34 @@ class KaraokeStorage:
             self._bucket().remove([path])
         except Exception:
             logger.warning("karaoke_orphan_cleanup_failed")
+
+    def download(self, path, song_id, expected_size):
+        """Only a bounded, trusted private object; never fetch a client URL."""
+        from app.schemas.karaoke import MAX_AUDIO_BYTES
+        if type(expected_size) is not int or not 1 <= expected_size <= MAX_AUDIO_BYTES:
+            raise HTTPException(503, "Karaoke media size is invalid")
+        self.verify(path, song_id, expected_size)
+        try:
+            # The SDK's download() buffers the whole response. Stream our own
+            # validated signed URL so a corrupt upstream size cannot exhaust RAM.
+            url = self.sign(path, song_id)
+            chunks, size = [], 0
+            with httpx.stream("GET", url, follow_redirects=False, timeout=30,
+                              trust_env=False, headers={"Accept-Encoding": "identity"}) as response:
+                response.raise_for_status()
+                if response.headers.get("content-encoding", "identity") != "identity":
+                    raise ValueError("Unexpected encoding")
+                length = response.headers.get("content-length")
+                if length is not None and int(length) != expected_size:
+                    raise ValueError("Storage object changed")
+                for block in response.iter_bytes(chunk_size=65536):
+                    size += len(block)
+                    if size > expected_size:
+                        raise ValueError("Storage object exceeded its size")
+                    chunks.append(block)
+            if size != expected_size:
+                raise ValueError("Storage object changed")
+            return b"".join(chunks)
+        except Exception:
+            logger.warning("karaoke_storage_download_failed")
+            raise HTTPException(503, "Karaoke media is unavailable") from None

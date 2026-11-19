@@ -47,6 +47,18 @@ vi.mock("@/components/karaoke/karaoke-player", () => ({
 
 function makeService() {
   return {
+    getProcessingCapabilities: vi.fn(),
+    uploadReference: vi.fn(),
+    removeReference: vi.fn(),
+    startProcessing: vi.fn(),
+    listProcessing: vi.fn(),
+    getProcessing: vi.fn(),
+    cancelProcessing: vi.fn(),
+    retryProcessing: vi.fn(),
+    getProcessingPreview: vi.fn(),
+    getDraftReferencePreview: vi.fn(),
+    applyProcessing: vi.fn(),
+    confirmReview: vi.fn(),
     list: vi
       .fn()
       .mockResolvedValue({ items: [], total: 0, limit: 12, offset: 0 }),

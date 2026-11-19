@@ -1,5 +1,6 @@
 import { expect, type Page, type Route } from "@playwright/test";
 import { createPlaywrightAuthFixtureHeaders } from "../../lib/auth/playwright-auth-fixture";
+import type { ProcessingCapabilities } from "../../types/karaoke-processing";
 
 export const ids = {
   parent: "11111111-1111-4111-8111-111111111111",
@@ -964,6 +965,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         verified_by: null,
       });
     }
+    if (
+      request.method() === "GET" &&
+      path === "/karaoke/admin/processing-capabilities"
+    )
+      return respond(route, {
+        enabled: false,
+        configured: false,
+        supported_modes: [],
+        unavailable_reason: "DISABLED",
+        limits: {
+          max_audio_bytes: 20971520,
+          max_duration_ms: 300000,
+          max_lyric_lines: 300,
+          max_lyric_characters: 50000,
+        },
+        queue_warning_after_seconds: 150,
+      } satisfies ProcessingCapabilities);
     if (path === "/system/admin/audit-logs")
       return respond(route, {
         items: [
