@@ -5,15 +5,20 @@ GOAL: minimum useful Codex context with reliable ViRead routing.
 
 DONE:
 - 81 detailed skills preserved in `.agent-library/`.
-- Auto-discovery reduced to 6 domain gateways.
-- Router/debug/quality gateways removed as redundant.
+- Auto-discovery: 9 → 6 concise domain gateways; router/debug/quality layers removed.
 - AGENTS compressed; new tasks skip checkpoint.
-- Raw search excludes generated graph/library noise.
+- Raw search ignores `graphify-out/` and `.agent-library/`.
+- Graphify trigger narrowed to unknown location/dependency/flow.
+
+MEASURED:
+- Gateway metadata: 258 → 82 rough tokens.
+- AGENTS: 346 → 305 rough tokens.
+- Checkpoint: 328 → ~155 rough tokens.
+- Possible fixed repo context incl. Graphify metadata: ~695 → ~416 rough tokens.
 
 NEXT:
-1. Known file/symbol first; Graphify only for unknown flow.
-2. Use one domain gateway when possible.
-3. Debug/quality detailed skills load only on demand.
-4. Keep checkpoint compact and only for handoff/resume.
+- Known file/symbol first; Graphify only for unknown flow.
+- One gateway per domain; detailed skills only on demand.
+- Focused/failure-only tests; keep handoff compact.
 
-BASE: Git main is source of truth.
+BASE: main @ 64afaaad; Git is source of truth.
