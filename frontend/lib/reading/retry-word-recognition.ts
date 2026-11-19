@@ -26,6 +26,7 @@ const ASSISTANT_BLEED_PHRASES = [
   "mình chưa nghe rõ",
   "con đọc lại",
   "con thử đọc cả cụm",
+  "con hãy đọc cả cụm",
   "nghe lại rồi đọc",
   "một lần nhé",
   "chính xác rồi",
@@ -89,13 +90,23 @@ export function shortWordContext(
   const expected = tokenizeVietnameseText(target);
   if (expected.length < 1 || expected.length > 2 || !context) return null;
   for (const sentence of context.split(/[.!?…;\n]+/u)) {
-    const words = tokenizeVietnameseText(sentence);
+    const original =
+      sentence.normalize("NFC").match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+    const words = original.map(normalizeVietnameseWord);
     const index = words.findIndex((_, start) =>
       expected.every((word, offset) => word === words[start + offset]),
     );
     if (index < 0 || words.length <= expected.length) continue;
-    const start = Math.max(0, Math.min(index, words.length - 3));
-    return words.slice(start, start + 3).join(" ");
+    // OCR word lists may omit the period before the next sentence's capital.
+    const nextCapital = original.findIndex(
+      (word, position) =>
+        position > index + expected.length && /^\p{Lu}/u.test(word),
+    );
+    const end = nextCapital < 0 ? words.length : nextCapital;
+    if (nextCapital >= 0 && end - index > expected.length)
+      return words.slice(index, Math.min(index + 3, end)).join(" ");
+    const start = Math.max(0, Math.min(index, end - 3));
+    return words.slice(start, Math.min(start + 3, end)).join(" ");
   }
   return null;
 }

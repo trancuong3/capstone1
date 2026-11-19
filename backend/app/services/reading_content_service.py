@@ -170,7 +170,13 @@ class ReadingContentService:
                     elif event.Status == "FAILED":
                         unkeyed_failed += 1
                     corrected |= event.Status == "CONFIRMED"
-                    skipped |= event.Status == "UNCERTAIN" and event_meta.get("skip_reason") == "TECHNICAL_OR_MANUAL"
+                    skipped |= (
+                        event.Status in {"FAILED", "UNCERTAIN"}
+                        and event_meta.get("resolution_status") == "UNRESOLVED"
+                    ) or (
+                        event.Status == "UNCERTAIN"
+                        and event_meta.get("skip_reason") == "TECHNICAL_OR_MANUAL"
+                    )
                 incorrect = min(3, len(failed) + unkeyed_failed)
                 words.append(PracticeWordRead(page_id=report.PageId, page_revision_id=report.PageRevisionId,
                     word_id=word.word_id, retry_attempt_count=max(attempts, default=0), incorrect_retry_count=incorrect,

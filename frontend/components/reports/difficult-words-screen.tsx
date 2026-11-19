@@ -61,11 +61,13 @@ export function DifficultWordsScreen({
     readonly word: string | null;
     readonly bookKey: string | null;
     readonly autoStart: boolean;
+    readonly visitedWords: readonly string[];
   }>({
     routeKey: routeSelectionKey,
     word: requestedPracticeWord ?? null,
     bookKey: null,
     autoStart: false,
+    visitedWords: [],
   });
 
   const activePracticeWord =
@@ -83,12 +85,19 @@ export function DifficultWordsScreen({
 
   const openPracticeSession = useCallback(
     (word: string | null, bookKey: string | null = null, autoStart = false) => {
-      setPracticeSelection({
+      setPracticeSelection((previous) => ({
         routeKey: routeSelectionKey,
         word,
         bookKey,
         autoStart,
-      });
+        visitedWords:
+          autoStart &&
+          previous.routeKey === routeSelectionKey &&
+          previous.bookKey === bookKey &&
+          previous.word
+            ? [...previous.visitedWords, previous.word]
+            : [],
+      }));
     },
     [routeSelectionKey],
   );
@@ -340,6 +349,11 @@ export function DifficultWordsScreen({
       {selectedPracticeWord ? (
         <DifficultWordPracticePanel
           autoStart={activeAutoStart}
+          visitedWords={
+            practiceSelection.routeKey === routeSelectionKey
+              ? practiceSelection.visitedWords
+              : undefined
+          }
           child={state.child}
           key={selectedPracticeWord.normalized_word}
           onAttemptCompleted={applyAttemptToLocalState}

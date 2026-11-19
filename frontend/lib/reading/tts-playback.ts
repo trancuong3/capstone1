@@ -34,6 +34,8 @@ export type PlaybackState =
 export interface SpeechPlayOptions {
   /** Use the word's pronunciation recording when one is available. */
   wordSample?: boolean;
+  /** Prefer a Vietnamese device voice for spoken guidance. */
+  coaching?: boolean;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   /** Browser boundaries only; audio without timing never guesses word indexes. */
@@ -241,7 +243,9 @@ export class TtsPlayback {
       async (operation) => {
         const spokenText = options.wordSample
           ? normalizeVietnameseWord(text)
-          : text;
+          : options.coaching
+            ? text.normalize("NFC")
+            : text;
         if (!spokenText.trim()) throw unavailable();
         const recording = options.wordSample && WORD_RECORDINGS.get(spokenText);
         let elapsed = 0;
@@ -290,7 +294,12 @@ export class TtsPlayback {
             );
             continue;
           }
-          if (options.wordSample) {
+          const deviceCanCoach =
+            options.coaching &&
+            typeof window !== "undefined" &&
+            window.speechSynthesis &&
+            selectVietnameseVoice(window.speechSynthesis);
+          if (options.wordSample || deviceCanCoach) {
             try {
               this.setFallbackNotice(null);
               elapsed += await this.playBrowser(
@@ -388,7 +397,11 @@ export class TtsPlayback {
         this.ensure(operation);
         options.onEnded?.();
       },
-      options.wordSample ? WORD_SAMPLE_MAX_RATE : undefined,
+      options.wordSample
+        ? WORD_SAMPLE_MAX_RATE
+        : options.coaching
+          ? 0.85
+          : undefined,
     );
 
   playWithWordTimings = (

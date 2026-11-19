@@ -113,6 +113,7 @@ export function ReadingLayout({
   onRetryMicrophonePermission,
   onRetrySave,
   retryRecording,
+  retryContextPhrase,
   isPlayingSample = false,
   isSamplePaused = false,
   onToggleSamplePause,
@@ -267,6 +268,11 @@ export function ReadingLayout({
               {currentWordText}
             </p>
 
+            {retryContextPhrase ? (
+              <p className="mt-2 break-words text-lg font-bold text-ink">
+                {retryContextPhrase}
+              </p>
+            ) : null}
             {latestTranscript ? (
               <p className="mt-1 truncate text-sm font-medium text-ink">
                 {latestTranscript}

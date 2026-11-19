@@ -522,7 +522,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       try {
         await act(async () => fireEvent.click(start));
         act(() => Recognition.instances[0].say(["Bé mèo"]));
-        await act(async () => vi.advanceTimersByTimeAsync(9_200));
+        await act(async () => vi.advanceTimersByTimeAsync(10_000));
         expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
         expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {
           wordSample: true,
@@ -544,10 +544,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await act(async () => fireEvent.click(start));
         await act(async () => vi.advanceTimersByTimeAsync(8999));
         expect(speechPlayerMock.play).not.toHaveBeenCalled();
-        await act(async () => vi.advanceTimersByTimeAsync(1));
-        // The silence threshold starts an async recorder-to-TTS handoff.
-        // Allow its bounded recorder stop to finish before inspecting playback.
-        await act(async () => vi.advanceTimersByTimeAsync(1_500));
+        await act(async () => vi.advanceTimersByTimeAsync(250));
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
           wordSample: true,
         });
@@ -590,14 +587,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       } finally {
         vi.useRealTimers();
       }
-      // The silence timer only initiates the async recorder -> STT -> TTS
-      // handoff. Wait for its real completion, not just the timer callback.
-      await waitFor(() => {
-        expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
-          wordSample: true,
-        });
-        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+      expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+        wordSample: true,
       });
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
       const user = userEvent.setup();
       await user.click(
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
@@ -1225,6 +1218,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(speechPlayerMock.play).toHaveBeenNthCalledWith(
           1,
           "Con nghe từ này nhé.",
+          { coaching: true },
         );
         expect(speechPlayerMock.play).toHaveBeenNthCalledWith(2, "mèo", {
           wordSample: true,
@@ -1336,9 +1330,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           ),
         );
         expect(speechPlayerMock.play.mock.calls.slice(-3)).toEqual([
-          ["Cô đọc mẫu cho con nhé."],
+          ["Cô đọc mẫu cho con nhé.", { coaching: true }],
           ["mèo", { wordSample: true }],
-          ["Đến lượt con đọc nhé."],
+          ["Đến lượt con đọc nhé.", { coaching: true }],
         ]);
         if (outcome === "silent-help-limit") await finishSilentCapture();
         else askForHelp();
@@ -1727,11 +1721,18 @@ describe("ReadingScreen presentation with typed test-local service responses", (
               incorrectCount + 2,
             );
           });
+          if (incorrectCount === 2) {
+            expect(
+              screen.getByText("mèo nhỏ đang", { exact: true }),
+            ).toBeVisible();
+          }
           speechServiceMock.transcribe.mockResolvedValueOnce({
             text:
               outcome === "third-correct" && incorrectCount === 2
-                ? "mèo"
-                : "chó",
+                ? "mèo nhỏ đang"
+                : incorrectCount === 2
+                  ? "chó nhỏ đang"
+                  : "chó",
             language_code: "vi",
             words: [],
           });

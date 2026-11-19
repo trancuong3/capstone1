@@ -235,6 +235,31 @@ describe("Phase 3 TTS lifecycle", () => {
     await sample;
   });
 
+  it("speaks coaching in Vietnamese with the original punctuation and tone marks", async () => {
+    const local = { lang: "vi-VN", localService: true } as SpeechSynthesisVoice;
+    voices = [
+      { lang: "en-US", localService: true } as SpeechSynthesisVoice,
+      local,
+    ];
+    const { result } = renderHook(() => useSpeechPlayer());
+    const text = "Con hãy đọc cả cụm: cành cây.";
+    const sample = result.current.play(text.normalize("NFD"), {
+      coaching: true,
+    });
+    await waitFor(() => expect(utterances).toHaveLength(1));
+    expect(utterances[0]).toMatchObject({
+      text,
+      voice: local,
+      lang: "vi-VN",
+      rate: 0.85,
+    });
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    act(() =>
+      utterances[0].onend?.({ elapsedTime: 1 } as SpeechSynthesisEvent),
+    );
+    await sample;
+  });
+
   it("reports an unavailable recording and allows replay without synthesizing a different sample", async () => {
     const { result } = renderHook(() => useSpeechPlayer());
     const playback = result.current.play("thức", { wordSample: true });

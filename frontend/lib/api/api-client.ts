@@ -209,34 +209,6 @@ const safeBackendMessages: Record<string, string> = {
     "Định dạng tệp chưa hỗ trợ. Hãy chọn JPEG, PNG, WebP, BMP, TIFF, PDF hoặc DOCX.",
   "File content does not match the declared file type or extension":
     "Nội dung thực tế của tệp không khớp với định dạng hoặc phần mở rộng.",
-  "Weights file must end with .pth or .pt":
-    "Tệp trọng số phải có định dạng .pth hoặc .pt.",
-  "Checkpoint file magic bytes are invalid; expected PyTorch .pth/.pt format":
-    "Tệp trọng số không hợp lệ hoặc bị hỏng; yêu cầu đúng định dạng PyTorch .pth/.pt.",
-  "Checkpoint shard exceeds 40 MiB": "Mảnh tệp trọng số vượt quá 40 MiB.",
-  "Comparison JSON file must be between 1 byte and 2 MiB":
-    "Tệp JSON so sánh phải có dung lượng từ 1 byte đến 2 MiB.",
-  "Comparison file must be valid UTF-8 JSON":
-    "Tệp kết quả so sánh phải là định dạng JSON UTF-8 hợp lệ.",
-  "Comparison JSON must be an object":
-    "Tệp so sánh JSON phải là một đối tượng JSON hợp lệ.",
-  "Comparison JSON missing 'models' object":
-    "Tệp JSON thiếu thông tin 'models' đối chiếu.",
-  "Comparison JSON must define 'baseline' and at least one fine-tuned model":
-    "Tệp JSON phải định nghĩa model baseline và ít nhất một model fine-tuned.",
-  "Comparison JSON must contain at least one dataset block with cer_pct and wer_pct":
-    "Tệp JSON phải chứa ít nhất một tập kiểm thử có chỉ số CER và WER.",
-  "Configuration file must have a .yml or .yaml extension":
-    "Tệp cấu hình phải có đuôi .yml hoặc .yaml.",
-  "Configuration file exceeds 1 MiB": "Tệp cấu hình vượt quá dung lượng 1 MiB.",
-  "Configuration YAML syntax is invalid":
-    "Cú pháp tệp YAML cấu hình không hợp lệ.",
-  "Configuration YAML must be a non-empty mapping":
-    "Tệp YAML cấu hình phải là một đối tượng cấu hình hợp lệ (dict).",
-  "Checkpoint shard failed integrity verification":
-    "Mảnh tệp trọng số không vượt qua bước kiểm tra toàn vẹn SHA-256.",
-  "Checkpoint and configuration are identical to the currently active model":
-    "Trọng số và cấu hình này giống hệt model đang hoạt động.",
   "The uploaded document is empty or corrupted":
     "Tệp tải lên bị rỗng hoặc bị hỏng không thể đọc được.",
   "No usable text was detected in the uploaded document":

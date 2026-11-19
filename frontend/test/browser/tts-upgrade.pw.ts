@@ -4,7 +4,6 @@ import { ids, installApiFixture } from "./real-data-fixture";
 interface Probe {
   audios: HTMLAudioElement[];
   utterances: SpeechSynthesisUtterance[];
-  speechStarts: number;
   microphoneRequests: number;
   cancels: number;
   pauses: number;
@@ -211,7 +210,6 @@ async function installReading(
       const probe: Probe = {
         audios: [],
         utterances: [],
-        speechStarts: 0,
         microphoneRequests: 0,
         cancels: 0,
         pauses: 0,
@@ -267,7 +265,6 @@ async function installReading(
           getVoices: () => [{ lang: noVietnameseVoice ? "en-US" : "vi-VN" }],
           speak: (utterance: SpeechSynthesisUtterance) => {
             probe.utterances.push(utterance);
-            probe.speechStarts += 1;
             utterance.onstart?.({
               utterance,
               elapsedTime: 0,
@@ -303,35 +300,18 @@ test("Phase 3: selecting a second word keeps the newest word sample active", asy
   const fixture = await installReading(page);
   await page.getByRole("button", { name: "Bé", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.speechStarts))
-    .toBe(1);
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
+    .toBe(false);
   await page.getByRole("button", { name: "mèo", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.speechStarts))
-    .toBe(2);
-  // Word samples prefer a Vietnamese device voice when available. Verify
-  // cancellation and lifecycle of the CURRENT utterance, not Audio elements
-  // that are only created for a server TTS fallback.
-  const probe = await page.evaluate(() => ({
-    firstCanceled: window.__ttsProbe.utterances[0]?.onend === null,
-    nextActive: typeof window.__ttsProbe.utterances[1]?.onend === "function",
-    nextText: window.__ttsProbe.utterances[1]?.text,
-    nextLanguage: window.__ttsProbe.utterances[1]?.lang,
-    nextRate: window.__ttsProbe.utterances[1]?.rate,
-    cancelCount: window.__ttsProbe.cancels,
-    audioCount: window.__ttsProbe.audios.length,
-  }));
-  expect(probe).toMatchObject({
-    firstCanceled: true,
-    nextActive: true,
-    nextText: "mèo. mèo.",
-    nextLanguage: "vi-VN",
-    nextRate: 0.7,
-    audioCount: 0,
-  });
-  expect(probe.cancelCount).toBeGreaterThanOrEqual(1);
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[1]?.paused))
+    .toBe(false);
+  expect(await page.evaluate(() => window.__ttsProbe.audios[0].paused)).toBe(
+    true,
+  );
   await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
-  expect(fixture.prompts).toEqual([]);
+  expect(fixture.prompts.map((prompt) => prompt.text)).toEqual(["Bé", "mèo"]);
+  expect(fixture.prompts.every((prompt) => prompt.speed === 0.9)).toBe(true);
   expect(fixture.writes).toEqual([]);
 });
 

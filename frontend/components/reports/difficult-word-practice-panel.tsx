@@ -26,7 +26,12 @@ import { isServiceError } from "@/lib/api/service-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { BrowserTranscriptCollector } from "@/lib/reading/browser-transcript-collector";
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
-import { shortWordContext } from "@/lib/reading/retry-word-recognition";
+import {
+  isAssistantPromptBleed,
+  shortWordContext,
+  stripNonSpeechAnnotations,
+} from "@/lib/reading/retry-word-recognition";
+import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 import {
   isWordHelpRequest,
   MAX_WORD_HELP_ROUNDS,
@@ -34,6 +39,7 @@ import {
 } from "@/lib/reading/word-help";
 import {
   SHORT_WORD_CAPTURE_CONFIG,
+  PHRASE_CAPTURE_CONFIG,
   VOICE_PROMPTS,
   classifyShortWordFailureLabel,
   hasShortWordSpeechActivity,
@@ -163,6 +169,7 @@ function mapMicrophoneErrorMessage(error: unknown): string {
 
 interface DifficultWordPracticePanelProps {
   readonly autoStart?: boolean;
+  readonly visitedWords?: readonly string[];
   readonly child: ChildProfileDTO;
   readonly word: DifficultWordDTO;
   readonly words: readonly DifficultWordDTO[];
@@ -179,6 +186,7 @@ interface DifficultWordPracticePanelProps {
 
 export function DifficultWordPracticePanel({
   autoStart = false,
+  visitedWords,
   child,
   word,
   words,
@@ -191,6 +199,8 @@ export function DifficultWordPracticePanel({
   const speechPlayer = useSpeechPlayer();
 
   const [flowState, setFlowState] = useState<WordPracticeState>("IDLE");
+  const [phraseTurn, setPhraseTurn] = useState(false);
+  const [phraseAttemptFailed, setPhraseAttemptFailed] = useState(false);
   const [sampleError, setSampleError] = useState<string | null>(null);
   const [coachCue, setCoachCue] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
@@ -233,6 +243,8 @@ export function DifficultWordPracticePanel({
   const stopCaptureLockRef = useRef(false);
   const autoRetryCountRef = useRef(0);
   const incorrectCountRef = useRef(0);
+  const heardFailuresRef = useRef(0);
+  const phraseTurnRef = useRef(false);
   const silenceStreakRef = useRef(0);
   const helpRoundsRef = useRef(0);
   const evaluationRef = useRef<AbortController | null>(null);
@@ -387,7 +399,7 @@ export function DifficultWordPracticePanel({
           () =>
             wordSample
               ? speechPlayer.play(text, { wordSample: true })
-              : speechPlayer.play(text),
+              : speechPlayer.play(text, { coaching: true }),
           undefined,
           CUE_TIMEOUT_MS,
         );
@@ -409,6 +421,7 @@ export function DifficultWordPracticePanel({
     async (
       generation: number,
       reason: "help" | "silence" | "unclear" | "incorrect",
+      heardSpeech = false,
     ) => {
       const silence = reason === "silence";
       silenceStreakRef.current = silence ? silenceStreakRef.current + 1 : 0;
@@ -416,11 +429,19 @@ export function DifficultWordPracticePanel({
         reason === "help" ||
         silenceStreakRef.current >= WORD_HELP_SILENCE_LIMIT;
       if (reason === "incorrect") incorrectCountRef.current += 1;
+      if (reason === "incorrect" || (reason === "unclear" && heardSpeech))
+        heardFailuresRef.current += 1;
+      const switchToPhrase =
+        contextPhrase &&
+        !phraseTurnRef.current &&
+        heardFailuresRef.current >= 2;
       if (
-        incorrectCountRef.current >= 3 ||
-        helpRoundsRef.current >= MAX_WORD_HELP_ROUNDS ||
-        (!guide &&
-          autoRetryCountRef.current >= SHORT_WORD_CAPTURE_CONFIG.maxAutoRetries)
+        !switchToPhrase &&
+        (incorrectCountRef.current >= 3 ||
+          helpRoundsRef.current >= MAX_WORD_HELP_ROUNDS ||
+          (!guide &&
+            autoRetryCountRef.current >=
+              SHORT_WORD_CAPTURE_CONFIG.maxAutoRetries))
       ) {
         speechRecorder.cancel();
         setRetryLoopPaused(true);
@@ -429,11 +450,21 @@ export function DifficultWordPracticePanel({
       }
 
       setFlowState("INSTRUCTING");
-      if (guide) {
+      if (switchToPhrase) {
+        phraseTurnRef.current = true;
+        setPhraseTurn(true);
+        if (
+          !(await playCue(`Con hãy đọc cả cụm: ${contextPhrase}.`, generation))
+        )
+          return;
+      } else if (guide) {
         helpRoundsRef.current += 1;
         if (!(await playCue("Không sao đâu. Con nghe cô đọc nhé.", generation)))
           return;
-        if (!(await playCue(word.display_text, generation, true))) return;
+        if (phraseTurnRef.current && contextPhrase) {
+          if (!(await playCue(contextPhrase + ".", generation))) return;
+        } else if (!(await playCue(word.display_text, generation, true)))
+          return;
         if (!(await playCue("Đến lượt con. Con đọc lại nhé.", generation)))
           return;
       } else {
@@ -443,14 +474,33 @@ export function DifficultWordPracticePanel({
             ? "Con thử đọc lại nhé."
             : silence
               ? "Cô đang nghe. Con thử đọc nhé."
-              : contextPhrase
-                ? `Cô chưa nghe rõ. Con thử đọc cả cụm “${contextPhrase}” nhé.`
-                : "Cô chưa nghe rõ. Con đọc lại nhé.";
+              : "Cô chưa nghe rõ. Con đọc lại nhé.";
         if (!(await playCue(cue, generation))) return;
       }
       await captureTurnRef.current(generation);
     },
     [contextPhrase, playCue, speechRecorder, word.display_text],
+  );
+
+  const scheduleNextWord = useCallback(
+    (generation: number, recommended?: string | null) => {
+      const eligible = words.filter(
+        (item) =>
+          item.normalized_word !== word.normalized_word &&
+          item.practice_status !== "COMPLETED" &&
+          !visitedWords?.includes(item.normalized_word),
+      );
+      const next =
+        eligible.find((item) => item.normalized_word === recommended) ??
+        eligible[0];
+      if (!next) return;
+      autoAdvanceTimerRef.current = window.setTimeout(() => {
+        if (mountedRef.current && generation === flowGenerationRef.current) {
+          onSelectWord(next.normalized_word, { autoStart: true });
+        }
+      }, SHORT_WORD_CAPTURE_CONFIG.autoAdvanceCorrectMs);
+    },
+    [onSelectWord, visitedWords, word.normalized_word, words],
   );
 
   const submitEvaluation = useCallback(
@@ -551,22 +601,7 @@ export function DifficultWordPracticePanel({
           setFlowState("SUCCESS");
           if (!(await playCue(VOICE_PROMPTS.correctPraise(), generation)))
             return;
-          if (
-            nextWordTarget &&
-            nextWordTarget.normalized_word !== word.normalized_word &&
-            nextWordTarget.practice_status !== "COMPLETED"
-          ) {
-            autoAdvanceTimerRef.current = window.setTimeout(() => {
-              if (
-                mountedRef.current &&
-                generation === flowGenerationRef.current
-              ) {
-                onSelectWord(nextWordTarget.normalized_word, {
-                  autoStart: true,
-                });
-              }
-            }, SHORT_WORD_CAPTURE_CONFIG.autoAdvanceCorrectMs);
-          }
+          scheduleNextWord(generation, evaluated.next_recommended_word);
         } else if (evaluated.assessment_status === "ENGINE_ERROR") {
           speechRecorder.cancel();
           setFailureLabel(null);
@@ -578,19 +613,43 @@ export function DifficultWordPracticePanel({
             evaluated.spoken_transcript,
           );
           setFailureLabel(nextFailureLabel);
+          const spoken =
+            evaluated.spoken_transcript ?? payload.browserTranscript ?? "";
+          const askedForHelp =
+            evaluated.assessment_status === "UNCERTAIN" &&
+            isWordHelpRequest(spoken, word.display_text);
+          const spokenTokens = tokenizeVietnameseText(
+            stripNonSpeechAnnotations(spoken),
+          );
+          const heardSpeech =
+            spokenTokens.length > 0 &&
+            !isAssistantPromptBleed(
+              spokenTokens,
+              tokenizeVietnameseText(word.display_text),
+            );
+          if (
+            phraseTurnRef.current &&
+            !askedForHelp &&
+            (evaluated.assessment_status === "INCORRECT" ||
+              (evaluated.assessment_status === "UNCERTAIN" && heardSpeech))
+          ) {
+            speechRecorder.cancel();
+            setPhraseAttemptFailed(true);
+            setRetryLoopPaused(true);
+            setFlowState("NEEDS_RETRY");
+            scheduleNextWord(generation, evaluated.next_recommended_word);
+            return;
+          }
           await retryTurn(
             generation,
-            evaluated.assessment_status === "UNCERTAIN" &&
-              isWordHelpRequest(
-                evaluated.spoken_transcript ?? "",
-                word.display_text,
-              )
+            askedForHelp
               ? "help"
               : nextFailureLabel === "Chưa nghe thấy"
                 ? "silence"
                 : nextFailureLabel === "Đọc sai"
                   ? "incorrect"
                   : "unclear",
+            heardSpeech,
           );
         }
       } catch (error) {
@@ -618,13 +677,12 @@ export function DifficultWordPracticePanel({
     [
       child.id,
       difficultWordService,
-      nextWordTarget,
       onAttemptCompleted,
       onProgressSaved,
-      onSelectWord,
       primarySource,
       refreshHistory,
       playCue,
+      scheduleNextWord,
       retryTurn,
       speechRecorder,
       word.display_text,
@@ -883,6 +941,7 @@ export function DifficultWordPracticePanel({
               elapsedMs,
               speechObserved: speechObservedRef.current,
               silenceElapsedMs,
+              config: phraseTurnRef.current ? PHRASE_CAPTURE_CONFIG : undefined,
             })
           ) {
             void finalizeCaptureAndEvaluate(generation);
@@ -910,6 +969,10 @@ export function DifficultWordPracticePanel({
     stopSelfPlayback();
     autoRetryCountRef.current = 0;
     incorrectCountRef.current = 0;
+    heardFailuresRef.current = 0;
+    phraseTurnRef.current = false;
+    setPhraseTurn(false);
+    setPhraseAttemptFailed(false);
     silenceStreakRef.current = 0;
     helpRoundsRef.current = 0;
     setRetryLoopPaused(false);
@@ -1106,9 +1169,9 @@ export function DifficultWordPracticePanel({
             {failureLabel}
           </span>
         ) : null}
-        {failureLabel === "Nghe chưa rõ" && contextPhrase ? (
-          <p className="text-sm text-muted">
-            Bé có thể đọc cả cụm “{contextPhrase}”.
+        {phraseTurn && contextPhrase && flowState !== "SUCCESS" ? (
+          <p className="rounded-control bg-white px-4 py-2 text-xl font-bold text-ink">
+            {contextPhrase}
           </p>
         ) : null}
 
@@ -1128,17 +1191,21 @@ export function DifficultWordPracticePanel({
             : flowState === "INSTRUCTING"
               ? (coachCue ?? "ViRead đang mời bé đọc...")
               : flowState === "LISTENING"
-                ? "Bé đọc từ trên màn hình một lần nhé."
+                ? phraseTurn
+                  ? "Bé đọc cả cụm trên màn hình nhé."
+                  : "Bé đọc từ trên màn hình một lần nhé."
                 : flowState === "EVALUATING" || flowState === "SAVING"
                   ? "Đang kiểm tra giọng đọc của bé..."
                   : flowState === "SUCCESS"
                     ? (latestResult?.feedback_message ??
                       VOICE_PROMPTS.correctPraise())
                     : flowState === "NEEDS_RETRY"
-                      ? retryLoopPaused
-                        ? `${failureLabel ? `${failureLabel}. ` : ""}Mình tạm nghỉ một nhịp nhé. Bé muốn tiếp tục thử hay nhờ ba mẹ giúp?`
-                        : (latestResult?.feedback_message ??
-                          VOICE_PROMPTS.retryGentle(word.display_text))
+                      ? phraseAttemptFailed
+                        ? "Từ này chưa luyện xong. Bé có thể luyện lại sau."
+                        : retryLoopPaused
+                          ? `${failureLabel ? `${failureLabel}. ` : ""}Mình tạm nghỉ một nhịp nhé. Bé muốn tiếp tục thử hay nhờ ba mẹ giúp?`
+                          : (latestResult?.feedback_message ??
+                            VOICE_PROMPTS.retryGentle(word.display_text))
                       : flowState === "TECHNICAL_ERROR"
                         ? (latestResult?.feedback_message ??
                           VOICE_PROMPTS.technicalFallback())

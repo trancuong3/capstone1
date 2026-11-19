@@ -81,15 +81,6 @@ const overviewSchema = z.object({
       profile: z.string(),
       decision_id: z.uuid().nullable(),
       updated_at: z.iso.datetime({ offset: true }),
-      version_label: z.string().nullable().optional(),
-      weights_filename: z.string().nullable().optional(),
-      config_source: z.string().nullable().optional(),
-      config_filename: z.string().nullable().optional(),
-      source: z.string().nullable().optional(),
-      comparison_summary: z
-        .record(z.string(), z.unknown())
-        .nullable()
-        .optional(),
     })
     .nullable(),
   locked_test: z
@@ -110,37 +101,6 @@ const overviewSchema = z.object({
 });
 
 export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
-
-const flow1ChunkResponseSchema = z.object({
-  upload_id: z.string(),
-  chunk_index: z.number().int(),
-  storage_path: z.string(),
-  sha256: z.string(),
-  bytes: z.number().int(),
-});
-
-const flow1ActivationResponseSchema = z.object({
-  decision_id: z.uuid(),
-  active_model: z.object({
-    checkpoint_sha256: z.string(),
-    storage_path: z.string(),
-    profile: z.string(),
-    version_label: z.string().nullable().optional(),
-    updated_at: z.iso.datetime({ offset: true }),
-  }),
-  cleanup: z.object({
-    previous_model_existed: z.boolean(),
-    previous_storage_deleted: z.boolean(),
-    deleted_object_count: z.number().int(),
-    local_cache_deleted: z.boolean(),
-    warning: z.string().nullable().optional(),
-  }),
-});
-
-export type Flow1ChunkUploadResult = z.infer<typeof flow1ChunkResponseSchema>;
-export type Flow1ModelActivationResult = z.infer<
-  typeof flow1ActivationResponseSchema
->;
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
@@ -180,25 +140,6 @@ export interface VireadTrainingService {
     benchmark_id?: string;
     reason: string;
   }): Promise<unknown>;
-  uploadFlow1ModelChunk(
-    uploadId: string,
-    chunkIndex: number,
-    chunk: Blob,
-  ): Promise<Flow1ChunkUploadResult>;
-  activateFlow1Model(input: {
-    uploadId: string;
-    weightsFilename: string;
-    chunks: Array<{
-      index: number;
-      path: string;
-      sha256: string;
-      bytes: number;
-    }>;
-    comparisonFile: File;
-    configFile?: File | null;
-    modelVersion?: string;
-    reason?: string;
-  }): Promise<Flow1ModelActivationResult>;
 }
 
 export function createVireadTrainingService(): VireadTrainingService {
@@ -269,39 +210,5 @@ export function createVireadTrainingService(): VireadTrainingService {
         undefined,
         { method: "POST", body: input },
       ),
-    uploadFlow1ModelChunk: (uploadId, chunkIndex, chunk) => {
-      const formData = new FormData();
-      formData.append("upload_id", uploadId);
-      formData.append("chunk_index", String(chunkIndex));
-      formData.append("file", chunk, `chunk-${chunkIndex}.part`);
-      return requestApi(
-        "/books/admin/viread-training/flow1-model/chunks",
-        flow1ChunkResponseSchema,
-        undefined,
-        { method: "POST", body: formData },
-      );
-    },
-    activateFlow1Model: (input) => {
-      const formData = new FormData();
-      formData.append("upload_id", input.uploadId);
-      formData.append("weights_filename", input.weightsFilename);
-      formData.append("chunks_json", JSON.stringify(input.chunks));
-      formData.append("comparison_file", input.comparisonFile);
-      if (input.configFile) {
-        formData.append("config_file", input.configFile);
-      }
-      if (input.modelVersion) {
-        formData.append("model_version", input.modelVersion);
-      }
-      if (input.reason) {
-        formData.append("reason", input.reason);
-      }
-      return requestApi(
-        "/books/admin/viread-training/flow1-model/activate",
-        flow1ActivationResponseSchema,
-        undefined,
-        { method: "POST", body: formData },
-      );
-    },
   };
 }

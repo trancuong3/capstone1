@@ -14,7 +14,12 @@ import type {
 } from "@/types/reports";
 
 const play = vi
-  .fn<(text: string, options?: { wordSample?: boolean }) => Promise<void>>()
+  .fn<
+    (
+      text: string,
+      options?: { wordSample?: boolean; coaching?: boolean },
+    ) => Promise<void>
+  >()
   .mockResolvedValue(undefined);
 const recorder = {
   prepare: vi.fn(async () => {}),
@@ -100,7 +105,12 @@ const sampleCount = () =>
   play.mock.calls.filter(
     ([text, options]) => text === "một" && options?.wordSample,
   ).length;
-async function start(refresh = async () => {}) {
+async function start(
+  refresh = async () => {},
+  target = word,
+  onSelectWord = vi.fn(),
+  words = [target],
+) {
   await act(async () => {
     render(
       <DifficultWordPracticePanel
@@ -112,9 +122,9 @@ async function start(refresh = async () => {}) {
           settings: {},
           created_at: "",
         }}
-        word={word}
-        words={[word]}
-        onSelectWord={vi.fn()}
+        word={target}
+        words={words}
+        onSelectWord={onSelectWord}
         onClose={vi.fn()}
         onProgressSaved={refresh}
       />,
@@ -154,13 +164,53 @@ describe("hands-free word coaching", () => {
     vi.useRealTimers();
   });
 
+  it.each([
+    ["INCORRECT", "CORRECT"],
+    ["INCORRECT", "INCORRECT"],
+    ["UNCERTAIN", "UNCERTAIN"],
+  ] as const)(
+    "uses the book phrase after two %s results and advances on %s",
+    async (initialStatus, status) => {
+      const target = {
+        ...word,
+        sources: [{ context_phrase: "Bé có một bông hoa.", last_seen_at: "" }],
+      };
+      const next = { ...word, normalized_word: "có", display_text: "có" };
+      const selectWord = vi.fn();
+      evaluate
+        .mockResolvedValueOnce(result(initialStatus, "mốt"))
+        .mockResolvedValueOnce(result(initialStatus, "mốt"))
+        .mockResolvedValueOnce(
+          result(
+            status,
+            status === "CORRECT" ? "một bông hoa" : "mốt bông hoa",
+          ),
+        );
+      await start(undefined, target, selectWord, [target, next]);
+      await say("mốt");
+      expect(screen.queryByText("một bông hoa", { exact: true })).toBeNull();
+      await say("mốt");
+      expect(screen.getByText("một bông hoa", { exact: true })).toBeVisible();
+      await say(status === "CORRECT" ? "một bông hoa" : "mốt bông hoa");
+      if (status !== "CORRECT") {
+        expect(screen.getByText(/Từ này chưa luyện xong/)).toBeVisible();
+        expect(screen.queryByText("Hoàn thành từ này")).toBeNull();
+      } else {
+        expect(screen.getByText("Hoàn thành từ này")).toBeVisible();
+      }
+      await tick(SHORT_WORD_CAPTURE_CONFIG.autoAdvanceCorrectMs + 30);
+      expect(selectWord).toHaveBeenCalledWith("có", { autoStart: true });
+      expect(evaluate).toHaveBeenCalledTimes(3);
+    },
+  );
+
   it("models only the target after a final help request and pauses on the next request", async () => {
     await start();
     await say("Con không biết đọc.");
     expect(play.mock.calls.slice(-3)).toEqual([
-      ["Không sao đâu. Con nghe cô đọc nhé."],
+      ["Không sao đâu. Con nghe cô đọc nhé.", { coaching: true }],
       ["một", { wordSample: true }],
-      ["Đến lượt con. Con đọc lại nhé."],
+      ["Đến lượt con. Con đọc lại nhé.", { coaching: true }],
     ]);
     expect(recorder.start).toHaveBeenCalledTimes(2);
     await say("Con không biết.");

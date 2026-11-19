@@ -569,58 +569,6 @@ async def create_viread_training_run(
     return await VireadOcrTrainingService(db).create_run(actor_id, payload)
 
 
-@router.post("/admin/viread-training/flow1-model/chunks", status_code=status.HTTP_201_CREATED)
-async def upload_viread_flow1_model_chunk(
-    upload_id: UUID = Form(...),
-    chunk_index: int = Form(ge=0),
-    file: UploadFile = File(...),
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    data = await file.read(MAX_SHARD_BYTES + 1)
-    if len(data) > MAX_SHARD_BYTES:
-        raise HTTPException(status_code=413, detail="Checkpoint shard exceeds 40 MiB")
-    return await VireadOcrTrainingService(db).upload_flow1_model_chunk(
-        actor_id, upload_id, chunk_index, data
-    )
-
-
-@router.post("/admin/viread-training/flow1-model/activate")
-async def activate_viread_flow1_model(
-    upload_id: UUID = Form(...),
-    weights_filename: str = Form(...),
-    chunks_json: str = Form(...),
-    comparison_file: UploadFile = File(...),
-    config_file: UploadFile | None = File(None),
-    model_version: str | None = Form(None),
-    reason: str | None = Form(None),
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    comparison_bytes = await comparison_file.read(2 * 1024 * 1024 + 1)
-    if len(comparison_bytes) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Comparison file exceeds 2 MiB")
-    config_bytes = None
-    config_filename = None
-    if config_file is not None and config_file.filename:
-        config_bytes = await config_file.read(1024 * 1024 + 1)
-        if len(config_bytes) > 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Configuration file exceeds 1 MiB")
-        config_filename = config_file.filename
-
-    return await VireadOcrTrainingService(db).activate_flow1_model(
-        actor_id=actor_id,
-        upload_id=upload_id,
-        weights_filename=weights_filename,
-        chunks_json=chunks_json,
-        comparison_bytes=comparison_bytes,
-        config_bytes=config_bytes,
-        config_filename=config_filename,
-        model_version=model_version,
-        reason=reason,
-    )
-
-
 @router.post("/admin/viread-training/runs/{run_id}/chunks", status_code=status.HTTP_201_CREATED)
 async def upload_viread_checkpoint_chunk(
     run_id: UUID,

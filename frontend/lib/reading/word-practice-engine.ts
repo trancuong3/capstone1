@@ -53,6 +53,13 @@ export const SHORT_WORD_CAPTURE_CONFIG = {
   autoRetryPauseMs: 900,
 } as const;
 
+export const PHRASE_CAPTURE_CONFIG = {
+  ...SHORT_WORD_CAPTURE_CONFIG,
+  minCaptureMs: 1400,
+  postSpeechSilenceMs: 1200,
+  maxCaptureMs: 11_000,
+};
+
 export type ShortWordFailureLabel =
   "Chưa nghe thấy" | "Nghe chưa rõ" | "Đọc sai";
 
@@ -96,7 +103,12 @@ export interface ShortWordAutoStopInput {
   readonly elapsedMs: number;
   readonly speechObserved: boolean;
   readonly silenceElapsedMs: number;
-  readonly config?: typeof SHORT_WORD_CAPTURE_CONFIG;
+  readonly config?: {
+    readonly minCaptureMs: number;
+    readonly postSpeechSilenceMs: number;
+    readonly noSpeechTimeoutMs: number;
+    readonly maxCaptureMs: number;
+  };
 }
 
 export function shouldAutoStopShortWordCapture({

@@ -13,7 +13,6 @@ import tempfile
 import threading
 import unicodedata
 from typing import Any
-import yaml
 from app.services.word_box_geometry import build_geometry_evidence
 
 from app.services.ocr_adjudication import (
@@ -132,22 +131,11 @@ _paddle_initialization_error: str | None = None
 _vietocr_initialization_error: str | None = None
 _vietocr_active_checkpoint_sha: str | None = None
 _vietocr_active_profile = "ORIGINAL"
-_vietocr_active_config_sha: str | None = None
 _active_model_info_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
 _active_model_cache_lock = threading.Lock()
 _ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 _ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
 _ORIGINAL_VOCAB_SIZE = 229
-
-
-def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            _deep_merge_dict(base[key], value)
-        else:
-            base[key] = value
-    return base
-
 
 
 def _sha256_path(path: str) -> str:
@@ -217,7 +205,7 @@ def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds:
         stop_event.wait(interval)
 
 
-def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
+def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:
     expected_sha = str(active.get("checkpoint_sha256", "")).lower()
     manifest_path = active.get("storage_path")
     if len(expected_sha) != 64 or not isinstance(manifest_path, str) or not manifest_path:
@@ -229,71 +217,27 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     if manifest.get("checkpoint_sha256") != expected_sha or not isinstance(manifest.get("chunks"), list):
         raise ValueError("active VietOCR V2 shard manifest does not match its database pointer")
     local_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.pth")
-    if not (os.path.isfile(local_path) and _sha256_path(local_path) == expected_sha):
-        digest = hashlib.sha256()
-        temporary = local_path + ".assembling"
-        with open(temporary, "xb") as output:
-            chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
-            if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
-                raise ValueError("VietOCR V2 checkpoint shards are incomplete")
-            for item in chunks:
-                data = download_object(str(item["path"]))
-                if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
-                    raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
-                output.write(data)
-                digest.update(data)
-        if digest.hexdigest() != expected_sha:
-            if os.path.isfile(temporary):
-                os.unlink(temporary)
-            raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
-        os.replace(temporary, local_path)
-
-    custom_config: dict[str, Any] | None = None
-    config_sha: str | None = None
-    config_meta = manifest.get("config")
-    if isinstance(config_meta, dict) and config_meta.get("storage_path"):
-        cfg_path = config_meta["storage_path"]
-        cfg_expected_sha = config_meta.get("sha256")
-        cfg_bytes = download_object(cfg_path)
-        cfg_actual_sha = hashlib.sha256(cfg_bytes).hexdigest()
-        if cfg_expected_sha and cfg_actual_sha != cfg_expected_sha:
-            raise ValueError("active VietOCR V2 config hash mismatch")
-        parsed = yaml.safe_load(cfg_bytes.decode("utf-8"))
-        if not isinstance(parsed, dict):
-            raise ValueError("active VietOCR V2 config must be a YAML mapping")
-        custom_config = parsed
-        config_sha = cfg_actual_sha
-        local_cfg_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.yml")
-        try:
-            with open(local_cfg_path, "wb") as f:
-                f.write(cfg_bytes)
-        except OSError:
-            pass
-
-    return local_path, custom_config, config_sha
-
-
-def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:
-    local_path, _, _ = _v2_artifact_from_storage(active)
+    if os.path.isfile(local_path):
+        if _sha256_path(local_path) != expected_sha:
+            raise ValueError("cached VietOCR V2 checkpoint hash mismatch; refusing to overwrite it")
+        return local_path
+    digest = hashlib.sha256()
+    temporary = local_path + ".assembling"
+    with open(temporary, "xb") as output:
+        chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
+        if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
+            raise ValueError("VietOCR V2 checkpoint shards are incomplete")
+        for item in chunks:
+            data = download_object(str(item["path"]))
+            if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
+                raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
+            output.write(data)
+            digest.update(data)
+    if digest.hexdigest() != expected_sha:
+        os.unlink(temporary)
+        raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
+    os.replace(temporary, local_path)
     return local_path
-
-
-def evict_cached_viread_checkpoint(checkpoint_sha256: str) -> bool:
-    """Safely unlink cached temp checkpoint weights and config from tempdir."""
-    sha = (checkpoint_sha256 or "").strip().lower()
-    if len(sha) != 64:
-        return False
-    evicted = False
-    temp_dir = tempfile.gettempdir()
-    for ext in (".pth", ".yml", ".yaml"):
-        target = os.path.join(temp_dir, f"viread-vietocr-v2-{sha}{ext}")
-        if os.path.isfile(target):
-            try:
-                os.unlink(target)
-                evicted = True
-            except OSError as exc:
-                logger.warning("Could not evict cached VietOCR file %s: %s", target, exc)
-    return evicted
 
 
 def _find_cached_vietocr_weights() -> str | None:
@@ -324,7 +268,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_engine, _vietocr_engine
     global _paddle_initialization_status, _vietocr_initialization_status
     global _paddle_initialization_error, _vietocr_initialization_error
-    global _vietocr_active_checkpoint_sha, _vietocr_active_profile, _vietocr_active_config_sha
+    global _vietocr_active_checkpoint_sha, _vietocr_active_profile
     global _ocr_dependencies_loaded, torch, PaddleOCR, Cfg, Predictor
     global _paddle_import_status, _paddle_import_error
     global _vietocr_import_status, _vietocr_import_error
@@ -409,25 +353,8 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             active_profile = "ORIGINAL"
             active_sha = _ORIGINAL_VIETOCR_SHA256
 
-        candidate_weights_path: str | None = None
-        custom_config_dict: dict[str, Any] | None = None
-        active_config_sha: str | None = None
-
-        if active_model and active_profile != "ORIGINAL":
-            try:
-                candidate_weights_path, custom_config_dict, active_config_sha = _v2_artifact_from_storage(active_model)
-            except Exception as exc:
-                logger.warning("Could not load fine-tuned VietOCR artifact: %s", type(exc).__name__)
-                active_model = None
-                active_profile = "ORIGINAL"
-                active_sha = _ORIGINAL_VIETOCR_SHA256
-                candidate_weights_path = None
-                custom_config_dict = None
-                active_config_sha = None
-
         if (_vietocr_engine is None or active_sha != _vietocr_active_checkpoint_sha
-                or active_profile != _vietocr_active_profile
-                or active_config_sha != _vietocr_active_config_sha):
+                or active_profile != _vietocr_active_profile):
             if Cfg is None or Predictor is None:
                 _vietocr_initialization_status = _vietocr_import_status
                 _vietocr_initialization_error = _vietocr_import_error
@@ -436,37 +363,35 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     viet_config = Cfg.load_config_from_name("vgg_transformer")
                     if torch is None:
                         raise OcrEngineUnavailable("The VietOCR torch runtime is not installed")
+                    lock_path = Path(__file__).resolve().parents[3] / "ai" / "vietocr_v2" / "original_artifact.json"
+                    original_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                    if package_version("vietocr") != original_lock["upstream"]["version"]:
+                        raise ValueError("VietOCR package version differs from the locked Original runtime")
+                    locked_architecture = original_lock["architecture"]
+                    current_architecture = {
+                        "backbone": viet_config.get("backbone"),
+                        "cnn": {key: viet_config.get("cnn", {}).get(key) for key in ("ss", "ks", "hidden")},
+                        "seq_modeling": viet_config.get("seq_modeling"),
+                        "transformer": dict(viet_config.get("transformer", {})),
+                        "input": {key: viet_config.get("dataset", {}).get(key) for key in ("image_height", "image_min_width", "image_max_width")},
+                    }
+                    if current_architecture != locked_architecture:
+                        raise ValueError("VietOCR Original architecture differs from its locked config")
                     target_device = "cuda" if torch.cuda.is_available() else "cpu"
                     viet_config["device"] = target_device
+                    # The released checkpoint already contains every CNN
+                    # weight. Skipping the ImageNet backbone avoids a ~550 MB
+                    # download that would otherwise make VietOCR unavailable
+                    # on machines without access to download.pytorch.org.
                     if isinstance(viet_config.get("cnn"), dict):
                         viet_config["cnn"]["pretrained"] = False
-
-                    if active_model and active_profile != "ORIGINAL" and candidate_weights_path:
-                        if custom_config_dict:
-                            _deep_merge_dict(viet_config, custom_config_dict)
-                            viet_config["device"] = target_device
-                            if isinstance(viet_config.get("cnn"), dict):
-                                viet_config["cnn"]["pretrained"] = False
-                        viet_config["weights"] = candidate_weights_path
+                    vocab = unicodedata.normalize("NFC", str(viet_config.get("vocab", "")))
+                    vocab_sha = hashlib.sha256(json.dumps(vocab, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    if len(vocab) != _ORIGINAL_VOCAB_SIZE or vocab_sha != _ORIGINAL_VOCAB_SHA256:
+                        raise ValueError("VietOCR Original vocabulary does not match the locked baseline")
+                    if active_model and active_profile != "ORIGINAL":
+                        viet_config["weights"] = _v2_checkpoint_from_storage(active_model)
                     else:
-                        lock_path = Path(__file__).resolve().parents[3] / "ai" / "vietocr_v2" / "original_artifact.json"
-                        original_lock = json.loads(lock_path.read_text(encoding="utf-8"))
-                        if package_version("vietocr") != original_lock["upstream"]["version"]:
-                            raise ValueError("VietOCR package version differs from the locked Original runtime")
-                        locked_architecture = original_lock["architecture"]
-                        current_architecture = {
-                            "backbone": viet_config.get("backbone"),
-                            "cnn": {key: viet_config.get("cnn", {}).get(key) for key in ("ss", "ks", "hidden")},
-                            "seq_modeling": viet_config.get("seq_modeling"),
-                            "transformer": dict(viet_config.get("transformer", {})),
-                            "input": {key: viet_config.get("dataset", {}).get(key) for key in ("image_height", "image_min_width", "image_max_width")},
-                        }
-                        if current_architecture != locked_architecture:
-                            raise ValueError("VietOCR Original architecture differs from its locked config")
-                        vocab = unicodedata.normalize("NFC", str(viet_config.get("vocab", "")))
-                        vocab_sha = hashlib.sha256(json.dumps(vocab, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-                        if len(vocab) != _ORIGINAL_VOCAB_SIZE or vocab_sha != _ORIGINAL_VOCAB_SHA256:
-                            raise ValueError("VietOCR Original vocabulary does not match the locked baseline")
                         cached_weight = _find_cached_vietocr_weights()
                         if cached_weight is None:
                             from vietocr.tool.utils import download_weights
@@ -475,14 +400,12 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                         if _sha256_path(cached_weight) != _ORIGINAL_VIETOCR_SHA256:
                             raise ValueError("VietOCR Original checkpoint hash mismatch")
                         viet_config["weights"] = cached_weight
-
                     if target_device == "cpu":
                         torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
                     next_engine = Predictor(viet_config)
                     _vietocr_engine = next_engine
                     _vietocr_active_checkpoint_sha = active_sha
                     _vietocr_active_profile = active_profile
-                    _vietocr_active_config_sha = active_config_sha
                     _vietocr_initialization_status = "success"
                     _vietocr_initialization_error = None
                 except Exception as exc:

@@ -21,11 +21,15 @@ import { ReadingVoiceSettings } from "@/components/reading/reading-voice-setting
 import {
   classifyRetryTranscript,
   hasConfusableNasalEnding,
+  isAssistantPromptBleed,
   normalizeShortWordTranscript,
   shortWordContext,
   stripNonSpeechAnnotations,
 } from "@/lib/reading/retry-word-recognition";
-import { normalizeVietnameseText } from "@/lib/reading/vietnamese-text";
+import {
+  normalizeVietnameseText,
+  tokenizeVietnameseText,
+} from "@/lib/reading/vietnamese-text";
 import {
   isWordHelpRequest,
   MAX_WORD_HELP_ROUNDS,
@@ -37,6 +41,7 @@ import {
 } from "@/lib/reading/audio-quality";
 import {
   SHORT_WORD_CAPTURE_CONFIG,
+  PHRASE_CAPTURE_CONFIG,
   hasShortWordSpeechActivity,
   shouldAutoStopShortWordCapture,
 } from "@/lib/reading/word-practice-engine";
@@ -312,6 +317,9 @@ function ReadingSessionScreen({
   const retryAttemptIdRef = useRef(0);
   const retryAbortControllerRef = useRef<AbortController | null>(null);
   const retryUnclearStreakRef = useRef(0);
+  const retryHeardFailuresRef = useRef(0);
+  const retryPhraseRef = useRef<string | null>(null);
+  const [retryPhrase, setRetryPhrase] = useState<string | null>(null);
   const retryHelpRoundsRef = useRef(0);
   const retryBrowserFinalRef = useRef("");
   const retryBrowserConfidenceRef = useRef<number | null>(null);
@@ -2799,6 +2807,7 @@ function ReadingSessionScreen({
           elapsedMs: elapsed,
           speechObserved: retrySpeechObservedRef.current,
           silenceElapsedMs: silenceElapsed,
+          config: retryPhraseRef.current ? PHRASE_CAPTURE_CONFIG : undefined,
         })
       ) {
         void stopRetryListeningAndTranscribe(candidate);
@@ -2844,6 +2853,8 @@ function ReadingSessionScreen({
       return;
     const nextPosition = retryPositionRef.current + 1;
     retryPlayback.stop();
+    retryPhraseRef.current = null;
+    setRetryPhrase(null);
     setRetryRecording(null);
     cancelRetryRecognition();
     if (nextPosition >= retryCandidatesRef.current.length) {
@@ -2886,54 +2897,71 @@ function ReadingSessionScreen({
     return persistRetryOutcome(pending);
   }
 
+  function selectRetryPhrase(candidate: RetryWordCandidate): string | null {
+    const phrase =
+      retryHeardFailuresRef.current >= 2
+        ? shortWordContext(
+            candidate.text,
+            resolveRetrySentenceContext(candidate),
+          )
+        : null;
+    retryPhraseRef.current = phrase;
+    setRetryPhrase(phrase);
+    return phrase;
+  }
+
   function retryUnclearCapture(
     candidate: RetryWordCandidate,
     transcript: string,
+    heardSpeech = true,
   ): void {
-    const context = transcript
-      ? shortWordContext(candidate.text, resolveRetrySentenceContext(candidate))
-      : null;
-    const contextCue = context ? `Con thử đọc cả cụm “${context}” nhé.` : null;
-    const contextHint = contextCue ? ` ${contextCue}` : "";
+    const spoken = tokenizeVietnameseText(
+      stripNonSpeechAnnotations(transcript),
+    );
+    const meaningfulSpeech =
+      heardSpeech &&
+      spoken.length > 0 &&
+      !isAssistantPromptBleed(spoken, tokenizeVietnameseText(candidate.text));
     retryListeningWantedRef.current = false;
     retryShouldRestartRef.current = false;
     isListeningActiveRef.current = false;
     retryProcessingRef.current = false;
+
+    if (meaningfulSpeech && retryPhraseRef.current) {
+      retryProcessingRef.current = true;
+      void persistRetryOutcome({
+        candidate,
+        status: "UNCERTAIN",
+        transcript,
+        attempt: nextRetryAttempt(candidate),
+      });
+      return;
+    }
+
+    if (meaningfulSpeech) {
+      retryHeardFailuresRef.current += 1;
+      if (selectRetryPhrase(candidate)) {
+        void playRetryInstructionAndListen(candidate);
+        return;
+      }
+    }
 
     retryUnclearStreakRef.current += 1;
     if (retryUnclearStreakRef.current < WORD_HELP_SILENCE_LIMIT) {
       setRetryFeedback("not-recognized");
       setLatestTranscript(
         transcript
-          ? `ViRead chưa nghe rõ từ "${candidate.text}".${contextHint || " Mình thử thu âm lại một lần nhé."}`
+          ? `ViRead chưa nghe rõ từ "${candidate.text}". Mình thử thu âm lại một lần nhé.`
           : `Chưa nghe thấy tiếng bé đọc từ "${candidate.text}". Mình thử lại một lần nhé.`,
       );
       const generation = retryAttemptIdRef.current;
-      window.setTimeout(async () => {
-        const isCurrent = () =>
+      window.setTimeout(() => {
+        if (
           isActiveRetryCandidate(candidate) &&
-          generation === retryAttemptIdRef.current;
-        if (!isCurrent()) return;
-        if (contextCue) {
-          setRetryFeedback("playing-instruction");
-          try {
-            await playAssistantAudio(
-              () => speechPlayer.play(contextCue),
-              false,
-              false,
-            );
-          } catch {
-            // The phrase stays visible even if audio is unavailable.
-          }
-          await new Promise<void>((resolve) =>
-            window.setTimeout(
-              resolve,
-              SHORT_WORD_CAPTURE_CONFIG.acousticSettleMs,
-            ),
-          );
+          generation === retryAttemptIdRef.current
+        ) {
+          void startRetryRecognition(candidate);
         }
-        if (isCurrent())
-          await startRetryRecognition(candidate, contextCue ?? undefined);
       }, 500);
       return;
     }
@@ -2945,7 +2973,7 @@ function ReadingSessionScreen({
     speechRecorder.cancel();
     setRetryFeedback("not-recognized");
     setLatestTranscript(
-      `ViRead chưa nhận diện được từ "${candidate.text}".${contextHint || " Bé có thể nghe lại rồi thử thêm nhé."} Từ này chưa bị đánh dấu sai.`,
+      `ViRead chưa nhận diện được từ "${candidate.text}". Bé có thể thử lại hoặc nghe mẫu.`,
     );
   }
 
@@ -2971,6 +2999,7 @@ function ReadingSessionScreen({
     const incorrectCount =
       (retryIncorrectCountsRef.current.get(candidateKey) ?? 0) +
       (pending.status === "FAILED" ? 1 : 0);
+    const terminal = incorrectCount >= 3 || retryPhraseRef.current !== null;
     pendingRetryEventRef.current = pending;
     setRetryFeedback("processing");
     setLatestTranscript("Đang lưu kết quả đọc lại...");
@@ -2991,10 +3020,10 @@ function ReadingSessionScreen({
           resolution_status:
             pending.status === "CONFIRMED"
               ? "SELF_CORRECTED"
-              : pending.status === "UNCERTAIN" || incorrectCount >= 3
+              : pending.status === "UNCERTAIN" || terminal
                 ? "UNRESOLVED"
                 : "RETRYING",
-          ...(pending.status === "UNCERTAIN"
+          ...(pending.status === "UNCERTAIN" && !pending.transcript
             ? { skip_reason: "TECHNICAL_OR_MANUAL" as const }
             : {}),
           original_status: pending.candidate.originalStatus,
@@ -3018,17 +3047,21 @@ function ReadingSessionScreen({
         );
         advanceRetryWord(pending.candidate);
       } else {
-        if (incorrectCount >= 3) retryResolvedKeysRef.current.add(candidateKey);
-        if (incorrectCount >= 3)
+        if (terminal) {
+          retryResolvedKeysRef.current.add(candidateKey);
           setUnresolvedRetryWordIds(
             (previous) => new Set([...previous, pending.candidate.wordId]),
           );
+        } else {
+          retryHeardFailuresRef.current += 1;
+          selectRetryPhrase(pending.candidate);
+        }
         retryIncorrectCountsRef.current.set(candidateKey, incorrectCount);
         retryProcessingRef.current = true;
         setRetryFeedback("incorrect");
         setLatestTranscript(
-          incorrectCount >= 3
-            ? `Mình đã luyện từ "${pending.candidate.text}" ba lần. Mình chuyển sang phần tiếp theo nhé.`
+          terminal
+            ? `Từ "${pending.candidate.text}" chưa luyện xong. Mình chuyển sang từ tiếp theo nhé.`
             : `Đọc sai — bé vừa đọc: "${pending.transcript}". Mình thử lại từ "${pending.candidate.text}" nhé.`,
         );
         const generation = retryAttemptIdRef.current;
@@ -3038,7 +3071,7 @@ function ReadingSessionScreen({
             generation !== retryAttemptIdRef.current
           )
             return;
-          if (incorrectCount >= 3) {
+          if (terminal) {
             advanceRetryWord(pending.candidate);
           } else {
             retryProcessingRef.current = false;
@@ -3210,6 +3243,7 @@ function ReadingSessionScreen({
             captureQuality?.status === "NO_AUDIO"
             ? ""
             : "Âm thanh chưa đủ rõ. Bé thử đọc lại nhé.",
+          false,
         );
         return;
       }
@@ -3449,7 +3483,7 @@ function ReadingSessionScreen({
 
         // Khi thành công, confirmRetryWord giữ khóa
         // trong lúc chờ chuyển sang từ tiếp theo.
-        if (!advancePending) {
+        if (!advancePending && !retrySaveInFlightRef.current) {
           retryProcessingRef.current = false;
         }
       }
@@ -3856,8 +3890,17 @@ function ReadingSessionScreen({
       await playAssistantAudio(async () => {
         setRetryFeedback("playing-instruction");
         setLatestTranscript("ViRead đang hướng dẫn bé đọc từ cần luyện...");
+        const phrase = retryPhraseRef.current;
+        if (phrase) {
+          setLatestTranscript("Bé đọc cả cụm trên màn hình nhé.");
+          await speechPlayer.play(`Con hãy đọc cả cụm: ${phrase}.`, {
+            coaching: true,
+          });
+          return;
+        }
         await speechPlayer.play(
           guidedHelp ? "Cô đọc mẫu cho con nhé." : "Con nghe từ này nhé.",
+          { coaching: true },
         );
 
         if (!isCurrent()) {
@@ -3870,7 +3913,9 @@ function ReadingSessionScreen({
         try {
           await speechPlayer.play(candidate.text, { wordSample: true });
           if (guidedHelp && isCurrent())
-            await speechPlayer.play("Đến lượt con đọc nhé.");
+            await speechPlayer.play("Đến lượt con đọc nhé.", {
+              coaching: true,
+            });
         } finally {
           if (isCurrent()) setIsReadingWord(false);
         }
@@ -3887,17 +3932,21 @@ function ReadingSessionScreen({
         return;
       }
 
-      await startRetryRecognition(candidate);
+      await startRetryRecognition(
+        candidate,
+        retryPhraseRef.current ? "Bé đọc cả cụm trên màn hình nhé." : undefined,
+      );
     } catch (error) {
       if (!isCurrent()) return;
       if (error instanceof Error && error.name === "AbortError") return;
       console.error("[RETRY TTS PLAYBACK]", error);
-      if (mountedRef.current && retryModeRef.current) {
+      if (isCurrent()) {
         setIsReadingWord(false);
-        setIsMicRecording(false);
-        setRetryFeedback("audio-unavailable");
-        setLatestTranscript(
-          "Chưa phát được lời hướng dẫn hoặc tiếng mẫu. Bé thử nghe lại nhé.",
+        await startRetryRecognition(
+          candidate,
+          retryPhraseRef.current
+            ? "Bé đọc cả cụm trên màn hình nhé."
+            : "Bé đọc từ trên màn hình nhé.",
         );
       }
     }
@@ -3924,6 +3973,9 @@ function ReadingSessionScreen({
       isActiveRetryCandidate(candidate) &&
       generation === retryAttemptIdRef.current;
     retryUnclearStreakRef.current = 0;
+    retryHeardFailuresRef.current =
+      retryIncorrectCountsRef.current.get(retryCandidateKey(candidate)) ?? 0;
+    selectRetryPhrase(candidate);
     setRetryWordPosition(position);
     retryHelpRoundsRef.current = 0;
     setRetryFeedback("waiting");
@@ -4600,11 +4652,7 @@ function ReadingSessionScreen({
         )}
         isListening={isMicRecording}
         isMicRecording={isMicRecording}
-        retryContextPhrase={
-          retryMode
-            ? (retryCandidates[retryWordPosition]?.contextPhrase ?? null)
-            : null
-        }
+        retryContextPhrase={retryMode ? retryPhrase : null}
         retryMode={retryMode}
         retryWordPosition={retryWordPosition + 1}
         retryWordCount={retryCandidates.length}
