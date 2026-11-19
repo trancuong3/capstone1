@@ -174,7 +174,10 @@ test("Parent stored history → detail, report counts and words", async ({
       configurable: true,
       value: async () => {
         probe.__practiceMicRequests = (probe.__practiceMicRequests ?? 0) + 1;
-        throw new DOMException("Test microphone permission denied", "NotAllowedError");
+        throw new DOMException(
+          "Test microphone permission denied",
+          "NotAllowedError",
+        );
       },
     });
   });
