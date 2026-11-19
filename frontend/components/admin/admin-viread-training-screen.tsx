@@ -4,6 +4,10 @@ import { RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminVireadFlow1Replacement,
+  AdminVireadReliabilityPanel,
+} from "@/components/admin/admin-viread-flow1-replacement";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
@@ -228,13 +232,6 @@ export function AdminVireadTrainingScreen() {
           flows.includes(item.source_flow) && (!split || item.split === split),
       )
       .reduce((sum, item) => sum + item.count, 0) ?? 0;
-  const flow1External = sourceCount(["FLOW2_EXTERNAL"]);
-  const flow1Trdg = sourceCount(["FLOW2_TRDG"]);
-  const flow1Train = sourceCount(["FLOW2_EXTERNAL", "FLOW2_TRDG"], "train");
-  const flow1Validation = sourceCount(
-    ["FLOW2_EXTERNAL", "FLOW2_TRDG"],
-    "validation",
-  );
   const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
   const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
   return (
@@ -307,6 +304,10 @@ export function AdminVireadTrainingScreen() {
             </Card>
           </div>
 
+          {data.active_model?.comparison_summary ? (
+            <AdminVireadReliabilityPanel activeModel={data.active_model} />
+          ) : null}
+
           <Card className="mb-6 bg-white">
             <h2 className="text-xl font-black">
               Training Readiness · nguồn dữ liệu
@@ -315,32 +316,8 @@ export function AdminVireadTrainingScreen() {
               Hai luồng dùng dataset và run riêng, cùng fine-tune VietOCR V2.
             </p>
             <ul className="mt-4 grid gap-3 md:grid-cols-2">
-              <li className="rounded-control border border-border p-4">
-                <p className="font-extrabold">
-                  Luồng 1 · ảnh thực tế + DBNet + TRDG
-                </p>
-                <p className="mt-2 text-sm">
-                  Ảnh thực tế: {flow1External.toLocaleString("vi-VN")} · TRDG:{" "}
-                  {flow1Trdg.toLocaleString("vi-VN")}
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  Train {flow1Train.toLocaleString("vi-VN")} · Validation{" "}
-                  {flow1Validation.toLocaleString("vi-VN")} · Holdout{" "}
-                  {sourceCount(
-                    ["FLOW2_EXTERNAL", "FLOW2_TRDG"],
-                    "holdout",
-                  ).toLocaleString("vi-VN")}
-                </p>
-                <p className="mt-2 text-sm font-bold text-muted">
-                  {flow1External > 1_000 || flow1Trdg > 50_000
-                    ? "Vượt khoảng dữ liệu cho phép: 500–1.000 mẫu thật và 20.000–50.000 mẫu TRDG"
-                    : flow1External < 500 ||
-                        flow1Trdg < 20_000 ||
-                        !flow1Train ||
-                        !flow1Validation
-                      ? "Chưa sẵn sàng: cần 500–1.000 mẫu thật, 20.000–50.000 mẫu TRDG, train và validation"
-                      : "Train/Validation đủ; training có thể bắt đầu. Candidate được lưu riêng và chờ Pilot hoặc Locked Test Production để đánh giá."}
-                </p>
+              <li className="list-none">
+                <AdminVireadFlow1Replacement onSuccess={load} />
               </li>
               <li className="rounded-control border border-border p-4">
                 <p className="font-extrabold">
