@@ -56,6 +56,9 @@ root_agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 for token in ("backend/**", "backend/AGENTS.md", "frontend/**", "frontend/AGENTS.md"):
     if token not in root_agents:
         errors.append(f"root AGENTS missing scoped-rule trigger: {token}")
+for token in ("graphify query", "--budget 300", "query-only", "build/update/export/diagnose"):
+    if token not in root_agents:
+        errors.append(f"root AGENTS missing Graphify fast-path rule: {token}")
 
 backend_agents = (ROOT / "backend" / "AGENTS.md").read_text(encoding="utf-8")
 for token in ("app/sever.py", "BACKEND_FLOW_STANDARD.md", "numpy==1.26.4", "protobuf==3.20.2"):
