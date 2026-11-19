@@ -1,8 +1,5 @@
 ---
 name: viread-frontend
-description: "Use for ViRead Next.js/React/TypeScript frontend logic, forms, validation, or accessibility."
+description: "ViRead Next.js/React/TypeScript frontend."
 ---
-# Frontend gateway
-Open only what is needed from `.agent-library/`.
-Default: `nextjs-app-router-patterns`.
-Optional by evidence: `vercel-react-best-practices`, `react-hook-form`, `zod`, `typescript-advanced-types`, `frontend-a11y`, `vitest`, `nextjs-turbopack`.
+Default detailed skill: `.agent-library/nextjs-app-router-patterns/SKILL.md`. Add exactly one matching skill only when needed: React performance, forms, Zod, TypeScript, accessibility, Vitest, or Turbopack.

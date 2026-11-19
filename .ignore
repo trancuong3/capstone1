@@ -1,0 +1,3 @@
+# Keep generic/ripgrep discovery focused on application source.
+graphify-out/
+.agent-library/
