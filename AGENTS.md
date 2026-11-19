@@ -1,60 +1,78 @@
-## Automatic Skill Routing
+# ViRead Codex Rules — Token First
 
-For every non-trivial task, automatically use the repository skill system even when the user does not mention any skill name.
+## 1. Minimal-context execution
 
-Rules:
-- Start with the project skill `viread-skill-router` to classify the task domain and choose the smallest relevant skill set.
-- Do not ask the user which skill to use when the task domain is clear.
-- Match skills by their name/description first; read full `SKILL.md` only for selected skills.
-- Never load all installed skills "just in case"; this project optimizes for low token usage.
-- For codebase tasks, Graphify remains the discovery layer and must run before broad grep/search/source reads when `graphify-out/graph.json` exists.
-- Prefer project-specific `viread-*` skills over overlapping generic skills when both cover the same behavior.
-- Add domain skills only as needed, for example:
-  - FastAPI/backend: `fastapi`, `fastapi-expert`.
-  - Supabase/Postgres: `supabase`, `supabase-postgres-best-practices`.
-  - Auth/security: `auth-implementation-patterns`, `secure-code-guardian`, `owasp-top-10`.
-  - React/Next.js: `nextjs-app-router-patterns`, `vercel-react-best-practices`.
-  - UI/Figma: `figma-design-to-code`, `frontend-design`, `ui-ux-pro-max`.
-  - Vietnamese OCR: `viread-ocr-vietnamese` / `viread-vietnamese-ocr`.
-  - Child reading/speech: `viread-reading-assessment`.
-  - Android/APK: `viread-android-apk`, `viread-android-build`.
-  - Debugging: `systematic-debugging` plus the relevant domain skill.
-  - Tests: select only the testing skill(s) for the affected layer.
-- Before declaring source-code work complete, use both `viread-quality-gate` and `verification-before-completion`.
-- After relevant source changes, run `graphify update .`.
-- When resuming after token/rate-limit recovery, use `.codex/skills/graphify/PROJECT_STATE.md` and the continuation protocol instead of rediscovering completed work.
+For every task, classify it before loading skills or Graphify:
 
+- **T0 — trivial/known edit**: exact file or tiny text/style/config change. Use **0 skills**, **0 Graphify queries** unless required by the task.
+- **T1 — focused task**: one clear bug/API/component/module. Load **at most 1 domain skill**. If the prompt/checkpoint already identifies the file/flow, read it directly; otherwise use **1 Graphify query**.
+- **T2 — complex feature/debugging**: spans several files/layers. Use `viread-skill-router`, then **at most 3 domain skills**. Use 1–2 narrow Graphify queries.
+- **T3 — cross-cutting architecture/rewrite**: use `viread-skill-router`, then **at most 5 skills** only when each is necessary.
 
-## graphify
+The user never needs to name skills. Automatically select them, but never load skills "just in case".
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+## 2. Token budget
 
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+- Default Graphify query budget: **600 tokens**.
+- Increase only when evidence is insufficient: 600 → 1000 → max 1500.
+- Do not read `graphify-out/GRAPH_REPORT.md` unless a broad architecture review truly needs it.
+- Do not scan the repository when Git/checkpoint/Graphify already identifies the relevant files.
+- Read only the smallest useful source ranges.
+- Do not paste large logs/diffs into context; summarize them.
+- Run focused tests first; full suites only near completion or when the change is cross-cutting.
 
-Rules:
-- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. When the answer is under a Markdown heading, `graphify section "<heading>"` prints that section's text, so the .md need not be opened. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
+## 3. Resume / token recovery
 
-## Graphify execution on Windows
-- Always run Graphify through the project Python environment.
-- Use `.\.venv\Scripts\python.exe -m graphify` instead of `graphify`.
-- Query the graph before reading large amounts of source code.
-- Keep queries specific and use small token budgets by default.
-- Rebuild the graph after relevant source changes.
-- Do not disable Windows Application Control.
+When continuing after a token/rate limit, read:
+1. this file;
+2. `.codex/skills/graphify/PROJECT_STATE.md`;
+3. `git status --short`;
+4. `git diff --name-only`;
+5. `git log -3 --oneline`.
 
-## ViRead Architecture & Critical Guardrails
+Then continue from **Next exact actions**. Do not rediscover completed work.
 
-- **FastAPI Entrypoint**: Entrypoint chính xác là `backend/app/sever.py` (`app.sever:app`). Tuyệt đối **không** đổi tên `sever.py` thành `server.py`.
-- **Locked Python ABI Dependencies** (`backend/requirements.txt`): Giữ nguyên `numpy==1.26.4` (không nâng lên 2.x), `protobuf==3.20.2` (`<4.0.0`), `opencv-python-headless==4.10.0.84`, `pytesseract==0.3.13`.
-- **Backend Layered Flow** (`BACKEND_FLOW_STANDARD.md`): Tuân thủ `Router -> Request Schema -> Service -> Repository -> Model/ORM -> PostgreSQL -> Response Schema`. Router không gọi `AsyncSession` trực tiếp; Service không viết query SQLAlchemy trực tiếp.
-- **Supabase & External Provider Security**:
-  - `bookpages.imagepath` chỉ lưu object path tương đối (tuyệt đối không lưu signed URL tạm thời vào DB).
-  - `SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE_KEY` chỉ được sử dụng ở Backend, không lộ ra frontend (`NEXT_PUBLIC_*`) hay commit `.env*`.
-  - Map lỗi provider ngoài sang mã an toàn (`SPEECH_UNAVAILABLE`, `STT_QUOTA_EXCEEDED`, `UNSUPPORTED_AUDIO`).
-  - Dùng lazy import / `try...except ImportError` cho `paddleocr`, `vietocr`, `torch`, `pytesseract` trong `backend/app/services/ocr_engine.py`.
-- **Quality Gate**: Trước khi kết luận hoàn tất thay đổi mã nguồn, chạy kiểm tra tương ứng theo skill `viread-quality-gate`.
+If the checkpoint already names the next file/action, do **not** run Graphify first. Use Graphify only when a dependency or flow is unknown.
+
+Never reset, discard, or overwrite uncommitted user work.
+
+## 4. Graphify
+
+When architecture/file ownership is unknown and `graphify-out/graph.json` exists, query before broad grep/search:
+
+```powershell
+.\.venv\Scripts\python.exe -m graphify query "<specific question>" --budget 600
+```
+
+Use `graphify path` / `graphify explain` for relationships or focused concepts.
+
+Do **not** rebuild/update Graphify after every edit. Run `graphify update .` only:
+- after a meaningful milestone;
+- before creating/updating a handoff checkpoint;
+- before commit/merge when source changed.
+
+## 5. Skill routing defaults
+
+Prefer the smallest non-overlapping set:
+- Backend: `fastapi` **or** `fastapi-expert` (not both unless necessary).
+- Supabase/Postgres: `supabase`; add `supabase-postgres-best-practices` only for DB/query/schema work.
+- Auth/security: `auth-implementation-patterns`; add security review only when trust boundaries change.
+- Frontend: `nextjs-app-router-patterns` or the most relevant React skill.
+- Figma/UI: usually `figma-design-to-code` + at most one visual/design skill.
+- Vietnamese OCR: prefer one project-specific OCR skill, not both by default.
+- Child reading/speech: `viread-reading-assessment`.
+- Android/APK: `viread-android-apk` or `viread-android-build`.
+- Debugging: `systematic-debugging` only for non-obvious bugs.
+- Testing skills are loaded only when their layer is reached.
+
+Before claiming source-code work complete, run the appropriate `viread-quality-gate` and `verification-before-completion`; do not load them at task start.
+
+## 6. ViRead critical guardrails
+
+- FastAPI entrypoint is `backend/app/sever.py` (`app.sever:app`). Never rename it to `server.py`.
+- Keep locked Python ABI dependencies in `backend/requirements.txt`: `numpy==1.26.4`, `protobuf==3.20.2`, `opencv-python-headless==4.10.0.84`, `pytesseract==0.3.13`.
+- Backend flow: `Router -> Request Schema -> Service -> Repository -> Model/ORM -> PostgreSQL -> Response Schema`.
+- `bookpages.imagepath` stores relative object paths only; never persist signed URLs.
+- Supabase secret/service-role keys remain backend-only and never enter `NEXT_PUBLIC_*`.
+- Map provider failures to safe application codes such as `SPEECH_UNAVAILABLE`, `STT_QUOTA_EXCEEDED`, `UNSUPPORTED_AUDIO`.
+- Keep OCR heavy dependencies lazy-imported / guarded in `backend/app/services/ocr_engine.py`.
