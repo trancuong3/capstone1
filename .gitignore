@@ -96,3 +96,6 @@ frontend/.next/
 # Local OCR language models
 tessdata/
 **/tessdata/
+
+# Local Graphify generated state
+graphify-out/

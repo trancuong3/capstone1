@@ -1,0 +1,26 @@
+# Keep Graphify focused on application/project source, not agent infrastructure.
+.agent-library/
+.agents/
+.codex/
+graphify-out/
+AGENTS.md
+**/AGENTS.md
+skills-lock.json
+
+# Keep secrets, dependencies, caches and generated output out even on older Graphify builds.
+.env
+.env.*
+**/.env
+**/.env.*
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+venv/
+**/venv/
+.next/
+**/.next/
+coverage/
+playwright-report/
+test-results/
+artifacts/
