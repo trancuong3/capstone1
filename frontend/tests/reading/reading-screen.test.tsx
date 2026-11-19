@@ -545,6 +545,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await act(async () => vi.advanceTimersByTimeAsync(8999));
         expect(speechPlayerMock.play).not.toHaveBeenCalled();
         await act(async () => vi.advanceTimersByTimeAsync(1));
+        // The silence threshold starts an async recorder-to-TTS handoff.
+        // Allow its bounded recorder stop to finish before inspecting playback.
+        await act(async () => vi.advanceTimersByTimeAsync(1_500));
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
           wordSample: true,
         });
