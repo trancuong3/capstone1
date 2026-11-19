@@ -88,6 +88,10 @@ for manifest in library_files:
         library_casefold[folded] = name
         library_names.add(name)
 
+missing_project_local = PROJECT_LOCAL_SKILLS - library_names
+if missing_project_local:
+    errors.append(f"missing project-local lazy skills: {sorted(missing_project_local)}")
+
 for manifest in gateway_files:
     text = manifest.read_text(encoding="utf-8")
     folder = manifest.parent.name
