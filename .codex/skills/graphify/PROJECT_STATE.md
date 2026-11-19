@@ -28,38 +28,51 @@ Do not infer implementation details or test status beyond what Git history prove
 
 ## Active task checkpoint
 
-Status: **NO ACTIVE CHECKPOINT RECORDED YET**
-
-The next coding agent must replace this section once it completes the first meaningful milestone.
+Status: **COMMITTED_MAIN**
 
 ### Goal
-- Not set.
+- Make repository agents automatically select and use the smallest relevant skill set even when prompts do not name skills.
 
 ### Completed
-- Not set.
+- Added project skill `viread-skill-router`.
+- Registered both `.codex/skills` and `.agents/skills` in `.agents/skills.json`.
+- Added mandatory Automatic Skill Routing rules to `AGENTS.md`.
+- Kept Graphify as the first discovery layer and quality-gate/verification skills as completion gates.
 
 ### Files changed
-- Not set.
+- `.agents/skills/viread-skill-router/SKILL.md`
+- `.agents/skills.json`
+- `AGENTS.md`
+- `.codex/skills/graphify/PROJECT_STATE.md`
 
 ### Tests / verification
-- Not set.
+- Verified the router skill exists on `main`.
+- Verified `.agents/skills.json` discovers both project skill roots.
+- Verified `AGENTS.md` contains mandatory automatic routing rules.
 
 ### Known issues
-- Not set.
+- Skill choice is still model/agent driven; no system can guarantee perfect routing for every ambiguous prompt.
+- Generic harnesses that ignore both `AGENTS.md` and repository skill discovery may not follow these rules.
 
 ### Decisions that must not be revisited without evidence
-- Follow `AGENTS.md`.
-- Query Graphify before broad source browsing.
+- Do not require users to name skills in normal prompts.
+- Do not load all skills; select the smallest relevant set.
+- Project-specific `viread-*` skills take precedence over overlapping generic skills.
+- Graphify remains mandatory for codebase discovery when the graph exists.
 - Do not discard or overwrite uncommitted user work.
-- Do not assume local/unpushed work exists on `main`.
 
 ### Next exact actions
-1. Run `git status --short`.
-2. If the tree is clean, run `git pull --ff-only origin main`.
-3. If the tree is dirty, preserve local changes; do not reset or overwrite them.
-4. Read this file.
-5. Run `git log -5 --oneline`.
-6. Continue from the active task checkpoint. If the checkpoint is missing/stale, use one narrow Graphify query before reading source files.
+1. On the next coding task, agent should read `AGENTS.md` and invoke `viread-skill-router` automatically.
+2. Classify the prompt domain and load only relevant skill instructions.
+3. Use Graphify before broad code browsing.
+4. Run focused tests, then `viread-quality-gate` and `verification-before-completion`.
+5. Update this checkpoint before stopping if the next task becomes long-running.
+
+### Latest relevant commits
+- `8e8de258` — add `viread-skill-router`.
+- `a9cd47a7` — enable project skill auto-discovery.
+- `3f53a2dc` — enforce automatic skill routing in `AGENTS.md`.
+- Location: `COMMITTED_MAIN`
 
 ## Handoff update contract
 
