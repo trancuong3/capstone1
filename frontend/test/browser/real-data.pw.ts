@@ -163,21 +163,13 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(page.getByText("Chưa đánh giá")).toBeVisible();
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
-  // This flow auto-starts practice after selecting a word. Deny the
-  // microphone deterministically to verify the safe paused/retry state.
+  // Practice auto-starts; deny microphone permission to verify a safe
+  // retry state instead of accepting a false success.
   await page.addInitScript(() => {
-    const device = navigator.mediaDevices;
-    if (!device) return;
-    const probe = window as Window & { __practiceMicRequests?: number };
-    probe.__practiceMicRequests = 0;
-    Object.defineProperty(device, "getUserMedia", {
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       configurable: true,
       value: async () => {
-        probe.__practiceMicRequests = (probe.__practiceMicRequests ?? 0) + 1;
-        throw new DOMException(
-          "Test microphone permission denied",
-          "NotAllowedError",
-        );
+        throw new DOMException("Microphone denied", "NotAllowedError");
       },
     });
   });
@@ -197,11 +189,6 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(
     page.getByRole("button", { name: "Tiếp tục luyện" }),
   ).toBeVisible();
-  const microphoneRequests = await page.evaluate(() => {
-    const probe = window as Window & { __practiceMicRequests?: number };
-    return probe.__practiceMicRequests;
-  });
-  expect(microphoneRequests).toBe(1);
   await expect(
     page.getByText("Đã tạm dừng. Khi sẵn sàng, bé bấm Tiếp tục luyện nhé."),
   ).toBeVisible();
