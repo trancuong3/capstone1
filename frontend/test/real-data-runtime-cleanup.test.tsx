@@ -18,11 +18,12 @@ const { routePushMock, routeReplaceMock } = vi.hoisted(() => ({
   routePushMock: vi.fn(),
   routeReplaceMock: vi.fn(),
 }));
-vi.mock("next/navigation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/navigation")>();
+vi.mock("next/navigation", () => {
   return {
-    ...actual,
     useRouter: () => ({ push: routePushMock, replace: routeReplaceMock }),
+    usePathname: () => "/",
+    useSearchParams: () => new URLSearchParams(),
+    useParams: () => ({}),
   };
 });
 
@@ -159,6 +160,9 @@ describe("Phase 5 real-data runtime cleanup", () => {
     );
     expect(
       screen.getByRole("heading", { name: "Tạo sách mới" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Sách chưa được đưa vào thư viện trẻ em"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("textbox", { name: "Tên sách *" }),

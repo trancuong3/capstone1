@@ -146,10 +146,20 @@ def _sha256_path(path: str) -> str:
     return digest.hexdigest()
 
 
-def _active_viread_model() -> dict[str, Any] | None:
-    """Return the pointer last refreshed by the background registry worker."""
+def set_active_viread_model_cache(item: dict[str, Any] | None) -> None:
+    """Immediately update the in-memory active model cache after an Admin decision."""
+    global _active_model_info_cache
     with _active_model_cache_lock:
-        return _active_model_info_cache[1]
+        _active_model_info_cache = (__import__("time").monotonic(), item)
+
+
+def _active_viread_model() -> dict[str, Any] | None:
+    """Return cached pointer; fetch once lazily on first OCR request if never loaded."""
+    with _active_model_cache_lock:
+        ts, cached = _active_model_info_cache
+    if ts == 0.0:
+        return refresh_active_viread_model()
+    return cached
 
 
 def refresh_active_viread_model() -> dict[str, Any] | None:
@@ -186,11 +196,13 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
         return cached
 
 
-def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 15) -> None:
-    """Poll the registry away from request threads and retain the last good pointer."""
+def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 300) -> None:
+    """Poll the registry calmly and only after OCR dependencies have been activated."""
+    interval = max(30, int(os.getenv("VIREAD_ACTIVE_MODEL_POLL_SECONDS", str(poll_seconds))))
     while not stop_event.is_set():
-        refresh_active_viread_model()
-        stop_event.wait(poll_seconds)
+        if _ocr_dependencies_loaded:
+            refresh_active_viread_model()
+        stop_event.wait(interval)
 
 
 def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:

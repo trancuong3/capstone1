@@ -359,6 +359,14 @@ class ReadingContentService:
                 detail="ChildId and BookId are required",
             )
         await self.require_owned_child(child_id, actor_id)
+        if not await self.repository.book_is_eligible(book_id):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                    "message": "Sách chưa được phép sử dụng cho trẻ; OCR hoặc Child Safety chưa hoàn tất trên toàn bộ nội dung hiện tại.",
+                },
+            )
 
         page_id = payload.SelectedPageId or payload.selected_page_id
         requested_revision_id = (

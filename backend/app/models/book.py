@@ -46,6 +46,7 @@ class PageRevision(Base):
     PageId = Column("pageid", UUID(as_uuid=True), ForeignKey("bookpages.id", ondelete="CASCADE"), nullable=False)
     RevisionNo = Column("revisionno", String, nullable=False)
     VerificationStatus = Column("verificationstatus", String, nullable=False)
+    OriginalOcrText = Column("originalocrtext", String)
     VerifiedText = Column("verifiedtext", String)
     DraftText = Column("drafttext", String)
     ContentHash = Column("contenthash", String, nullable=False)

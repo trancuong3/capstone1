@@ -270,6 +270,7 @@ class AdminRevisionDetailRead(BaseModel):
     revision_no: int = Field(gt=0)
     verification_status: Literal["PROCESSING", "NEEDS_REVIEW", "VERIFIED"]
     lifecycle_status: Literal["ACTIVE", "RETIRED"]
+    original_ocr_text: str | None = None
     draft_text: str | None
     words: list[AdminRevisionWordRead]
     ocr_metadata: dict[str, object]

@@ -19,11 +19,11 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import Book, BookPage, PageRevision
+from app.models import AdminAiWorkflow, Book, BookPage, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import (
     AdminOcrDraftRequest,
@@ -59,6 +59,7 @@ from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
 from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
+from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
 logger = logging.getLogger(__name__)
@@ -1561,15 +1562,15 @@ class AdminOcrService:
                     PageId=page_id,
                     RevisionNo="1",
                     VerificationStatus="NEEDS_REVIEW",
+                    OriginalOcrText=text_value,
                     VerifiedText=None,
                     DraftText=text_value,
                     ContentHash=content_hash,
                     ProcessingMeta=metadata,
+                    CreatedAt=datetime.now(timezone.utc),
                 )
                 self.repo.stage_page_revision_bundle(page, revision, words)
                 await self.repo.flush()
-                await self.db.refresh(page)
-                await self.db.refresh(revision)
                 result = await self.revision_detail(page, revision)
                 assigned_page_number = int(page.PageNumber)
                 await self.db.commit()
@@ -1979,15 +1980,15 @@ class AdminOcrService:
                 PageId=current_page.Id,
                 RevisionNo=str(next_number),
                 VerificationStatus="NEEDS_REVIEW",
+                OriginalOcrText=text_value,
                 VerifiedText=None,
                 DraftText=text_value,
                 ContentHash=content_hash,
                 ProcessingMeta=processing_meta,
+                CreatedAt=datetime.now(timezone.utc),
             )
             self.repo.stage_revision_bundle(revision, words)
             await self.repo.flush()
-            await self.db.refresh(revision)
-            await self.db.refresh(current_page)
             result = await self.revision_detail(current_page, revision)
 
             commit_started = True
@@ -2243,6 +2244,14 @@ class AdminOcrService:
         return AdminRevisionDetailRead(
             page_id=page.Id, page_revision_id=revision.Id, revision_no=int(raw_revision),
             verification_status=revision.VerificationStatus, lifecycle_status=page.LifecycleStatus,
+            original_ocr_text=(
+                unicodedata.normalize("NFC", original_ocr_text)
+                if isinstance(
+                    original_ocr_text := getattr(revision, "OriginalOcrText", None),
+                    str,
+                )
+                else None
+            ),
             draft_text=unicodedata.normalize("NFC", revision.DraftText if revision.DraftText is not None else (revision.VerifiedText or "")),
             words=words, ocr_metadata=metadata, created_at=revision.CreatedAt,
             verified_at=revision.VerifiedAt, verified_by=revision.VerifiedBy,
@@ -2317,6 +2326,8 @@ class AdminOcrService:
                 )
         if proofread.mode == "MANUAL_FALLBACK" and checked_text != corrected_text:
             raise HTTPException(status_code=422, detail="Manual fallback audit must describe the exact text being verified")
+        if proofread.mode == "ADMIN_EDITED" and checked_text != corrected_text:
+            raise HTTPException(status_code=422, detail="Admin-edited audit must describe the exact final text")
         return decisions
 
     async def create_edit_draft(
@@ -2461,6 +2472,7 @@ class AdminOcrService:
             PageId=page.Id,
             RevisionNo=str(next_number),
             VerificationStatus="NEEDS_REVIEW",
+            OriginalOcrText=text_value,
             VerifiedText=None,
             DraftText=text_value,
             ContentHash=hashlib.sha256(
@@ -2479,12 +2491,13 @@ class AdminOcrService:
                 "word_evidence_v2_authoritative": True,
                 "ocr_score_contract": score_contract,
             },
+            CreatedAt=datetime.now(timezone.utc),
         )
         try:
             self.repo.stage_revision_bundle(revision, words)
+            if isinstance(self.db, AsyncSession):
+                await self.repo.flush()
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except IntegrityError as exc:
             await self.db.rollback()
             raise HTTPException(status_code=409, detail="A concurrent edit created this revision number; retry") from exc
@@ -2531,8 +2544,6 @@ class AdminOcrService:
                 content_hash=content_hash,
             )
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except Exception:
             await self.db.rollback()
             raise
@@ -2561,6 +2572,20 @@ class AdminOcrService:
         proofread = payload.proofread_audit
         checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
         decisions = self._validate_proofread_final(proofread, corrected_text)
+        workflow = None
+        workflow_text_hash = safety_content_hash(corrected_text)
+        if payload.workflow_id is not None:
+            workflow = await self.db.scalar(
+                select(AdminAiWorkflow)
+                .where(
+                    AdminAiWorkflow.Id == payload.workflow_id,
+                    AdminAiWorkflow.PageId == page.Id,
+                )
+                .with_for_update()
+            )
+            if workflow is None or workflow.PageRevisionId != revision.Id:
+                raise HTTPException(status_code=404, detail="AI workflow does not belong to this revision")
+            self._validate_ai_workflow_for_verification(workflow, workflow_text_hash)
         content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -2612,6 +2637,8 @@ class AdminOcrService:
                     if proofread.mode == "AI_CHECKED" and not decisions
                     else "ADMIN_REVIEWED"
                     if proofread.mode == "AI_CHECKED"
+                    else "ADMIN_EDITED_AFTER_AI_REVIEW"
+                    if proofread.mode == "ADMIN_EDITED"
                     else "MANUAL_FALLBACK"
                 ),
                 "source_revision_id": str(revision.Id),
@@ -2625,6 +2652,32 @@ class AdminOcrService:
                 "reviewed_at": None if automatic_verification else audit_timestamp,
                 "automated_at": audit_timestamp if automatic_verification else None,
             }
+            if workflow is None:
+                # A manual verification must not inherit an earlier workflow
+                # approval marker from this revision's JSON metadata.
+                verification_metadata.pop("admin_ai_workflow", None)
+            if workflow is not None:
+                verification_metadata["admin_ai_workflow"] = {
+                    "workflow_id": str(workflow.Id),
+                    "candidate_hash": workflow_text_hash,
+                    "safety_status": (
+                        "CONFIRMED"
+                        if workflow.SafetyStatus == "CONFIRMED"
+                        and workflow.SafetyInputHash == workflow_text_hash
+                        else "PENDING"
+                    ),
+                    "safety_input_hash": workflow.SafetyInputHash,
+                }
+                workflow.OcrApprovedAt = datetime.now(timezone.utc)
+                workflow.OcrApprovedBy = actor_id
+                workflow.FinalApprovedTextHash = workflow_text_hash
+                workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
+                    "event": "OCR_FINAL_APPROVED",
+                    "actor_id": str(actor_id),
+                    "content_hash": workflow_text_hash,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }]
+                workflow.UpdatedAt = datetime.now(timezone.utc)
             revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
@@ -2671,12 +2724,51 @@ class AdminOcrService:
                 },
             )
             await self.db.commit()
-            await self.db.refresh(revision)
-            await self.db.refresh(page)
         except Exception:
             await self.db.rollback()
             raise
         return await self.revision_detail(page, revision)
+
+    @staticmethod
+    def _validate_ai_workflow_for_verification(
+        workflow: AdminAiWorkflow, candidate_hash: str
+    ) -> None:
+        stored_candidate_hash = (
+            safety_content_hash(workflow.CandidateText)
+            if isinstance(workflow.CandidateText, str)
+            else None
+        )
+        if (
+            workflow.CandidateHash != candidate_hash
+            or stored_candidate_hash != candidate_hash
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Candidate changed; save and wait for the matching review before approval",
+            )
+        if workflow.Status != "READY_FOR_ADMIN_REVIEW":
+            raise HTTPException(
+                status_code=409,
+                detail="AI workflow is not ready for final approval",
+            )
+        if (
+            workflow.SafetyStatus != "CONFIRMED"
+            or workflow.SafetyInputHash != candidate_hash
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Child Safety must be completed and confirmed for the current Candidate",
+            )
+        if workflow.Suitability == "NOT_RECOMMENDED" or any(
+            isinstance(finding, dict) and finding.get("severity") == "HIGH"
+            for finding in workflow.Findings or []
+        ):
+            # The existing workflow has no explicit high-risk override policy.
+            # Fail closed until one is implemented and audited.
+            raise HTTPException(
+                status_code=409,
+                detail="High-risk Safety results require a separate Admin content decision before verification",
+            )
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
         await self.require_admin(actor_id)
@@ -2823,15 +2915,15 @@ class AdminOcrService:
                 PageId=current_page.Id,
                 RevisionNo=str(next_number),
                 VerificationStatus="NEEDS_REVIEW",
+                OriginalOcrText=text_value,
                 VerifiedText=None,
                 DraftText=text_value,
                 ContentHash=content_hash,
                 ProcessingMeta=processing_meta,
+                CreatedAt=datetime.now(timezone.utc),
             )
             self.repo.stage_revision_bundle(revision, words)
             await self.repo.flush()
-            await self.db.refresh(revision)
-            await self.db.refresh(current_page)
             result = await self.revision_detail(current_page, revision)
             await self.db.commit()
             return result
@@ -2960,6 +3052,8 @@ class AdminOcrService:
     async def run_prepared_ai_correction(
         prepared: PreparedLocalOcrCorrection,
         on_progress: Callable[[int, int], None] | None = None,
+        on_provider_event: Callable[[dict[str, object]], None] | None = None,
+        on_uncertain_tokens: Callable[[int, tuple[int, ...]], None] | None = None,
     ) -> str:
         try:
             image_bytes = await run_in_threadpool(
@@ -2975,11 +3069,16 @@ class AdminOcrService:
             ) from exc
 
         try:
+            callbacks: dict[str, object] = {"on_progress": on_progress}
+            if on_provider_event is not None:
+                callbacks["on_provider_event"] = on_provider_event
+            if on_uncertain_tokens is not None:
+                callbacks["on_uncertain_tokens"] = on_uncertain_tokens
             return await OcrCorrectionOrchestrator(prepared.config).correct(
                 prepared.draft_text,
                 image_bytes,
                 list(prepared.word_boxes),
-                on_progress=on_progress,
+                **callbacks,
             )
         except OcrOrchestrationError as exc:
             if exc.code in {"INVALID_CHUNK_PLAN", "WORD_BOX_MISMATCH"}:

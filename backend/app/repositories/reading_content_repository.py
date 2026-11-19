@@ -4,12 +4,14 @@ from uuid import UUID
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.reading_comparison_report import ReadingComparisonReport
 
+from app.database.role_cache import get_cached_profile_role
 from app.models import (
     Book, BookPage, ChildProfile, FluencyAssessment, PageRevision,
-    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
+    PageRevisionWord, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
+from app.repositories.book_repository import CatalogRepository
+from app.models.reading_comparison_report import ReadingComparisonReport
 
 
 class ReadingContentRepository:
@@ -40,7 +42,7 @@ class ReadingContentRepository:
         return None
 
     async def profile_role(self, profile_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def child_belongs_to_parent(self, child_id: UUID, parent_id: UUID) -> bool:
         found = await self.db.scalar(
@@ -60,6 +62,7 @@ class ReadingContentRepository:
                 BookPage.Id == page_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -67,6 +70,16 @@ class ReadingContentRepository:
         if book_id is not None:
             query = query.where(BookPage.BookId == book_id)
         return await self.db.scalar(query)
+
+    async def book_is_eligible(self, book_id: UUID) -> bool:
+        return (
+            await self.db.scalar(
+                select(Book.Id).where(
+                    Book.Id == book_id,
+                    CatalogRepository.eligible_book(),
+                )
+            )
+        ) is not None
 
     async def first_verified_page(self, book_id: UUID) -> BookPage | None:
         return await self.db.scalar(
@@ -77,6 +90,7 @@ class ReadingContentRepository:
                 BookPage.BookId == book_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -103,7 +117,7 @@ class ReadingContentRepository:
         result = await self.db.execute(
             select(PageRevisionWord)
             .where(PageRevisionWord.PageRevisionId == revision_id)
-            .order_by(PageRevisionWord.WordIndex)
+            .order_by(PageRevisionWord.WordIndex, PageRevisionWord.Id)
         )
         return list(result.scalars().all())
 
@@ -135,6 +149,7 @@ class ReadingContentRepository:
                 BookPage.PageNumber <= end_page_number,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
+                CatalogRepository.eligible_book(),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -187,21 +202,32 @@ class ReadingContentRepository:
     async def session_for_update(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .where(ReadingSession.Id == session_id)
+            .where(CatalogRepository.eligible_book())
             .with_for_update()
             .execution_options(populate_existing=True)
         )
 
     async def session(self, session_id: UUID) -> ReadingSession | None:
         return await self.db.scalar(
-            select(ReadingSession).where(ReadingSession.Id == session_id)
+            select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
+            .where(
+                ReadingSession.Id == session_id,
+                CatalogRepository.eligible_book(),
+            )
         )
 
     async def sessions_for_parent(self, parent_id: UUID) -> list[ReadingSession]:
         result = await self.db.execute(
             select(ReadingSession)
+            .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ChildProfile.ParentId == parent_id)
+            .where(
+                ChildProfile.ParentId == parent_id,
+                CatalogRepository.eligible_book(),
+            )
             .order_by(ReadingSession.StartedAt.desc(), ReadingSession.Id.desc())
         )
         return list(result.scalars().all())
@@ -227,8 +253,6 @@ class ReadingContentRepository:
         self, session_id: UUID, page_id: UUID, revision_id: UUID,
         word_id: UUID, event_type: str, attempt: int,
     ) -> ReadingEvent | None:
-        # The caller holds the session row lock until commit, so concurrent
-        # requests using this write path cannot insert the same attempt twice.
         return await self.db.scalar(
             select(ReadingEvent).where(
                 ReadingEvent.SessionId == session_id,

@@ -1,0 +1,45 @@
+# Agent/harness infrastructure is not application architecture.
+.agent-library/
+.agents/
+.codex/
+graphify-out/
+AGENTS.md
+**/AGENTS.md
+skills-lock.json
+scripts/validate_agent_config.py
+
+# Secrets, dependencies, caches and generated output.
+# Duplicated here intentionally for compatibility with older Graphify builds
+# where .graphifyignore could shadow .gitignore.
+.env
+.env.*
+**/.env
+**/.env.*
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+.next/
+**/.next/
+out/
+coverage/
+playwright-report/
+test-results/
+artifacts/
+*.tsbuildinfo
+*.log
+.vercel/
+.turbo/
+.cache/
+.idea/
+.vscode/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+tessdata/
+**/tessdata/

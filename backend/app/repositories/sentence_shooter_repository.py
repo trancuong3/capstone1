@@ -17,6 +17,7 @@ from app.models import (
     PageRevisionWord,
     Profile,
 )
+from app.repositories.book_repository import CatalogRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,9 +68,8 @@ class SentenceShooterRepository:
         self.db = db
 
     async def profile_role(self, profile_id: UUID) -> str | None:
-        return await self.db.scalar(
-            select(Profile.Role).where(Profile.Id == profile_id)
-        )
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, profile_id)
 
     async def child_owned_by(
         self,
@@ -100,7 +100,7 @@ class SentenceShooterRepository:
                 Book.MinGrade,
                 Book.MaxGrade,
                 Book.LifecycleStatus,
-            ).where(Book.Id == book_id)
+            ).where(Book.Id == book_id, CatalogRepository.eligible_book())
         )
         row = result.one_or_none()
         if row is None:
@@ -152,6 +152,7 @@ class SentenceShooterRepository:
                 BookPage.LifecycleStatus == "ACTIVE",
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
+                CatalogRepository.eligible_book(),
             )
             .order_by(Book.Id, BookPage.PageNumber, BookPage.Id)
         )
@@ -228,10 +229,12 @@ class SentenceShooterRepository:
     ) -> GameSession | None:
         query = (
             select(GameSession)
+            .join(Book, Book.Id == GameSession.BookId)
             .join(ChildProfile, ChildProfile.Id == GameSession.ChildProfileId)
             .where(
                 GameSession.Id == session_id,
                 ChildProfile.ParentId == parent_id,
+                CatalogRepository.eligible_book(),
             )
         )
         if lock:

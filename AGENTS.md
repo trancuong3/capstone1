@@ -1,33 +1,13 @@
-## graphify
+# ViRead Codex — Minimal Rules
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
-
-Rules:
-- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. When the answer is under a Markdown heading, `graphify section "<heading>"` prints that section's text, so the .md need not be opened. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
-
-## Graphify execution on Windows
-- Always run Graphify through the project Python environment.
-- Use `.\.venv\Scripts\python.exe -m graphify` instead of `graphify`.
-- Query the graph before reading large amounts of source code.
-- Keep queries specific and use small token budgets by default.
-- Rebuild the graph after relevant source changes.
-- Do not disable Windows Application Control.
-
-## ViRead Architecture & Critical Guardrails
-
-- **FastAPI Entrypoint**: Entrypoint chính xác là `backend/app/sever.py` (`app.sever:app`). Tuyệt đối **không** đổi tên `sever.py` thành `server.py`.
-- **Locked Python ABI Dependencies** (`backend/requirements.txt`): Giữ nguyên `numpy==1.26.4` (không nâng lên 2.x), `protobuf==3.20.2` (`<4.0.0`), `opencv-python-headless==4.10.0.84`, `pytesseract==0.3.13`.
-- **Backend Layered Flow** (`BACKEND_FLOW_STANDARD.md`): Tuân thủ `Router -> Request Schema -> Service -> Repository -> Model/ORM -> PostgreSQL -> Response Schema`. Router không gọi `AsyncSession` trực tiếp; Service không viết query SQLAlchemy trực tiếp.
-- **Supabase & External Provider Security**:
-  - `bookpages.imagepath` chỉ lưu object path tương đối (tuyệt đối không lưu signed URL tạm thời vào DB).
-  - `SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE_KEY` chỉ được sử dụng ở Backend, không lộ ra frontend (`NEXT_PUBLIC_*`) hay commit `.env*`.
-  - Map lỗi provider ngoài sang mã an toàn (`SPEECH_UNAVAILABLE`, `STT_QUOTA_EXCEEDED`, `UNSUPPORTED_AUDIO`).
-  - Dùng lazy import / `try...except ImportError` cho `paddleocr`, `vietocr`, `torch`, `pytesseract` trong `backend/app/services/ocr_engine.py`.
-- **Quality Gate**: Trước khi kết luận hoàn tất thay đổi mã nguồn, chạy kiểm tra tương ứng theo skill `viread-quality-gate`.
+- Preserve dirty work; never reset/clean/discard it unless explicitly asked.
+- Scope rules: before editing `backend/**` or `frontend/**`, ensure that subtree's `AGENTS.md` is in context; if CWD already auto-injected it, do not reread it. Pure text/CSS/local presentational frontend edits do not require Next.js docs; framework/API/routing/rendering/data/config changes do.
+- Known file/symbol → act or exact-search. Unknown flow → exact search first. If a fresh local graph exists, prefer the project venv on Windows: `.\\.venv\\Scripts\\python.exe -m graphify query "<question>" --budget 300` (or another already-working `python -m graphify` invocation), escalating only to 600→1000 when evidence is insufficient. Do not read the full Graphify guide for query-only work; read `.codex/skills/graphify/SKILL.md` only to build/update/export/diagnose Graphify. If no fresh graph exists, do not build one for a single lookup; build only for repeated/structural cross-file discovery and honor `.graphifyignore`. Graph outputs are local/generated state.
+- Skills: use source/project docs first; single-domain ≤1 gateway, multi-domain only what is necessary. Open detailed `.agent-library/<skill>/SKILL.md` only for missing knowledge. Do not reread a loaded skill; after resume/compaction reload only what `NEXT` needs.
+- Rare/non-code workflow with no gateway: try `.agent-library/<skill>/SKILL.md`; if unclear, exact-search `skills-lock.json` by name only. Never scan the whole library.
+- New unrelated task skips `PROJECT_STATE.md`. Resume: checkpoint + `git status --short` + `git diff --name-only` + `git log -3 --oneline`; unchanged verified source/tests/Graphify/root-cause stay valid until relevant Git changes invalidate them. Reused test evidence may guide resume, but it never replaces a fresh scoped final completion gate.
+- Milestones: update only `GOAL/ROOT/VERIFIED/NEXT/DO_NOT_REPEAT/BASE` from active knowledge; never rescan just to checkpoint.
+- Subagents only for independent workstreams/isolated verification, not focused edits.
+- Non-obvious debug → `.agent-library/systematic-debugging/SKILL.md`; completion → `.agent-library/viread-quality-gate/SKILL.md` as the canonical ViRead fresh final gate. Load generic `verification-before-completion` only if the project gate cannot prove the specific claim.
+- Focused failure-only tests first. When agent configuration changes, run `python scripts/validate_agent_config.py`.
+- Never expose secrets/JWT/signed tokens or weaken authorization/RLS.
