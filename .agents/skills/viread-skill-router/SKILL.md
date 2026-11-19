@@ -1,195 +1,63 @@
 ---
 name: viread-skill-router
-description: "Use automatically for every non-trivial ReadAlong Vision task, even when the user does not mention skills. Before research, debugging, coding, review, testing, Supabase work, OCR/speech work, UI/Figma work, Android work, or architecture changes, classify the task domains and load the smallest relevant set of repository skills. Always use Graphify first for codebase discovery when graphify-out exists. Before declaring code changes complete, use viread-quality-gate and verification-before-completion. Skip only trivial chat/formatting or when the user explicitly asks not to use skills."
+description: "Use for complex, cross-layer, or ambiguous ReadAlong Vision tasks (T2/T3), especially when more than one domain is involved. Classify the task and choose the smallest relevant skill set. Do not use for trivial T0 edits or ordinary focused T1 tasks when one obvious domain skill is enough. Optimize for minimum token/context usage."
 ---
 
-# ViRead Automatic Skill Router
+# ViRead Skill Router — Token-Minimal
 
-This skill is the project-level skill dispatcher for ReadAlong Vision.
+Use this skill only for **T2/T3** work or when the correct domain skill is unclear.
 
-## Core rule
+## Classification
 
-For every non-trivial task, select and use the smallest relevant skill set even when the user does not name any skill.
+- **T0**: tiny known edit → 0 skills, 0 Graphify.
+- **T1**: one clear module/domain → at most 1 domain skill; Graphify only if file/flow is unknown.
+- **T2**: several files/layers → this router + at most 3 domain skills.
+- **T3**: cross-cutting architecture → this router + at most 5 necessary skills.
 
-Do not ask the user which skill to use when the task domain is clear.
+Never load every installed skill.
 
-Do not load every installed skill. Skill selection must reduce token usage, not increase it.
+## Routing
 
-## Mandatory order
+Choose only what the task actually needs:
 
-1. Read the task and classify its domains.
-2. Read `AGENTS.md` and obey all project guardrails.
-3. If `graphify-out/graph.json` exists and the task concerns the codebase, query Graphify before broad grep/search/source reads.
-4. Select only the relevant repository skills.
-5. Use those skills while implementing/researching.
-6. Run the smallest relevant tests first.
-7. Before claiming code work is complete, use:
-   - `viread-quality-gate`
-   - `verification-before-completion`
-8. After relevant source changes, run `graphify update .`.
+- FastAPI/backend → `fastapi` OR `fastapi-expert`.
+- Async/concurrency → add `async-python-patterns` only if relevant.
+- Supabase → `supabase`; add `supabase-postgres-best-practices` only for DB/query/schema work.
+- SQLAlchemy/migrations → `sqlalchemy-alembic-expert-best-practices-code-review`.
+- Auth/authorization → `auth-implementation-patterns`; add `secure-code-guardian` only for security-boundary changes.
+- Next.js/frontend → `nextjs-app-router-patterns` or the most relevant React skill.
+- Forms/validation → `react-hook-form`, `zod` only when present in the affected code.
+- Figma/UI → `figma-design-to-code` + at most one of `frontend-design` / `ui-ux-pro-max`.
+- Vietnamese OCR → prefer one project-specific OCR skill.
+- Child reading/speech → `viread-reading-assessment`.
+- Android/APK → `viread-android-apk` OR `viread-android-build`.
+- Non-obvious bug → `systematic-debugging`.
+- Tests → load only the testing skill for the affected layer.
+- Completion → `viread-quality-gate` + `verification-before-completion` only at the end.
 
-## Routing table
+## Graphify rule
 
-### Backend / FastAPI / Python
-Prefer:
-- `fastapi`
-- `fastapi-expert`
-- `async-python-patterns` when async/concurrency is involved
-- `python-error-handling` for failure/retry behavior
-- `python-performance-optimization` for performance work
-- `pydantic` for request/response model work
+If the prompt/checkpoint already names the exact file or next action, read that file directly.
 
-### Supabase / PostgreSQL / quota / storage / auth
-Prefer:
-- `supabase`
-- `supabase-postgres-best-practices`
-- `postgresql-table-design` for schema/index work
-- `sqlalchemy-alembic-expert-best-practices-code-review` for ORM/migrations
-- `auth-implementation-patterns` for authentication/authorization
-- `secure-code-guardian` and/or `owasp-top-10` when security boundaries change
+Otherwise, when architecture/file ownership is unknown and `graphify-out/graph.json` exists, run one narrow query with **600-token budget**. Increase only if necessary, never above 1500 for routine work.
 
-### Authentication / authorization / Parent-Admin isolation
-Prefer:
-- `auth-implementation-patterns`
-- `secure-code-guardian`
-- `owasp-top-10`
-- plus backend/database skills relevant to the implementation
+Do not open `GRAPH_REPORT.md` for focused tasks.
 
-### React / Next.js / frontend
-Prefer:
-- `nextjs-app-router-patterns`
-- `vercel-react-best-practices`
-- `typescript-advanced-types` when types are complex
-- `zod` or `zod-4` for validation
-- `react-hook-form` for forms
-- `frontend-a11y` for accessibility
+## Resume rule
 
-### UI / UX / Figma
-Prefer:
-- `figma-design-to-code` when implementing from Figma
-- `frontend-design`
-- `ui-ux-pro-max`
-- `design-system`
-- `ui-styling`
-- `tailwind-design-system` / `tailwind-4-docs` when Tailwind is involved
-- `web-design-guidelines` for visual quality review
+For "continue/resume/làm tiếp":
+1. read `.codex/skills/graphify/PROJECT_STATE.md`;
+2. inspect `git status --short`, `git diff --name-only`, `git log -3 --oneline`;
+3. continue from **Next exact actions**;
+4. do not Graphify or rediscover already-known work unless the checkpoint is stale/incomplete.
 
-### Vietnamese OCR
-Prefer project-specific skills first:
-- `viread-ocr-vietnamese`
-- `viread-vietnamese-ocr`
-Then add only what is needed:
-- Python/FastAPI/performance/testing skills
+## Context discipline
 
-### Reading assessment / child speech flow
-Prefer:
-- `viread-reading-assessment`
-- `systematic-debugging` for recognition/state bugs
-- relevant FastAPI/React/testing skills
+- Read smallest source ranges.
+- Summarize test/log output.
+- Focused tests before full suites.
+- No repeated architecture explanation.
+- No duplicate overlapping skills unless evidence requires both.
+- Update Graphify/checkpoint at meaningful milestones, not after every edit.
 
-### Android / APK / Expo
-Prefer:
-- `viread-android-apk`
-- `viread-android-build`
-- `expo-router`
-- `expo-data-fetching`
-- `expo-native-ui`
-- `expo-design-system`
-- `expo-web-to-native` only when porting web UI
-
-### Architecture / cross-cutting refactors
-Prefer:
-- `viread-architecture`
-- `differential-review`
-- `systematic-debugging`
-- `planning-with-files` or `writing-plans` only when the task genuinely needs a plan
-- `dispatching-parallel-agents` / `subagent-driven-development` only when parallel work has clear value
-
-### Debugging
-Prefer:
-- `systematic-debugging`
-- domain-specific skill(s)
-- `python-error-handling` or frontend testing skills as appropriate
-
-### Testing
-Choose by layer:
-- `python-testing-patterns`
-- `pytest-coverage`
-- `vitest`
-- `e2e-testing-patterns`
-- `playwright-best-practices`
-- `playwright-cli`
-- `webapp-testing`
-
-Do not load all testing skills unless the task spans all those layers.
-
-### Code review / finishing work
-Prefer:
-- `differential-review`
-- `requesting-code-review` / `receiving-code-review` when applicable
-- `verification-before-completion`
-- `viread-quality-gate`
-
-### Git/worktree workflow
-Prefer:
-- `using-git-worktrees`
-- `finishing-a-development-branch`
-
-## Token-efficiency rules
-
-- Never read all SKILL.md files "just in case".
-- Match using skill name + description first.
-- Load full skill instructions only for selected skills.
-- Prefer one project-specific skill over several generic overlapping skills when it fully covers the task.
-- Use Graphify to locate code before raw repository scans.
-- Use the continuation checkpoint in `.codex/skills/graphify/PROJECT_STATE.md` for resume/continue tasks.
-- When resuming after token/rate-limit recovery, do not rediscover completed work.
-
-## Examples
-
-User: "Sửa lỗi Parent upload sách"
-Use approximately:
-- graphify
-- viread-skill-router
-- fastapi / fastapi-expert
-- auth-implementation-patterns
-- nextjs-app-router-patterns
-- relevant testing skill
-- viread-quality-gate + verification-before-completion
-
-User: "Tối ưu Supabase egress"
-Use approximately:
-- graphify
-- viread-skill-router
-- supabase
-- supabase-postgres-best-practices
-- python-performance-optimization
-- systematic-debugging
-- verification-before-completion
-
-User: "Làm giao diện giống Figma"
-Use approximately:
-- graphify
-- viread-skill-router
-- figma-design-to-code
-- frontend-design
-- relevant React/Next.js skill
-- frontend-a11y
-- viread-quality-gate
-
-User: "Sửa nhận diện đọc tiếng Việt của bé"
-Use approximately:
-- graphify
-- viread-skill-router
-- viread-reading-assessment
-- systematic-debugging
-- relevant backend/frontend/testing skills
-- viread-quality-gate
-
-## Conflict rule
-
-If two skills disagree:
-1. System/developer/user instructions win.
-2. `AGENTS.md` project guardrails win over generic skill advice.
-3. Project-specific `viread-*` skill guidance wins over generic skill guidance when both address the same project behavior.
-4. Prefer the safer, narrower change.
+Project rules in `AGENTS.md` override generic skill advice.
