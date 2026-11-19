@@ -587,10 +587,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       } finally {
         vi.useRealTimers();
       }
-      expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
-        wordSample: true,
+      // The silence timer only initiates the async recorder -> STT -> TTS
+      // handoff. Wait for its real completion, not just the timer callback.
+      await waitFor(() => {
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+          wordSample: true,
+        });
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
       });
-      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
       const user = userEvent.setup();
       await user.click(
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
