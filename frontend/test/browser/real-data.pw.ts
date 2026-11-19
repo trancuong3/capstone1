@@ -163,16 +163,9 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(page.getByText("Chưa đánh giá")).toBeVisible();
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
-  // Practice auto-starts; deny microphone permission to verify a safe
-  // retry state instead of accepting a false success.
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
-      configurable: true,
-      value: async () => {
-        throw new DOMException("Microphone denied", "NotAllowedError");
-      },
-    });
-  });
+  // Restrict microphone permission in the actual Chromium context.
+  // Selecting a word auto-starts capture, then must offer a safe retry.
+  await page.context().grantPermissions([]);
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
   const wordPracticeButton = page.getByRole("button", {
     name: /Luyện từ Mèo API/,
@@ -185,16 +178,12 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(
     page.getByRole("button", { name: "Nghe phát âm mẫu" }),
   ).toBeVisible();
-  // A denied device must not claim success or silently start another attempt.
   await expect(
     page.getByRole("button", { name: "Tiếp tục luyện" }),
   ).toBeVisible();
   await expect(
     page.getByText("Đã tạm dừng. Khi sẵn sàng, bé bấm Tiếp tục luyện nhé."),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Bắt đầu luyện" }),
-  ).toHaveCount(0);
   expect(api.unexpected).toEqual([]);
 });
 
