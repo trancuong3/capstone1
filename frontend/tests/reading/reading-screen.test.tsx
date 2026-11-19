@@ -410,6 +410,201 @@ function renderReading(
 }
 
 describe("ReadingScreen presentation with typed test-local service responses", () => {
+  describe("continuous passage help", () => {
+    class Recognition {
+      static instances: Recognition[] = [];
+      onend: (() => void) | null = null;
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: {
+              isFinal: boolean;
+              0: { transcript: string; confidence: number };
+            }[];
+          }) => void)
+        | null = null;
+      constructor() {
+        Recognition.instances.push(this);
+      }
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+      say(texts: string[], isFinal = true, confidence = 0.95) {
+        this.onresult?.({
+          resultIndex: 0,
+          results: texts.map((transcript) => ({
+            isFinal,
+            0: { transcript, confidence },
+          })),
+        });
+      }
+    }
+    beforeEach(() => {
+      Recognition.instances.length = 0;
+      Object.defineProperty(window, "SpeechRecognition", {
+        configurable: true,
+        value: Recognition,
+      });
+    });
+
+    it("retains preceding read words, models the next word, resumes and excludes a repeated help command from first-pass scoring", async () => {
+      const user = userEvent.setup();
+      renderReading("reading");
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Bé đọc với nhận diện giọng nói",
+        }),
+      );
+      const first = Recognition.instances[0];
+      act(() => first.say(["con không biết"], false));
+      expect(speechPlayerMock.play).not.toHaveBeenCalled();
+      act(() => first.say(["Bé mèo", "Con không biết đọc từ này ạ."]));
+      await waitFor(() => expect(Recognition.instances).toHaveLength(2));
+      expect(speechPlayerMock.play.mock.calls).toEqual([
+        ["Cô đọc mẫu cho con nhé."],
+        ["nhỏ", { wordSample: true }],
+        ["Đến lượt con đọc nhé."],
+      ]);
+      expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+      await act(async () => Recognition.instances[1].say(["con không biết"]));
+      expect(speechPlayerMock.play).toHaveBeenCalledTimes(3);
+      expect(Recognition.instances).toHaveLength(2);
+      await user.click(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Lưu và dừng" }),
+      );
+      await waitFor(() => expect(compareTranscriptMock).toHaveBeenCalledOnce());
+      expect(compareTranscriptMock.mock.calls[0][1]).toBe("Bé mèo");
+      expect(compareTranscriptMock.mock.calls[0][3].initial_assessment).toEqual(
+        assessmentFor(pageFour, [
+          "CORRECT",
+          "CORRECT",
+          "UNCERTAIN",
+          "UNCERTAIN",
+        ]),
+      );
+      expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+    });
+
+    it("reads the same phrase as passage text when it is expected", async () => {
+      const words = ["Con", "không", "biết", "bay"];
+      services.readingService.getCurrentPage.mockResolvedValue({
+        ...pageFour,
+        words: pageFour.words.map((word, index) => ({
+          ...word,
+          text: words[index],
+        })),
+      });
+      const user = userEvent.setup();
+      renderReading("reading");
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Bé đọc với nhận diện giọng nói",
+        }),
+      );
+      act(() => Recognition.instances[0].say(["Con không biết"]));
+      expect(speechPlayerMock.play).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "biết" })).toHaveClass(
+        "bg-success-surface",
+      );
+      expect(speechRecorderMock.stop).not.toHaveBeenCalled();
+    });
+
+    it("uses the final browser words when quiet windows trigger passage help", async () => {
+      renderReading("reading");
+      const start = await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      });
+      vi.useFakeTimers();
+      try {
+        await act(async () => fireEvent.click(start));
+        act(() => Recognition.instances[0].say(["Bé mèo"]));
+        await act(async () => vi.advanceTimersByTimeAsync(9_200));
+        expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {
+          wordSample: true,
+        });
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("offers one model after two quiet windows, then leaves the mic off after another quiet turn", async () => {
+      renderReading("reading");
+      const start = await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      });
+      speechRecorderMock.stop.mockResolvedValue(null);
+      vi.useFakeTimers();
+      try {
+        await act(async () => fireEvent.click(start));
+        await act(async () => vi.advanceTimersByTimeAsync(8999));
+        expect(speechPlayerMock.play).not.toHaveBeenCalled();
+        await act(async () => vi.advanceTimersByTimeAsync(1));
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+          wordSample: true,
+        });
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+        await act(async () => vi.advanceTimersByTimeAsync(27000));
+        expect(speechPlayerMock.play).toHaveBeenCalledTimes(3);
+        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+        expect(
+          screen.getByRole("button", {
+            name: "Bé đọc với nhận diện giọng nói",
+          }),
+        ).toBeEnabled();
+        expect(compareTranscriptMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("filters an exact recorder-only help request before reporting and accepts the child's next utterance", async () => {
+      Reflect.deleteProperty(window, "SpeechRecognition");
+      speechServiceMock.transcribe
+        .mockResolvedValueOnce({
+          text: "Con không biết đọc.",
+          language_code: "vie",
+          words: null,
+        })
+        .mockResolvedValueOnce({
+          text: "Bé mèo nhỏ đang",
+          language_code: "vie",
+          words: null,
+        });
+      renderReading("reading");
+      const start = await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      });
+      vi.useFakeTimers();
+      try {
+        await act(async () => fireEvent.click(start));
+        await act(async () => vi.advanceTimersByTimeAsync(9000));
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+        wordSample: true,
+      });
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+      const user = userEvent.setup();
+      await user.click(
+        screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Lưu và dừng" }),
+      );
+      await waitFor(() => expect(compareTranscriptMock).toHaveBeenCalledOnce());
+      expect(compareTranscriptMock.mock.calls[0][1]).toBe("Bé mèo nhỏ đang");
+      expect(compareTranscriptMock.mock.calls[0][3].initial_assessment).toEqual(
+        assessmentFor(pageFour),
+      );
+    });
+  });
   it("recovers from a live recorder failure without a false transcript or stale listening indicator", async () => {
     const user = userEvent.setup();
     renderReading("reading");
@@ -651,7 +846,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             results: [{ isFinal: true, 0: { transcript: browserText } }],
           }),
         );
-        if (autoPage) await screen.findByLabelText("Trang sách 5");
+        if (autoPage) {
+          await screen.findByLabelText("Trang sách 5");
+          expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+        }
         await waitFor(() =>
           expect(
             screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
@@ -808,6 +1006,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         resultIndex: 0,
         results: [{ isFinal: true, 0: { transcript: "Bé mèo" } }],
       };
+      expect(screen.getByRole("button", { name: "Bé" })).toHaveAttribute(
+        "data-reading-state",
+        "preview-correct",
+      );
+      expect(screen.getByText(/Đã đọc 0\/4 từ/)).toBeInTheDocument();
       act(() => {
         recognition.onresult?.(finalEvent);
         if (duplicate) recognition.onresult?.(finalEvent);
@@ -868,6 +1071,12 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     "wrong-language-keyterm",
     "browser-corroborated-keyterm",
     "pause-retry",
+    "stop-retry-tts-from-settings",
+    "asks-for-help",
+    "strong-browser-service-outage",
+    "browser-error-keeps-recording",
+    "late-browser-final",
+    "silent-help-limit",
   ] as const)(
     "uses recorded Vietnamese STT for retry outcome: %s",
     async (outcome) => {
@@ -879,7 +1088,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
               results: Array<{
                 isFinal: boolean;
                 length: number;
-                0: { transcript: string };
+                0: { transcript: string; confidence?: number };
               }>;
             }) => void)
           | null = null;
@@ -896,6 +1105,21 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
         start() {}
         stop() {
+          if (
+            outcome === "late-browser-final" &&
+            this === FakeSpeechRecognition.instances[1]
+          ) {
+            this.onresult?.({
+              resultIndex: 0,
+              results: [
+                {
+                  isFinal: true,
+                  length: 1,
+                  0: { transcript: "Mèo.", confidence: 0.93 },
+                },
+              ],
+            });
+          }
           this.onend?.();
         }
       }
@@ -993,9 +1217,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
         expect(speechPlayerMock.play).toHaveBeenNthCalledWith(
           1,
-          "Bé hãy đọc lại từ mèo nhé.",
+          "Con nghe từ này nhé.",
         );
-        expect(speechPlayerMock.play).toHaveBeenNthCalledWith(2, "mèo");
+        expect(speechPlayerMock.play).toHaveBeenNthCalledWith(2, "mèo", {
+          wordSample: true,
+        });
       });
       expect(
         screen.queryByRole("button", {
@@ -1008,6 +1234,144 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(FakeSpeechRecognition.instances).toHaveLength(2);
         expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
       });
+
+      if (
+        outcome === "browser-error-keeps-recording" ||
+        outcome === "late-browser-final"
+      ) {
+        speechServiceMock.transcribe.mockClear();
+        speechServiceMock.transcribe.mockResolvedValueOnce({
+          text: "mèo",
+          language_code: "vi",
+          words: [],
+        });
+        if (outcome === "browser-error-keeps-recording") {
+          speechRecorderMock.stop.mockClear();
+          act(() =>
+            FakeSpeechRecognition.instances[1].onerror?.({ error: "network" }),
+          );
+          expect(speechRecorderMock.stop).not.toHaveBeenCalled();
+        }
+        await user.click(
+          screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+        );
+        await waitFor(() =>
+          expect(services.readingService.createRetryEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ status: "CONFIRMED" }),
+          ),
+        );
+        expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(
+          outcome === "late-browser-final" ? 0 : 1,
+        );
+        return;
+      }
+
+      if (outcome === "strong-browser-service-outage") {
+        speechServiceMock.transcribe.mockClear();
+        const event = {
+          resultIndex: 0,
+          results: [
+            {
+              isFinal: true,
+              length: 1,
+              0: { transcript: "mèo", confidence: 0.94 },
+            },
+          ],
+        };
+        act(() => FakeSpeechRecognition.instances.at(-1)?.onresult?.(event));
+        await waitFor(
+          () =>
+            expect(
+              services.readingService.createRetryEvent,
+            ).toHaveBeenCalledWith(
+              expect.objectContaining({
+                status: "CONFIRMED",
+                wordId: pageFour.words[1].word_id,
+              }),
+            ),
+          { timeout: 2000 },
+        );
+        expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+        return;
+      }
+      if (outcome === "asks-for-help" || outcome === "silent-help-limit") {
+        const finishSilentCapture = async () => {
+          speechRecorderMock.stop.mockResolvedValueOnce(null);
+          await user.click(
+            screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+          );
+        };
+        const askForHelp = () =>
+          act(() =>
+            FakeSpeechRecognition.instances.at(-1)?.onresult?.({
+              resultIndex: 0,
+              results: [
+                {
+                  isFinal: true,
+                  length: 1,
+                  0: { transcript: "Con chưa biết từ này." },
+                },
+              ],
+            }),
+          );
+        if (outcome === "silent-help-limit") {
+          await finishSilentCapture();
+          await waitFor(() =>
+            expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
+          );
+          await finishSilentCapture();
+        } else {
+          askForHelp();
+        }
+        await waitFor(() =>
+          expect(speechRecorderMock.start).toHaveBeenCalledTimes(
+            outcome === "silent-help-limit" ? 4 : 3,
+          ),
+        );
+        expect(speechPlayerMock.play.mock.calls.slice(-3)).toEqual([
+          ["Cô đọc mẫu cho con nhé."],
+          ["mèo", { wordSample: true }],
+          ["Đến lượt con đọc nhé."],
+        ]);
+        if (outcome === "silent-help-limit") await finishSilentCapture();
+        else askForHelp();
+        expect(
+          await screen.findByRole("button", { name: "Nghe lại và thử" }),
+        ).toBeEnabled();
+        expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+        return;
+      }
+      if (outcome === "stop-retry-tts-from-settings") {
+        let rejectSamplePlayback!: (error: DOMException) => void;
+        speechPlayerMock.play.mockImplementation(async (text: string) => {
+          if (text === "mèo") {
+            speechPlayerMock.isPlaying = true;
+            return new Promise<void>((_resolve, reject) => {
+              rejectSamplePlayback = reject;
+            });
+          }
+        });
+        speechPlayerMock.stop.mockImplementation(() => {
+          speechPlayerMock.isPlaying = false;
+          rejectSamplePlayback?.(
+            new DOMException("Stopped by child", "AbortError"),
+          );
+        });
+
+        await user.click(
+          screen.getByRole("button", { name: "Nghe mẫu từ cần đọc lại" }),
+        );
+        await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+        await user.click(
+          await screen.findByRole("button", { name: "Dừng nghe thử" }),
+        );
+
+        await waitFor(() =>
+          expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
+        );
+        expect(screen.getByText("Đang nghe bé")).toBeInTheDocument();
+        return;
+      }
 
       if (outcome === "pause-retry") {
         await user.click(
@@ -1041,7 +1405,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       ) {
         speechServiceMock.transcribe
           .mockResolvedValueOnce({
-            text: "mèo",
+            text: outcome === "browser-corroborated-keyterm" ? "" : "mèo",
             language_code: outcome === "wrong-language-keyterm" ? "en" : "vi",
             words: [{ text: "mèo", start: 0, end: 1, logprob: -5 }],
           })
@@ -1067,8 +1431,17 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           act(() =>
             FakeSpeechRecognition.instances[1].onresult?.({
               resultIndex: 0,
-              results: [{ isFinal: true, length: 1, 0: { transcript: "mèo" } }],
+              results: [
+                {
+                  isFinal: true,
+                  length: 1,
+                  0: { transcript: "mèo", confidence: 0.8 },
+                },
+              ],
             }),
+          );
+          await user.click(
+            screen.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
           );
           await waitFor(() =>
             expect(
@@ -1102,9 +1475,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             "bg-success-surface",
           );
         }
-        expect(speechServiceMock.transcribe).toHaveBeenLastCalledWith(
-          expect.any(Blob),
-          expect.objectContaining({ keyterms: ["mèo"] }),
+        const hintedCalls = speechServiceMock.transcribe.mock.calls.filter(
+          ([, options]) => options?.keyterms?.length,
+        );
+        expect(hintedCalls).toHaveLength(
+          outcome === "wrong-language-keyterm" ? 0 : 1,
         );
         return;
       }
@@ -1374,7 +1749,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
       await waitFor(() => {
         expect(speechServiceMock.transcribe).toHaveBeenCalledTimes(
-          outcome === "technical-error" ? 3 : 2,
+          outcome === "technical-error" ? 2 : 1,
         );
         expect(services.readingService.finish).toHaveBeenCalledOnce();
       });
@@ -2358,6 +2733,92 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       },
     );
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+  });
+
+  it("keeps untouched words neutral after an unclear capture and scores later clear speech", async () => {
+    services.readingService.getPageProgress.mockResolvedValue({
+      ...pageProgressFixture,
+      persisted: false,
+    });
+    speechServiceMock.transcribe
+      .mockResolvedValueOnce({ text: "", words: [] })
+      .mockResolvedValueOnce({ text: "mèo nhỏ đan", words: [] });
+    const user = userEvent.setup();
+    renderReading("reading");
+    const start = { name: "Bé đọc với nhận diện giọng nói" };
+    const stop = { name: "Dừng nhận diện giọng nói" };
+    await user.click(await screen.findByRole("button", start));
+    await user.click(await screen.findByRole("button", stop));
+    expect(screen.getByRole("button", { name: "đang" })).toHaveAttribute(
+      "data-reading-state",
+      "unread",
+    );
+    await user.click(await screen.findByRole("button", start));
+    await user.click(await screen.findByRole("button", stop));
+    await user.click(screen.getByRole("button", { name: "Kết thúc buổi đọc" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Lưu và dừng" }),
+    );
+    await waitFor(() =>
+      expect(compareTranscriptMock).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        "mèo nhỏ đan",
+        [],
+        {
+          page_id: pageFour.page_id,
+          page_revision_id: pageFour.page_revision_id,
+          initial_assessment: assessmentFor(pageFour, [
+            "UNCERTAIN",
+            "CORRECT",
+            "CORRECT",
+            "MISPRONUNCIATION",
+          ]),
+        },
+      ),
+    );
+    expect(screen.getByRole("button", { name: "đang" })).toHaveClass(
+      "bg-red-200",
+    );
+  });
+
+  it("locates a supported pause and repetition on the reading page", async () => {
+    speechServiceMock.transcribe.mockResolvedValue({
+      text: "Bé Bé mèo nhỏ",
+      words: [
+        { text: "Bé", start: 0, end: 0.2 },
+        { text: "Bé", start: 0.2, end: 0.4 },
+        { text: "mèo", start: 0.4, end: 0.6 },
+        { text: "nhỏ", start: 2.4, end: 2.8 },
+      ],
+    });
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    );
+    expect(screen.getByRole("button", { name: "Bé" })).toHaveAttribute(
+      "data-reading-state",
+      "repeated",
+    );
+    expect(screen.getByRole("button", { name: "Bé" })).toHaveClass(
+      "bg-purple-200",
+    );
+    expect(screen.getByRole("button", { name: "nhỏ" })).toHaveAttribute(
+      "data-reading-state",
+      "hesitation",
+    );
+    expect(screen.getByRole("button", { name: "nhỏ" })).toHaveClass(
+      "bg-purple-200",
+    );
+    expect(screen.getByRole("button", { name: "mèo" })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
   });
 
   it("preserves the first completed page assessment when revisiting and reading it correctly", async () => {

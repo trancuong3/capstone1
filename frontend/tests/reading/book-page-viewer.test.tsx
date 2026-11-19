@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
+import { RealtimeAlignmentEngine } from "@/lib/reading/realtime-alignment";
+import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { ReadingPageDTO } from "@/types/reading";
 
 const page: ReadingPageDTO = {
@@ -43,6 +45,112 @@ describe("BookPageViewer", () => {
     });
     fireEvent.load(probe);
   }
+
+  const feedbackPage: ReadingPageDTO = {
+    page_id: "first",
+    page_revision_id: "revision",
+    page_number: 1,
+    confidence: 1,
+    width: 600,
+    height: 600,
+    image_overlay_safe: true,
+    words: ["Bé", "mèo", "Bé", "đọc", "sách"].map((text, index) => ({
+      word_id: String(index),
+      text,
+      word_index: index + 10,
+      bbox: [index * 0.18, 0.2, 0.15, 0.08] as const,
+    })),
+  };
+  const result: ComparisonResult = {
+    session_id: "session",
+    page_id: feedbackPage.page_id,
+    page_revision_id: feedbackPage.page_revision_id,
+    distance: 1,
+    alignment: [
+      {
+        book_word: "sách",
+        book_index: 4,
+        spoken_word: null,
+        spoken_index: null,
+        status: "DELETE",
+      },
+    ],
+    summary: {
+      initial_assessment: feedbackPage.words.map((word, index) => ({
+        ...word,
+        status:
+          index === 0
+            ? "MISPRONUNCIATION"
+            : index === 4
+              ? "UNCERTAIN"
+              : "CORRECT",
+      })),
+      repeated_count: 1,
+      repeated_words: ["bé"],
+      repeated_book_indices: [2],
+      hesitations: [
+        {
+          after_word: "bé",
+          before_word: "mèo",
+          before_book_index: 1,
+          pause: 2,
+        },
+      ],
+      hesitation_seconds: 2,
+      missing_words: [],
+      extra_words: [],
+      substitutions: [],
+    },
+  };
+
+  it.each(["text", "image-overlay"])(
+    "shows saved word colors at their positions in %s",
+    async (mode) => {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        DOMRect.fromRect({ width: 600, height: 600 }),
+      );
+      const { container, rerender } = render(
+        <BookPageViewer
+          currentWordId={null}
+          page={{
+            ...feedbackPage,
+            image_url: mode === "text" ? null : "https://example.test/page.png",
+          }}
+          comparisonResult={result}
+        />,
+      );
+      if (mode === "image-overlay") loadImage(container, 600, 600);
+      await waitFor(() =>
+        expect(screen.getByRole("article")).toHaveAttribute(
+          "data-render-mode",
+          mode,
+        ),
+      );
+      const words = screen.getAllByRole("button");
+      expect(words.map((word) => word.dataset.readingState)).toEqual([
+        "incorrect",
+        "hesitation",
+        "repeated",
+        "correct",
+        "unread",
+      ]);
+      expect(words[0].className).toContain("bg-red-");
+      expect(words[1].className).toContain("bg-purple-");
+      expect(words[2].className).toContain("bg-purple-");
+      rerender(
+        <BookPageViewer
+          currentWordId={null}
+          page={{ ...feedbackPage, page_revision_id: "next" }}
+          comparisonResult={result}
+        />,
+      );
+      expect(
+        screen
+          .getAllByRole("button")
+          .every((word) => word.dataset.readingState === "unread"),
+      ).toBe(true);
+    },
+  );
 
   it("renders a real word overlay with letterboxing and keeps a single reading surface", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -147,6 +255,29 @@ describe("BookPageViewer", () => {
       expect(selected.words).toEqual(imagePage.words);
     },
   );
+
+  it("previews matching interim words and removes the preview when they are revised", () => {
+    const textPage = { ...imagePage, image_url: null };
+    const engine = new RealtimeAlignmentEngine(textPage.words);
+    const { rerender } = render(
+      <BookPageViewer
+        page={textPage}
+        currentWordId={null}
+        previewSnapshot={engine.previewAlignment("Bé đọc")}
+      />,
+    );
+    const first = screen.getByRole("button", { name: "Bé" });
+    expect(first).toHaveAttribute("data-reading-state", "preview-correct");
+    expect(engine.getSnapshot().statusByWordId.size).toBe(0);
+    rerender(
+      <BookPageViewer
+        page={textPage}
+        currentWordId={null}
+        previewSnapshot={engine.previewAlignment("Mẹ")}
+      />,
+    );
+    expect(first).not.toHaveAttribute("data-reading-state", "preview-correct");
+  });
 
   it("shows self-corrected and unresolved words distinctly without changing first-pass sets", () => {
     const initialErrors = new Set(["word-0", "word-1"]);

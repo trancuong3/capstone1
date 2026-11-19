@@ -4,8 +4,7 @@
  * - Difficult-words hands-free voice practice (`DifficultWordPracticePanel`)
  *
  * Guarantees:
- * - Child speaks 1 short word once in clear audio -> auto-stops fast (~700-950ms total capture)
- *   without waiting 3.5-12 seconds.
+ * - Capture stops after a short quiet tail to keep the final consonant.
  * - Acoustic VAD onset works even when browser Web Speech API fails on 1-syllable Vietnamese words.
  * - Never fabricates "CORRECT" from keyterm hints without high confidence or browser corroboration.
  */
@@ -42,9 +41,9 @@ export type WordPracticeState =
 export const SHORT_WORD_CAPTURE_CONFIG = {
   mode: "short-word" as const,
   pollIntervalMs: 120,
-  acousticSettleMs: 70,
-  minCaptureMs: 650,
-  postSpeechSilenceMs: 520,
+  acousticSettleMs: 140,
+  minCaptureMs: 800,
+  postSpeechSilenceMs: 800,
   noSpeechTimeoutMs: 4500,
   maxCaptureMs: 6500,
   softSpeechRmsThreshold: 0.015,

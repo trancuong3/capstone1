@@ -27,6 +27,15 @@ class DifficultWordsRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def lock_practice_request(self, child_id: UUID, request_id: UUID) -> None:
+        # An HTTP retry may arrive while the first evaluation is still in flight.
+        # The legacy readingevents store has no unique request-id column.
+        await self.db.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(
+                f"word-practice:{child_id}:{request_id}", 0
+            )))
+        )
+
     async def is_practice_storage_ready(self) -> bool:
         """Safely probe table existence without aborting the current PostgreSQL transaction."""
         table_name = await self.db.scalar(
@@ -299,14 +308,19 @@ class DifficultWordsRepository:
         normalized_word: str,
         completion_request_id: UUID,
     ) -> ReadingEvent | None:
-        events = await self.list_retry_events_for_child(child_id, actor_id, limit=500)
-        req_str = str(completion_request_id)
-        for event in events:
-            if not isinstance(event.Metadata, dict):
-                continue
-            if event.Metadata.get("completion_request_id") == req_str:
-                return event
-        return None
+        return await self.db.scalar(
+            select(ReadingEvent)
+            .join(ReadingSession, ReadingSession.Id == ReadingEvent.SessionId)
+            .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .where(
+                ReadingSession.ChildId == child_id,
+                ChildProfile.ParentId == actor_id,
+                ReadingEvent.Type == "WORD_RETRY",
+                ReadingEvent.Metadata["normalized_word"].as_string() == normalized_word,
+                ReadingEvent.Metadata["completion_request_id"].as_string() == str(completion_request_id),
+            )
+            .limit(1)
+        )
 
     async def resolve_retry_target(
         self,

@@ -4,50 +4,28 @@ import { Fragment, useEffect, useRef } from "react";
 import {
   wordPresentationClasses,
   wordPresentationLabels,
-  type WordPresentationState,
+  type PageWordEvidence,
+  wordStateForPage,
 } from "@/lib/reading/word-presentation";
 
 import { cn } from "@/lib/utils/cn";
-import type { ComparisonResult } from "@/lib/api/comparison-service";
-import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
-import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import type { ReadingPageWordDTO } from "@/types/reading";
 
-interface BookPageContentProps {
-  selfCorrectedWordIds?: ReadonlySet<string>;
-  unresolvedWordIds?: ReadonlySet<string>;
-  uncertainWordIds?: ReadonlySet<string>;
-  activeRetryWordId?: string | null;
-  page: ReadingPageDTO;
-  comparisonResult?: Pick<ComparisonResult, "alignment" | "summary"> | null;
-  currentWordId?: string | null;
-  correctWordIds?: Set<string>;
-  mispronouncedWordIds?: Set<string>;
+interface BookPageContentProps extends PageWordEvidence {
   spokenWords?: Set<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   readOnly?: boolean;
-  skippedWordIds?: Set<string>;
-  repeatedWordIds?: Set<string>;
-  hesitationWordIds?: Set<string>;
-  previewSnapshot?: RealtimeAlignmentSnapshot | null;
 }
 
-export function BookPageContent({
-  selfCorrectedWordIds,
-  unresolvedWordIds,
-  uncertainWordIds,
-  activeRetryWordId = null,
-  page,
-  comparisonResult,
-  currentWordId = null,
-  correctWordIds,
-  mispronouncedWordIds,
-  onWordClick,
-  readOnly = false,
-  skippedWordIds,
-  repeatedWordIds,
-  hesitationWordIds,
-  previewSnapshot,
-}: BookPageContentProps) {
+export function BookPageContent(props: BookPageContentProps) {
+  const {
+    page,
+    currentWordId,
+    onWordClick,
+    previewSnapshot,
+    readOnly = false,
+  } = props;
+  const stateFor = wordStateForPage(props);
   const hasWords = page.words.length > 0;
   const contentRef = useRef<HTMLDivElement>(null);
   const activeWordId = previewSnapshot
@@ -66,15 +44,6 @@ export function BookPageContent({
         : "smooth",
     });
   }, [activeWordId, page.page_revision_id]);
-  const alignmentByIndex = new Map(
-    comparisonResult?.alignment.map((item) => [item.book_index, item]),
-  );
-  const savedById = new Map(
-    comparisonResult?.summary.initial_assessment?.map((item) => [
-      item.word_id,
-      item,
-    ]),
-  );
   const textTokens = [...(page.text ?? "").matchAll(/\S+/gu)];
   const textMatchesWords =
     textTokens.length === page.words.length &&
@@ -92,93 +61,8 @@ export function BookPageContent({
       {hasWords ? (
         <p className="text-balance text-[24px] font-bold leading-[2] text-ink sm:text-[30px] sm:leading-[1.85]">
           {page.words.map((word, index) => {
-            const wordIndex = word.word_index ?? index;
-
-            const initial = savedById.get(word.word_id);
-            const alignment = initial
-              ? {
-                  status:
-                    initial.status === "CORRECT"
-                      ? "MATCH"
-                      : initial.status === "MISPRONUNCIATION"
-                        ? "SUBSTITUTE"
-                        : initial.status === "OMISSION"
-                          ? "DELETE"
-                          : "UNCERTAIN",
-                }
-              : alignmentByIndex.get(wordIndex);
-
-            const isPreviewActive =
-              previewSnapshot !== null && previewSnapshot !== undefined;
-
-            const isPreviewCurrent =
-              word.word_id === previewSnapshot?.currentWordId;
-
-            // Khi có preview, chỉ sử dụng vị trí preview.
-            // Không cộng thêm currentWordId chính thức.
-            const isCurrent = isPreviewActive
-              ? isPreviewCurrent
-              : word.word_id === currentWordId;
-
-            const previewStatus = previewSnapshot?.statusByWordId.get(
-              word.word_id,
-            );
-
-            const isPreviewMatched =
-              previewSnapshot?.previewMatchedWordIds.has(word.word_id) ?? false;
-
-            const isSelfCorrected = Boolean(
-              selfCorrectedWordIds?.has(word.word_id),
-            );
-            const isActiveRetry =
-              !readOnly &&
-              !isSelfCorrected &&
-              activeRetryWordId === word.word_id;
-
-            const isSkipped = Boolean(
-              !isSelfCorrected &&
-              !correctWordIds?.has(word.word_id) &&
-              (skippedWordIds?.has(word.word_id) ||
-                alignment?.status === "DELETE" ||
-                previewStatus?.status === "DELETE"),
-            );
-
-            const isRepeated = Boolean(
-              repeatedWordIds?.has(word.word_id) ||
-              comparisonResult?.summary.repeated_book_indices?.includes(
-                wordIndex,
-              ) ||
-              previewStatus?.status === "REPEATED",
-            );
-
-            const isHesitation = Boolean(
-              hesitationWordIds?.has(word.word_id) ||
-              previewSnapshot?.hesitationWordIds.has(word.word_id) ||
-              comparisonResult?.summary.hesitations.some(
-                (item) =>
-                  typeof item === "object" &&
-                  item !== null &&
-                  "before_book_index" in item &&
-                  item.before_book_index === wordIndex,
-              ),
-            );
-
-            const isMispronounced = Boolean(
-              !isSelfCorrected &&
-              !correctWordIds?.has(word.word_id) &&
-              (mispronouncedWordIds?.has(word.word_id) ||
-                alignment?.status === "SUBSTITUTE" ||
-                previewStatus?.status === "SUBSTITUTE"),
-            );
-
-            const isCorrect = Boolean(
-              isSelfCorrected ||
-              correctWordIds?.has(word.word_id) ||
-              alignment?.status === "MATCH" ||
-              previewStatus?.status === "MATCH" ||
-              isPreviewMatched,
-            );
-
+            const isCurrent = activeWordId === word.word_id;
+            const presentationState = stateFor(word, index);
             const previousWord = page.words[index - 1];
             const lineIndex = word.line_index ?? 0;
             const previousLineIndex = previousWord?.line_index ?? 0;
@@ -203,58 +87,6 @@ export function BookPageContent({
             const isIndented =
               (index === 0 || startsLine) &&
               (page.indented_line_indices ?? []).includes(lineIndex);
-
-            const presentationState: WordPresentationState = isSelfCorrected
-              ? "self-corrected"
-              : isActiveRetry
-                ? "current"
-                : unresolvedWordIds?.has(word.word_id)
-                  ? "unresolved"
-                  : uncertainWordIds?.has(word.word_id) ||
-                      initial?.status === "UNCERTAIN"
-                    ? "uncertain"
-                    : isSkipped
-                      ? "omission"
-                      : isMispronounced
-                        ? "incorrect"
-                        : isCorrect
-                          ? "correct"
-                          : isCurrent
-                            ? "current"
-                            : "unread";
-            const statusClass = isActiveRetry
-              ? wordPresentationClasses.current
-              : ["self-corrected", "unresolved", "uncertain"].includes(
-                    presentationState,
-                  )
-                ? wordPresentationClasses[presentationState]
-                : isSkipped
-                  ? "bg-red-200 text-red-900 ring-1 ring-red-500"
-                  : isMispronounced
-                    ? "bg-orange-200 text-orange-900 ring-1 ring-orange-500"
-                    : isRepeated
-                      ? "bg-purple-200 text-purple-900 ring-1 ring-purple-500"
-                      : isHesitation
-                        ? "bg-blue-200 text-blue-900 ring-1 ring-blue-500"
-                        : isCorrect
-                          ? "bg-success-surface text-success-ink"
-                          : "";
-
-            const hasConfirmedStatus =
-              isSkipped ||
-              isMispronounced ||
-              isRepeated ||
-              isHesitation ||
-              isCorrect;
-
-            const currentClass = isCurrent
-              ? cn(
-                  "scale-105 font-semibold shadow-sm",
-                  hasConfirmedStatus
-                    ? "ring-2 ring-current"
-                    : "bg-highlight text-ink ring-2 ring-amber-600",
-                )
-              : "";
 
             return (
               <Fragment key={word.word_id}>
@@ -298,14 +130,11 @@ export function BookPageContent({
                     !readOnly &&
                       "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                     !readOnly && "cursor-pointer select-none",
-                    statusClass,
-                    currentClass,
-                    !isCurrent &&
-                      isMispronounced &&
-                      "font-semibold border-b-2 border-orange-500",
-                    !isCurrent && isCorrect && "font-bold",
-                    !isCurrent &&
-                      !hasConfirmedStatus &&
+                    wordPresentationClasses[presentationState],
+                    isCurrent && "scale-105 font-semibold shadow-sm",
+                    presentationState === "incorrect" &&
+                      "font-semibold border-b-2 border-red-500",
+                    presentationState === "unread" &&
                       !readOnly &&
                       "hover:bg-highlight/40",
                   )}
@@ -327,7 +156,7 @@ export function BookPageContent({
                   title={
                     readOnly
                       ? undefined
-                      : isCurrent && isMispronounced
+                      : isCurrent && presentationState === "incorrect"
                         ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé.`
                         : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
                   }

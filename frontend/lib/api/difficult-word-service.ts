@@ -386,43 +386,135 @@ export function groupDifficultWordsByBook(
       bookId: string | null;
       bookTitle: string;
       bookAuthor: string | null;
+      bookCoverUrl: string | null;
       minGrade: number | null;
       maxGrade: number | null;
       words: DifficultWordDTO[];
+      /** Track normalized_word values already added to avoid duplicates. */
+      seenWords: Set<string>;
       latestSeenAt: string;
     }
   >();
 
-  for (const word of words) {
-    const primary = word.sources?.[0];
-    const bookId = primary?.book_id ?? null;
-    const key = bookId ?? "__unknown_book__";
-    const bookTitle = primary?.book_title?.trim() || "Chưa xác định nguồn sách";
+  function upsertBucket(
+    key: string,
+    bookId: string | null,
+    bookTitle: string,
+    bookAuthor: string | null,
+    bookCoverUrl: string | null,
+    minGrade: number | null,
+    maxGrade: number | null,
+    word: DifficultWordDTO,
+    matchingSources: DifficultWordDTO["sources"],
+  ): void {
+    // Build a word copy whose `sources` only contain entries for this book.
+    const wordForBucket: DifficultWordDTO =
+      matchingSources && matchingSources !== word.sources
+        ? { ...word, sources: matchingSources }
+        : word;
+
     const existing = buckets.get(key);
     if (!existing) {
       buckets.set(key, {
         bookId,
         bookTitle,
-        bookAuthor: primary?.book_author ?? null,
-        minGrade: primary?.min_grade ?? null,
-        maxGrade: primary?.max_grade ?? null,
-        words: [word],
+        bookAuthor,
+        bookCoverUrl,
+        minGrade,
+        maxGrade,
+        words: [wordForBucket],
+        seenWords: new Set([word.normalized_word]),
         latestSeenAt: word.last_seen_at,
       });
     } else {
-      existing.words.push(word);
+      // Only add the word once per book bucket.
+      if (!existing.seenWords.has(word.normalized_word)) {
+        existing.seenWords.add(word.normalized_word);
+        existing.words.push(wordForBucket);
+      }
       if (word.last_seen_at > existing.latestSeenAt) {
         existing.latestSeenAt = word.last_seen_at;
       }
-      if (!existing.bookAuthor && primary?.book_author) {
-        existing.bookAuthor = primary.book_author;
+      if (!existing.bookAuthor && bookAuthor) {
+        existing.bookAuthor = bookAuthor;
       }
-      if (existing.minGrade == null && primary?.min_grade != null) {
-        existing.minGrade = primary.min_grade;
+      if (!existing.bookCoverUrl && bookCoverUrl) {
+        existing.bookCoverUrl = bookCoverUrl;
       }
-      if (existing.maxGrade == null && primary?.max_grade != null) {
-        existing.maxGrade = primary.max_grade;
+      if (existing.minGrade == null && minGrade != null) {
+        existing.minGrade = minGrade;
       }
+      if (existing.maxGrade == null && maxGrade != null) {
+        existing.maxGrade = maxGrade;
+      }
+    }
+  }
+
+  for (const word of words) {
+    const sources = word.sources;
+
+    // Collect all distinct book_ids from the word's sources.
+    if (sources && sources.length > 0) {
+      // Group sources by book_id so each bucket gets only its own sources.
+      const sourcesByBook = new Map<string, typeof sources extends readonly (infer T)[] ? T[] : never>();
+      let hasValidBook = false;
+      for (const src of sources) {
+        const bid = src.book_id;
+        if (bid) {
+          hasValidBook = true;
+          let arr = sourcesByBook.get(bid);
+          if (!arr) {
+            arr = [];
+            sourcesByBook.set(bid, arr);
+          }
+          arr.push(src);
+        }
+      }
+
+      if (hasValidBook) {
+        for (const [bid, bookSources] of sourcesByBook) {
+          // Use the first source of this book for metadata.
+          const rep = bookSources[0]!;
+          upsertBucket(
+            bid,
+            bid,
+            rep.book_title?.trim() || "Chưa xác định nguồn sách",
+            rep.book_author ?? null,
+            rep.book_cover_url ?? null,
+            rep.min_grade ?? null,
+            rep.max_grade ?? null,
+            word,
+            bookSources,
+          );
+        }
+      } else {
+        // All sources lack a book_id — fall through to unknown.
+        const first = sources[0]!;
+        upsertBucket(
+          "__unknown_book__",
+          null,
+          "Chưa xác định nguồn sách",
+          first.book_author ?? null,
+          first.book_cover_url ?? null,
+          first.min_grade ?? null,
+          first.max_grade ?? null,
+          word,
+          sources,
+        );
+      }
+    } else {
+      // No sources at all.
+      upsertBucket(
+        "__unknown_book__",
+        null,
+        "Chưa xác định nguồn sách",
+        null,
+        null,
+        null,
+        null,
+        word,
+        sources,
+      );
     }
   }
 
@@ -439,6 +531,7 @@ export function groupDifficultWordsByBook(
       bookId: bucket.bookId,
       bookTitle: bucket.bookTitle,
       bookAuthor: bucket.bookAuthor,
+      bookCoverUrl: bucket.bookCoverUrl,
       minGrade: bucket.minGrade,
       maxGrade: bucket.maxGrade,
       words: bucket.words,

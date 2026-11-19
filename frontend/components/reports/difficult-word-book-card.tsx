@@ -1,6 +1,7 @@
 "use client";
 
 import { BookOpen, Check, ChevronDown, Mic, Sparkles } from "lucide-react";
+import { useCallback, useState } from "react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
@@ -55,6 +56,9 @@ export function DifficultWordBookCard({
   onStartBookPractice,
   onSelectWord,
 }: DifficultWordBookCardProps) {
+  const [coverError, setCoverError] = useState(false);
+  const handleCoverError = useCallback(() => setCoverError(true), []);
+
   const firstPendingWord =
     group.words.find((item) => item.practice_status !== "COMPLETED") ??
     group.words[0];
@@ -75,18 +79,33 @@ export function DifficultWordBookCard({
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-4">
           {group.bookId ? (
-            <BookCover
-              book={{
-                id: group.bookId,
-                title: group.bookTitle,
-                author: group.bookAuthor,
-                min_grade: group.minGrade ?? 1,
-                max_grade: group.maxGrade ?? group.minGrade ?? 1,
-                lifecycle_status: "ACTIVE",
-              }}
-              className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 sm:h-28! sm:w-24!"
-              hero
-            />
+            group.bookCoverUrl && !coverError ? (
+              /* eslint-disable-next-line @next/next/no-img-element --
+                 Remote cover URLs come from the backend without a fixed
+                 hostname, so next/image remotePatterns cannot be configured
+                 ahead of time.  A plain <img> with onError fallback is the
+                 safest option until cover URLs are served from a known CDN. */
+              <img
+                alt={`Bìa sách ${group.bookTitle}`}
+                className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover sm:h-28 sm:w-24"
+                loading="lazy"
+                onError={handleCoverError}
+                src={group.bookCoverUrl}
+              />
+            ) : (
+              <BookCover
+                book={{
+                  id: group.bookId,
+                  title: group.bookTitle,
+                  author: group.bookAuthor,
+                  min_grade: group.minGrade ?? 1,
+                  max_grade: group.maxGrade ?? group.minGrade ?? 1,
+                  lifecycle_status: "ACTIVE",
+                }}
+                className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 sm:h-28! sm:w-24!"
+                hero
+              />
+            )
           ) : (
             <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] text-[#147D87] sm:h-28 sm:w-24">
               <BookOpen aria-hidden="true" className="size-8" />

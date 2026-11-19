@@ -58,6 +58,7 @@ interface ReadingLayoutProps {
   onRetryRead?: () => void;
   onRetryMicrophonePermission?: () => void;
   onRetrySave?: () => void;
+  retryRecording?: ReactNode;
   retryContextPhrase?: string | null;
   isPlayingSample?: boolean;
   isSamplePaused?: boolean;
@@ -111,6 +112,7 @@ export function ReadingLayout({
   onRetryRead,
   onRetryMicrophonePermission,
   onRetrySave,
+  retryRecording,
   isPlayingSample = false,
   isSamplePaused = false,
   onToggleSamplePause,
@@ -316,6 +318,7 @@ export function ReadingLayout({
               Thử lưu lại
             </button>
           ) : null}
+          {retryRecording}
         </div>
       ) : countdown !== null ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border border-border bg-white px-4 py-3">
@@ -426,8 +429,7 @@ export function ReadingLayout({
           page.words.filter(
             (word) =>
               correctWordIds?.has(word.word_id) ||
-              mispronouncedWordIds?.has(word.word_id) ||
-              previewSnapshot?.previewMatchedWordIds.has(word.word_id),
+              mispronouncedWordIds?.has(word.word_id),
           ).length
         }
         currentWord={currentWordText}

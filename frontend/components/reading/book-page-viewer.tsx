@@ -7,31 +7,18 @@ import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import {
   wordPresentationLabels,
   type WordPresentationState,
+  type PageWordEvidence,
+  wordStateForPage,
 } from "@/lib/reading/word-presentation";
 import { cn } from "@/lib/utils/cn";
-import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
-import type { ComparisonResult } from "@/lib/api/comparison-service";
-import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import type { ReadingPageWordDTO } from "@/types/reading";
 
-interface BookPageViewerProps {
+interface BookPageViewerProps extends PageWordEvidence {
   title?: string;
   illustration?: ReactNode;
-  correctWordIds?: Set<string>;
-  currentWordId: string | null;
   isTransitioning?: boolean;
-  mispronouncedWordIds?: Set<string>;
-  skippedWordIds?: Set<string>;
-  repeatedWordIds?: Set<string>;
-  hesitationWordIds?: Set<string>;
-  selfCorrectedWordIds?: ReadonlySet<string>;
-  unresolvedWordIds?: ReadonlySet<string>;
-  uncertainWordIds?: ReadonlySet<string>;
-  activeRetryWordId?: string | null;
   onWordClick?: (word: ReadingPageWordDTO) => void;
-  page: ReadingPageDTO;
-  comparisonResult?: ComparisonResult | null;
   spokenWords?: Set<string>;
-  previewSnapshot?: RealtimeAlignmentSnapshot | null;
 }
 
 export function BookPageViewer(props: BookPageViewerProps) {
@@ -124,31 +111,15 @@ function PageSurface(props: BookPageViewerProps) {
     });
   }, [activeId, overlay]);
 
-  function stateFor(word: ReadingPageWordDTO): WordPresentationState {
-    const id = word.word_id;
-    const preview = previewSnapshot?.statusByWordId.get(id)?.status;
-    if (props.selfCorrectedWordIds?.has(id)) return "self-corrected";
-    if (props.activeRetryWordId && props.activeRetryWordId === id)
-      return "current";
-    if (props.unresolvedWordIds?.has(id)) return "unresolved";
-    if (props.uncertainWordIds?.has(id)) return "uncertain";
-    if (props.skippedWordIds?.has(id) || preview === "DELETE")
-      return "omission";
-    if (props.mispronouncedWordIds?.has(id) || preview === "SUBSTITUTE")
-      return "incorrect";
-    if (
-      props.correctWordIds?.has(id) ||
-      preview === "MATCH" ||
-      previewSnapshot?.previewMatchedWordIds.has(id)
-    )
-      return "correct";
-    return id === activeId ? "current" : "unread";
-  }
+  const stateFor = wordStateForPage(props);
   const overlayColors: Record<WordPresentationState, string> = {
     unread: "",
     current: "bg-yellow-300/25 ring-2 ring-yellow-500",
+    "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
     correct: "bg-green-300/25 ring-1 ring-green-600",
-    incorrect: "bg-orange-300/25 ring-1 ring-orange-600",
+    incorrect: "bg-red-300/25 ring-1 ring-red-600",
+    repeated: "bg-purple-300/25 ring-1 ring-purple-600",
+    hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
     omission: "bg-red-300/25 ring-1 ring-red-600",
     "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
     unresolved: "bg-red-300/25 ring-2 ring-red-700",
@@ -232,8 +203,8 @@ function PageSurface(props: BookPageViewerProps) {
                 height: rect.height,
               }}
             >
-              {page.words.map((word) => {
-                const state = stateFor(word);
+              {page.words.map((word, index) => {
+                const state = stateFor(word, index);
                 return (
                   <button
                     key={word.word_id}
@@ -251,7 +222,6 @@ function PageSurface(props: BookPageViewerProps) {
                     className={cn(
                       "absolute rounded-sm focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       overlayColors[state],
-                      word.word_id === activeId && "ring-2 ring-yellow-500",
                     )}
                     style={{
                       left: `${word.bbox[0] * 100}%`,

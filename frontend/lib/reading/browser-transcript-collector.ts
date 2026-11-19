@@ -19,7 +19,10 @@ export class BrowserTranscriptCollector {
   private readonly currentCycle = new Map<number, string>();
   private readonly completedCycles: string[] = [];
 
-  addResults(event: BrowserRecognitionEventLike): string[] {
+  addResults(
+    event: BrowserRecognitionEventLike,
+    acceptFinal?: (text: string, usable: boolean) => boolean,
+  ): string[] {
     const newFinals: string[] = [];
     const start = Math.max(
       0,
@@ -28,14 +31,16 @@ export class BrowserTranscriptCollector {
 
     for (let index = start; index < event.results.length; index += 1) {
       const result = event.results[index];
-      if (
-        !result?.isFinal ||
-        !hasUsableBrowserConfidence(result[0]?.confidence)
-      )
-        continue;
-
+      if (!result?.isFinal || this.currentCycle.has(index)) continue;
       const text = result[0]?.transcript?.trim();
-      if (text && !this.currentCycle.has(index)) {
+      if (text) {
+        const usable = hasUsableBrowserConfidence(result[0]?.confidence);
+        const accept = acceptFinal?.(text, usable) ?? usable;
+        if (!accept || !usable) {
+          // A discarded command or uncertain final still occupies its slot.
+          this.currentCycle.set(index, "");
+          continue;
+        }
         newFinals.push(text);
         this.currentCycle.set(index, text);
       }

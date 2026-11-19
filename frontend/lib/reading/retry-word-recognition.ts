@@ -7,6 +7,7 @@
  */
 
 import {
+  normalizeVietnameseText,
   normalizeVietnameseWord,
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
@@ -24,6 +25,7 @@ const ASSISTANT_BLEED_PHRASES = [
   "chưa nghe rõ",
   "mình chưa nghe rõ",
   "con đọc lại",
+  "con thử đọc cả cụm",
   "nghe lại rồi đọc",
   "một lần nhé",
   "chính xác rồi",
@@ -59,6 +61,59 @@ export function stripNonSpeechAnnotations(value: string): string {
  */
 export function normalizeVietnameseRetryToken(value: string): string {
   return normalizeVietnameseWord(value);
+}
+
+const DIGIT_WORDS = [
+  "không",
+  "một",
+  "hai",
+  "ba",
+  "bốn",
+  "năm",
+  "sáu",
+  "bảy",
+  "tám",
+  "chín",
+];
+
+export function normalizeShortWordTranscript(value: string): string {
+  const text = normalizeVietnameseText(stripNonSpeechAnnotations(value));
+  return /^[0-9]$/u.test(text) ? DIGIT_WORDS[Number(text)] : text;
+}
+
+/** Select up to three adjacent words from the child's book for a second try. */
+export function shortWordContext(
+  target: string,
+  context?: string | null,
+): string | null {
+  const expected = tokenizeVietnameseText(target);
+  if (expected.length < 1 || expected.length > 2 || !context) return null;
+  for (const sentence of context.split(/[.!?…;\n]+/u)) {
+    const words = tokenizeVietnameseText(sentence);
+    const index = words.findIndex((_, start) =>
+      expected.every((word, offset) => word === words[start + offset]),
+    );
+    if (index < 0 || words.length <= expected.length) continue;
+    const start = Math.max(0, Math.min(index, words.length - 3));
+    return words.slice(start, start + 3).join(" ");
+  }
+  return null;
+}
+
+/** Similar nasal codas need corroboration before an attempt is marked wrong. */
+export function hasConfusableNasalEnding(
+  target: string,
+  transcript?: string | null,
+): boolean {
+  if (!transcript) return false;
+  const expected = tokenizeVietnameseText(target);
+  const actual = tokenizeVietnameseText(transcript);
+  if (expected.length !== 1 || actual.length !== 1 || expected[0] === actual[0])
+    return false;
+  const coda = /^(.+?)(ng|nh|m|n)$/u;
+  const left = coda.exec(expected[0]);
+  const right = coda.exec(actual[0]);
+  return Boolean(left && right && left[1] === right[1]);
 }
 
 export interface RetryTranscriptOptions {
@@ -116,7 +171,7 @@ export function classifyRetryTranscript(
   transcript: string | null | undefined,
   options?: RetryTranscriptOptions,
 ): RetryRecognitionStatus {
-  const expected = normalizeVietnameseRetryToken(expectedWord);
+  const expected = normalizeShortWordTranscript(expectedWord);
 
   if (!expected || /\s/u.test(expected)) {
     return "UNCERTAIN";
@@ -129,7 +184,9 @@ export function classifyRetryTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  const tokens = tokenizeVietnameseText(rawTranscript);
+  const tokens = tokenizeVietnameseText(
+    normalizeShortWordTranscript(rawTranscript),
+  );
 
   if (tokens.length === 0) {
     return "NOT_RECOGNIZED";

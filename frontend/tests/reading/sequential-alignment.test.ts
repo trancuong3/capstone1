@@ -80,6 +80,24 @@ describe("sequential capture alignment", () => {
     e.reset();
     expect(e.hasUncertainty()).toBe(false);
   });
+  it("scores reliable speech after finding the next word beyond an unclear capture", () => {
+    const e = engine("Ba đi học với mẹ");
+    e.addFinalTranscript("Ba");
+    e.markUncertain();
+    e.addFinalTranscript("học vội mẹ");
+    expect(statuses(e)).toEqual([
+      ["word-0", "MATCH"],
+      ["word-2", "MATCH"],
+      ["word-3", "SUBSTITUTE"],
+      ["word-4", "MATCH"],
+    ]);
+  });
+  it("keeps an extra repeated syllable on its own occurrence", () => {
+    const e = engine("ba đi ba về");
+    e.addFinalTranscript("ba ba đi ba về");
+    expect([...e.getSnapshot().repeatedWordIds]).toEqual(["word-0"]);
+    expect(e.finish().statusByWordId.get("word-1")?.status).toBe("MATCH");
+  });
   it.each([
     ["má", "ma"],
     ["đi", "di"],
