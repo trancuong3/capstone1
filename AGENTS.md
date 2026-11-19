@@ -1,3 +1,30 @@
+## Automatic Skill Routing
+
+For every non-trivial task, automatically use the repository skill system even when the user does not mention any skill name.
+
+Rules:
+- Start with the project skill `viread-skill-router` to classify the task domain and choose the smallest relevant skill set.
+- Do not ask the user which skill to use when the task domain is clear.
+- Match skills by their name/description first; read full `SKILL.md` only for selected skills.
+- Never load all installed skills "just in case"; this project optimizes for low token usage.
+- For codebase tasks, Graphify remains the discovery layer and must run before broad grep/search/source reads when `graphify-out/graph.json` exists.
+- Prefer project-specific `viread-*` skills over overlapping generic skills when both cover the same behavior.
+- Add domain skills only as needed, for example:
+  - FastAPI/backend: `fastapi`, `fastapi-expert`.
+  - Supabase/Postgres: `supabase`, `supabase-postgres-best-practices`.
+  - Auth/security: `auth-implementation-patterns`, `secure-code-guardian`, `owasp-top-10`.
+  - React/Next.js: `nextjs-app-router-patterns`, `vercel-react-best-practices`.
+  - UI/Figma: `figma-design-to-code`, `frontend-design`, `ui-ux-pro-max`.
+  - Vietnamese OCR: `viread-ocr-vietnamese` / `viread-vietnamese-ocr`.
+  - Child reading/speech: `viread-reading-assessment`.
+  - Android/APK: `viread-android-apk`, `viread-android-build`.
+  - Debugging: `systematic-debugging` plus the relevant domain skill.
+  - Tests: select only the testing skill(s) for the affected layer.
+- Before declaring source-code work complete, use both `viread-quality-gate` and `verification-before-completion`.
+- After relevant source changes, run `graphify update .`.
+- When resuming after token/rate-limit recovery, use `.codex/skills/graphify/PROJECT_STATE.md` and the continuation protocol instead of rediscovering completed work.
+
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
