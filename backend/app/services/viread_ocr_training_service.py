@@ -17,14 +17,22 @@ from fastapi import HTTPException, status
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+import yaml
 
 from app.repositories.viread_ocr_training_repository import VireadOcrTrainingRepository
 from app.schemas.viread_ocr_training import BenchmarkCreate, DatasetImport, DatasetSampleInput, ModelDecisionRequest, TrainingRunComplete, TrainingRunCreate
 from app.services.admin_ocr_service import AdminOcrService
-from app.services.storage_service import create_signed_image_url, download_object, hash_storage_object, upload_object
+from app.services.storage_service import create_signed_image_url, delete_object, download_object, hash_storage_object, upload_object
 from app.services.viread_training_storage_quota import ensure_database_capacity, ensure_storage_capacity
 
 logger = logging.getLogger(__name__)
+
+_OVERVIEW_MANIFEST_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def invalidate_overview_manifest_cache() -> None:
+    _OVERVIEW_MANIFEST_CACHE.clear()
+
 ORIGINAL_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
 ORIGINAL_ARCHITECTURE_SHA256 = "a26f0adfc33ffe32cdf73c7daa04c39a86a36a8ac0dcc6047fe7a4d9b4fe6dc6"
@@ -316,6 +324,42 @@ class VireadOcrTrainingService:
             FROM public.viread_ocr_benchmarks ORDER BY created_at DESC LIMIT 20
         """)
         active = await self.repo.one("SELECT model_family, checkpoint_sha256, storage_path, profile, decision_id, updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE")
+        if active:
+            if not active.get("storage_path") or active.get("profile") == "ORIGINAL":
+                active["version_label"] = None
+                active["weights_filename"] = None
+                active["config_source"] = "original_default"
+                active["config_filename"] = None
+                active["comparison_summary"] = None
+                active["source"] = "original_default"
+            else:
+                cache_key = (str(active.get("checkpoint_sha256")), str(active.get("storage_path")))
+                cached_meta = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
+                if cached_meta is None:
+                    try:
+                        m_bytes = await asyncio.to_thread(download_object, active["storage_path"])
+                        m_json = json.loads(m_bytes.decode("utf-8"))
+                        m_info = m_json.get("model_info", {})
+                        cached_meta = {
+                            "version_label": m_info.get("version_label"),
+                            "weights_filename": m_info.get("weights_filename"),
+                            "config_source": m_info.get("config_source", "custom_yaml" if m_json.get("config") else "default_vgg_transformer"),
+                            "config_filename": m_info.get("config_filename") or (m_json.get("config", {}).get("filename") if m_json.get("config") else None),
+                            "comparison_summary": m_json.get("comparison_summary"),
+                            "source": m_json.get("source"),
+                        }
+                        _OVERVIEW_MANIFEST_CACHE[cache_key] = cached_meta
+                    except Exception as exc:
+                        logger.warning("Could not read active model manifest metadata: %s", exc)
+                        cached_meta = {
+                            "version_label": None,
+                            "weights_filename": None,
+                            "config_source": "default_vgg_transformer",
+                            "config_filename": None,
+                            "comparison_summary": None,
+                            "source": None,
+                        }
+                active.update(cached_meta)
         locked_test = await self._locked_test_readiness()
         return {"outbox": outbox, "samples": samples, "jobs": jobs, "runs": runs,
                 "benchmarks": benchmarks, "active_model": active, "locked_test": locked_test}
@@ -1374,6 +1418,349 @@ class VireadOcrTrainingService:
         return {"run_id": run_id, "status": "CANDIDATE", "checkpoint_sha256": payload.checkpoint_sha256,
                 "checkpoint_bytes": total, "manifest_storage_path": manifest_path, "chunk_count": len(chunks),
                 "idempotent": already_completed}
+
+    async def upload_flow1_model_chunk(
+        self,
+        actor_id: UUID,
+        upload_id: UUID,
+        chunk_index: int,
+        data: bytes,
+    ) -> dict[str, Any]:
+        await self._admin(actor_id)
+        if not data or len(data) > MAX_SHARD_BYTES:
+            raise HTTPException(status_code=413, detail="Checkpoint shard must be between 1 byte and 40 MiB")
+        if chunk_index == 0:
+            is_zip = len(data) >= 4 and data[:4] == b"PK\x03\x04"
+            is_pickle = len(data) >= 2 and data[:2] in (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05")
+            if not (is_zip or is_pickle):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Checkpoint file magic bytes are invalid; expected PyTorch .pth/.pt format",
+                )
+        digest = hashlib.sha256(data).hexdigest()
+        path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/{chunk_index:04d}-{digest}.part"
+        await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
+        await asyncio.to_thread(upload_object, path, data, "application/octet-stream", upsert=True)
+        return {
+            "upload_id": str(upload_id),
+            "chunk_index": chunk_index,
+            "storage_path": path,
+            "sha256": digest,
+            "bytes": len(data),
+        }
+
+    async def activate_flow1_model(
+        self,
+        *,
+        actor_id: UUID,
+        upload_id: UUID,
+        weights_filename: str,
+        chunks_json: str,
+        comparison_bytes: bytes,
+        config_bytes: bytes | None = None,
+        config_filename: str | None = None,
+        model_version: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        await self._admin(actor_id)
+        w_lower = weights_filename.lower()
+        if not (w_lower.endswith(".pth") or w_lower.endswith(".pt")):
+            raise HTTPException(status_code=422, detail="Weights file must end with .pth or .pt")
+
+        if not comparison_bytes or len(comparison_bytes) > 2 * 1024 * 1024:
+            raise HTTPException(status_code=422, detail="Comparison JSON file must be between 1 byte and 2 MiB")
+        try:
+            comp = json.loads(comparison_bytes.decode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=422, detail="Comparison file must be valid UTF-8 JSON")
+        if not isinstance(comp, dict):
+            raise HTTPException(status_code=422, detail="Comparison JSON must be an object")
+
+        models = comp.get("models")
+        if not isinstance(models, dict):
+            raise HTTPException(status_code=422, detail="Comparison JSON missing 'models' object")
+        baseline_name = models.get("baseline")
+        has_finetuned = bool(
+            models.get("finetuned_full_pipeline") or models.get("finetuned_model_only") or models.get("finetuned")
+        )
+        if not baseline_name or not has_finetuned:
+            raise HTTPException(status_code=422, detail="Comparison JSON must define 'baseline' and at least one fine-tuned model")
+
+        dataset_blocks: list[tuple[str, dict[str, Any]]] = []
+        for key, val in comp.items():
+            if key in {"models", "vietnamese_diacritics_errors", "metadata", "summary", "verdict"}:
+                continue
+            if isinstance(val, dict) and "cer_pct" in val and "wer_pct" in val:
+                dataset_blocks.append((key, val))
+
+        if not dataset_blocks:
+            raise HTTPException(status_code=422, detail="Comparison JSON must contain at least one dataset block with cer_pct and wer_pct")
+
+        normalized_datasets = []
+        for key, block in dataset_blocks:
+            cer_pct = block.get("cer_pct")
+            wer_pct = block.get("wer_pct")
+            if not isinstance(cer_pct, dict) or not isinstance(wer_pct, dict):
+                raise HTTPException(status_code=422, detail=f"Dataset '{key}' must have object values for cer_pct and wer_pct")
+            b_cer = cer_pct.get("baseline")
+            b_wer = wer_pct.get("baseline")
+            if b_cer is None or b_wer is None or not isinstance(b_cer, (int, float)) or not isinstance(b_wer, (int, float)):
+                raise HTTPException(status_code=422, detail=f"Dataset '{key}' missing numeric baseline CER or WER")
+
+            candidate_keys = [k for k in ("finetuned_full_pipeline", "finetuned_model_only", "finetuned") if k in cer_pct or k in wer_pct]
+            if not candidate_keys:
+                raise HTTPException(status_code=422, detail=f"Dataset '{key}' missing fine-tuned metrics in cer_pct or wer_pct")
+
+            for c_key in candidate_keys:
+                c_cer = cer_pct.get(c_key)
+                c_wer = wer_pct.get(c_key)
+                if c_cer is not None and isinstance(c_cer, (int, float)) and c_cer >= b_cer:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Fine-tuned model does not improve CER over baseline on '{key}': {c_cer}% vs baseline {b_cer}%",
+                    )
+                if c_wer is not None and isinstance(c_wer, (int, float)) and c_wer >= b_wer:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Fine-tuned model does not improve WER over baseline on '{key}': {c_wer}% vs baseline {b_wer}%",
+                    )
+
+            key_lower = key.lower()
+            if "sgk" in key_lower or "real" in key_lower:
+                label = "Tập sách giáo khoa thực tế (Real SGK Test Set)"
+                sort_order = 0
+            elif "overall" in key_lower:
+                label = "Tập kiểm thử tổng hợp (Overall Test Set)"
+                sort_order = 1
+            else:
+                label = key.replace("_", " ").title()
+                sort_order = 2
+
+            item: dict[str, Any] = {
+                "key": key,
+                "label": label,
+                "_order": sort_order,
+                "cer_pct": cer_pct,
+                "wer_pct": wer_pct,
+            }
+            for optional_metric in ("exact_match_pct", "f1_score_pct", "gpu_infer_ms_per_line"):
+                if optional_metric in block and isinstance(block[optional_metric], dict):
+                    item[optional_metric] = block[optional_metric]
+            normalized_datasets.append(item)
+
+        normalized_datasets.sort(key=lambda d: (d["_order"], d["key"]))
+        for d in normalized_datasets:
+            d.pop("_order", None)
+
+        diacritics_errors = None
+        if "vietnamese_diacritics_errors" in comp and isinstance(comp["vietnamese_diacritics_errors"], dict):
+            diacritics_errors = comp["vietnamese_diacritics_errors"]
+
+        comparison_summary = {
+            "models": {
+                "baseline": str(baseline_name),
+                "finetuned_model_only": models.get("finetuned_model_only"),
+                "finetuned_full_pipeline": models.get("finetuned_full_pipeline"),
+            },
+            "datasets": normalized_datasets,
+            "vietnamese_diacritics_errors": diacritics_errors,
+            "verdict": "IMPROVED",
+        }
+
+        newly_uploaded_paths: list[str] = []
+        try:
+            config_info: dict[str, Any] | None = None
+            config_sha: str | None = None
+            if config_bytes and len(config_bytes) > 0:
+                if not config_filename or not (config_filename.lower().endswith(".yml") or config_filename.lower().endswith(".yaml")):
+                    raise HTTPException(status_code=422, detail="Configuration file must have a .yml or .yaml extension")
+                if len(config_bytes) > 1024 * 1024:
+                    raise HTTPException(status_code=422, detail="Configuration file must be at most 1 MiB")
+                try:
+                    cfg_parsed = yaml.safe_load(config_bytes.decode("utf-8"))
+                except Exception:
+                    raise HTTPException(status_code=422, detail="Configuration YAML syntax is invalid")
+                if not isinstance(cfg_parsed, dict) or not cfg_parsed:
+                    raise HTTPException(status_code=422, detail="Configuration YAML must be a non-empty mapping")
+
+                config_storage_path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/config.yml"
+                await ensure_storage_capacity(self.db, len(config_bytes), existing_object_path=config_storage_path)
+                await asyncio.to_thread(upload_object, config_storage_path, config_bytes, "application/x-yaml", upsert=True)
+                newly_uploaded_paths.append(config_storage_path)
+                config_sha = hashlib.sha256(config_bytes).hexdigest()
+                config_info = {
+                    "storage_path": config_storage_path,
+                    "sha256": config_sha,
+                    "filename": config_filename,
+                }
+
+            try:
+                chunks = json.loads(chunks_json)
+            except Exception:
+                raise HTTPException(status_code=422, detail="chunks_json must be a valid JSON array")
+            if not isinstance(chunks, list) or not chunks:
+                raise HTTPException(status_code=422, detail="Chunks list cannot be empty")
+            if [int(c.get("index", -1)) for c in chunks] != list(range(len(chunks))):
+                raise HTTPException(status_code=422, detail="Chunks are incomplete or not contiguous")
+
+            expected_prefix = f"ocr-training/checkpoints/flow1-manual/{upload_id}/"
+            for c in chunks:
+                if not str(c.get("path", "")).startswith(expected_prefix):
+                    raise HTTPException(status_code=422, detail="Chunk storage path prefix is invalid")
+                newly_uploaded_paths.append(c["path"])
+
+            aggregate_digest = hashlib.sha256()
+            total_bytes = 0
+            for c in chunks:
+                chunk_path = c["path"]
+                chunk_digest, chunk_bytes = await asyncio.to_thread(hash_storage_object, chunk_path, aggregate_digest)
+                if chunk_bytes != int(c["bytes"]) or chunk_digest != c["sha256"]:
+                    raise HTTPException(status_code=422, detail="Checkpoint shard failed integrity verification")
+                total_bytes += chunk_bytes
+
+            checkpoint_sha256 = aggregate_digest.hexdigest()
+            checkpoint_bytes = total_bytes
+
+            active = await self.repo.get_active_model_for_update()
+            if active and active.get("checkpoint_sha256") == checkpoint_sha256:
+                old_cfg_sha = None
+                if active.get("storage_path"):
+                    try:
+                        old_m_bytes = await asyncio.to_thread(download_object, active["storage_path"])
+                        old_m_data = json.loads(old_m_bytes.decode("utf-8"))
+                        old_cfg_sha = old_m_data.get("config", {}).get("sha256") if isinstance(old_m_data.get("config"), dict) else None
+                    except Exception:
+                        pass
+                if old_cfg_sha == config_sha:
+                    raise HTTPException(status_code=409, detail="Checkpoint and configuration are identical to the currently active model")
+
+            old_storage_path = active.get("storage_path") if active else None
+            old_checkpoint_sha256 = active.get("checkpoint_sha256") if active else None
+            old_object_paths: list[str] = []
+            if old_storage_path:
+                try:
+                    old_manifest_bytes = await asyncio.to_thread(download_object, old_storage_path)
+                    old_manifest = json.loads(old_manifest_bytes.decode("utf-8"))
+                    for c in old_manifest.get("chunks", []):
+                        if isinstance(c.get("path"), str):
+                            old_object_paths.append(c["path"])
+                    if isinstance(old_manifest.get("config"), dict) and old_manifest["config"].get("storage_path"):
+                        old_object_paths.append(old_manifest["config"]["storage_path"])
+                    old_object_paths.append(old_storage_path)
+                except Exception as exc:
+                    logger.warning("Could not read previous active manifest for cleanup: %s", exc)
+
+            version_label = model_version.strip() if model_version and model_version.strip() else None
+            if not version_label:
+                version_label = models.get("finetuned_full_pipeline") or models.get("finetuned_model_only") or weights_filename.rsplit(".", 1)[0]
+            version_label = version_label[:120]
+
+            manifest = {
+                "schema": "viread-checkpoint-shards-v1",
+                "source": "flow1_manual_upload",
+                "upload_id": str(upload_id),
+                "checkpoint_sha256": checkpoint_sha256,
+                "checkpoint_bytes": checkpoint_bytes,
+                "chunks": [{"index": int(c["index"]), "path": c["path"], "sha256": c["sha256"], "bytes": int(c["bytes"])} for c in chunks],
+                "config": config_info,
+                "model_info": {
+                    "version_label": version_label,
+                    "weights_filename": weights_filename,
+                    "config_source": "custom_yaml" if config_info else "default_vgg_transformer",
+                    "config_filename": config_filename,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "uploaded_by": str(actor_id),
+                },
+                "comparison_summary": comparison_summary,
+            }
+
+            manifest_path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/checkpoint.manifest.json"
+            manifest_bytes = _canonical(manifest)
+            await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
+            await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
+            newly_uploaded_paths.append(manifest_path)
+
+            decision_id = uuid4()
+            decision_reason = reason.strip() if reason and len(reason.strip()) >= 8 else f"Direct fine-tuned model replacement ({version_label})"
+
+            await self.repo.insert_model_decision(
+                decision_id=decision_id,
+                action="APPROVE",
+                candidate_sha=checkpoint_sha256,
+                previous_sha=active["checkpoint_sha256"] if active else ORIGINAL_SHA256,
+                candidate_path=manifest_path,
+                previous_path=old_storage_path,
+                candidate_profile="FLOW1_EXTERNAL_TRDG",
+                previous_profile=active["profile"] if active else "ORIGINAL",
+                benchmark_id=None,
+                reason=decision_reason,
+                actor_id=actor_id,
+            )
+            await self.repo.update_active_model(
+                checkpoint_sha256=checkpoint_sha256,
+                storage_path=manifest_path,
+                profile="FLOW1_EXTERNAL_TRDG",
+                decision_id=decision_id,
+            )
+            await self.repo.commit()
+        except Exception:
+            await self.repo.rollback()
+            for obj_path in set(newly_uploaded_paths):
+                try:
+                    await asyncio.to_thread(delete_object, obj_path)
+                except Exception as del_err:
+                    logger.warning("Could not delete orphan shard %s: %s", obj_path, del_err)
+            raise
+
+        from app.services.ocr_engine import evict_cached_viread_checkpoint, set_active_viread_model_cache
+        set_active_viread_model_cache({
+            "checkpoint_sha256": checkpoint_sha256,
+            "storage_path": manifest_path,
+            "profile": "FLOW1_EXTERNAL_TRDG",
+        })
+        invalidate_overview_manifest_cache()
+
+        cleanup_status = {
+            "previous_model_existed": bool(old_storage_path),
+            "previous_storage_deleted": False,
+            "deleted_object_count": 0,
+            "local_cache_deleted": False,
+            "warning": None,
+        }
+        if old_storage_path and old_storage_path != manifest_path:
+            deleted_count = 0
+            try:
+                for obj_path in set(old_object_paths):
+                    try:
+                        await asyncio.to_thread(delete_object, obj_path)
+                        deleted_count += 1
+                    except Exception as del_err:
+                        logger.warning("Could not delete old object %s: %s", obj_path, del_err)
+                cleanup_status["previous_storage_deleted"] = True
+                cleanup_status["deleted_object_count"] = deleted_count
+            except Exception as exc:
+                cleanup_status["warning"] = f"Storage deletion warning: {exc}"
+                logger.warning("Failed deleting previous model storage objects: %s", exc)
+
+            if old_checkpoint_sha256:
+                try:
+                    evicted = evict_cached_viread_checkpoint(old_checkpoint_sha256)
+                    cleanup_status["local_cache_deleted"] = evicted
+                except Exception as exc:
+                    logger.warning("Failed evicting cached checkpoint %s: %s", old_checkpoint_sha256, exc)
+
+        return {
+            "decision_id": decision_id,
+            "active_model": {
+                "checkpoint_sha256": checkpoint_sha256,
+                "storage_path": manifest_path,
+                "profile": "FLOW1_EXTERNAL_TRDG",
+                "version_label": version_label,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "cleanup": cleanup_status,
+        }
+
 
     async def benchmark(self, actor_id: UUID, payload: BenchmarkCreate) -> dict[str, Any]:
         await self._admin(actor_id)
