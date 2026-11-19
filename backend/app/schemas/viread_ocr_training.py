@@ -154,3 +154,25 @@ class TrainingWorkerFinish(BaseModel):
     status: Literal["CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED", "FAILED"]
     error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z0-9_]+$")
     runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class Flow1ChunkUploadResponse(BaseModel):
+    upload_id: UUID
+    chunk_index: int
+    storage_path: str
+    sha256: HexSha256
+    bytes: int
+
+
+class Flow1ChunkInput(BaseModel):
+    index: int = Field(ge=0)
+    path: str = Field(min_length=1, max_length=1024)
+    sha256: HexSha256
+    bytes: int = Field(gt=0)
+
+
+class Flow1ModelActivationResponse(BaseModel):
+    decision_id: UUID
+    active_model: dict[str, Any]
+    cleanup: dict[str, Any]
+
