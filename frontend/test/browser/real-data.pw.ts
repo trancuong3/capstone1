@@ -163,6 +163,21 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(page.getByText("Chưa đánh giá")).toBeVisible();
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
+  // This flow auto-starts practice after selecting a word. Deny the
+  // microphone deterministically to verify the safe paused/retry state.
+  await page.addInitScript(() => {
+    const device = navigator.mediaDevices;
+    if (!device) return;
+    const probe = window as Window & { __practiceMicRequests?: number };
+    probe.__practiceMicRequests = 0;
+    Object.defineProperty(device, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        probe.__practiceMicRequests = (probe.__practiceMicRequests ?? 0) + 1;
+        throw new DOMException("Test microphone permission denied", "NotAllowedError");
+      },
+    });
+  });
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
   const wordPracticeButton = page.getByRole("button", {
     name: /Luyện từ Mèo API/,
