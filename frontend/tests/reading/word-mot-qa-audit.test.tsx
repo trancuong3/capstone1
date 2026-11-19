@@ -339,9 +339,9 @@ describe("QA Audit Scenarios A & C — Short-word 'một' retry, green sync, imm
       name: "Đồng ý, đọc lại",
     });
 
-    // Starts RED/ORANGE before retry confirmation
+    // Starts red before retry confirmation.
     const motBefore = screen.getByRole("button", { name: "một" });
-    expect(motBefore.className).toContain("bg-orange-200");
+    expect(motBefore).toHaveClass("bg-red-200");
 
     // Simulate child speaking 'một' clearly once during first ~220ms then silence,
     // without browser Web Speech API emitting anything and WITHOUT clicking Stop button.

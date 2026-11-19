@@ -456,7 +456,10 @@ export function groupDifficultWordsByBook(
     // Collect all distinct book_ids from the word's sources.
     if (sources && sources.length > 0) {
       // Group sources by book_id so each bucket gets only its own sources.
-      const sourcesByBook = new Map<string, typeof sources extends readonly (infer T)[] ? T[] : never>();
+      const sourcesByBook = new Map<
+        string,
+        typeof sources extends readonly (infer T)[] ? T[] : never
+      >();
       let hasValidBook = false;
       for (const src of sources) {
         const bid = src.book_id;

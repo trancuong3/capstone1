@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const pushMock = vi.fn();
 let currentPathname = "/reports/difficult-words";
-let currentSearchParams = new URLSearchParams("childId=child-1&word=khủng_long");
+let currentSearchParams = new URLSearchParams(
+  "childId=child-1&word=khủng_long",
+);
 
 vi.mock("next/navigation", () => ({
   usePathname: () => currentPathname,
@@ -89,10 +91,7 @@ describe("ChildSelector – clearQueryKeys", () => {
     );
 
     render(
-      <ChildSelector
-        childrenProfiles={PROFILES}
-        selectedChildId="child-1"
-      />,
+      <ChildSelector childrenProfiles={PROFILES} selectedChildId="child-1" />,
     );
 
     const select = screen.getByLabelText("Chọn hồ sơ bé để xem dữ liệu");
@@ -111,9 +110,7 @@ describe("ChildSelector – clearQueryKeys", () => {
 
   it("always clears `page` regardless of clearQueryKeys", async () => {
     currentPathname = "/reports/difficult-words";
-    currentSearchParams = new URLSearchParams(
-      "childId=child-1&page=3&word=cá",
-    );
+    currentSearchParams = new URLSearchParams("childId=child-1&page=3&word=cá");
 
     render(
       <ChildSelector

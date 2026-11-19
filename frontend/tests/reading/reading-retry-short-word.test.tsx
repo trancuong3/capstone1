@@ -415,5 +415,4 @@ describe("ReadingScreen short-word 'có' retry state synchronization", () => {
     expect(coBtnConfirmed.className).toContain("bg-green-200");
     expect(coBtnConfirmed).toHaveAccessibleDescription("Bé đã tự sửa đúng");
   });
-
 });

@@ -8,5 +8,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-
 Project clarification: only read Next.js version docs when the change touches Next.js APIs, conventions, routing, rendering, data fetching, config, or framework behavior. Pure text/CSS/local presentational edits do not require a Next.js docs read.

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
-import type {
-  DifficultWordDTO,
-  DifficultWordSourceDTO,
-} from "@/types/reports";
+import type { DifficultWordDTO, DifficultWordSourceDTO } from "@/types/reports";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,8 +50,16 @@ describe("groupDifficultWordsByBook", () => {
     const word = makeWord({
       normalized_word: "khủng_long",
       sources: [
-        makeSource({ book_id: BOOK_A_ID, book_title: "Sách A", page_number: 3 }),
-        makeSource({ book_id: BOOK_B_ID, book_title: "Sách B", page_number: 7 }),
+        makeSource({
+          book_id: BOOK_A_ID,
+          book_title: "Sách A",
+          page_number: 3,
+        }),
+        makeSource({
+          book_id: BOOK_B_ID,
+          book_title: "Sách B",
+          page_number: 7,
+        }),
       ],
     });
 
@@ -190,9 +195,10 @@ describe("groupDifficultWordsByBook", () => {
     const unknown = groups.find((g) => g.bookId === null)!;
 
     expect(groupA.words.map((w) => w.normalized_word)).toEqual(["rồng"]);
-    expect(
-      groupB.words.map((w) => w.normalized_word).sort(),
-    ).toEqual(["phượng", "rồng"]);
+    expect(groupB.words.map((w) => w.normalized_word).sort()).toEqual([
+      "phượng",
+      "rồng",
+    ]);
     expect(unknown.words.map((w) => w.normalized_word)).toEqual(["lân"]);
   });
 });

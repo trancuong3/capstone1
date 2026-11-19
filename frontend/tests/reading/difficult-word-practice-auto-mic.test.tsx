@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
+import type { AudioQualitySnapshot } from "@/lib/reading/audio-quality";
 import type {
   DifficultWordDTO,
   DifficultWordPracticeAttemptDTO,
@@ -35,17 +36,7 @@ const { speechPlayerMock, speechRecorderMock, evaluatePracticeWordMock } =
       cancel: vi.fn(),
       getStream: vi.fn(() => null),
       getIsSpeaking: vi.fn(() => false),
-      getQuality: vi.fn(() => ({
-        status: "SILENCE" as const,
-        durationMs: 700,
-        speechDurationMs: 0,
-        silenceDurationMs: 700,
-        rms: 0,
-        peak: 0,
-        noiseFloor: 0.001,
-        clipped: false,
-        isSpeaking: false,
-      })),
+      getQuality: vi.fn<() => AudioQualitySnapshot>(),
       getSettings: vi.fn(() => ({})),
     },
     evaluatePracticeWordMock: vi.fn(),
@@ -145,6 +136,17 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       .mockReset()
       .mockResolvedValue(new Blob(["wav-bytes"], { type: "audio/webm" }));
     speechRecorderMock.cancel.mockClear();
+    speechRecorderMock.getQuality.mockReset().mockReturnValue({
+      status: "SPEECH_DETECTED",
+      durationMs: 700,
+      speechDurationMs: 180,
+      silenceDurationMs: 400,
+      rms: 0.02,
+      peak: 0.07,
+      noiseFloor: 0.001,
+      clipped: false,
+      isSpeaking: false,
+    });
     evaluatePracticeWordMock.mockReset();
   });
 
@@ -164,10 +166,9 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       order.push("start");
     });
 
-    evaluatePracticeWordMock
-      .mockResolvedValueOnce(makeAttempt("INCORRECT", "mốt"))
-      .mockResolvedValueOnce(makeAttempt("NO_CLEAR_AUDIO", null))
-      .mockResolvedValueOnce(makeAttempt("NO_CLEAR_AUDIO", null));
+    evaluatePracticeWordMock.mockResolvedValueOnce(
+      makeAttempt("INCORRECT", "mốt"),
+    );
 
     const user = userEvent.setup();
     render(
@@ -188,7 +189,7 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
     // Verify pre-warmed mic order: prepare -> TTS prompt -> warm start(short-word, retainStream)
     expect(order.slice(0, 3)).toEqual([
       "prepare",
-      "tts:Bé hãy đọc từ một nhé.",
+      "tts:Con đọc từ trên màn hình nhé.",
       "start",
     ]);
     expect(speechRecorderMock.start).toHaveBeenCalledWith({
@@ -204,13 +205,28 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
     );
     expect(screen.getByText("Đọc sai")).toBeInTheDocument();
 
-    // Turn 2: NO_CLEAR_AUDIO (silence #1) -> auto-reopens mic once more
+    speechRecorderMock.getQuality.mockReturnValue({
+      ...speechRecorderMock.getQuality(),
+      status: "SILENCE",
+      speechDurationMs: 0,
+      rms: 0,
+      peak: 0,
+    });
+    // The first silent capture retries, while the second plays one model.
     await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
     await waitFor(() =>
       expect(speechRecorderMock.start).toHaveBeenCalledTimes(3),
     );
 
-    // Turn 3: NO_CLEAR_AUDIO (silence #2 -> hits silence streak loop breaker)
+    await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
+    await waitFor(() =>
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(4),
+    );
+    expect(speechPlayerMock.play).toHaveBeenCalledWith("một", {
+      wordSample: true,
+    });
+
+    // Silence after the model pauses the automatic loop.
     await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
     expect(
       await screen.findByRole("button", { name: /Tiếp tục thử/ }),
@@ -219,12 +235,13 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       screen.getByRole("button", { name: /Nhờ ba mẹ giúp/ }),
     ).toBeInTheDocument();
     expect(speechRecorderMock.cancel).toHaveBeenCalled();
-    expect(speechRecorderMock.start).toHaveBeenCalledTimes(3);
+    expect(speechRecorderMock.start).toHaveBeenCalledTimes(4);
+    expect(evaluatePracticeWordMock).toHaveBeenCalledTimes(1);
 
     // Explicit continue button resumes fresh cycle
     await user.click(screen.getByRole("button", { name: /Tiếp tục thử/ }));
     await waitFor(() =>
-      expect(speechRecorderMock.start).toHaveBeenCalledTimes(4),
+      expect(speechRecorderMock.start).toHaveBeenCalledTimes(5),
     );
   }, 15_000);
 
