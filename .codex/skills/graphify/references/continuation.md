@@ -1,92 +1,46 @@
 # Continuation / Token-Recovery Protocol
 
-Use this protocol whenever:
-- the user says "continue", "resume", "làm tiếp", "tiếp tục";
-- a prior agent hit a token/rate/usage limit;
-- the user says they pulled/pull `main` and wants to continue;
-- the repository contains `.codex/skills/graphify/PROJECT_STATE.md`.
+Use only for unfinished work: continue/resume, token/rate-limit recovery, or a dirty tree clearly related to the current request. A new unrelated task does **not** read this protocol or `PROJECT_STATE.md`.
 
-## Goal
+## Resume order
 
-Resume work with the smallest possible context load. Do **not** rediscover the whole codebase.
-
-## Mandatory resume order
-
-1. Read `AGENTS.md`.
-2. Read `.codex/skills/graphify/PROJECT_STATE.md`.
-3. Run only:
+1. Read `AGENTS.md` and `PROJECT_STATE.md`.
+2. Run only:
    - `git status --short`
    - `git diff --name-only`
    - `git log -3 --oneline`
-4. If **Next exact actions** already names the next file/action, continue directly. Do not run Graphify first.
-5. If architecture/file ownership is unknown, run one narrow Graphify query with `--budget 600`.
-6. Read only changed files, checkpoint-named files, Graphify-located files, and direct dependencies needed for the next action.
-7. Run the smallest relevant test first.
-8. Continue implementation without repeating verified work.
+3. Git wins over stale checkpoint data.
+4. Continue from `NEXT`.
+5. If a previously verified file is unchanged since `BASE`, do not reread it.
+6. If it changed, read only the changed range plus direct dependencies needed for the next action.
+7. Reuse recorded `ROOT`, `VERIFIED`, and `DO_NOT_REPEAT`. Do not repeat Graphify/search/debug work without new contradictory evidence.
+8. Do not rerun a passed test unless affected source/dependency/test changed or a final integration gate requires it.
+9. If ownership/flow is still unknown, use one narrow Graphify query starting at budget 300.
 
-If the tree is clean and the checkpoint says `COMMITTED_MAIN`, pull with fast-forward only before continuing. If the tree is dirty, preserve local changes and never reset/overwrite them.
+## Checkpoint format
 
-## Forbidden resume behavior
+Keep `PROJECT_STATE.md` compact and record only facts Git cannot reconstruct cheaply:
 
-Do not:
-- rescan the repository from scratch;
-- rebuild Graphify unless stale graph output is itself the problem;
-- reread every file in a feature;
-- reinstall dependencies that are already present;
-- rerun broad tests before a focused test;
-- discard a dirty tree;
-- infer unpushed/local work from main;
-- trust a stale checkpoint over Git.
+```text
+STATUS: LOCAL_UNPUSHED | COMMITTED_BRANCH:<name> | COMMITTED_MAIN
+GOAL: current intent
+ROOT: proven root cause, or UNKNOWN
+VERIFIED: shortest useful facts/tests/flow
+NEXT: next 1–3 exact actions
+DO_NOT_REPEAT: ruled-out causes / verified unchanged work
+BASE: commit SHA used for invalidation
+```
 
-## Checkpoint freshness
+Update automatically when a root cause is established, a meaningful milestone changes `NEXT`, a test materially changes the plan, before voluntary stop, and before commit/merge. Do not update after every edit.
 
-`PROJECT_STATE.md` is a cache, not the ultimate source of truth.
+Write the checkpoint from facts already in active context. **Never reread source, rerun Graphify, reread the full diff, or rerun tests merely to write the checkpoint.**
 
-Git wins if they disagree.
+## Invalidation
 
-When the latest commit SHA recorded in the checkpoint differs from the current branch:
-- inspect only the commits since that SHA;
-- update the checkpoint;
-- do not redo old discovery.
+- Unchanged since `BASE` → knowledge remains valid.
+- Changed relevant file/dependency → invalidate only affected facts.
+- Unrelated new commits → do not invalidate the current feature.
+- Checkpoint contradicts Git → Git wins.
+- Context compaction alone does not invalidate source knowledge recorded in the checkpoint.
 
-## Mandatory checkpoint writes
-
-Update `PROJECT_STATE.md` automatically:
-- after a meaningful milestone;
-- when the next action changes materially;
-- before voluntarily stopping;
-- before token/rate-limit exhaustion when practical;
-- before commit/merge.
-
-Do **not** update it after every tiny edit.
-
-Keep the active checkpoint compact (target ~30–60 lines). Record only:
-- Goal
-- Completed
-- Files changed
-- Tests / verification
-- Known issues
-- Decisions
-- Next exact actions
-- latest relevant commit SHA
-- location status
-
-Never paste full diffs, logs, stack traces, or source code.
-
-## Before committing/merging completed work
-
-When the user allows commit/push:
-1. update `PROJECT_STATE.md` in the same logical change;
-2. run `graphify update .`;
-3. commit the checkpoint together with the relevant state or immediately after it;
-4. when merged to main, change location status to `COMMITTED_MAIN` and record the merge/head SHA on the next checkpoint update.
-
-This makes `git pull origin main` a usable recovery mechanism.
-
-## Minimal recovery prompt for the user
-
-After this protocol is installed, the user can simply say:
-
-> Pull main and continue from the Graphify project checkpoint. Do not rediscover completed work.
-
-The agent must then follow this protocol automatically.
+Forbidden: whole-repo rediscovery, broad rereads, broad test reruns, dependency reinstall, dirty-tree discard, or treating local unpushed work as if it existed on main.
