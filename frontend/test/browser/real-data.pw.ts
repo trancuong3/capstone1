@@ -193,19 +193,15 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(
     page.getByRole("button", { name: "Nghe phát âm mẫu" }),
   ).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as Window & { __practiceMicRequests?: number })
-            .__practiceMicRequests ?? 0,
-      ),
-    )
-    .toBe(1);
   // A denied device must not claim success or silently start another attempt.
   await expect(
     page.getByRole("button", { name: "Tiếp tục luyện" }),
   ).toBeVisible();
+  const microphoneRequests = await page.evaluate(() => {
+    const probe = window as Window & { __practiceMicRequests?: number };
+    return probe.__practiceMicRequests;
+  });
+  expect(microphoneRequests).toBe(1);
   await expect(
     page.getByText("Đã tạm dừng. Khi sẵn sàng, bé bấm Tiếp tục luyện nhé."),
   ).toBeVisible();
