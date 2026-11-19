@@ -1,4 +1,4 @@
-# Keep Graphify focused on application/project source, not agent infrastructure.
+# Agent/harness infrastructure is not application architecture.
 .agent-library/
 .agents/
 .codex/
@@ -6,8 +6,11 @@ graphify-out/
 AGENTS.md
 **/AGENTS.md
 skills-lock.json
+scripts/validate_agent_config.py
 
-# Keep secrets, dependencies, caches and generated output out even on older Graphify builds.
+# Secrets, dependencies, caches and generated output.
+# Duplicated here intentionally for compatibility with older Graphify builds
+# where .graphifyignore could shadow .gitignore.
 .env
 .env.*
 **/.env
@@ -18,9 +21,25 @@ node_modules/
 **/.venv/
 venv/
 **/venv/
+env/
+**/env/
 .next/
 **/.next/
+out/
 coverage/
 playwright-report/
 test-results/
 artifacts/
+*.tsbuildinfo
+*.log
+.vercel/
+.turbo/
+.cache/
+.idea/
+.vscode/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+tessdata/
+**/tessdata/
