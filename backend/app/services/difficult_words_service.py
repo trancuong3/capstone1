@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 import unicodedata
@@ -60,6 +61,9 @@ _NON_SPEECH_TAG_RE = re.compile(
     re.UNICODE | re.IGNORECASE,
 )
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_WORD_HELP_RE = re.compile(
+    r"(?:(?:cô|thầy) ơi )?(?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: từ này| chữ này)?(?: ạ)?"
+)
 
 
 def normalize_vietnamese_practice_word(value: Any) -> str:
@@ -84,6 +88,16 @@ def tokenize_vietnamese_practice_text(value: Any) -> list[str]:
     return tokens
 
 
+_DIGIT_WORDS = ("không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín")
+
+
+def _short_word_tokens(value: str | None) -> list[str]:
+    tokens = tokenize_vietnamese_practice_text(value)
+    if len(tokens) == 1 and re.fullmatch(r"[0-9]", tokens[0]):
+        return [_DIGIT_WORDS[int(tokens[0])]]
+    return tokens
+
+
 _ASSISTANT_BLEED_PHRASES = (
     "bé hãy đọc",
     "hãy đọc lại",
@@ -91,6 +105,7 @@ _ASSISTANT_BLEED_PHRASES = (
     "chưa nghe rõ",
     "mình chưa nghe rõ",
     "con đọc lại",
+    "con thử đọc cả cụm",
     "nghe lại rồi đọc",
     "một lần nhé",
     "chính xác rồi",
@@ -116,19 +131,39 @@ def _contains_subslice(needle: list[str], haystack: list[str]) -> bool:
     return any(haystack[idx : idx + span] == needle for idx in range(len(haystack) - span + 1))
 
 
+def is_word_help_request(transcript: str | None, target: str) -> bool:
+    spoken = normalize_vietnamese_practice_word(transcript)
+    expected = normalize_vietnamese_practice_word(target)
+    return bool(_WORD_HELP_RE.fullmatch(spoken)) and not (expected + " ").startswith(spoken + " ")
+
+
+def has_confusable_nasal_ending(target: str, transcript: str | None) -> bool:
+    expected = tokenize_vietnamese_practice_text(target)
+    actual = tokenize_vietnamese_practice_text(transcript)
+    if len(expected) != 1 or len(actual) != 1 or expected == actual:
+        return False
+    coda = re.compile(r"(.+?)(ng|nh|m|n)")
+    left = coda.fullmatch(expected[0])
+    right = coda.fullmatch(actual[0])
+    return bool(left and right and left.group(1) == right.group(1))
+
+
 def classify_practice_transcript(
     expected_word: str,
     transcript: str | None,
     context_phrase: str | None = None,
 ) -> PracticeAssessmentStatusLiteral:
     """Classify a short practice transcript against a Vietnamese word or compound phrase."""
-    expected_tokens = tokenize_vietnamese_practice_text(expected_word)
+    expected_tokens = _short_word_tokens(expected_word)
     if not expected_tokens or len(expected_tokens) > 4:
         return "UNCERTAIN"
 
-    actual_tokens = tokenize_vietnamese_practice_text(transcript or "")
+    actual_tokens = _short_word_tokens(transcript)
     if not actual_tokens:
         return "NO_CLEAR_AUDIO"
+
+    if is_word_help_request(transcript, expected_word):
+        return "UNCERTAIN"
 
     if is_assistant_prompt_bleed(actual_tokens, expected_tokens):
         return "UNCERTAIN"
@@ -168,7 +203,9 @@ def has_usable_practice_transcript(
         "vi-VN",
     ):
         return False
-    words = transcription.words or []
+    words = [w for w in transcription.words or [] if w.get("type") in (None, "word")]
+    if transcription.words and not words:
+        return False
     for word in words:
         logprob = word.get("logprob")
         if logprob is not None and (not math.isfinite(logprob) or logprob < -1.5):
@@ -177,7 +214,7 @@ def has_usable_practice_transcript(
 
 
 def has_high_confidence_keyterm_result(transcription: Transcription) -> bool:
-    words = transcription.words or []
+    words = [w for w in transcription.words or [] if w.get("type") in (None, "word")]
     if not words or not any(word.get("logprob") is not None for word in words):
         return False
     return all(
@@ -1144,7 +1181,7 @@ class DifficultWordsService:
             else None
         )
         browser_usable = bool(
-            clean_browser_text and has_usable_browser_confidence(valid_browser_conf)
+            clean_browser_text and has_usable_browser_confidence(browser_confidence)
         )
         browser_status: PracticeAssessmentStatusLiteral | None = (
             classify_practice_transcript(
@@ -1152,6 +1189,11 @@ class DifficultWordsService:
             )
             if browser_usable
             else None
+        )
+        browser_disagrees = (
+            browser_status == "INCORRECT"
+            and valid_browser_conf is not None
+            and valid_browser_conf >= 0.75
         )
 
         if audio_bytes is not None and len(audio_bytes) > 0:
@@ -1193,8 +1235,22 @@ class DifficultWordsService:
             else "audio/webm"
         )
 
-        if audio_quality_status and audio_quality_status in UNUSABLE_AUDIO_QUALITY_STATUSES:
+        exact_browser_read = (
+            browser_status == "CORRECT"
+            and valid_browser_conf is not None
+            and valid_browser_conf >= 0.9
+            and _short_word_tokens(clean_browser_text) == _short_word_tokens(display_text)
+        )
+        if audio_quality_status in UNUSABLE_AUDIO_QUALITY_STATUSES and not (
+            exact_browser_read and audio_quality_status == "AUDIO_TOO_SHORT"
+        ):
             return ("NO_CLEAR_AUDIO", "AUDIO_QUALITY_GATE", None, None)
+
+        if browser_usable and is_word_help_request(clean_browser_text, display_text):
+            return ("UNCERTAIN", "BROWSER_SPEECH", clean_browser_text, valid_browser_conf)
+
+        if exact_browser_read:
+            return ("CORRECT", "BROWSER_SPEECH", clean_browser_text, valid_browser_conf)
 
         resolved_status: PracticeAssessmentStatusLiteral
         resolved_source: PracticeRecognitionSourceLiteral = "SERVER_STT"
@@ -1202,20 +1258,43 @@ class DifficultWordsService:
         calibrated_confidence: float | None = None
 
         try:
-            first_pass = await self.voice_provider.transcribe(
-                audio=audio_bytes,
-                filename=filename or "practice.webm",
-                content_type=effective_content_type,
-                language_code="vi",
+            first_pass = await asyncio.wait_for(
+                self.voice_provider.transcribe(
+                    audio=audio_bytes,
+                    filename=filename or "practice.webm",
+                    content_type=effective_content_type,
+                    language_code="vi",
+                ),
+                timeout=7,
             )
             first_text = unicodedata.normalize("NFC", first_pass.text).strip()[:160]
             spoken_transcript = first_text or None
-            first_tokens = tokenize_vietnamese_practice_text(first_text)
+            first_tokens = _short_word_tokens(first_text)
+            target_tokens = _short_word_tokens(display_text)
+            primary_matches = (
+                bool(first_tokens)
+                and first_tokens == target_tokens
+                and first_pass.language_code in (None, "vi", "vie", "vi-VN")
+                and (
+                    not first_pass.words
+                    or any(word.get("type") in (None, "word") for word in first_pass.words)
+                )
+                and not browser_disagrees
+            )
 
             # Pure ambient/non-speech tag like "[tiếng đập]" must never be graded INCORRECT.
             if first_text and not first_tokens:
                 first_status: PracticeAssessmentStatusLiteral = "NO_CLEAR_AUDIO"
+            elif (
+                primary_matches
+                and browser_status == "CORRECT"
+                and _short_word_tokens(clean_browser_text) == target_tokens
+            ):
+                # Two unprompted exact matches can corroborate a weak word score.
+                first_status = "CORRECT"
             elif has_usable_practice_transcript(first_pass):
+                if is_word_help_request(first_text, display_text):
+                    return ("UNCERTAIN", "SERVER_STT", first_text, None)
                 first_status = classify_practice_transcript(
                     display_text, first_text, context_phrase=context_phrase
                 )
@@ -1225,22 +1304,31 @@ class DifficultWordsService:
             resolved_status = first_status
             resolved_source = "SERVER_STT"
 
-            should_retry_with_keyterm = (
-                (first_status == "UNCERTAIN")
-                or (first_status == "NO_CLEAR_AUDIO" and not (first_text and not first_tokens))
+            if (
+                (first_status == "CORRECT" and browser_disagrees)
                 or (first_status == "INCORRECT" and browser_status == "CORRECT")
+            ):
+                return ("UNCERTAIN", "SERVER_STT", spoken_transcript, None)
+
+            # Hints can transcribe the requested word even when nothing resembling
+            # it was said. Require independent lexical evidence before using them.
+            corroborated = browser_status == "CORRECT"
+            should_retry_with_keyterm = (
+                first_status == "UNCERTAIN" and (corroborated or primary_matches)
             )
             if should_retry_with_keyterm:
                 try:
-                    second_pass = await self.voice_provider.transcribe(
-                        audio=audio_bytes,
-                        filename=filename or "practice.webm",
-                        content_type=effective_content_type,
-                        language_code="vi",
-                        keyterms=[display_text],
+                    second_pass = await asyncio.wait_for(
+                        self.voice_provider.transcribe(
+                            audio=audio_bytes,
+                            filename=filename or "practice.webm",
+                            content_type=effective_content_type,
+                            language_code="vi",
+                            keyterms=[display_text],
+                        ),
+                        timeout=3,
                     )
                     second_text = unicodedata.normalize("NFC", second_pass.text).strip()[:160]
-                    corroborated = browser_status == "CORRECT"
                     high_conf = has_high_confidence_keyterm_result(second_pass)
                     if has_usable_practice_transcript(second_pass) and (
                         corroborated or high_conf
@@ -1250,13 +1338,13 @@ class DifficultWordsService:
                         )
                         resolved_source = "SERVER_STT_KEYTERM"
                         spoken_transcript = second_text or spoken_transcript
-                except VoiceProviderError:
+                except (VoiceProviderError, TimeoutError):
                     pass
 
             if resolved_status in ("UNCERTAIN", "NO_CLEAR_AUDIO") and browser_status == "CORRECT":
                 # Live browser speech heard target word, while audio recording did not confirm cleanly.
                 resolved_status = "UNCERTAIN"
-        except VoiceProviderError:
+        except (VoiceProviderError, TimeoutError):
             if browser_usable and browser_status is not None:
                 resolved_status = browser_status
                 resolved_source = "BROWSER_SPEECH"
@@ -1265,6 +1353,18 @@ class DifficultWordsService:
             else:
                 resolved_status = "ENGINE_ERROR"
                 resolved_source = "ENGINE_ERROR"
+
+        if resolved_status == "INCORRECT" and has_confusable_nasal_ending(display_text, spoken_transcript):
+            corroborated = (
+                resolved_source == "SERVER_STT"
+                and browser_usable
+                and valid_browser_conf is not None
+                and valid_browser_conf >= 0.75
+                and normalize_vietnamese_practice_word(clean_browser_text)
+                == normalize_vietnamese_practice_word(spoken_transcript)
+            )
+            if not corroborated:
+                resolved_status = "UNCERTAIN"
 
         return (resolved_status, resolved_source, spoken_transcript, calibrated_confidence)
 
@@ -1514,6 +1614,7 @@ class DifficultWordsService:
             "NFC", (display_text or normalized_word).strip()
         )[:120] or norm
 
+        await self.repository.lock_practice_request(child_id, request_id)
         storage_ready = await self.repository.is_practice_storage_ready()
         if storage_ready:
             existing = await self.repository.find_practice_attempt_by_request(

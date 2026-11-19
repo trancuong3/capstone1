@@ -7,6 +7,14 @@ import {
 test("A new first pass persists the original error before native retry self-correction", async ({
   page,
 }) => {
+  const hydrationWarnings: string[] = [];
+  const observeHydration = (message: string) => {
+    if (/hydration failed|tree hydrated|server rendered html/i.test(message)) {
+      hydrationWarnings.push(message);
+    }
+  };
+  page.on("console", (message) => observeHydration(message.text()));
+  page.on("pageerror", (error) => observeHydration(error.message));
   const fixture = await installReadingExperience(page, {
     sttTexts: ["Bé chó đọc", "mèo"],
   });
@@ -55,4 +63,5 @@ test("A new first pass persists the original error before native retry self-corr
   expect(fixture.comparisons).toEqual([frozen]);
   expect(fixture.sttCalls()).toBe(2);
   expect(fixture.unexpected).toEqual([]);
+  expect(hydrationWarnings).toEqual([]);
 });

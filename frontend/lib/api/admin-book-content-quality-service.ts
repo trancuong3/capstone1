@@ -4,6 +4,7 @@ import { apiQuery, requestApi } from "@/lib/api/api-client";
 import {
   bookContentReportDetailSchema,
   bookQualityBookDetailSchema,
+  bookQualityBookDecisionReadSchema,
   bookQualityBookPageSchema,
   bookQualityFindingSchema,
   bookQualityReportAdminPageSchema,
@@ -12,6 +13,9 @@ import {
   type BookContentReportDetailDTO,
   type BookContentReportStatus,
   type BookQualityBookDetailDTO,
+  type BookQualityBookDecisionReadDTO,
+  type BookQualityBookDecisionRequest,
+  type BookApprovalStatus,
   type BookQualityBookPageDTO,
   type BookQualityFindingDTO,
   type BookQualityFindingStatus,
@@ -39,10 +43,16 @@ export interface AdminBookContentQualityService {
   ): Promise<BookContentReportDetailDTO>;
   listBooks(query?: {
     search?: string;
+    approval_status?: BookApprovalStatus;
+    alert_filter?: "CHILD_SAFETY" | "COPYRIGHT" | "BOTH";
     limit?: number;
     offset?: number;
   }): Promise<BookQualityBookPageDTO>;
   getBook(bookId: string): Promise<BookQualityBookDetailDTO>;
+  decideBook(
+    bookId: string,
+    decision: BookQualityBookDecisionRequest,
+  ): Promise<BookQualityBookDecisionReadDTO>;
   enqueueScan(bookId: string): Promise<BookQualityScanDTO>;
   listScans(bookId: string): Promise<BookQualityScanDTO[]>;
   getScan(scanId: string): Promise<BookQualityScanDetailDTO>;
@@ -92,6 +102,8 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
       requestApi(
         `/books/admin/quality/books${apiQuery({
           search: query?.search,
+          approval_status: query?.approval_status,
+          alert_filter: query?.alert_filter,
           limit: query?.limit,
           offset: query?.offset,
         })}`,
@@ -101,6 +113,13 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
       requestApi(
         `/books/admin/quality/books/${encodeURIComponent(bookId)}`,
         bookQualityBookDetailSchema,
+      ),
+    decideBook: (bookId, decision) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/decision`,
+        bookQualityBookDecisionReadSchema,
+        undefined,
+        { method: "POST", body: decision },
       ),
     enqueueScan: (bookId) =>
       requestApi(

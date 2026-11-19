@@ -19,7 +19,13 @@ from sqlalchemy.pool import NullPool
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.router import api_router
-from app.models import BookPage, PageRevision, PageRevisionWord
+from app.models import (
+    AdminAiWorkflow,
+    AuditLog,
+    BookPage,
+    PageRevision,
+    PageRevisionWord,
+)
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.admin_ocr_service import AdminOcrService
@@ -113,6 +119,7 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     pageid uuid NOT NULL REFERENCES bookpages(id) ON DELETE CASCADE,
                     revisionno text NOT NULL,
                     verificationstatus text NOT NULL,
+                    originalocrtext text,
                     verifiedtext text,
                     drafttext text,
                     contenthash text NOT NULL,
@@ -145,6 +152,12 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             for statement in statements:
                 await connection.execute(text(statement))
+            await connection.run_sync(
+                lambda sync_connection: AuditLog.__table__.create(sync_connection)
+            )
+            await connection.run_sync(
+                lambda sync_connection: AdminAiWorkflow.__table__.create(sync_connection)
+            )
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),
                 {"id": ACTOR},
@@ -173,10 +186,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 text(
                     """
                     INSERT INTO pagerevisions
-                        (id, pageid, revisionno, verificationstatus, verifiedtext,
-                         drafttext, contenthash, verifiedby, verifiedat)
+                        (id, pageid, revisionno, verificationstatus, originalocrtext,
+                         verifiedtext, drafttext, contenthash, verifiedby, verifiedat)
                     VALUES (:id, :page, '1', 'VERIFIED', 'Ngày xưa có bé.',
-                            'Ngày xưa có bé.', 'r1-hash', :actor, now())
+                            'Ngày xưa có bé.', 'Ngày xưa có bé.', 'r1-hash', :actor, now())
                     """
                 ),
                 {"id": R1_ID, "page": PAGE_ID, "actor": ACTOR},
@@ -477,20 +490,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 reading_repository = ReadingContentRepository(session)
                 reading = ReadingContentService(reading_repository)
                 reading_page = await reading.repository.verified_page(PAGE_ID, BOOK_ID)
-                self.assertIsNotNone(reading_page)
-                current_revision = await reading.repository.verified_revision(
-                    PAGE_ID, reading_page.CurrentVerifiedRevisionId
-                )
-                self.assertIsNotNone(current_revision)
-                page_content = await reading._build_page_dto(
-                    reading_page, current_revision
-                )
-                self.assertEqual(page_content.text, "Ngày xưa có em.")
-                self.assertEqual(
-                    [word.text for word in page_content.words],
-                    ["Ngày", "xưa", "có", "em."],
-                )
-                self.assertEqual(page_content.page_revision_id, UUID(r2["page_revision_id"]))
+                # OCR verification is not book-level child approval. This
+                # fixture has no current book.children.approved audit decision,
+                # so the public reading path must continue to block the book.
+                self.assertIsNone(reading_page)
 
             second_draft = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/revisions/draft",

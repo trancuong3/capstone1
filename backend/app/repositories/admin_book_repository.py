@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.role_cache import get_cached_profile_role
 from app.models import Book
+from app.repositories.book_repository import CatalogRepository
 
 
 class AdminBookRepository:
@@ -19,6 +20,9 @@ class AdminBookRepository:
 
     async def get(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
+
+    async def is_ready_for_children(self, book_id: UUID) -> bool:
+        return await CatalogRepository(self.db).is_ready_for_children(book_id)
 
     async def create(self, *, actor_id: UUID, values: dict[str, object]) -> Book:
         book = Book(

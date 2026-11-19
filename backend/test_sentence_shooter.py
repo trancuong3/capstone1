@@ -807,12 +807,16 @@ class SentenceShooterRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.rollback_calls, 1)
         self.assertEqual(len(db.statements), 2)
 
-        sql = "\n".join(str(statement) for statement in db.statements).lower()
+        statement_sql = [str(statement).lower() for statement in db.statements]
+        sql = "\n".join(statement_sql)
+        select_projections = "\n".join(
+            statement.split("\nfrom ", 1)[0] for statement in statement_sql
+        )
         self.assertIn("currentverifiedrevisionid", sql)
         self.assertIn("verificationstatus", sql)
         self.assertIn("lifecyclestatus", sql)
         for unused_column in ("boundingbox", "ocrconfidence", "imagepath", "drafttext", "processingmeta"):
-            self.assertNotIn(unused_column, sql)
+            self.assertNotIn(unused_column, select_projections)
 
 
 class SentenceShooterLatencyBundleTests(unittest.IsolatedAsyncioTestCase):

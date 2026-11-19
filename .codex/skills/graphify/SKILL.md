@@ -1,7 +1,15 @@
 ---
 name: graphify
-description: "Use for any question about a codebase, its architecture, file relationships, or project content — especially when graphify-out/ exists, where the question should be treated as a graphify query first. Turns any input (code, docs, papers, images, videos) into a persistent knowledge graph with god nodes, community detection, and query/path/explain tools."
+description: "Use when code location, dependencies, or flow are unknown; skip when the file or symbol is already known."
 ---
+## ViRead repository override
+
+When this skill is used inside ViRead/capstone1:
+- Treat `graphify-out/` as local generated state, never as committed source of truth.
+- For a single known symbol/file lookup, use exact search instead of building a graph.
+- Build/rebuild only for repeated or structural cross-file discovery, and always honor the repository `.graphifyignore`; never index `.agent-library/`, `.agents/`, or `.codex/`.
+- If an existing graph predates current source/config or references paths that no longer exist, treat it as stale and rebuild before querying it.
+
 
 # /graphify
 

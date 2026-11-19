@@ -1,5 +1,7 @@
 # AGENT HANDOVER & ARCHITECTURE GUIDE (Agent.md)
 
+> **LEGACY / HISTORICAL HANDOVER**: This file is not the current Codex instruction source. Use root `AGENTS.md`, scoped `backend/AGENTS.md` / `frontend/AGENTS.md`, current Git state, and the six `.agents/skills/viread-*` gateways for active rules. Branch/status details below may be historical; Git is authoritative.
+
 > **MỤC TIÊU DÀNH CHO AI TIẾP QUẢN**:
 > Tài liệu này cung cấp toàn bộ bối cảnh hệ thống, kiến trúc kỹ thuật, quy tắc bất khả xâm phạm (rules & guardrails), các luồng nghiệp vụ cốt lõi, và lịch sử các thay đổi quan trọng trên nhánh `tu`. Hãy đọc kỹ tài liệu này trước khi chỉnh sửa bất kỳ dòng code nào để **tránh gây hỏng project hoặc làm vỡ test suite**.
 

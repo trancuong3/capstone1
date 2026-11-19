@@ -54,4 +54,4 @@ Set-Location "F:\c1\capstone1\backend"
 1. Every verification command exited with `$LASTEXITCODE -eq 0`.
 2. `git status -sb` and `git diff --stat` confirm no unrelated files, `.env*` secrets, or locked `backend/requirements.txt` pins (`numpy==1.26.4`, `protobuf==3.20.2`) were accidentally altered.
 3. `git diff --check` reports zero whitespace or merge-marker errors.
-4. If source code changed and `graphify-out/graph.json` exists, run `.\.venv\Scripts\python.exe -m graphify update .`.
+4. **Graphify freshness is not a completion criterion.** Update a local graph only when structural relationships changed **and** that graph will be queried/reused; otherwise skip Graphify. Never update it merely to claim completion.

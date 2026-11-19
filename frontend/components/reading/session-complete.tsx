@@ -31,6 +31,8 @@ import type { ReadingCompletionSummaryUI } from "@/types/reading";
 interface SessionCompleteProps {
   booksHref: string;
   bookId: string;
+  startPageId?: string;
+  endPageId?: string;
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
@@ -42,6 +44,8 @@ interface SessionCompleteProps {
 export function SessionComplete({
   booksHref,
   bookId,
+  startPageId,
+  endPageId,
   child,
   sessionId,
   summary,
@@ -56,6 +60,10 @@ export function SessionComplete({
     (summary.pages_explored === null ||
       summary.pages_explored < summary.selected_range_pages);
   const spokenWords = summary.spoken_words ?? [];
+  const rereadHref =
+    startPageId && endPageId
+      ? `/reading-preparation?${new URLSearchParams({ bookId, pageId: startPageId, endPageId })}`
+      : `/books/${encodeURIComponent(bookId)}`;
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? [];
   const mispronouncedWords = summary.mispronounced_words ?? [];
@@ -407,7 +415,15 @@ export function SessionComplete({
           </div>
         )}
 
-        <ButtonLink className="mx-auto max-w-[360px]" href={booksHref}>
+        <ButtonLink className="mx-auto max-w-[360px]" href={rereadHref}>
+          <BookOpen aria-hidden="true" className="size-5" />
+          Đọc lại phần này
+        </ButtonLink>
+        <ButtonLink
+          className="mx-auto max-w-[360px]"
+          href={booksHref}
+          variant="secondary"
+        >
           Đọc cuốn khác
           <ArrowRight aria-hidden="true" className="size-5" />
         </ButtonLink>

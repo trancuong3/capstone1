@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { adminAiWorkflowSchema } from "@/lib/api/ocr-review-service";
 
 export const bookContentIssueTypeSchema = z.enum([
   "BOOK_METADATA_ERROR",
@@ -150,6 +151,63 @@ export const bookQualityScanDetailSchema = bookQualityScanSchema.extend({
   ),
 });
 
+export const bookApprovalStatusSchema = z.enum([
+  "PROCESSING",
+  "SCAN_FAILED",
+  "PENDING_ADMIN_REVIEW",
+  "READY_FOR_CHILDREN",
+  "APPROVED_BY_ADMIN",
+  "REJECTED_FOR_CHILDREN",
+  "STALE",
+]);
+
+export const bookApprovalAssessmentSchema = z.object({
+  status: bookApprovalStatusSchema,
+  page_count: z.number().int().nonnegative(),
+  ocr_completed_pages: z.number().int().nonnegative(),
+  ocr_approval_valid_pages: z.number().int().nonnegative(),
+  proofreading_status: z.string(),
+  proofreading_completed_pages: z.number().int().nonnegative(),
+  proofreading_suggestion_count: z.number().int().nonnegative(),
+  child_safety_status: z.string(),
+  child_safety_completed_pages: z.number().int().nonnegative(),
+  processing_pages: z.number().int().nonnegative(),
+  failed_pages: z.number().int().nonnegative(),
+  stale_pages: z.number().int().nonnegative(),
+  copyright_status: z.string(),
+  copyright_finding_count: z.number().int().nonnegative().nullable(),
+  finding_count: z.number().int().nonnegative(),
+  high_finding_count: z.number().int().nonnegative(),
+  medium_finding_count: z.number().int().nonnegative(),
+  warning_page_count: z.number().int().nonnegative(),
+  failed_or_unscanned_page_count: z.number().int().nonnegative(),
+  finding_groups: z.array(
+    z.object({
+      category: z.string(),
+      severity: z.string(),
+      finding_count: z.number().int().nonnegative(),
+      page_count: z.number().int().nonnegative(),
+      page_numbers: z.array(z.number().int()),
+      examples: z.array(
+        z.object({
+          page_number: z.number().int(),
+          evidence_text: z.string(),
+          explanation: z.string(),
+          recommendation: z.string(),
+        }),
+      ),
+    }),
+  ),
+  assessment_hash: z.string(),
+  assessed_at: z.iso.datetime({ offset: true }),
+  admin_approved_at: z.iso.datetime({ offset: true }).nullable(),
+  admin_approved_by: z.guid().nullable(),
+  admin_approved_by_name: z.string().nullable(),
+  admin_reason: z.string().nullable(),
+  rights_confirmed: z.boolean(),
+  blockers: z.array(z.string()),
+});
+
 export const bookQualityBookSummarySchema = z.object({
   book_id: z.guid(),
   book_title: z.string(),
@@ -158,6 +216,7 @@ export const bookQualityBookSummarySchema = z.object({
   finding_count: z.number().int().nonnegative(),
   needs_review_finding_count: z.number().int().nonnegative(),
   latest_scan: bookQualityScanSchema.nullable(),
+  assessment: bookApprovalAssessmentSchema,
 });
 
 export const bookQualityBookPageSchema = z.object({
@@ -165,6 +224,27 @@ export const bookQualityBookPageSchema = z.object({
   total: z.number().int().nonnegative(),
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
+  summary: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  alert_summary: z
+    .record(z.string(), z.number().int().nonnegative())
+    .default({}),
+});
+
+export const bookQualityBookDecisionReadSchema = z.object({
+  book_id: z.guid(),
+  assessment: bookApprovalAssessmentSchema,
+  decision_history: z.array(
+    z.object({
+      action: z.string(),
+      actor_id: z.string().nullable(),
+      actor_name: z.string().nullable(),
+      created_at: z.string().nullable(),
+      reason: z.string().nullable(),
+      assessment_hash: z.string().nullable(),
+      category: z.string().nullable(),
+      rights_confirmed: z.boolean(),
+    }),
+  ),
 });
 
 export const bookQualityBookDetailSchema = z.object({
@@ -173,6 +253,19 @@ export const bookQualityBookDetailSchema = z.object({
   reports: z.array(bookContentReportSchema),
   scans: z.array(bookQualityScanSchema),
   latest_scan_detail: bookQualityScanDetailSchema.nullable(),
+  ai_workflows: z.array(adminAiWorkflowSchema).default([]),
+  ai_workflow_summary: z
+    .record(z.string(), z.number().int().nonnegative())
+    .default({}),
+  assessment: bookApprovalAssessmentSchema,
+  decision_history: bookQualityBookDecisionReadSchema.shape.decision_history,
+});
+
+export const bookQualityBookDecisionRequestSchema = z.object({
+  decision: z.enum(["APPROVE", "REJECT", "REQUEST_RESCAN", "FALSE_POSITIVE"]),
+  reason: z.string().min(1).max(2000),
+  rights_confirmed: z.boolean().default(false),
+  category: z.string().max(80).optional(),
 });
 
 export type BookContentIssueType = z.infer<typeof bookContentIssueTypeSchema>;
@@ -200,6 +293,16 @@ export type BookQualityBookSummaryDTO = z.infer<
 export type BookQualityBookPageDTO = z.infer<typeof bookQualityBookPageSchema>;
 export type BookQualityBookDetailDTO = z.infer<
   typeof bookQualityBookDetailSchema
+>;
+export type BookApprovalAssessmentDTO = z.infer<
+  typeof bookApprovalAssessmentSchema
+>;
+export type BookApprovalStatus = z.infer<typeof bookApprovalStatusSchema>;
+export type BookQualityBookDecisionReadDTO = z.infer<
+  typeof bookQualityBookDecisionReadSchema
+>;
+export type BookQualityBookDecisionRequest = z.infer<
+  typeof bookQualityBookDecisionRequestSchema
 >;
 export type BookQualityReportAdminPageDTO = z.infer<
   typeof bookQualityReportAdminPageSchema

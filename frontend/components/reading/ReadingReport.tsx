@@ -29,8 +29,8 @@ type Hesitation = {
 const COLORS = {
   correct: "border-green-500 bg-green-100",
   missing: "border-red-500 bg-red-100",
-  wrong: "border-orange-500 bg-orange-100",
-  hesitation: "border-blue-500 bg-blue-100",
+  wrong: "border-red-500 bg-red-100",
+  hesitation: "border-purple-500 bg-purple-100",
   repeated: "border-purple-500 bg-purple-100",
 };
 
@@ -173,7 +173,7 @@ export function ReadingReport({ result, sessionId }: Props) {
         </div>
 
         <div>
-          <p className="text-orange-600">Từ đọc nhầm</p>
+          <p className="text-red-600">Từ đọc nhầm</p>
           <p className="text-2xl font-semibold">{wrongCount}</p>
         </div>
 
@@ -188,7 +188,7 @@ export function ReadingReport({ result, sessionId }: Props) {
         </div>
 
         <div>
-          <p className="text-blue-700">Khoảng ngập ngừng</p>
+          <p className="text-purple-700">Khoảng ngập ngừng</p>
           <p className="text-2xl font-semibold">{hesitations.length}</p>
         </div>
       </div>
@@ -250,11 +250,12 @@ export function ReadingReport({ result, sessionId }: Props) {
           <ul className="list-disc space-y-1 pl-5">
             {hesitations.map((item, index) => (
               <li key={`${item.after_word}-${item.before_word}-${index}`}>
-                <span className="rounded border border-blue-500 bg-blue-100 px-1">
-                  {item.after_word}
-                </span>
+                {item.after_word}
                 {" → "}
-                {item.before_word}: dừng {item.pause.toFixed(2)} giây
+                <span className="rounded border border-purple-500 bg-purple-100 px-1">
+                  {item.before_word}
+                </span>
+                : dừng {item.pause.toFixed(2)} giây
               </li>
             ))}
           </ul>

@@ -45,6 +45,7 @@ from app.request_context import request_id_context
 from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
+from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
 
@@ -175,10 +176,20 @@ async def lifespan(_app: FastAPI):
     book_quality_task = None
     viread_outbox_task = None
     viread_training_task = None
+    stop_admin_ai_workflow = asyncio.Event()
+    admin_ai_workflow_task = None
     if APP_ENVIRONMENT != "test" and not worker_disabled:
         book_quality_task = asyncio.create_task(
             run_book_quality_worker(stop_book_quality_worker),
             name="book_quality_scan_worker",
+        )
+    workflow_worker_enabled = os.getenv(
+        "ADMIN_AI_WORKFLOW_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if APP_ENVIRONMENT != "test" and workflow_worker_enabled:
+        admin_ai_workflow_task = asyncio.create_task(
+            run_admin_ai_workflow_worker(stop_admin_ai_workflow),
+            name="admin_ai_workflow_worker",
         )
     ocr_outbox_enabled = os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
@@ -218,6 +229,7 @@ async def lifespan(_app: FastAPI):
             "viread_ocr_outbox": viread_outbox_task,
             "viread_ocr_training": viread_training_task,
             "book_quality": book_quality_task,
+            "admin_ai_workflow": admin_ai_workflow_task,
             "active_model_registry": active_model_worker,
             "local_trainer_process": local_trainer_process,
         }
@@ -233,8 +245,14 @@ async def lifespan(_app: FastAPI):
         stop_viread_ocr_outbox.set()
         stop_viread_training.set()
         stop_book_quality_worker.set()
+        stop_admin_ai_workflow.set()
 
-        worker_tasks = (viread_outbox_task, viread_training_task, book_quality_task)
+        worker_tasks = (
+            viread_outbox_task,
+            viread_training_task,
+            book_quality_task,
+            admin_ai_workflow_task,
+        )
         try:
             # Book quality worker releases its lease on cancellation; an interrupted
             # page is resumed from its durable per-page state on the next poll.
@@ -243,6 +261,9 @@ async def lifespan(_app: FastAPI):
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),
+                _shutdown_worker_task(
+                    admin_ai_workflow_task, stop_admin_ai_workflow
+                ),
             )
         except asyncio.CancelledError:
             for worker_task in worker_tasks:

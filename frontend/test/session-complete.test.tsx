@@ -152,6 +152,8 @@ describe("SessionComplete component", () => {
       <SessionComplete
         booksHref="/books"
         bookId="book-id-with-special-chars"
+        startPageId="first"
+        endPageId="last"
         child={childFixture}
         sessionId={TEST_SESSION_ID}
         summary={baseSummary}
@@ -159,6 +161,12 @@ describe("SessionComplete component", () => {
     );
 
     const gameLink = screen.getByRole("link", { name: /Chơi game/i });
+    expect(
+      screen.getByRole("link", { name: "Đọc lại phần này" }),
+    ).toHaveAttribute(
+      "href",
+      "/reading-preparation?bookId=book-id-with-special-chars&pageId=first&endPageId=last",
+    );
     const href = new URL(
       gameLink.getAttribute("href") ?? "",
       "https://viread.test",

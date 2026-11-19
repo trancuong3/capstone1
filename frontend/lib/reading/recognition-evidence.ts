@@ -4,6 +4,24 @@ import {
   type AudioQualitySnapshot,
 } from "@/lib/reading/audio-quality";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
+import { normalizeShortWordTranscript } from "@/lib/reading/retry-word-recognition";
+
+export function isConfidentExactBrowserRead(
+  target: string,
+  text?: string | null,
+  confidence?: number | null,
+): boolean {
+  if (
+    !text ||
+    confidence == null ||
+    confidence < 0.9 ||
+    confidence > 1 ||
+    !Number.isFinite(confidence)
+  )
+    return false;
+  const expected = normalizeShortWordTranscript(target);
+  return Boolean(expected && normalizeShortWordTranscript(text) === expected);
+}
 
 /** Conservative rejection gates, not calibrated pronunciation probabilities.
  * Language probability describes language identification only. Word logprob

@@ -5,7 +5,6 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
-  LoaderCircle,
   Mic,
   Pause,
   Play,
@@ -21,9 +20,18 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useReportServices } from "@/hooks/use-report-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import { useRecordingPlayback } from "@/hooks/use-recording-playback";
+import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import { isServiceError } from "@/lib/api/service-error";
+import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { BrowserTranscriptCollector } from "@/lib/reading/browser-transcript-collector";
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
+import { shortWordContext } from "@/lib/reading/retry-word-recognition";
+import {
+  isWordHelpRequest,
+  MAX_WORD_HELP_ROUNDS,
+  WORD_HELP_SILENCE_LIMIT,
+} from "@/lib/reading/word-help";
 import {
   SHORT_WORD_CAPTURE_CONFIG,
   VOICE_PROMPTS,
@@ -50,7 +58,7 @@ interface BrowserSpeechRecognitionLike {
   onresult: ((event: BrowserSpeechRecognitionEventLike) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
-  start(): void;
+  start(track?: MediaStreamTrack): void;
   stop(): void;
   abort?(): void;
 }
@@ -100,6 +108,9 @@ const ASSESSMENT_LABELS: Record<DifficultWordAssessmentStatus, string> = {
   NO_CLEAR_AUDIO: "Chưa nghe thấy",
   ENGINE_ERROR: "Máy đang bận",
 };
+
+const EVALUATION_TIMEOUT_MS = 15_000;
+const CUE_TIMEOUT_MS = 8_000;
 
 function createRequestUuid(): string {
   if (
@@ -181,10 +192,19 @@ export function DifficultWordPracticePanel({
 
   const [flowState, setFlowState] = useState<WordPracticeState>("IDLE");
   const [sampleError, setSampleError] = useState<string | null>(null);
+  const [coachCue, setCoachCue] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [isPlayingSelf, setIsPlayingSelf] = useState(false);
+  const [evaluationDurationMs, setEvaluationDurationMs] = useState<
+    number | null
+  >(null);
+  const {
+    playing: isPlayingSelf,
+    error: playbackError,
+    stop: stopSelfPlayback,
+    toggle: toggleSelfPlayback,
+  } = useRecordingPlayback();
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
   const [latestResult, setLatestResult] =
     useState<DifficultWordPracticeAttemptDTO | null>(null);
@@ -212,12 +232,13 @@ export function DifficultWordPracticePanel({
   const recognitionRef = useRef<BrowserSpeechRecognitionLike | null>(null);
   const stopCaptureLockRef = useRef(false);
   const autoRetryCountRef = useRef(0);
+  const incorrectCountRef = useRef(0);
   const silenceStreakRef = useRef(0);
+  const helpRoundsRef = useRef(0);
+  const evaluationRef = useRef<AbortController | null>(null);
   const captureTurnRef = useRef<(generation: number) => Promise<void>>(
     async () => undefined,
   );
-  const selfAudioRef = useRef<HTMLAudioElement | null>(null);
-  const selfAudioUrlRef = useRef<string | null>(null);
   const cleanupRef = useRef<() => void>(() => undefined);
   const didAutoStartRef = useRef(false);
 
@@ -228,6 +249,10 @@ export function DifficultWordPracticePanel({
   });
 
   const primarySource = word.sources?.[0];
+  const contextPhrase = shortWordContext(
+    word.display_text,
+    primarySource?.context_phrase,
+  );
   const wordIndexInQueue = useMemo(
     () =>
       words.findIndex((item) => item.normalized_word === word.normalized_word),
@@ -287,20 +312,6 @@ export function DifficultWordPracticePanel({
     }
   }, []);
 
-  const stopSelfPlayback = useCallback(() => {
-    if (selfAudioRef.current) {
-      selfAudioRef.current.pause();
-      selfAudioRef.current.onended = null;
-      selfAudioRef.current.onerror = null;
-      selfAudioRef.current = null;
-    }
-    if (selfAudioUrlRef.current) {
-      URL.revokeObjectURL(selfAudioUrlRef.current);
-      selfAudioUrlRef.current = null;
-    }
-    if (mountedRef.current) setIsPlayingSelf(false);
-  }, []);
-
   const refreshHistory = useCallback(async () => {
     try {
       const response = await difficultWordService.getPracticeHistory(child.id, {
@@ -347,6 +358,8 @@ export function DifficultWordPracticePanel({
 
   useEffect(() => {
     cleanupRef.current = () => {
+      evaluationRef.current?.abort();
+      evaluationRef.current = null;
       clearTimers();
       stopBrowserRecognition();
       speechPlayer.stop();
@@ -364,66 +377,165 @@ export function DifficultWordPracticePanel({
     };
   }, []);
 
+  const playCue = useCallback(
+    async (text: string, generation: number, wordSample = false) => {
+      if (!mountedRef.current || generation !== flowGenerationRef.current)
+        return false;
+      setCoachCue(text);
+      try {
+        await withRequestDeadline(
+          () =>
+            wordSample
+              ? speechPlayer.play(text, { wordSample: true })
+              : speechPlayer.play(text),
+          undefined,
+          CUE_TIMEOUT_MS,
+        );
+      } catch {
+        if (!mountedRef.current || generation !== flowGenerationRef.current)
+          return false;
+        speechPlayer.stop();
+        if (wordSample)
+          setSampleError(
+            "Chưa phát được giọng đọc mẫu tiếng Việt. Bé có thể đọc cùng ba mẹ nhé.",
+          );
+      }
+      return mountedRef.current && generation === flowGenerationRef.current;
+    },
+    [speechPlayer],
+  );
+
+  const retryTurn = useCallback(
+    async (
+      generation: number,
+      reason: "help" | "silence" | "unclear" | "incorrect",
+    ) => {
+      const silence = reason === "silence";
+      silenceStreakRef.current = silence ? silenceStreakRef.current + 1 : 0;
+      const guide =
+        reason === "help" ||
+        silenceStreakRef.current >= WORD_HELP_SILENCE_LIMIT;
+      if (reason === "incorrect") incorrectCountRef.current += 1;
+      if (
+        incorrectCountRef.current >= 3 ||
+        helpRoundsRef.current >= MAX_WORD_HELP_ROUNDS ||
+        (!guide &&
+          autoRetryCountRef.current >= SHORT_WORD_CAPTURE_CONFIG.maxAutoRetries)
+      ) {
+        speechRecorder.cancel();
+        setRetryLoopPaused(true);
+        setFlowState("NEEDS_RETRY");
+        return;
+      }
+
+      setFlowState("INSTRUCTING");
+      if (guide) {
+        helpRoundsRef.current += 1;
+        if (!(await playCue("Không sao đâu. Con nghe cô đọc nhé.", generation)))
+          return;
+        if (!(await playCue(word.display_text, generation, true))) return;
+        if (!(await playCue("Đến lượt con. Con đọc lại nhé.", generation)))
+          return;
+      } else {
+        autoRetryCountRef.current += 1;
+        const cue =
+          reason === "incorrect"
+            ? "Con thử đọc lại nhé."
+            : silence
+              ? "Cô đang nghe. Con thử đọc nhé."
+              : contextPhrase
+                ? `Cô chưa nghe rõ. Con thử đọc cả cụm “${contextPhrase}” nhé.`
+                : "Cô chưa nghe rõ. Con đọc lại nhé.";
+        if (!(await playCue(cue, generation))) return;
+      }
+      await captureTurnRef.current(generation);
+    },
+    [contextPhrase, playCue, speechRecorder, word.display_text],
+  );
+
   const submitEvaluation = useCallback(
     async (payload: CapturedAttemptPayload, generation: number) => {
       if (!mountedRef.current || generation !== flowGenerationRef.current) {
         return;
       }
+      if (evaluationRef.current) return;
+      const controller = new AbortController();
+      const evaluationStart = performance.now();
+      evaluationRef.current = controller;
       setFlowState("EVALUATING");
       setSubmitError(null);
       setPendingSavePayload(null);
 
       try {
-        let evaluated: DifficultWordPracticeAttemptDTO;
-        if (difficultWordService.evaluatePracticeWord) {
-          evaluated = await difficultWordService.evaluatePracticeWord(
-            child.id,
-            {
-              request_id: payload.requestId,
-              normalized_word: word.normalized_word,
-              display_text: word.display_text,
-              context_phrase: primarySource?.context_phrase ?? undefined,
-              audio: payload.audioBlob,
-              audio_duration_ms: payload.durationMs,
-              audio_quality_status: payload.audioQualityStatus ?? undefined,
-              browser_transcript: payload.browserTranscript ?? undefined,
-              browser_confidence: payload.browserConfidence ?? undefined,
-              book_id: primarySource?.book_id ?? undefined,
-              session_id: primarySource?.session_id ?? undefined,
-              page_id: primarySource?.page_id ?? undefined,
-              page_revision_id: primarySource?.page_revision_id ?? undefined,
-              word_id: primarySource?.word_id ?? undefined,
-              evidence_word_ids: word.evidence_word_ids,
-            },
-          );
-        } else {
-          const started = await difficultWordService.startPractice(child.id, {
-            request_id: payload.requestId,
-            normalized_word: word.normalized_word,
-            display_text: word.display_text,
-            evidence_word_ids: word.evidence_word_ids,
-          });
-          evaluated = await difficultWordService.evaluateAudio(
-            child.id,
-            started.attempt_id,
-            {
-              completion_request_id: payload.requestId,
-              audio: payload.audioBlob,
-              audio_duration_ms: payload.durationMs,
-              audio_quality_status: payload.audioQualityStatus ?? undefined,
-              browser_transcript: payload.browserTranscript ?? undefined,
-              browser_confidence: payload.browserConfidence ?? undefined,
-            },
-          );
-        }
+        const evaluated = await withRequestDeadline(
+          async (signal) => {
+            if (difficultWordService.evaluatePracticeWord) {
+              return difficultWordService.evaluatePracticeWord(
+                child.id,
+                {
+                  request_id: payload.requestId,
+                  normalized_word: word.normalized_word,
+                  display_text: word.display_text,
+                  context_phrase: primarySource?.context_phrase ?? undefined,
+                  audio: payload.audioBlob,
+                  audio_duration_ms: payload.durationMs,
+                  audio_quality_status: payload.audioQualityStatus ?? undefined,
+                  browser_transcript: payload.browserTranscript ?? undefined,
+                  browser_confidence: payload.browserConfidence ?? undefined,
+                  book_id: primarySource?.book_id ?? undefined,
+                  session_id: primarySource?.session_id ?? undefined,
+                  page_id: primarySource?.page_id ?? undefined,
+                  page_revision_id:
+                    primarySource?.page_revision_id ?? undefined,
+                  word_id: primarySource?.word_id ?? undefined,
+                  evidence_word_ids: word.evidence_word_ids,
+                },
+                signal,
+              );
+            } else {
+              const started = await difficultWordService.startPractice(
+                child.id,
+                {
+                  request_id: payload.requestId,
+                  normalized_word: word.normalized_word,
+                  display_text: word.display_text,
+                  evidence_word_ids: word.evidence_word_ids,
+                },
+                signal,
+              );
+              signal.throwIfAborted();
+              return difficultWordService.evaluateAudio(
+                child.id,
+                started.attempt_id,
+                {
+                  completion_request_id: payload.requestId,
+                  audio: payload.audioBlob,
+                  audio_duration_ms: payload.durationMs,
+                  audio_quality_status: payload.audioQualityStatus ?? undefined,
+                  browser_transcript: payload.browserTranscript ?? undefined,
+                  browser_confidence: payload.browserConfidence ?? undefined,
+                },
+                signal,
+              );
+            }
+          },
+          controller.signal,
+          EVALUATION_TIMEOUT_MS,
+        );
 
         if (!mountedRef.current || generation !== flowGenerationRef.current) {
           return;
         }
 
+        evaluationRef.current = null;
+        setEvaluationDurationMs(
+          Math.round(performance.now() - evaluationStart),
+        );
         setLatestResult(evaluated);
         onAttemptCompleted?.(evaluated);
-        await onProgressSaved();
+        void Promise.resolve()
+          .then(onProgressSaved)
+          .catch(() => undefined);
         void refreshHistory();
 
         if (!mountedRef.current || generation !== flowGenerationRef.current) {
@@ -431,19 +543,14 @@ export function DifficultWordPracticePanel({
         }
 
         if (evaluated.assessment_status === "CORRECT") {
+          speechRecorder.cancel();
           autoRetryCountRef.current = 0;
           silenceStreakRef.current = 0;
           setRetryLoopPaused(false);
           setFailureLabel(null);
           setFlowState("SUCCESS");
-          try {
-            await speechPlayer.play(VOICE_PROMPTS.correctPraise());
-          } catch {
-            // Audio praise fallback silently ignored if TTS unavailable
-          }
-          if (!mountedRef.current || generation !== flowGenerationRef.current) {
+          if (!(await playCue(VOICE_PROMPTS.correctPraise(), generation)))
             return;
-          }
           if (
             nextWordTarget &&
             nextWordTarget.normalized_word !== word.normalized_word &&
@@ -471,59 +578,41 @@ export function DifficultWordPracticePanel({
             evaluated.spoken_transcript,
           );
           setFailureLabel(nextFailureLabel);
-          silenceStreakRef.current =
-            nextFailureLabel === "Chưa nghe thấy"
-              ? silenceStreakRef.current + 1
-              : 0;
-          const gentleCue =
-            evaluated.assessment_status === "INCORRECT"
-              ? VOICE_PROMPTS.incorrectGentle(word.display_text)
-              : VOICE_PROMPTS.retryGentle(word.display_text);
-
-          if (
-            autoRetryCountRef.current <
-              SHORT_WORD_CAPTURE_CONFIG.maxAutoRetries &&
-            silenceStreakRef.current <
-              SHORT_WORD_CAPTURE_CONFIG.maxSilenceStreak
-          ) {
-            autoRetryCountRef.current += 1;
-            setFlowState("INSTRUCTING");
-            try {
-              await speechPlayer.play(gentleCue);
-            } catch {
-              // Proceed directly to next listen turn if TTS is unavailable
-            }
-            if (
-              !mountedRef.current ||
-              generation !== flowGenerationRef.current
-            ) {
-              return;
-            }
-            stopCaptureLockRef.current = false;
-            browserCollectorRef.current.reset();
-            browserBestConfRef.current = null;
-            setLiveTranscript(null);
-            await captureTurnRef.current(generation);
-          } else {
-            speechRecorder.cancel();
-            setRetryLoopPaused(true);
-            setFlowState("NEEDS_RETRY");
-            void speechPlayer.play(gentleCue).catch(() => undefined);
-          }
+          await retryTurn(
+            generation,
+            evaluated.assessment_status === "UNCERTAIN" &&
+              isWordHelpRequest(
+                evaluated.spoken_transcript ?? "",
+                word.display_text,
+              )
+              ? "help"
+              : nextFailureLabel === "Chưa nghe thấy"
+                ? "silence"
+                : nextFailureLabel === "Đọc sai"
+                  ? "incorrect"
+                  : "unclear",
+          );
         }
       } catch (error) {
         if (!mountedRef.current || generation !== flowGenerationRef.current) {
           return;
         }
+        speechRecorder.cancel();
         setPendingSavePayload(payload);
         setFlowState("TECHNICAL_ERROR");
         if (isServiceError(error) && error.status === 503) {
           setSubmitError(error.message);
+        } else if (error instanceof Error && error.name === "TimeoutError") {
+          setSubmitError(
+            "Máy kiểm tra lâu hơn dự kiến. Bé có thể gửi lại bản ghi vừa rồi.",
+          );
         } else {
           setSubmitError(
             "Chưa lưu được kết quả lên máy chủ. Giọng đọc của bé vẫn được giữ nguyên — bấm Lưu lại kết quả nhé.",
           );
         }
+      } finally {
+        if (evaluationRef.current === controller) evaluationRef.current = null;
       }
     },
     [
@@ -535,7 +624,8 @@ export function DifficultWordPracticePanel({
       onSelectWord,
       primarySource,
       refreshHistory,
-      speechPlayer,
+      playCue,
+      retryTurn,
       speechRecorder,
       word.display_text,
       word.evidence_word_ids,
@@ -548,7 +638,23 @@ export function DifficultWordPracticePanel({
       if (stopCaptureLockRef.current) return;
       stopCaptureLockRef.current = true;
       clearTimers();
-      stopBrowserRecognition();
+      const recognition = recognitionRef.current;
+      // stop() may deliver its last final after the recorder has already stopped.
+      const finalResult = recognition
+        ? new Promise<void>((resolve) => {
+            const timer = window.setTimeout(resolve, 300);
+            recognition.onend = () => {
+              window.clearTimeout(timer);
+              resolve();
+            };
+            try {
+              recognition.stop();
+            } catch {
+              window.clearTimeout(timer);
+              resolve();
+            }
+          })
+        : Promise.resolve();
 
       let blob: Blob | null = null;
       try {
@@ -556,12 +662,22 @@ export function DifficultWordPracticePanel({
       } catch {
         blob = null;
       }
+      await finalResult;
 
       if (!mountedRef.current || generation !== flowGenerationRef.current) {
         return;
       }
+      stopBrowserRecognition();
+      const transcript = browserCollectorRef.current.getTranscript();
+      if (isWordHelpRequest(transcript, word.display_text)) {
+        setFailureLabel(null);
+        setLiveTranscript(null);
+        await retryTurn(generation, "help");
+        return;
+      }
 
       if (!blob || blob.size === 0) {
+        speechRecorder.cancel();
         setMicError(
           "Không thu được âm thanh từ micro. Ba mẹ hãy thử lại giúp bé nhé.",
         );
@@ -570,6 +686,18 @@ export function DifficultWordPracticePanel({
       }
 
       const quality = speechRecorder.getQuality?.();
+      const recording =
+        quality?.status === "SILENCE" || quality?.status === "NO_AUDIO"
+          ? null
+          : await prepareShortWordAudio(blob);
+      if (!mountedRef.current || generation !== flowGenerationRef.current)
+        return;
+      if (!recording) {
+        setRecordedBlob(null);
+        setFailureLabel("Chưa nghe thấy");
+        await retryTurn(generation, "silence");
+        return;
+      }
       const elapsed =
         quality?.durationMs && quality.durationMs > 0
           ? quality.durationMs
@@ -579,24 +707,26 @@ export function DifficultWordPracticePanel({
             );
 
       stopSelfPlayback();
-      setRecordedBlob(blob);
+      setRecordedBlob(recording);
 
       const captured: CapturedAttemptPayload = {
         requestId: createRequestUuid(),
-        audioBlob: blob,
+        audioBlob: recording,
         durationMs: elapsed,
         audioQualityStatus: quality?.status,
-        browserTranscript: browserCollectorRef.current.getTranscript() || null,
+        browserTranscript: transcript || null,
         browserConfidence: browserBestConfRef.current,
       };
       await submitEvaluation(captured, generation);
     },
     [
       clearTimers,
+      retryTurn,
       speechRecorder,
       stopBrowserRecognition,
       stopSelfPlayback,
       submitEvaluation,
+      word.display_text,
     ],
   );
 
@@ -629,6 +759,13 @@ export function DifficultWordPracticePanel({
       }
 
       setFlowState("LISTENING");
+      setCoachCue(null);
+      setEvaluationDurationMs(null);
+      setLiveTranscript(null);
+      setLatestResult(null);
+      stopCaptureLockRef.current = false;
+      browserCollectorRef.current.reset();
+      browserBestConfRef.current = null;
       captureStartedAtRef.current = performance.now();
       speechObservedRef.current = false;
       browserPulseRef.current = false;
@@ -648,7 +785,8 @@ export function DifficultWordPracticePanel({
             rec.onresult = (event) => {
               if (
                 !mountedRef.current ||
-                generation !== flowGenerationRef.current
+                generation !== flowGenerationRef.current ||
+                recognitionRef.current !== rec
               ) {
                 return;
               }
@@ -671,8 +809,11 @@ export function DifficultWordPracticePanel({
                 speechObservedRef.current = true;
                 browserPulseRef.current = true;
                 silenceStartedAtRef.current = null;
-                if (typeof conf === "number" && Number.isFinite(conf)) {
-                  browserBestConfRef.current = conf;
+                if (item.isFinal && addedFinals.includes(chunk)) {
+                  browserBestConfRef.current = Math.min(
+                    browserBestConfRef.current ?? 1,
+                    conf ?? 0,
+                  );
                 }
                 if (!item.isFinal) {
                   interimText = chunk;
@@ -692,7 +833,9 @@ export function DifficultWordPracticePanel({
               if (recognitionRef.current === rec) recognitionRef.current = null;
             };
             recognitionRef.current = rec;
-            rec.start();
+            const track = speechRecorder.getStream()?.getAudioTracks()[0];
+            if (track) rec.start(track);
+            else rec.start();
           } catch {
             recognitionRef.current = null;
           }
@@ -759,12 +902,16 @@ export function DifficultWordPracticePanel({
 
   const startHandsFreePractice = useCallback(async () => {
     const generation = ++flowGenerationRef.current;
+    evaluationRef.current?.abort();
+    evaluationRef.current = null;
     clearTimers();
     stopBrowserRecognition();
     speechPlayer.stop();
     stopSelfPlayback();
     autoRetryCountRef.current = 0;
+    incorrectCountRef.current = 0;
     silenceStreakRef.current = 0;
+    helpRoundsRef.current = 0;
     setRetryLoopPaused(false);
     setFailureLabel(null);
     setSampleError(null);
@@ -796,11 +943,7 @@ export function DifficultWordPracticePanel({
     }
 
     setFlowState("INSTRUCTING");
-    try {
-      await speechPlayer.play(VOICE_PROMPTS.introWord(word.display_text));
-    } catch {
-      // Proceed to microphone even if TTS fails
-    }
+    await playCue("Con đọc từ trên màn hình nhé.", generation);
 
     if (!mountedRef.current || generation !== flowGenerationRef.current) {
       return;
@@ -810,19 +953,16 @@ export function DifficultWordPracticePanel({
   }, [
     captureWordTurn,
     clearTimers,
+    playCue,
     speechPlayer,
     speechRecorder,
     stopBrowserRecognition,
     stopSelfPlayback,
-    word.display_text,
   ]);
 
   function handlePauseSession(): void {
     flowGenerationRef.current += 1;
-    clearTimers();
-    stopBrowserRecognition();
-    speechPlayer.stop();
-    speechRecorder.cancel();
+    cleanupRef.current();
     setFlowState("PAUSED");
   }
 
@@ -837,12 +977,19 @@ export function DifficultWordPracticePanel({
   }, [autoStart, startHandsFreePractice]);
 
   async function handlePlaySample(): Promise<void> {
+    const generation = ++flowGenerationRef.current;
+    clearTimers();
     setSampleError(null);
     stopSelfPlayback();
     try {
-      await speechPlayer.play(word.display_text);
+      await withRequestDeadline(
+        () => speechPlayer.play(word.display_text, { wordSample: true }),
+        undefined,
+        CUE_TIMEOUT_MS,
+      );
     } catch {
-      if (mountedRef.current) {
+      if (mountedRef.current && generation === flowGenerationRef.current) {
+        speechPlayer.stop();
         setSampleError(
           "Chưa phát được giọng đọc mẫu tiếng Việt trên thiết bị này. Bé vẫn có thể đọc cùng ba mẹ nhé.",
         );
@@ -852,44 +999,40 @@ export function DifficultWordPracticePanel({
 
   async function handlePlaySelfRecording(): Promise<void> {
     if (!recordedBlob) return;
-    if (isPlayingSelf) {
-      stopSelfPlayback();
-      return;
-    }
-    stopSelfPlayback();
-    const url = URL.createObjectURL(recordedBlob);
-    selfAudioUrlRef.current = url;
-    const audio = new Audio(url);
-    selfAudioRef.current = audio;
-    audio.onended = () => stopSelfPlayback();
-    audio.onerror = () => stopSelfPlayback();
-    setIsPlayingSelf(true);
-    try {
-      await audio.play();
-    } catch {
-      stopSelfPlayback();
-    }
+    flowGenerationRef.current += 1;
+    clearTimers();
+    speechPlayer.stop();
+    await toggleSelfPlayback(recordedBlob);
   }
 
   const stageThemeClass =
-    flowState === "SUCCESS" || flowState === "LISTENING"
-      ? "border-primary/30 bg-sky"
-      : flowState === "NEEDS_RETRY" || flowState === "TECHNICAL_ERROR"
-        ? "border-warning/30 bg-warning-surface"
-        : "border-border bg-cream";
+    flowState === "SUCCESS"
+      ? "border-emerald-300 bg-emerald-50"
+      : flowState === "LISTENING" || flowState === "EVALUATING"
+        ? "border-amber-300 bg-amber-50"
+        : failureLabel === "Đọc sai" &&
+            (flowState === "INSTRUCTING" || flowState === "NEEDS_RETRY")
+          ? "border-red-300 bg-red-50"
+          : flowState === "NEEDS_RETRY" || flowState === "TECHNICAL_ERROR"
+            ? "border-warning/30 bg-warning-surface"
+            : "border-border bg-cream";
 
   const stageLabel =
-    flowState === "PREPARING"
-      ? "Chuẩn bị micro"
-      : flowState === "INSTRUCTING" || speechPlayer.isPlaying
-        ? "Nghe mẫu"
-        : flowState === "LISTENING"
-          ? "Đang nghe bé"
-          : flowState === "EVALUATING" || flowState === "SAVING"
-            ? "Đang kiểm tra"
-            : flowState === "NEEDS_RETRY" || flowState === "TECHNICAL_ERROR"
-              ? (failureLabel ?? "Thử lại")
-              : `Luyện đọc cùng ${child.alias}`;
+    flowState === "SUCCESS"
+      ? "Đọc đúng rồi"
+      : flowState === "PREPARING"
+        ? "Chuẩn bị micro"
+        : flowState === "INSTRUCTING"
+          ? "Nghe hướng dẫn"
+          : speechPlayer.isPlaying
+            ? "Nghe mẫu"
+            : flowState === "LISTENING"
+              ? "Đang nghe bé"
+              : flowState === "EVALUATING" || flowState === "SAVING"
+                ? "Đang kiểm tra"
+                : flowState === "NEEDS_RETRY" || flowState === "TECHNICAL_ERROR"
+                  ? (failureLabel ?? "Thử lại")
+                  : `Luyện đọc cùng ${child.alias}`;
 
   const statusBadgeClass = PRACTICE_STATUS_CLASSES[effectiveStatus];
   const isBusyActive =
@@ -909,11 +1052,7 @@ export function DifficultWordPracticePanel({
           className="sm:w-auto"
           onClick={() => {
             flowGenerationRef.current += 1;
-            clearTimers();
-            stopBrowserRecognition();
-            speechPlayer.stop();
-            speechRecorder.cancel();
-            stopSelfPlayback();
+            cleanupRef.current();
             onClose();
           }}
           variant="secondary"
@@ -954,6 +1093,8 @@ export function DifficultWordPracticePanel({
       ) : null}
 
       <div
+        data-capture-ms={latestResult?.audio_duration_ms ?? undefined}
+        data-evaluation-ms={evaluationDurationMs ?? undefined}
         className={`flex flex-col items-center gap-4 rounded-card border px-5 py-5 text-center transition-colors sm:py-7 ${stageThemeClass}`}
       >
         <p className="text-sm font-extrabold text-primary" aria-live="polite">
@@ -964,6 +1105,11 @@ export function DifficultWordPracticePanel({
           <span className="rounded-full border border-warning/30 bg-white/90 px-3 py-0.5 text-xs font-extrabold text-[#213C42]">
             {failureLabel}
           </span>
+        ) : null}
+        {failureLabel === "Nghe chưa rõ" && contextPhrase ? (
+          <p className="text-sm text-muted">
+            Bé có thể đọc cả cụm “{contextPhrase}”.
+          </p>
         ) : null}
 
         <h2
@@ -980,7 +1126,7 @@ export function DifficultWordPracticePanel({
           {flowState === "PREPARING"
             ? "Đang bật sẵn micro cho bé..."
             : flowState === "INSTRUCTING"
-              ? "ViRead đang mời bé đọc..."
+              ? (coachCue ?? "ViRead đang mời bé đọc...")
               : flowState === "LISTENING"
                 ? "Bé đọc từ trên màn hình một lần nhé."
                 : flowState === "EVALUATING" || flowState === "SAVING"
@@ -1024,6 +1170,9 @@ export function DifficultWordPracticePanel({
       ) : null}
       {micError ? (
         <StatusMessage tone="warning">{micError}</StatusMessage>
+      ) : null}
+      {playbackError ? (
+        <StatusMessage tone="warning">{playbackError}</StatusMessage>
       ) : null}
       {submitError ? (
         <StatusMessage tone="warning">
@@ -1073,13 +1222,12 @@ export function DifficultWordPracticePanel({
           flowState === "EVALUATING" ||
           flowState === "SAVING" ? (
           <Button
-            className="min-h-14 flex-1 rounded-2xl text-base font-extrabold"
-            disabled
+            className="min-h-14 rounded-2xl sm:w-auto"
+            onClick={handlePauseSession}
+            variant="secondary"
           >
-            <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
-            {flowState === "PREPARING" || flowState === "INSTRUCTING"
-              ? "Đang chuẩn bị micro..."
-              : "Đang chấm kết quả..."}
+            <Pause aria-hidden="true" className="size-4" />
+            Tạm dừng
           </Button>
         ) : flowState === "SUCCESS" ? (
           <>
@@ -1126,6 +1274,19 @@ export function DifficultWordPracticePanel({
               <Mic aria-hidden="true" className="size-5" />
               Tiếp tục thử
             </Button>
+            {nextWordTarget &&
+            nextWordTarget.normalized_word !== word.normalized_word ? (
+              <Button
+                className="min-h-14 rounded-2xl sm:w-auto"
+                onClick={() => {
+                  handlePauseSession();
+                  onSelectWord(nextWordTarget.normalized_word);
+                }}
+                variant="secondary"
+              >
+                Sang từ tiếp theo
+              </Button>
+            ) : null}
             <Button
               className="min-h-14 rounded-2xl sm:w-auto"
               onClick={() => {

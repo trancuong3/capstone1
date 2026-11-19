@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -16,6 +16,7 @@ from app.models import (
     PictureDescriptionSession,
     Profile,
 )
+from app.repositories.book_repository import CatalogRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,7 @@ class PictureDescriptionRepository:
                 BookPage.LifecycleStatus == "ACTIVE",
                 BookPage.ImagePath.is_not(None),
                 BookPage.ImagePath != "",
+                CatalogRepository.eligible_book(),
             )
             .order_by(Book.Title.asc(), BookPage.PageNumber.asc(), BookPage.Id.asc())
             .limit(limit)
@@ -159,6 +161,7 @@ class PictureDescriptionRepository:
                 BookPage.LifecycleStatus == "ACTIVE",
                 BookPage.ImagePath.is_not(None),
                 BookPage.ImagePath != "",
+                CatalogRepository.eligible_book(),
             )
         )
         result = await self.db.execute(query)
@@ -227,6 +230,15 @@ class PictureDescriptionRepository:
                 PictureDescriptionSession.Id == session_id,
                 PictureDescriptionSession.ParentId == parent_id,
                 ChildProfile.ParentId == parent_id,
+                or_(
+                    PictureDescriptionSession.BookId.is_(None),
+                    exists(
+                        select(Book.Id).where(
+                            Book.Id == PictureDescriptionSession.BookId,
+                            CatalogRepository.eligible_book(),
+                        )
+                    ),
+                ),
             )
         )
         session = await self.db.scalar(query)
@@ -260,6 +272,15 @@ class PictureDescriptionRepository:
                 PictureDescriptionSession.ChildProfileId == child_id,
                 PictureDescriptionSession.ParentId == parent_id,
                 ChildProfile.ParentId == parent_id,
+                or_(
+                    PictureDescriptionSession.BookId.is_(None),
+                    exists(
+                        select(Book.Id).where(
+                            Book.Id == PictureDescriptionSession.BookId,
+                            CatalogRepository.eligible_book(),
+                        )
+                    ),
+                ),
             )
             .order_by(desc(PictureDescriptionSession.UpdatedAt))
             .limit(limit)
@@ -302,6 +323,15 @@ class PictureDescriptionRepository:
                 PictureDescriptionSession.Id == session_id,
                 PictureDescriptionSession.ParentId == parent_id,
                 ChildProfile.ParentId == parent_id,
+                or_(
+                    PictureDescriptionSession.BookId.is_(None),
+                    exists(
+                        select(Book.Id).where(
+                            Book.Id == PictureDescriptionSession.BookId,
+                            CatalogRepository.eligible_book(),
+                        )
+                    ),
+                ),
             )
             .with_for_update()
         )

@@ -18,4 +18,5 @@ from app.models.book_content_quality import (
 
 from .game_session import GameAttempt, GameRound, GameSession
 from .picture_description import PictureDescriptionAttempt, PictureDescriptionSession
+from .admin_ai_workflow import AdminAiWorkflow
 from .difficult_word_practice import DifficultWordPracticeAttempt

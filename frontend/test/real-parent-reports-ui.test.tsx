@@ -627,12 +627,18 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       "ALL",
     );
 
-    // Click book CTA "Luyện cùng bé" -> opens focus practice panel at 'có'
+    mockSpeechRecorder.start.mockRejectedValueOnce(
+      new DOMException("Denied", "NotAllowedError"),
+    );
+    // Start practice from the book CTA and exercise automatic mic denial.
     await user.click(screen.getByRole("button", { name: "Luyện cùng bé" }));
     expect(
       await screen.findByRole("heading", { name: "có" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Bé có một bông hoa\./)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/chưa được cấp quyền Micro/i),
+    ).toBeInTheDocument();
 
     // Sample TTS failure shows honest guidance
     mockSpeechPlayer.play.mockRejectedValueOnce(new Error("No vi-VN voice"));
@@ -644,18 +650,11 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     // Sample TTS success
     mockSpeechPlayer.play.mockResolvedValueOnce(undefined);
     await user.click(screen.getByRole("button", { name: "Nghe phát âm mẫu" }));
-    expect(mockSpeechPlayer.play).toHaveBeenCalledWith("có");
+    expect(mockSpeechPlayer.play).toHaveBeenCalledWith("có", {
+      wordSample: true,
+    });
 
-    // Microphone denial shows calm message
-    mockSpeechRecorder.start.mockRejectedValueOnce(
-      new DOMException("Denied", "NotAllowedError"),
-    );
-    await user.click(screen.getByRole("button", { name: "Bắt đầu luyện" }));
-    expect(
-      await screen.findByText(/chưa được cấp quyền Micro/i),
-    ).toBeInTheDocument();
-
-    // Single-tap "Bắt đầu luyện" -> stop recording -> first save fails -> "Lưu lại kết quả" succeeds without re-recording!
+    // The retry action reopens the microphone. Saving reuses the same recording.
     await user.click(screen.getByRole("button", { name: /Tiếp tục luyện/ }));
     expect(
       await screen.findByRole("button", { name: "Dừng ghi âm" }),
@@ -825,8 +824,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       await screen.findByRole("heading", { name: /^một$/ }),
     ).toBeInTheDocument();
 
-    // Tap #2 (ONLY recording tap for all 2 words!): "Bắt đầu luyện" -> hands-free loop
-    await user.click(screen.getByRole("button", { name: "Bắt đầu luyện" }));
+    // The book CTA already starts capture and hands-free practice.
 
     // Word 1 ('một') auto-stops via VAD without clicking Stop -> marked green in 1 read
     expect(
