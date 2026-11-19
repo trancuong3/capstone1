@@ -6,7 +6,7 @@ description: >-
 
 # ViRead Zero-Cost (0 VND) Android APK Preparation & Verification
 
-Complement [viread-android-build](../viread-android-build/SKILL.md) with ViRead's concrete `0 VND` APK readiness checklist, WebView vs. Chrome hardware/STT rules, and `adb` verification workflow.
+Use this skill when the packaging direction is already chosen and the task is concrete APK preparation/readiness/runtime verification. If strategy or packaging tradeoffs are still unresolved, read [viread-android-build](../viread-android-build/SKILL.md) first; otherwise do not load both skills.
 
 > **Project Protection Rule**: Never rewrite `frontend/` (Next.js 16, 46 routes) into React Native or scaffold new mobile folders unless explicitly requested by the user. Never embed `SUPABASE_SECRET_KEY` or `ELEVENLABS_API_KEY` inside APK assets or `NEXT_PUBLIC_*` variables.
 
