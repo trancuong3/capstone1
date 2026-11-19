@@ -31,47 +31,54 @@ Do not infer implementation details or test status beyond what Git history prove
 Status: **COMMITTED_MAIN**
 
 ### Goal
-- Make repository agents automatically select and use the smallest relevant skill set even when prompts do not name skills.
+- Minimize Codex token/context usage while preserving automatic skill selection and safe project continuation.
 
 ### Completed
-- Added project skill `viread-skill-router`.
-- Registered both `.codex/skills` and `.agents/skills` in `.agents/skills.json`.
-- Added mandatory Automatic Skill Routing rules to `AGENTS.md`.
-- Kept Graphify as the first discovery layer and quality-gate/verification skills as completion gates.
+- Added T0/T1/T2/T3 task classification.
+- T0 uses 0 skills / 0 Graphify by default.
+- T1 uses at most 1 domain skill and Graphify only when file/flow is unknown.
+- T2 uses router + at most 3 domain skills.
+- T3 uses router + at most 5 necessary skills.
+- Default Graphify query budget set to 600 tokens; increase only when needed.
+- Full GRAPH_REPORT.md is avoided for focused tasks.
+- Graphify update moved from every edit to meaningful milestones / checkpoint / commit.
+- Completion skills are loaded only at the end.
+- Resume flow uses checkpoint + cheap Git state first and skips rediscovery when next action is known.
 
 ### Files changed
-- `.agents/skills/viread-skill-router/SKILL.md`
-- `.agents/skills.json`
 - `AGENTS.md`
+- `.agents/skills/viread-skill-router/SKILL.md`
 - `.codex/skills/graphify/PROJECT_STATE.md`
+- `.codex/skills/graphify/references/continuation.md`
 
 ### Tests / verification
-- Verified the router skill exists on `main`.
-- Verified `.agents/skills.json` discovers both project skill roots.
-- Verified `AGENTS.md` contains mandatory automatic routing rules.
+- Verified token-first rules are committed to `main`.
+- Verified automatic skill discovery remains enabled.
+- Verified continuation checkpoint exists and remains under a compact format.
 
 ### Known issues
-- Skill choice is still model/agent driven; no system can guarantee perfect routing for every ambiguous prompt.
-- Generic harnesses that ignore both `AGENTS.md` and repository skill discovery may not follow these rules.
+- A model may still occasionally choose more context than necessary; project rules now explicitly constrain this.
+- Local uncommitted code is never recoverable from `main` alone; Git remains the source of truth.
 
 ### Decisions that must not be revisited without evidence
-- Do not require users to name skills in normal prompts.
-- Do not load all skills; select the smallest relevant set.
-- Project-specific `viread-*` skills take precedence over overlapping generic skills.
-- Graphify remains mandatory for codebase discovery when the graph exists.
-- Do not discard or overwrite uncommitted user work.
+- User should not need to name skills.
+- User should not need to manually maintain checkpoint text.
+- Do not load router for T0/T1 unless ambiguity requires it.
+- Do not run Graphify when exact next file/action is already known.
+- Do not update Graphify after every small edit.
+- Do not load quality-gate/verification skills until completion phase.
+- Never discard uncommitted user work.
 
 ### Next exact actions
-1. On the next coding task, agent should read `AGENTS.md` and invoke `viread-skill-router` automatically.
-2. Classify the prompt domain and load only relevant skill instructions.
-3. Use Graphify before broad code browsing.
-4. Run focused tests, then `viread-quality-gate` and `verification-before-completion`.
-5. Update this checkpoint before stopping if the next task becomes long-running.
+1. On the next task, classify T0/T1/T2/T3 automatically.
+2. Use the minimum context path defined in `AGENTS.md`.
+3. If resuming, read this checkpoint and cheap Git state first.
+4. Update this checkpoint automatically at meaningful milestones or before stopping.
+5. When source changes are ready to commit/merge, update Graphify once and run the final quality gates.
 
 ### Latest relevant commits
-- `8e8de258` — add `viread-skill-router`.
-- `a9cd47a7` — enable project skill auto-discovery.
-- `3f53a2dc` — enforce automatic skill routing in `AGENTS.md`.
+- `04f46f7f` — minimize default context and skill loading.
+- `279cef1b` — route by task tier to reduce token use.
 - Location: `COMMITTED_MAIN`
 
 ## Handoff update contract
