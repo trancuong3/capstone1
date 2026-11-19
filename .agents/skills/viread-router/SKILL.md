@@ -11,3 +11,6 @@ Classify first:
 
 Search escalation: known file → exact symbol → Graphify 300 → 600 → targeted reads → 1000+ only if required.
 Resume from `.codex/skills/graphify/PROJECT_STATE.md`; never rediscover known work.
+
+## Uncommon task fallback
+If no gateway clearly matches, inspect only the relevant names in `skills-lock.json` (do not read every detailed skill), then open exactly one matching `.agent-library/<skill>/SKILL.md`. This preserves rare capabilities without restoring global skill metadata.
