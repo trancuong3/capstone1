@@ -364,6 +364,7 @@ export function DifficultWordsScreen({
             <div className="min-w-0 sm:col-span-1">
               <ChildSelector
                 childrenProfiles={state.children}
+                clearQueryKeys={["word"]}
                 selectedChildId={state.child.id}
               />
             </div>
@@ -421,6 +422,7 @@ export function DifficultWordsScreen({
                     openPracticeSession(
                       firstPendingGlobalWord.normalized_word,
                       null,
+                      true,
                     )
                   }
                 >
@@ -472,10 +474,10 @@ export function DifficultWordsScreen({
                   group={group}
                   key={group.key}
                   onSelectWord={(target) =>
-                    openPracticeSession(target.normalized_word, group.key)
+                    openPracticeSession(target.normalized_word, group.key, true)
                   }
                   onStartBookPractice={(target) =>
-                    openPracticeSession(target.normalized_word, group.key)
+                    openPracticeSession(target.normalized_word, group.key, true)
                   }
                 />
               ))}

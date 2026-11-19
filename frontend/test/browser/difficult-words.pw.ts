@@ -394,6 +394,16 @@ async function installDifficultWordsE2EFixture(
   // Synthetic Web Audio / MediaRecorder or permission-denied fixture (never touches real hardware)
   await page.addInitScript(
     (mode: "synthetic" | "synthetic-burst" | "denied") => {
+      const bursts = new WeakMap<MediaStream, () => void>();
+      if (mode === "synthetic-burst") {
+        const NativeRecorder = window.MediaRecorder;
+        window.MediaRecorder = class extends NativeRecorder {
+          start(timeslice?: number) {
+            super.start(timeslice);
+            bursts.get(this.stream)?.();
+          }
+        };
+      }
       Object.defineProperty(window, "SpeechRecognition", {
         configurable: true,
         value: undefined,
@@ -414,15 +424,24 @@ async function installDifficultWordsE2EFixture(
           const gain = context.createGain();
           const destination = context.createMediaStreamDestination();
           oscillator.frequency.value = 260;
-          gain.gain.setValueAtTime(0.08, context.currentTime);
-          if (mode === "synthetic-burst") {
-            // Speak cleanly for ~420ms then become silent so real Chromium AnalyserNode triggers VAD auto-stop
-            gain.gain.setValueAtTime(0.0001, context.currentTime + 0.42);
-          }
+          gain.gain.value = mode === "synthetic-burst" ? 0 : 0.008;
           oscillator.connect(gain);
           gain.connect(destination);
           oscillator.start();
           const stream = destination.stream;
+          if (mode === "synthetic-burst") {
+            // Preparing the mic can happen before TTS. Aim the synthetic
+            // utterance at each actual recording, including reused streams.
+            bursts.set(stream, () => {
+              const start = context.currentTime;
+              gain.gain.cancelScheduledValues(start);
+              gain.gain.setValueAtTime(0, start);
+              gain.gain.setValueAtTime(0.08, start + 0.12);
+              gain.gain.setValueAtTime(0.04, start + 0.26);
+              gain.gain.setValueAtTime(0.08, start + 0.4);
+              gain.gain.setValueAtTime(0, start + 0.54);
+            });
+          }
           for (const track of stream.getTracks()) {
             const origStop = track.stop.bind(track);
             track.stop = () => {
@@ -449,6 +468,14 @@ test("Difficult words end-to-end flow: select child, practice, evaluate, persist
   page,
 }, testInfo) => {
   const { childBId } = await installDifficultWordsE2EFixture(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (this.src.startsWith("blob:"))
+        Reflect.set(window, "practiceReplay", this);
+      return originalPlay.call(this);
+    };
+  });
 
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
   await expect(
@@ -503,7 +530,8 @@ test("Difficult words end-to-end flow: select child, practice, evaluate, persist
   ).toBeVisible();
   await expect(page.getByText(/Bé có một bông hoa\./)).toBeVisible();
 
-  // 1) Play sample TTS
+  // The word chip starts practice. Pause before testing standalone playback.
+  await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
   await page.getByRole("button", { name: "Nghe phát âm mẫu" }).click();
 
   // Check responsive widths inside practice panel
@@ -521,13 +549,25 @@ test("Difficult words end-to-end flow: select child, practice, evaluate, persist
     height: 900,
   });
 
-  // 2) Single tap "Bắt đầu luyện" -> speaks once -> stop recording -> evaluates & turns green in 1 attempt!
-  await page.getByRole("button", { name: "Bắt đầu luyện" }).click();
+  // Resume, read once, and save a successful evaluation.
+  await page.getByRole("button", { name: "Tiếp tục luyện" }).click();
   await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible();
   await page.waitForTimeout(450);
   await page.getByRole("button", { name: "Dừng ghi âm" }).click();
 
   await expect(page.getByText(/Chính xác rồi! Con giỏi lắm!/)).toBeVisible();
+  await page.getByRole("button", { name: "Nghe lại giọng bé" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const replay = Reflect.get(window, "practiceReplay") as
+          HTMLAudioElement | undefined;
+        if (!replay || replay.currentTime === 0) return null;
+        const response = await fetch(replay.src);
+        return response.headers.get("content-type");
+      }),
+    )
+    .toBe("audio/wav");
   await page.screenshot({
     fullPage: true,
     path: path.join(
@@ -576,7 +616,6 @@ test("Difficult words resilient states: 503 retry, empty state, and microphone p
   ).toBeVisible();
 
   await page.getByRole("button", { name: /Luyện từ có/ }).click();
-  await page.getByRole("button", { name: "Bắt đầu luyện" }).click();
   await expect(page.getByText(/chưa được cấp quyền Micro/i)).toBeVisible();
 });
 
@@ -592,14 +631,13 @@ test("Hands-free short-word sensitivity & zero-extra-tap auto-advance loop in re
   });
 
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
+  const startedAt = Date.now();
   await page.getByRole("button", { name: "Luyện cùng bé" }).click();
   await expect(
     page.getByRole("heading", { name: "có", exact: true }),
   ).toBeVisible();
 
-  // Single tap on "Bắt đầu luyện" -> NO click on "Dừng ghi âm": real Chromium AnalyserNode auto-stops & advances!
-  const startedAt = Date.now();
-  await page.getByRole("button", { name: "Bắt đầu luyện" }).click();
+  // The book CTA is the only tap. The analyser stops each capture.
 
   await expect(page.getByText(/Hoàn thành từ này/)).toBeVisible({
     timeout: 10000,

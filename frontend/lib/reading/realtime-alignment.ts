@@ -1,4 +1,5 @@
 import type { ReadingPageWordDTO } from "@/types/reading";
+import type { WordTimestamp } from "@/lib/api/speech-service";
 import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
@@ -79,6 +80,30 @@ export function tokenizeRealtimeText(text: string): string[] {
   return tokenizeVietnameseText(text);
 }
 
+/** Timestamps must correspond one-to-one to the tokens actually scored. */
+export function timingsForTranscript(
+  text: string,
+  words?: readonly WordTimestamp[] | null,
+) {
+  const timed =
+    words?.filter((item) => !item.type || item.type === "word") ?? [];
+  const tokens = tokenizeRealtimeText(text);
+  if (!timed.length || timed.length !== tokens.length) return [];
+  if (
+    !timed.every(
+      (item, index) =>
+        normalizeRealtimeWord(item.text) === tokens[index] &&
+        Number.isFinite(item.start) &&
+        Number.isFinite(item.end) &&
+        item.start >= 0 &&
+        item.end >= item.start &&
+        (index === 0 || item.start >= timed[index - 1].start),
+    )
+  )
+    return [];
+  return timed;
+}
+
 export class RealtimeAlignmentEngine {
   private readonly bookWords: IndexedBookWord[];
 
@@ -128,6 +153,7 @@ export class RealtimeAlignmentEngine {
    */
   markUncertain(): void {
     this.uncertain = true;
+    this.pendingToken = null;
   }
 
   hasUncertainty(): boolean {
@@ -296,6 +322,20 @@ export class RealtimeAlignmentEngine {
 
     const currentWord = this.bookWords[this.currentBookIndex];
 
+    // An unclear segment breaks the connection between speech and the cursor.
+    // Wait for a reliable matching word before scoring further mistakes.
+    if (this.uncertain) {
+      const anchor =
+        currentWord.normalizedText === token
+          ? this.currentBookIndex
+          : this.findAhead(token);
+      if (anchor !== -1) {
+        this.uncertain = false;
+        this.processConfirmedMatch(spokenIndex, anchor);
+      }
+      return;
+    }
+
     /*
      * Nếu đang có một từ chưa khớp:
      * - Từ mới khớp vị trí hiện tại: bỏ từ pending (có thể là nhiễu
@@ -352,6 +392,8 @@ export class RealtimeAlignmentEngine {
       this.processConfirmedMatch(spokenIndex, this.currentBookIndex);
       return;
     }
+
+    if (this.tryMarkRepeatedWord(token, spokenIndex)) return;
 
     // Từ xuất hiện ở phía trước: chỉ xác nhận bỏ sót khi đã có từ
     // tiếp theo làm bằng chứng, tránh kết luận DELETE quá sớm.
@@ -502,10 +544,6 @@ export class RealtimeAlignmentEngine {
     const word = this.bookWords[bookArrayIndex];
 
     if (!word) return;
-    // Missing/low-confidence audio is not evidence of a child omission or substitution.
-    if (this.uncertain && (status === "DELETE" || status === "SUBSTITUTE"))
-      return;
-
     this.statusByWordId.set(word.wordId, {
       wordId: word.wordId,
       wordIndex: word.wordIndex,

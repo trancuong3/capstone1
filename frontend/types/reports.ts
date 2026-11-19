@@ -80,6 +80,7 @@ export interface DifficultWordBookGroup {
   readonly bookId: UUID | null;
   readonly bookTitle: string;
   readonly bookAuthor: string | null;
+  readonly bookCoverUrl: string | null;
   readonly minGrade: number | null;
   readonly maxGrade: number | null;
   readonly words: readonly DifficultWordDTO[];

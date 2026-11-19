@@ -8,11 +8,14 @@ import type { ChildProfileDTO } from "@/types/child";
 interface ChildSelectorProps {
   readonly childrenProfiles: readonly ChildProfileDTO[];
   readonly selectedChildId: string;
+  /** Query parameters to remove when switching profiles (e.g. `["word"]`). */
+  readonly clearQueryKeys?: readonly string[];
 }
 
 export function ChildSelector({
   childrenProfiles,
   selectedChildId,
+  clearQueryKeys,
 }: ChildSelectorProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -28,6 +31,11 @@ export function ChildSelector({
             const next = new URLSearchParams(searchParams.toString());
             next.set("childId", event.target.value);
             next.delete("page");
+            if (clearQueryKeys) {
+              for (const key of clearQueryKeys) {
+                next.delete(key);
+              }
+            }
             router.push(`${pathname}?${next.toString()}`);
           }}
           value={selectedChildId}

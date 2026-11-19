@@ -96,7 +96,7 @@ function reportMetrics(report: SavedReadingReport): readonly ReportMetric[] {
       label: "Đọc nhầm",
       count: substitutions.length,
       words: substitutions,
-      color: "text-orange-700",
+      color: "text-red-700",
     },
     {
       key: "extra",
@@ -117,7 +117,7 @@ function reportMetrics(report: SavedReadingReport): readonly ReportMetric[] {
       label: "Ngập ngừng",
       count: report.summary.hesitations.length,
       words: hesitation,
-      color: "text-blue-700",
+      color: "text-purple-700",
     },
   ];
 }

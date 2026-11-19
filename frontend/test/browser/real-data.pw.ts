@@ -163,6 +163,9 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(page.getByText("Chưa đánh giá")).toBeVisible();
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
+  // Restrict microphone permission in the actual Chromium context.
+  // Selecting a word auto-starts capture, then must offer a safe retry.
+  await page.context().grantPermissions([]);
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
   const wordPracticeButton = page.getByRole("button", {
     name: /Luyện từ Mèo API/,
@@ -176,7 +179,10 @@ test("Parent stored history → detail, report counts and words", async ({
     page.getByRole("button", { name: "Nghe phát âm mẫu" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Bắt đầu luyện" }),
+    page.getByRole("button", { name: "Tiếp tục luyện" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Đã tạm dừng. Khi sẵn sàng, bé bấm Tiếp tục luyện nhé."),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });

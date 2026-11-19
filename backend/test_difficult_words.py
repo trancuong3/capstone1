@@ -62,6 +62,9 @@ def make_access(role: str = "parent", owned_children: set[UUID] | None = None):
 
 
 class InMemoryPracticeRepo:
+    async def lock_practice_request(self, child_id, request_id):
+        pass
+
     def __init__(self, storage_ready: bool = True):
         self.storage_ready = storage_ready
         self.sessions_rows = []
@@ -529,6 +532,7 @@ class DifficultWordsAggregationAndPracticeTests(unittest.IsolatedAsyncioTestCase
         )
         self.assertEqual(r1.assessment_status, "CORRECT")
         self.assertEqual(r1.recognition_source, "BROWSER_SPEECH")
+        voice.transcribe.assert_not_awaited()
 
         a2 = await service.start_attempt(
             CHILD_A, ACTOR, DifficultWordPracticeStartRequest(request_id=uuid4(), normalized_word="mèo", display_text="Mèo")
@@ -540,6 +544,63 @@ class DifficultWordsAggregationAndPracticeTests(unittest.IsolatedAsyncioTestCase
         self.assertEqual(r2.assessment_status, "ENGINE_ERROR")
         self.assertEqual(r2.recognition_source, "ENGINE_ERROR")
         self.assertEqual(r2.word_progress.consecutive_correct_count, 1)
+
+    async def test_help_is_neutral_and_hints_cannot_manufacture_a_tonal_match(self):
+        repo = InMemoryPracticeRepo()
+        voice = MagicMock()
+        service = DifficultWordsService(repo, make_access(), voice_provider=voice)
+        for target, spoken, browser, expected in [
+            ("đọc", "Con không biết đọc.", None, "UNCERTAIN"),
+            ("một", "Cô ơi, con chưa biết đọc từ này ạ.", None, "UNCERTAIN"),
+            ("một", "mốt", "một", "UNCERTAIN"),
+            ("một", "một", "mốt", "UNCERTAIN"),
+            ("một", "", None, "UNCERTAIN"),
+            ("một", "mọt", None, "INCORRECT"),
+            ("hôm", "hôn", None, "UNCERTAIN"),
+            ("hôm", "hôn", "hôn", "INCORRECT"),
+            ("hôm", "hôn", "hôm", "UNCERTAIN"),
+            ("hôm", "hôm nay", None, "CORRECT"),
+            ("có", "cỏ", None, "INCORRECT"),
+            ("có", "Có.", None, "CORRECT"),
+            ("một", "1.", None, "CORRECT"),
+            ("một", "2.", None, "INCORRECT"),
+            ("một", "mốt", None, "INCORRECT"),
+            ("một", "01", None, "INCORRECT"),
+            ("một", "MỘT".lower(), None, "CORRECT"),
+            ("con không biết", "Con không biết!", None, "CORRECT"),
+        ]:
+            with self.subTest(target=target, spoken=spoken, browser=browser):
+                voice.transcribe = AsyncMock(return_value=Transcription(
+                    text=spoken, language_code="vi", language_probability=0.99, words=[]
+                ))
+                request = dict(
+                    request_id=uuid4(), normalized_word=target, audio_bytes=b"audio",
+                    filename="test.webm", content_type="audio/webm",
+                    browser_transcript=browser, browser_confidence=0.80 if browser else None,
+                )
+                result = await service.evaluate_word_direct(CHILD_A, ACTOR, **request)
+                self.assertEqual(result.assessment_status, expected)
+                retry = await service.evaluate_word_direct(CHILD_A, ACTOR, **request)
+                self.assertEqual(result.attempt_id, retry.attempt_id)
+                voice.transcribe.assert_awaited_once()
+
+    async def test_two_unprompted_exact_matches_confirm_even_with_weak_confidence(self):
+        voice = MagicMock()
+        voice.transcribe = AsyncMock(side_effect=[
+            Transcription(text="Hôm.", language_code="vi", language_probability=0.95,
+                          words=[{"text": "Hôm", "start": 0.1, "end": 0.4, "logprob": -1.8}]),
+            VoiceProviderError("keyterms unavailable"),
+        ])
+        service = DifficultWordsService(InMemoryPracticeRepo(), make_access(), voice_provider=voice)
+        result = await service.evaluate_word_direct(
+            CHILD_A, ACTOR, request_id=uuid4(), normalized_word="hôm",
+            audio_bytes=b"audio", filename="test.webm", content_type="audio/webm",
+            audio_quality_status="SPEECH_DETECTED", browser_transcript="hôm",
+            browser_confidence=0,
+        )
+        self.assertEqual(result.assessment_status, "CORRECT")
+        self.assertEqual(result.word_progress.practice_status, "COMPLETED")
+        voice.transcribe.assert_awaited_once()
 
     async def test_audio_validation_rejects_empty_oversized_and_bad_mime(self):
         repo = InMemoryPracticeRepo()

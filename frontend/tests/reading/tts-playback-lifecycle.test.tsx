@@ -1,4 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import type { TimedSpeech } from "@/lib/api/voice-studio-service";
@@ -26,6 +29,7 @@ class AudioFixture {
   currentTime = 0;
   defaultPlaybackRate = 1;
   playbackRate = 1;
+  preservesPitch = false;
   paused = true;
   ended = false;
   onended: (() => void) | null = null;
@@ -51,6 +55,7 @@ class UtteranceFixture {
   lang = "";
   rate = 1;
   pitch = 1;
+  volume = 0;
   voice: SpeechSynthesisVoice | null = null;
   onstart: ((event: SpeechSynthesisEvent) => void) | null = null;
   onboundary: ((event: SpeechSynthesisEvent) => void) | null = null;
@@ -140,6 +145,112 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Phase 3 TTS lifecycle", () => {
+  it("plays the published recordings for sắc and nặng, including on replay", async () => {
+    const { result } = renderHook(() => useSpeechPlayer());
+    act(() => setSpeechPreferences({ speed: 0.8 }));
+    const samples = [
+      [
+        "“THỨC!”".normalize("NFD"),
+        "thuc-sac",
+        "d913cbf9ee3de337141390ef01496b225efbb1c055168a8f6d70ec8ca33c8ed7",
+      ],
+      [
+        "thực",
+        "thuc-nang",
+        "d424c561454f12a43cd978daf0596c3bc23b3ff4014e2d8135595652bf0ee84f",
+      ],
+      [
+        "thức",
+        "thuc-sac",
+        "d913cbf9ee3de337141390ef01496b225efbb1c055168a8f6d70ec8ca33c8ed7",
+      ],
+    ] as const;
+    for (const [index, [word, name, checksum]] of samples.entries()) {
+      const playback = result.current.play(word, { wordSample: true });
+      const audio = await audioAt(index);
+      expect(audio.src).toBe(`/audio/word-samples/${name}.wav`);
+      const file = readFileSync(resolve("public", audio.src.slice(1)));
+      expect(createHash("sha256").update(file).digest("hex")).toBe(checksum);
+      expect(audio.playbackRate).toBe(0.7);
+      expect(audio.preservesPitch).toBe(true);
+      act(() => audio.finish());
+      await playback;
+    }
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("uses the same spelling for a generated word, its cache, and the Vietnamese fallback", async () => {
+    voices = [{ lang: "en-US" } as SpeechSynthesisVoice];
+    const { result } = renderHook(() => useSpeechPlayer());
+    for (const [i, text] of [
+      "“Sớm!”".normalize("NFD"),
+      "sớm",
+      "sờm",
+    ].entries()) {
+      const playback = result.current.play(text, { wordSample: true });
+      const audio = await audioAt(i);
+      act(() => audio.finish());
+      await playback;
+    }
+    expect(speech.synthesize.mock.calls.map(([word]) => word)).toEqual([
+      "sớm",
+      "sờm",
+    ]);
+    speech.synthesize.mockImplementationOnce(async () => {
+      voices.push({ lang: "vi-VN" } as SpeechSynthesisVoice);
+      throw new Error("offline");
+    });
+    const fallback = result.current.play("“Muộn!”".normalize("NFD"), {
+      wordSample: true,
+    });
+    await waitFor(() => expect(utterances).toHaveLength(1));
+    expect(utterances[0].text).toBe("muộn. muộn.");
+    expect(utterances[0].voice?.lang).toBe("vi-VN");
+    act(() =>
+      utterances[0].onend?.({ elapsedTime: 1 } as SpeechSynthesisEvent),
+    );
+    await fallback;
+  });
+
+  it("reads a practice word with a Vietnamese device voice before cloud synthesis", async () => {
+    const local = { lang: "vi-VN", localService: true } as SpeechSynthesisVoice;
+    voices.push(
+      { lang: "en-US", localService: true } as SpeechSynthesisVoice,
+      local,
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    const sample = result.current.play("Dậy.".normalize("NFD"), {
+      wordSample: true,
+    });
+    await waitFor(() => expect(utterances).toHaveLength(1));
+    expect(utterances[0].text).toBe("dậy. dậy.");
+    expect(utterances[0].volume).toBe(1);
+    expect(utterances[0].voice).toBe(local);
+    expect(utterances[0].rate).toBe(0.7);
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    act(() =>
+      utterances[0].onend?.({ elapsedTime: 0.5 } as SpeechSynthesisEvent),
+    );
+    await sample;
+  });
+
+  it("reports an unavailable recording and allows replay without synthesizing a different sample", async () => {
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playback = result.current.play("thức", { wordSample: true });
+    const error = expect(playback).rejects.toThrow();
+    const audio = await audioAt(0);
+    act(() => audio.onerror?.());
+    await error;
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+    const retry = result.current.play("thức", { wordSample: true });
+    const second = await audioAt(1);
+    expect(second.src).toBe("/audio/word-samples/thuc-sac.wav");
+    act(() => second.finish());
+    await retry;
+  });
+
   it.each([800, 801, 1600])(
     "plays all %s words exactly once with global word indexes",
     async (count) => {

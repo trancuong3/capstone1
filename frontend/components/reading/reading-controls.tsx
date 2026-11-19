@@ -42,7 +42,13 @@ export function ReadingControls({
         data-reading-controls
         className={cn(
           "grid grid-cols-2 gap-2 sm:gap-3",
-          voiceSettings ? "sm:grid-cols-6" : "sm:grid-cols-5",
+          retryMode
+            ? voiceSettings
+              ? "sm:grid-cols-5"
+              : "sm:grid-cols-4"
+            : voiceSettings
+              ? "sm:grid-cols-6"
+              : "sm:grid-cols-5",
         )}
       >
         <Button
@@ -116,18 +122,20 @@ export function ReadingControls({
           </span>
         </Button>
 
-        <Button
-          aria-label="Chọn trang"
-          className="min-h-14 min-w-0"
-          disabled={disabled || retryMode || !onChoosePage}
-          onClick={onChoosePage}
-          variant="quiet"
-        >
-          <BookOpen aria-hidden="true" className="size-6 shrink-0" />
-          <span className="max-w-full text-center whitespace-normal break-words">
-            Chọn trang
-          </span>
-        </Button>
+        {!retryMode && (
+          <Button
+            aria-label="Chọn trang"
+            className="min-h-14 min-w-0"
+            disabled={disabled || !onChoosePage}
+            onClick={onChoosePage}
+            variant="quiet"
+          >
+            <BookOpen aria-hidden="true" className="size-6 shrink-0" />
+            <span className="max-w-full text-center whitespace-normal break-words">
+              Chọn trang
+            </span>
+          </Button>
+        )}
 
         <Button
           aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
