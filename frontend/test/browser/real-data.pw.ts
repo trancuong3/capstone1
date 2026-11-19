@@ -175,8 +175,15 @@ test("Parent stored history → detail, report counts and words", async ({
   await expect(
     page.getByRole("button", { name: "Nghe phát âm mẫu" }),
   ).toBeVisible();
+  // Choosing a word now starts the hands-free practice automatically.
+  // The microphone may be unavailable in isolated CI, in which case the
+  // practice offers a safe resume action instead of its initial start button.
   await expect(
-    page.getByRole("button", { name: "Bắt đầu luyện" }),
+    page
+      .getByRole("button", {
+        name: /^(Tiếp tục luyện|Tạm dừng|Dừng ghi âm)$/,
+      })
+      .first(),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
