@@ -127,7 +127,9 @@ describe("DifficultWordPracticePanel – autoStart", () => {
     expect(recorder.prepare).toHaveBeenCalledOnce();
 
     // Keep the coaching cue separate from pronunciation playback.
-    expect(play).toHaveBeenNthCalledWith(1, "Con đọc từ trên màn hình nhé.");
+    expect(play).toHaveBeenNthCalledWith(1, "Con đọc từ trên màn hình nhé.", {
+      coaching: true,
+    });
   });
 
   it("does NOT auto-start when autoStart is false (URL-based entry)", async () => {

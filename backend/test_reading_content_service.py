@@ -91,6 +91,31 @@ class ReadingContentServiceTests(unittest.IsolatedAsyncioTestCase):
         repo.retry_events_for_word = AsyncMock(return_value=[])
         return ReadingContentService(repo), repo
 
+    async def test_saved_unfinished_phrase_is_not_reoffered_after_reload(self):
+        service, repo = self.make_service()
+        session_id = UUID("77777777-7777-4777-8777-777777777777")
+        word_id = UUID("88888888-8888-4888-8888-888888888888")
+        repo.session.return_value = SimpleNamespace(ChildId=CHILD_ID, BookId=BOOK_ID)
+        repo.page_by_id.return_value = SimpleNamespace(BookId=BOOK_ID, PageNumber=1)
+        repo.revision_words.return_value = [SimpleNamespace(Id=word_id)]
+        repo.comparison_reports.return_value = [SimpleNamespace(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID, Transcript="càng",
+            Summary={"assessment_version": 1, "initial_assessment": [
+                {"word_id": word_id, "word_index": 0, "text": "cành", "status": "MISPRONUNCIATION"},
+            ]},
+        )]
+        repo.events_for_session.return_value = [SimpleNamespace(
+            SessionId=session_id, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+            WordId=word_id, Type="WORD_RETRY", Status="FAILED",
+            Metadata={"retry_attempt": 1, "resolution_status": "UNRESOLVED"},
+        )]
+
+        practice = await service.get_practice_state(session_id, PARENT_ID)
+
+        self.assertEqual(practice.words[0].resolution_status, "UNRESOLVED")
+        self.assertEqual(practice.words[0].incorrect_retry_count, 1)
+        self.assertEqual(practice.pages[0].initial_assessment[0].status, "MISPRONUNCIATION")
+
     async def test_list_sessions_is_scoped_to_authenticated_parent(self):
         service, repo = self.make_service()
         repo.sessions_for_parent.return_value = ["owned-session"]

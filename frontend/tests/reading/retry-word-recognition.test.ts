@@ -21,6 +21,9 @@ describe("Vietnamese retry recognition", () => {
       "hôm nay nắng",
     );
     expect(shortWordContext("hôm", "Bé nói hôn.")).toBeNull();
+    expect(shortWordContext("cành", "líu lo trên cành cây Bé An")).toBe(
+      "cành cây",
+    );
     expect(classifyRetryTranscript("hôm", "hôm nay nắng")).toBe("CORRECT");
     expect(classifyRetryTranscript("hôm", "hôn nay nắng")).toBe("INCORRECT");
     expect(

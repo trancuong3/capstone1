@@ -63,6 +63,37 @@ def has_description(text: str) -> bool:
     return len(parts) >= 3 and re.search(r"^description:\s*.*$", parts[1], re.M) is not None
 
 
+def lazy_skill_references(text: str) -> set[str]:
+    """Return concrete lazy-skill paths, ignoring documentation placeholders."""
+    return set(re.findall(r"\.agent-library/([A-Za-z0-9][A-Za-z0-9._-]*)/SKILL\.md", text))
+
+
+def scoped_rule_errors(text: str) -> list[str]:
+    required = {
+        "backend/**": "backend/**",
+        "frontend/**": "frontend/**",
+        "subtree instructions": "subtree's `AGENTS.md` is in context",
+    }
+    return [f"root AGENTS missing scoped-rule requirement: {label}" for label, token in required.items() if token not in text]
+
+
+def router_errors(text: str) -> list[str]:
+    name = skill_name(text)
+    if name != "viread-skill-router":
+        return [f"legacy router has invalid skill name: {name!r}"]
+
+    required = {
+        "backend routing": "viread-backend",
+        "frontend routing": "viread-frontend",
+        "data routing": "viread-data",
+        "reading routing": "viread-ai-reading",
+        "UI routing": "viread-ui",
+        "mobile routing": "viread-mobile",
+        "bounded Graphify lookup": "budget 300",
+    }
+    return [f"legacy router missing {label}" for label, token in required.items() if token not in text]
+
+
 skill_root = ROOT / ".agents" / "skills"
 gateway_files = sorted(skill_root.glob("*/SKILL.md"))
 gateway_names = {p.parent.name for p in gateway_files}
@@ -128,9 +159,7 @@ if paths != [".agents/skills"]:
     errors.append(f".agents/skills.json must expose only .agents/skills, got {paths}")
 
 root_agents = read("AGENTS.md")
-for token in ("backend/**", "backend/AGENTS.md", "frontend/**", "frontend/AGENTS.md"):
-    if token not in root_agents:
-        errors.append(f"root AGENTS missing scoped-rule trigger: {token}")
+errors.extend(scoped_rule_errors(root_agents))
 for token in ("graphify query", "--budget 300", "query-only", "build/update/export/diagnose"):
     if token not in root_agents:
         errors.append(f"root AGENTS missing Graphify fast-path rule: {token}")
@@ -142,7 +171,7 @@ if "+ `.agent-library/verification-before-completion/SKILL.md`" in root_agents:
 
 for text_path in ["AGENTS.md", *[str(p.relative_to(ROOT)) for p in gateway_files]]:
     text = read(text_path)
-    for target in re.findall(r"\.agent-library/([^/`]+?)/SKILL\.md", text):
+    for target in lazy_skill_references(text):
         if target not in library_names:
             errors.append(f"broken lazy-skill path in {text_path}: {target}")
 
@@ -186,8 +215,7 @@ for stale in ("--budget 1200", "Query Graphify first", "update the AST graph inc
         errors.append(f"viread-architecture still contains stale policy: {stale}")
 
 router = read(".agent-library/viread-skill-router/SKILL.md")
-if "Legacy compatibility" not in router or "viread-backend" not in router or "--budget 300" not in router:
-    errors.append("legacy viread-skill-router is not aligned with current routing")
+errors.extend(router_errors(router))
 
 ignore = read(".graphifyignore")
 for token in (".agent-library/", ".agents/", ".codex/", "graphify-out/"):

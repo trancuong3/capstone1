@@ -106,6 +106,7 @@ _ASSISTANT_BLEED_PHRASES = (
     "mình chưa nghe rõ",
     "con đọc lại",
     "con thử đọc cả cụm",
+    "con hãy đọc cả cụm",
     "nghe lại rồi đọc",
     "một lần nhé",
     "chính xác rồi",

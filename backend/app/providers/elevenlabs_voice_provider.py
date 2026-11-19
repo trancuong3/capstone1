@@ -32,6 +32,14 @@ ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io/v1"
 # set ELEVENLABS_VOICE_ID to choose the product's intended voice.
 DEFAULT_VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 DEFAULT_MODEL_ID = "eleven_flash_v2_5"
+VIETNAMESE_TTS_MODELS = {
+    DEFAULT_MODEL_ID,
+    "eleven_turbo_v2_5",
+    "eleven_v3",
+    "eleven_v3_conversational",
+    "eleven_v4",
+    "eleven_v4_turbo",
+}
 SHORT_TTS_CACHE_MAX_ENTRIES = 32
 SHORT_TTS_CACHE_MAX_BYTES = 8 * 1024 * 1024
 
@@ -373,7 +381,12 @@ class ElevenLabsVoiceProvider:
         speed: float = 1.0,
     ) -> SynthesizedAudio:
         headers = self._headers()
-        model_id = os.getenv("ELEVENLABS_MODEL_ID", "").strip() or DEFAULT_MODEL_ID
+        configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
+        model_id = (
+            configured_model
+            if configured_model in VIETNAMESE_TTS_MODELS
+            else DEFAULT_MODEL_ID
+        )
         settings = self._tts_voice_settings(model_id, speed)
         normalized_speed = settings["speed"]
         fp = self._key_fingerprint or ""
@@ -388,10 +401,9 @@ class ElevenLabsVoiceProvider:
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
+            "language_code": "vi",
             "voice_settings": settings,
         }
-        if "flash" in model_id or "turbo" in model_id:
-            payload["language_code"] = "vi"
 
         try:
             async with httpx.AsyncClient(

@@ -74,6 +74,26 @@ def run_mocked_transcription(responses, api_key="unit-test-secret"):
 
 
 class VoiceRouteTests(unittest.TestCase):
+    def test_vietnamese_speech_uses_a_model_with_vietnamese_support(self):
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock()
+        client.post = AsyncMock(
+            return_value=httpx.Response(
+                200, content=b"mp3", headers={"content-type": "audio/mpeg"}
+            )
+        )
+        with (
+            patch.dict(os.environ, {"ELEVENLABS_MODEL_ID": "eleven_multilingual_v2"}),
+            patch("app.providers.elevenlabs_voice_provider.httpx.AsyncClient", return_value=client),
+        ):
+            provider = ElevenLabsVoiceProvider(api_key="unit-test-vietnamese-tts")
+            asyncio.run(provider.synthesize(text="Con hãy đọc cả cụm: cành cây."))
+        payload = client.post.await_args.kwargs["json"]
+        self.assertEqual(payload["model_id"], "eleven_flash_v2_5")
+        self.assertEqual(payload["language_code"], "vi")
+        self.assertEqual(payload["text"], "Con hãy đọc cả cụm: cành cây.")
+
     def test_text_to_speech_returns_provider_audio_without_provider_details(self):
         provider = MagicMock()
         provider.synthesize = AsyncMock(
