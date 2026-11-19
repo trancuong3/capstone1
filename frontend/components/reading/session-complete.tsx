@@ -31,6 +31,8 @@ import type { ReadingCompletionSummaryUI } from "@/types/reading";
 interface SessionCompleteProps {
   booksHref: string;
   bookId: string;
+  startPageId?: string;
+  endPageId?: string;
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
@@ -42,6 +44,8 @@ interface SessionCompleteProps {
 export function SessionComplete({
   booksHref,
   bookId,
+  startPageId,
+  endPageId,
   child,
   sessionId,
   summary,
@@ -56,6 +60,10 @@ export function SessionComplete({
     (summary.pages_explored === null ||
       summary.pages_explored < summary.selected_range_pages);
   const spokenWords = summary.spoken_words ?? [];
+  const rereadHref =
+    startPageId && endPageId
+      ? `/reading-preparation?${new URLSearchParams({ bookId, pageId: startPageId, endPageId })}`
+      : `/books/${encodeURIComponent(bookId)}`;
   const transcripts = summary.transcripts ?? [];
   const correctWords = summary.correct_words ?? [];
   const mispronouncedWords = summary.mispronounced_words ?? [];
@@ -90,12 +98,14 @@ export function SessionComplete({
           />
           <div>
             <h1 className="text-heading font-extrabold text-ink">
-              {rangeWasPartial ? "Đã lưu buổi đọc" : "Bé đọc xong rồi!"}
+              {rangeWasPartial
+                ? "Đã lưu tiến độ đọc"
+                : "Buổi đọc đã hoàn thành"}
             </h1>
             <p className="mt-2 text-body text-muted">
               {rangeWasPartial
-                ? "Mình đã lưu phần bé đã đọc. Một số trang trong phạm vi vẫn chưa được xác nhận hoàn thành."
-                : "Giỏi lắm, hôm nay bé đã hoàn thành một buổi đọc."}
+                ? "Phần đã đọc được lưu lại. Một số trang trong phạm vi vẫn chưa hoàn thành."
+                : "Buổi đọc của bé đã được lưu."}
             </p>
           </div>
         </div>
@@ -104,19 +114,19 @@ export function SessionComplete({
         {score !== null && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-card bg-cream border-2 border-primary/30 p-5 shadow-sm">
             <div className="flex items-center gap-4">
-              <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary text-2xl font-black text-white shadow-md">
+              <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary text-2xl font-semibold text-white shadow-md">
                 {score}%
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-wider text-primary">
-                  Đánh giá lượt đầu
+                <p className="text-sm font-semibold text-primary">
+                  Độ chính xác lượt đầu
                 </p>
-                <h3 className="text-lg font-extrabold text-ink">
+                <h3 className="text-lg font-semibold text-ink">
                   {score >= 90
-                    ? "🌟 Xuất sắc! Bé đọc rất chuẩn"
+                    ? "Đọc rất chính xác"
                     : score >= 70
-                      ? "👍 Giỏi lắm! Bé phát âm khá tốt"
-                      : "💪 Bé cố gắng thêm ở lượt đọc tới nhé"}
+                      ? "Phần lớn từ được đọc đúng"
+                      : "Có thêm từ để luyện"}
                 </h3>
                 <p className="text-xs text-muted mt-0.5">
                   Đúng {correctWords.length}/{scoredWordCount} từ
@@ -184,7 +194,7 @@ export function SessionComplete({
               aria-hidden="true"
               className="mx-auto size-7 text-purple-ink"
             />
-            <p className="mt-3 text-[26px] font-extrabold">
+            <p className="mt-3 text-[26px] font-semibold">
               {summary.duration_minutes === null
                 ? "Chưa ghi nhận"
                 : `${summary.duration_minutes} phút`}
@@ -198,7 +208,7 @@ export function SessionComplete({
                 aria-hidden="true"
                 className="mx-auto size-7 text-purple-ink"
               />
-              <p className="mt-3 text-[26px] font-extrabold">
+              <p className="mt-3 text-[26px] font-semibold">
                 {summary.selected_range_pages} trang
               </p>
               <p className="text-label text-muted">trong phạm vi đã chọn</p>
@@ -209,7 +219,7 @@ export function SessionComplete({
               aria-hidden="true"
               className="mx-auto size-7 text-purple-ink"
             />
-            <p className="mt-3 text-[26px] font-extrabold">
+            <p className="mt-3 text-[26px] font-semibold">
               {summary.pages_explored === null
                 ? "Chưa ghi nhận"
                 : `${summary.pages_explored} trang`}
@@ -220,21 +230,21 @@ export function SessionComplete({
             type="button"
             onClick={() => setShowWordList((prev) => !prev)}
             aria-expanded={showWordList}
-            className="group rounded-card bg-cream p-5 text-center transition-all hover:bg-cream-dark/40 focus:outline-none focus:ring-2 focus:ring-purple-ink cursor-pointer border-2 border-transparent hover:border-purple-ink/30 shadow-sm flex flex-col items-center justify-between"
+            className="group flex cursor-pointer flex-col items-center justify-between rounded-card border border-border bg-white p-5 text-center hover:bg-canvas focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <div>
               <Star
                 aria-hidden="true"
                 className="mx-auto size-7 text-purple-ink transition-transform group-hover:scale-110"
               />
-              <p className="mt-3 text-[26px] font-extrabold text-ink">
+              <p className="mt-3 text-[26px] font-semibold text-ink">
                 {summary.practiced_words === null
                   ? "Chưa ghi nhận"
                   : `${summary.practiced_words} từ`}
               </p>
               <p className="text-label text-muted">trong lượt đọc</p>
             </div>
-            <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-purple-ink group-hover:underline">
+            <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-purple-ink group-hover:underline">
               {showWordList ? (
                 <>
                   Thu gọn <ChevronUp aria-hidden="true" className="size-3.5" />
@@ -249,7 +259,7 @@ export function SessionComplete({
           </button>
         </div>
 
-        <div className="rounded-card border border-line bg-white p-4 shadow-sm sm:p-5">
+        <div className="rounded-card border border-border bg-white p-4 shadow-sm sm:p-5">
           <SessionReadingReports
             sessionId={sessionId}
             showAssessment={!summary.assessment}
@@ -258,17 +268,17 @@ export function SessionComplete({
 
         {showWordList && (
           <div
-            className="rounded-card bg-cream p-5 sm:p-6 border border-purple-border/50 shadow-sm animate-in fade-in slide-in-from-top-2"
+            className="rounded-card border border-border bg-white p-5 sm:p-6"
             data-testid="spoken-words-container"
           >
-            <div className="flex items-center justify-between mb-4 border-b border-cream-dark pb-3">
+            <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2">
                 <Mic aria-hidden="true" className="size-5 text-purple-ink" />
-                <h2 className="text-lg font-extrabold text-ink">
+                <h2 className="text-lg font-semibold text-ink">
                   Kết quả nhận diện giọng nói của bé (STT)
                 </h2>
               </div>
-              <span className="rounded-full bg-purple-surface px-3 py-0.5 text-xs font-bold text-purple-ink border border-purple-border/40">
+              <span className="rounded-full border border-purple/50 bg-purple px-3 py-0.5 text-xs font-semibold text-purple-ink">
                 {spokenWords.length} từ nhận diện
               </span>
             </div>
@@ -298,7 +308,7 @@ export function SessionComplete({
                 ) : null}
                 {correctWords.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
+                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted">
                       <CheckCircle2 className="size-4 text-emerald-600" />
                       <span>
                         Danh sách các từ bé đã đọc thành công (
@@ -309,11 +319,11 @@ export function SessionComplete({
                       {correctWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-ink shadow-sm border border-emerald-200 hover:bg-emerald-50/50 transition-colors"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-ink shadow-sm border border-emerald-200 hover:bg-emerald-50/50 transition-colors"
                         >
                           <CheckCircle2
                             aria-hidden="true"
-                            className="size-4 text-leaf-green flex-shrink-0"
+                            className="size-4 flex-shrink-0 text-success-ink"
                           />
                           {word}
                         </span>
@@ -324,7 +334,7 @@ export function SessionComplete({
 
                 {mispronouncedWords.length > 0 && (
                   <div className="rounded-card border border-rose-200 bg-rose-50/60 p-4">
-                    <p className="text-xs font-black uppercase tracking-wider text-rose-700 mb-2 flex items-center gap-1.5">
+                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-danger">
                       <AlertCircle className="size-4 text-rose-600" />
                       <span>
                         Các từ bé cần chú ý phát âm lại (
@@ -335,7 +345,7 @@ export function SessionComplete({
                       {mispronouncedWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-rose-800 shadow-sm border border-rose-200"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-rose-800 shadow-sm border border-rose-200"
                         >
                           <XCircle
                             aria-hidden="true"
@@ -350,7 +360,7 @@ export function SessionComplete({
 
                 {skippedWords.length > 0 && (
                   <div className="rounded-card border border-amber-200 bg-amber-50/60 p-4">
-                    <p className="text-xs font-black uppercase tracking-wider text-amber-800 mb-2 flex items-center gap-1.5">
+                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-warning">
                       <AlertCircle className="size-4 text-amber-700" />
                       <span>
                         Các từ bé chưa đọc đến ({skippedWords.length} từ):
@@ -360,7 +370,7 @@ export function SessionComplete({
                       {skippedWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-bold text-amber-900 shadow-sm border border-amber-200"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 shadow-sm border border-amber-200"
                         >
                           <AlertCircle
                             aria-hidden="true"
@@ -375,14 +385,14 @@ export function SessionComplete({
 
                 {transcripts.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-1.5">
+                    <p className="mb-1.5 text-sm font-semibold text-muted">
                       Câu nhận diện từ microphone:
                     </p>
                     <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                       {transcripts.map((t, idx) => (
                         <div
                           key={idx}
-                          className="rounded-lg bg-white/80 px-3.5 py-2 text-sm text-ink italic border border-cream-dark"
+                          className="rounded-lg border border-border bg-white/80 px-3.5 py-2 text-sm text-ink italic"
                         >
                           &ldquo;{t}&rdquo;
                         </div>
@@ -405,7 +415,15 @@ export function SessionComplete({
           </div>
         )}
 
-        <ButtonLink className="mx-auto max-w-[360px]" href={booksHref}>
+        <ButtonLink className="mx-auto max-w-[360px]" href={rereadHref}>
+          <BookOpen aria-hidden="true" className="size-5" />
+          Đọc lại phần này
+        </ButtonLink>
+        <ButtonLink
+          className="mx-auto max-w-[360px]"
+          href={booksHref}
+          variant="secondary"
+        >
           Đọc cuốn khác
           <ArrowRight aria-hidden="true" className="size-5" />
         </ButtonLink>

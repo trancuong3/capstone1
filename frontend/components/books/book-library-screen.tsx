@@ -1,11 +1,10 @@
 "use client";
 
-import { BookOpenText, Check, RefreshCw, SearchX } from "lucide-react";
+import { BookOpenText, RefreshCw, SearchX } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
@@ -189,7 +188,7 @@ export function BookLibraryScreen() {
     return (
       <section
         aria-busy="true"
-        className="mx-auto w-full max-w-[1130px] px-4 py-8"
+        className="mx-auto w-full max-w-[1280px] px-4 py-8"
       >
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
@@ -216,12 +215,11 @@ export function BookLibraryScreen() {
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
-      <BookChildHeader child={child} />
-      {child ? (
-        <div className="mx-auto w-full max-w-[1130px]">
-          <SelectedChildIdentity child={child} />
-        </div>
-      ) : null}
+      <BookChildHeader
+        child={child}
+        fullBleedDesktop
+        mobileLabel="Cùng bé chọn một cuốn sách"
+      />
 
       {collectionNotice ? (
         <StatusMessage
@@ -236,28 +234,17 @@ export function BookLibraryScreen() {
         </StatusMessage>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:gap-6">
-        <div className="flex flex-col gap-4 lg:min-h-16 lg:flex-row lg:items-center lg:gap-6">
-          <h1
-            aria-label={
-              child
-                ? `${child.alias} muốn đọc gì hôm nay?`
-                : "Bé muốn đọc gì hôm nay?"
-            }
-            className="min-w-0 flex-1 text-heading font-extrabold text-ink"
-          >
-            <span className="hidden sm:inline">
-              {child
-                ? `${child.alias} muốn đọc gì hôm nay?`
-                : "Bé muốn đọc gì hôm nay?"}
-            </span>
-            <span className="sm:hidden">Bé muốn đọc gì hôm nay?</span>
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
+          <h1 className="book-title min-w-0 text-4xl text-ink sm:text-5xl">
+            Tủ sách{child ? ` của ${child.alias}` : " của bé"}
           </h1>
-          <div className="w-full lg:w-[486px]">
+          <div className="w-full sm:max-w-sm">
             <TextField
               aria-label="Tìm theo tên sách hoặc tác giả"
               label="Tìm cuốn sách bé thích…"
               onChange={(event) => setSearch(event.target.value)}
+              placeholder="Tìm theo tên sách hoặc tác giả"
               type="search"
               value={search}
             />
@@ -266,7 +253,7 @@ export function BookLibraryScreen() {
 
         <fieldset className="min-w-0">
           <legend className="sr-only">Lọc sách theo lớp</legend>
-          <div className="flex gap-3 overflow-x-auto pb-1 sm:flex-wrap">
+          <div className="flex flex-wrap gap-2">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -274,9 +261,9 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex h-16 min-w-[132px] shrink-0 items-center justify-center gap-2 rounded-control px-4 text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-control px-4 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                     isSelected
-                      ? "bg-sky text-primary-hover ring-2 ring-primary"
+                      ? "bg-sky text-primary-hover"
                       : "bg-white text-ink hover:bg-sky",
                   )}
                   key={grade ?? "all"}
@@ -287,9 +274,6 @@ export function BookLibraryScreen() {
                   }}
                   type="button"
                 >
-                  {isSelected ? (
-                    <Check aria-hidden="true" className="size-5 shrink-0" />
-                  ) : null}
                   {grade === null ? "Tất cả" : `Lớp ${grade}`}
                 </button>
               );
@@ -301,7 +285,7 @@ export function BookLibraryScreen() {
           <div
             aria-busy="true"
             aria-label="Đang tải thư viện sách"
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
               Đang tải sách…
@@ -374,7 +358,7 @@ export function BookLibraryScreen() {
         ) : null}
 
         {catalogState.status === "ready" && catalogState.books.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {catalogState.books.map((book) => (
               <BookCard
                 book={book}
@@ -391,10 +375,6 @@ export function BookLibraryScreen() {
           </div>
         ) : null}
       </div>
-
-      <p className="mt-auto text-center text-body text-muted">
-        Mỗi câu chuyện là một điều mới để khám phá.
-      </p>
     </section>
   );
 }

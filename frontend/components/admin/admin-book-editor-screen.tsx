@@ -1,15 +1,10 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  AdminLoading,
-  AdminPageHeader,
-  AdminStatusBadge,
-} from "@/components/admin/admin-ui";
+import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
@@ -133,9 +128,13 @@ export function AdminBookEditorScreen({
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
-          cause.status === 422
-            ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
-            : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+          cause.status === 409
+            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            : nextStatus === "ACTIVE" &&
+                isServiceError(cause) &&
+                cause.status === 422
+              ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
+              : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
       });
     } finally {
       setStatusBusy(false);
@@ -164,7 +163,7 @@ export function AdminBookEditorScreen({
               Thử lại
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
               Quay lại kho sách
@@ -182,27 +181,17 @@ export function AdminBookEditorScreen({
     min_grade: book.min_grade,
     max_grade: book.max_grade,
   };
+  const cancelHref =
+    returnTo === "metadata-quality"
+      ? "/admin/metadata-quality"
+      : `/admin/books/${encodeURIComponent(bookId)}`;
 
   return (
-    <>
+    <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
-        eyebrow="Kho sách · Metadata"
         title="Chỉnh sửa metadata sách"
-        description="Chỉnh sửa đầu sách hiện có. Thay đổi này không sửa hoặc xóa trang sách, revision hay lịch sử đọc."
+        description="Cập nhật tên sách, tiêu đề và khoảng lớp; giữ nguyên trang sách, revision và lịch sử đọc."
       />
-      <Link
-        className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
-        href={
-          returnTo === "metadata-quality"
-            ? "/admin/metadata-quality"
-            : `/admin/books/${encodeURIComponent(bookId)}`
-        }
-      >
-        <ArrowLeft aria-hidden className="size-5" />
-        {returnTo === "metadata-quality"
-          ? "Quay lại chất lượng metadata"
-          : "Quay lại chi tiết sách"}
-      </Link>
       {issue && issueLabels[issue] ? (
         <StatusMessage
           className="mb-5"
@@ -213,10 +202,9 @@ export function AdminBookEditorScreen({
           tải lại dữ liệu từ Backend và điều kiện đó đã được khắc phục.
         </StatusMessage>
       ) : null}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <AdminStatusBadge status={book.lifecycle_status} />
-        <span className="text-sm text-muted">ID: {book.id}</span>
+      <div className="flex flex-wrap items-center gap-4">
         <Button
+          className="sm:w-auto"
           disabled={statusBusy}
           isLoading={statusBusy}
           onClick={() => void changeLifecycle()}
@@ -228,18 +216,19 @@ export function AdminBookEditorScreen({
         </Button>
       </div>
       {notice ? (
-        <StatusMessage className="mb-5" tone={notice.tone} title={notice.title}>
+        <StatusMessage tone={notice.tone} title={notice.title}>
           {notice.message}
         </StatusMessage>
       ) : null}
-      <Card className="max-w-3xl bg-white">
-        <h2 className="mb-5 text-xl font-black">Thông tin sách</h2>
+      <Card className="w-full bg-white sm:px-8 sm:py-8">
+        <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
         <AdminBookForm
+          cancelHref={cancelHref}
           initial={initial}
           onSubmit={saveMetadata}
           submitLabel="Lưu metadata"
         />
       </Card>
-    </>
+    </section>
   );
 }

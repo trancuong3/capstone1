@@ -1,14 +1,14 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Camera, RefreshCw } from "lucide-react";
+import { Camera, RefreshCw } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
 
 interface BookScannerScreenProps {
@@ -48,7 +48,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     return (
       <section
         aria-busy="true"
-        className="mx-auto w-full max-w-[900px] px-4 py-8"
+        className="mx-auto w-full max-w-[960px] px-4 py-8"
       >
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
@@ -75,11 +75,16 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const child = childState.child;
 
   return (
-    <section className="mx-auto flex min-h-[calc(100dvh-5rem)] w-full max-w-[1100px] flex-col gap-5 px-4 py-6 sm:py-8">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <section
+      className={cn(
+        "mx-auto flex w-full flex-col gap-6",
+        cameraStarted ? "max-w-[1120px]" : "max-w-[960px]",
+      )}
+    >
+      <header className="border-b border-border pb-5">
         <div>
-          <p className="text-label font-bold uppercase tracking-wide text-primary">
-            ViRead · Quét trang sách
+          <p className="text-label font-semibold text-muted">
+            {child.alias} · Lớp {child.grade}
           </p>
           <h1 className="mt-1 text-heading font-extrabold text-ink">
             Đưa trang sách vào khung camera
@@ -89,13 +94,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             dùng ảnh camera để tìm cuốn sách và trang tương ứng.
           </p>
         </div>
-        <ButtonLink href="/dashboard" variant="quiet" className="sm:w-auto">
-          <ArrowLeft aria-hidden="true" className="size-5" />
-          Về tổng quan
-        </ButtonLink>
       </header>
-
-      <SelectedChildIdentity child={child} />
 
       {cameraUnavailable ? (
         <StatusMessage title="Camera chưa sẵn sàng" tone="error">
@@ -112,44 +111,48 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           onBookPageDetected={handleBookPageDetected}
         />
       ) : (
-        <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-6 text-center">
-          <span className="flex size-16 items-center justify-center rounded-full bg-white text-primary">
-            <Camera aria-hidden="true" className="size-8" />
-          </span>
+        <div className="flex min-h-[380px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-6 text-center">
+          <Camera aria-hidden="true" className="size-14 text-primary" />
           <div>
-            <h2 className="text-xl font-extrabold text-ink">Camera đang tắt</h2>
-            <p className="mt-2 max-w-[520px] text-body text-muted">
-              ViRead chỉ yêu cầu camera sau khi ba mẹ bấm nút bên dưới. Trang
-              quét này không yêu cầu quyền microphone.
+            <h2 className="text-2xl font-extrabold text-ink">
+              Camera đang tắt
+            </h2>
+            <p className="mt-6 max-w-[620px] text-body text-muted">
+              Camera chỉ bật khi ba mẹ chọn nút bên dưới. Bước này chưa sử dụng
+              microphone.
             </p>
           </div>
           <Button
-            className="sm:max-w-[320px]"
+            className="min-h-16 sm:max-w-[400px]"
             onClick={() => {
               setCameraUnavailable(false);
               setCameraStarted(true);
             }}
           >
-            {cameraUnavailable ? (
-              <RefreshCw aria-hidden="true" className="size-5" />
-            ) : (
-              <Camera aria-hidden="true" className="size-5" />
-            )}
-            {cameraUnavailable ? "Thử bật camera lại" : "Bật camera để quét"}
+            Bật camera để quét
           </Button>
         </div>
       )}
 
-      <div className="flex items-start gap-3 rounded-card border border-border bg-cream p-4">
-        <BookOpen
-          aria-hidden="true"
-          className="mt-1 size-5 shrink-0 text-primary"
-        />
-        <p className="text-sm leading-6 text-muted">
-          Sau khi nhận diện được trang, ViRead sẽ mở thông tin sách để ba mẹ
-          kiểm tra. Buổi đọc chỉ được tạo sau bước xác minh microphone.
-        </p>
-      </div>
+      {!cameraUnavailable ? (
+        <div className="rounded-card bg-sky p-4">
+          <h2 className="font-extrabold text-ink">Sau khi nhận diện</h2>
+          <p className="mt-2 text-body text-muted">
+            ViRead mở chi tiết sách để ba mẹ chọn phạm vi trang. Microphone được
+            kiểm tra ở bước chuẩn bị đọc.
+          </p>
+        </div>
+      ) : null}
+
+      {!cameraStarted || cameraUnavailable ? (
+        <ButtonLink
+          className="min-h-16 sm:max-w-[400px]"
+          href="/books"
+          variant="secondary"
+        >
+          Chọn sách từ thư viện
+        </ButtonLink>
+      ) : null}
     </section>
   );
 }

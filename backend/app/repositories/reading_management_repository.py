@@ -14,6 +14,7 @@ from app.models.reading_management import (
     ReadingReminder,
     ReadingReminderOccurrence,
 )
+from app.repositories.book_repository import CatalogRepository
 from app.services.reading_management_rules import STALE_REMINDER_HOURS, local_day_bounds
 from app.services.reading_reminder_schedule import local_schedule_to_utc
 
@@ -25,7 +26,8 @@ class ReadingManagementRepository:
         self.db = db
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def owned_child(self, child_id: UUID, actor_id: UUID) -> ChildProfile | None:
         return await self.db.scalar(select(ChildProfile).where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id))
@@ -35,13 +37,12 @@ class ReadingManagementRepository:
         return list(result.scalars().all())
 
     async def eligible_book(self, book_id: UUID) -> Book | None:
-        verified_active_page = exists(
-            select(BookPage.Id)
-            .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-            .where(BookPage.BookId == Book.Id, BookPage.LifecycleStatus == "ACTIVE",
-                   PageRevision.PageId == BookPage.Id, PageRevision.VerificationStatus == "VERIFIED")
+        return await self.db.scalar(
+            select(Book).where(
+                Book.Id == book_id,
+                CatalogRepository.eligible_book(),
+            )
         )
-        return await self.db.scalar(select(Book).where(Book.Id == book_id, Book.LifecycleStatus == "ACTIVE", verified_active_page))
 
     async def book(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))

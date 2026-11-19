@@ -4,6 +4,24 @@ import {
   type AudioQualitySnapshot,
 } from "@/lib/reading/audio-quality";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
+import { normalizeShortWordTranscript } from "@/lib/reading/retry-word-recognition";
+
+export function isConfidentExactBrowserRead(
+  target: string,
+  text?: string | null,
+  confidence?: number | null,
+): boolean {
+  if (
+    !text ||
+    confidence == null ||
+    confidence < 0.9 ||
+    confidence > 1 ||
+    !Number.isFinite(confidence)
+  )
+    return false;
+  const expected = normalizeShortWordTranscript(target);
+  return Boolean(expected && normalizeShortWordTranscript(text) === expected);
+}
 
 /** Conservative rejection gates, not calibrated pronunciation probabilities.
  * Language probability describes language identification only. Word logprob
@@ -31,6 +49,29 @@ export function hasUsableTranscript(
     (word) =>
       word.logprob != null &&
       (!Number.isFinite(word.logprob) || word.logprob < -1.5),
+  );
+}
+
+/**
+ * Returns true when a keyterm-biased transcription has high enough word-level
+ * confidence to be trusted without independent browser corroboration.
+ *
+ * The threshold (logprob >= −0.5) is intentionally much stricter than the
+ * general usability gate (−1.5) to guard against keyterm hallucination while
+ * still accepting clear correct pronunciations that the browser missed.
+ */
+export function hasHighConfidenceKeytermResult(
+  transcript: SpeechTranscript,
+): boolean {
+  const words =
+    transcript.words?.filter((word) => !word.type || word.type === "word") ??
+    [];
+  // Require at least one word with a logprob score to make a judgement.
+  if (!words.length || !words.some((w) => w.logprob != null)) return false;
+  return words.every(
+    (word) =>
+      word.logprob == null ||
+      (Number.isFinite(word.logprob) && word.logprob >= -0.5),
   );
 }
 

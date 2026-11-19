@@ -1,4 +1,4 @@
-"""Prepare the disposable GitHub Actions PostgreSQL for the VietOCR migration test."""
+"""Prepare disposable GitHub Actions PostgreSQL for OCR and Admin AI schema tests."""
 
 from __future__ import annotations
 
@@ -11,7 +11,14 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "supabase" / "migrations" / "20261112110945_viread_vietocr_v2.sql"
 DUAL_FLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261112123000_viread_dual_training_profiles.sql"
-MIGRATIONS = (MIGRATION, DUAL_FLOW_MIGRATION)
+ADMIN_AI_WORKFLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261116110000_admin_ai_workflows.sql"
+ADMIN_AI_SAFETY_HISTORY_MIGRATION = ROOT / "supabase" / "migrations" / "20261116120000_admin_ai_workflow_safety_history.sql"
+MIGRATIONS = (
+    MIGRATION,
+    DUAL_FLOW_MIGRATION,
+    ADMIN_AI_WORKFLOW_MIGRATION,
+    ADMIN_AI_SAFETY_HISTORY_MIGRATION,
+)
 ALLOWED_DATABASE = "test"
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -66,12 +73,17 @@ async def prepare() -> None:
             CREATE TABLE IF NOT EXISTS public.profiles (
                 id UUID PRIMARY KEY
             );
+            CREATE TABLE IF NOT EXISTS public.books (
+                id UUID PRIMARY KEY
+            );
             CREATE TABLE IF NOT EXISTS public.bookpages (
                 id UUID PRIMARY KEY
             );
             CREATE TABLE IF NOT EXISTS public.pagerevisions (
                 id UUID PRIMARY KEY,
-                pageid UUID NOT NULL REFERENCES public.bookpages(id) ON DELETE CASCADE
+                pageid UUID NOT NULL REFERENCES public.bookpages(id) ON DELETE CASCADE,
+                drafttext TEXT,
+                verifiedtext TEXT
             );
             """
         )
@@ -83,4 +95,4 @@ async def prepare() -> None:
 
 if __name__ == "__main__":
     asyncio.run(prepare())
-    print("Applied the VietOCR V2 and dual-flow migrations to the disposable loopback PostgreSQL test database.")
+    print("Applied the VietOCR V2, dual-flow, and Admin AI workflow migrations to the disposable loopback PostgreSQL test database.")

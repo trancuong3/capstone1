@@ -437,6 +437,7 @@ describe("ReadingManagementScreen with derived data", () => {
     const user = userEvent.setup();
     renderScreen();
     await screen.findByRole("heading", { name: "Mục tiêu đọc" });
+    await user.click(screen.getByRole("button", { name: "Thêm mục tiêu" }));
     await user.click(screen.getByRole("button", { name: "Tạo mục tiêu" }));
     expect(
       await screen.findByText(/đã có mục tiêu cùng loại và cùng chu kỳ/i),

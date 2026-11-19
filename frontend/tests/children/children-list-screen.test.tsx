@@ -49,7 +49,11 @@ describe("ChildrenListScreen with real API responses", () => {
     renderChildren();
     expect(await screen.findByText(childFixture.alias)).toBeInTheDocument();
     expect(screen.getByText(second.alias)).toBeInTheDocument();
-    expect(screen.getAllByText("Xem và chỉnh sửa")).toHaveLength(2);
+    expect(
+      screen.getByRole("link", {
+        name: `${second.alias}, lớp ${second.grade}`,
+      }),
+    ).toHaveAttribute("href", `/children/${second.id}`);
     expect(
       screen.getByRole("link", { name: new RegExp(childFixture.alias) }),
     ).toHaveAttribute("href", `/children/${TEST_CHILD_ID}`);

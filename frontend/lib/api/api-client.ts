@@ -10,6 +10,16 @@ const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
 // Only deliberately authored backend details are shown to users. Unknown server
 // messages may contain SQL, tokens, file paths, or other private diagnostic data.
 const safeBackendMessages: Record<string, string> = {
+  "Copyright scanner is not configured. Admin must confirm rights before approving this book.":
+    "Chưa có Copyright Detection tự động. Hãy xác nhận quyền sử dụng trước khi phê duyệt.",
+  "Book approval requires current OCR, Proofreading and Child Safety results on every active page.":
+    "Mỗi trang đang hoạt động cần có OCR, Proofreading và Child Safety hợp lệ trước khi duyệt sách.",
+  "High severity or NOT_RECOMMENDED content is blocked by the current child access policy.":
+    "Sách có cảnh báo HIGH hoặc NOT_RECOMMENDED đang bị chính sách trẻ em chặn.",
+  "A page Safety result is stale or incomplete.":
+    "Có trang chưa có kết quả Safety hiện hành. Hãy tải lại đánh giá và quét lại trang đó.",
+  "A category is required for a false-positive decision.":
+    "Hãy nhập category trước khi ghi nhận false positive.",
   ...readingManagementMessages,
   INSUFFICIENT_CONTENT:
     "Cuốn sách này chưa có đủ câu đã xác minh cho lượt chơi. Bé có thể chọn sách hoặc độ khó khác nhé.",
@@ -174,6 +184,79 @@ const safeBackendMessages: Record<string, string> = {
     "Số trang vượt ngoài phạm vi hợp lệ (1-32767).",
   "Image decoding failed": "Không đọc được file ảnh gửi lên.",
   "Image dimensions are invalid": "Kích thước ảnh không hợp lệ.",
+  "A file is required": "Hãy chọn tệp ảnh hoặc tài liệu để tải lên.",
+  "Document exceeds the 50 MB limit":
+    "Tệp tài liệu vượt quá giới hạn dung lượng 50 MB.",
+  "Image exceeds the 12 MB limit":
+    "Ảnh tải lên vượt quá giới hạn dung lượng 12 MB.",
+  "Image dimensions must not exceed 6000 by 6000 pixels":
+    "Kích thước ảnh vượt quá giới hạn 6000 × 6000 px.",
+  "Document exceeds the 30-page limit per upload":
+    "Mỗi tệp tài liệu chỉ hỗ trợ quét tối đa 30 trang. Hãy tách nhỏ tệp rồi tải lên lại.",
+  "Password-protected PDF files are not supported":
+    "Không hỗ trợ tệp PDF đặt mật khẩu. Hãy gỡ mật khẩu trước khi tải lên.",
+  "Password-protected documents are not supported":
+    "Không hỗ trợ tài liệu đặt mật khẩu. Hãy gỡ mật khẩu trước khi tải lên.",
+  "Legacy .doc files are not supported; convert to .docx or .pdf":
+    "Chưa hỗ trợ định dạng Word .doc cũ. Hãy lưu sang .docx hoặc .pdf rồi tải lên.",
+  "Macro-enabled Word documents are not permitted":
+    "Không cho phép tài liệu Word chứa macro (.docm) vì lý do bảo mật.",
+  "Archive structure exceeds safe extraction limits":
+    "Cấu trúc nén của tệp vượt ngưỡng an toàn.",
+  "Document XML contains unsafe declarations":
+    "Tệp DOCX chứa khai báo XML không an toàn nên đã bị từ chối.",
+  "Unsupported upload format; use JPEG, PNG, WebP, BMP, TIFF, PDF, or DOCX":
+    "Định dạng tệp chưa hỗ trợ. Hãy chọn JPEG, PNG, WebP, BMP, TIFF, PDF hoặc DOCX.",
+  "File content does not match the declared file type or extension":
+    "Nội dung thực tế của tệp không khớp với định dạng hoặc phần mở rộng.",
+  "Weights file must end with .pth or .pt":
+    "Tệp trọng số phải có định dạng .pth hoặc .pt.",
+  "Checkpoint file magic bytes are invalid; expected PyTorch .pth/.pt format":
+    "Tệp trọng số không hợp lệ hoặc bị hỏng; yêu cầu đúng định dạng PyTorch .pth/.pt.",
+  "Checkpoint shard exceeds 40 MiB": "Mảnh tệp trọng số vượt quá 40 MiB.",
+  "Comparison JSON file must be between 1 byte and 2 MiB":
+    "Tệp JSON so sánh phải có dung lượng từ 1 byte đến 2 MiB.",
+  "Comparison file must be valid UTF-8 JSON":
+    "Tệp kết quả so sánh phải là định dạng JSON UTF-8 hợp lệ.",
+  "Comparison JSON must be an object":
+    "Tệp so sánh JSON phải là một đối tượng JSON hợp lệ.",
+  "Comparison JSON missing 'models' object":
+    "Tệp JSON thiếu thông tin 'models' đối chiếu.",
+  "Comparison JSON must define 'baseline' and at least one fine-tuned model":
+    "Tệp JSON phải định nghĩa model baseline và ít nhất một model fine-tuned.",
+  "Comparison JSON must contain at least one dataset block with cer_pct and wer_pct":
+    "Tệp JSON phải chứa ít nhất một tập kiểm thử có chỉ số CER và WER.",
+  "Configuration file must have a .yml or .yaml extension":
+    "Tệp cấu hình phải có đuôi .yml hoặc .yaml.",
+  "Configuration file exceeds 1 MiB": "Tệp cấu hình vượt quá dung lượng 1 MiB.",
+  "Configuration YAML syntax is invalid":
+    "Cú pháp tệp YAML cấu hình không hợp lệ.",
+  "Configuration YAML must be a non-empty mapping":
+    "Tệp YAML cấu hình phải là một đối tượng cấu hình hợp lệ (dict).",
+  "Checkpoint shard failed integrity verification":
+    "Mảnh tệp trọng số không vượt qua bước kiểm tra toàn vẹn SHA-256.",
+  "Checkpoint and configuration are identical to the currently active model":
+    "Trọng số và cấu hình này giống hệt model đang hoạt động.",
+  "The uploaded document is empty or corrupted":
+    "Tệp tải lên bị rỗng hoặc bị hỏng không thể đọc được.",
+  "No usable text was detected in the uploaded document":
+    "Không phát hiện được chữ trong tài liệu tải lên. Hãy kiểm tra chất lượng bản scan hoặc nội dung tệp.",
+  "Document upload failed to produce any valid OCR page":
+    "Không tạo được trang OCR hợp lệ nào từ tài liệu này.",
+  "Server Unicode font for DOCX rendering is unavailable":
+    "Máy chủ thiếu font Unicode tiếng Việt để dựng trang DOCX.",
+  "PDF rendering engine is not available on the server":
+    "Máy chủ chưa sẵn sàng bộ dựng trang PDF.",
+  DIFFICULT_WORD_PRACTICE_STORAGE_UNAVAILABLE:
+    "Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ.",
+  DIFFICULT_WORD_ATTEMPT_ALREADY_COMPLETED:
+    "Lượt luyện từ này đã được ghi nhận trước đó. Con hãy bắt đầu lượt luyện mới nhé.",
+  DIFFICULT_WORD_ATTEMPT_NOT_FOUND:
+    "Không tìm thấy lượt luyện từ này trong hồ sơ của bé.",
+  INVALID_PRACTICE_WORD: "Từ cần luyện chưa hợp lệ.",
+  EMPTY_AUDIO: "Chưa nhận được âm thanh ghi âm. Con hãy thử nói lại nhé.",
+  AUDIO_TOO_LARGE: "Đoạn ghi âm quá dài. Con hãy ghi âm ngắn gọn một từ nhé.",
+  UNSUPPORTED_AUDIO: "Định dạng âm thanh chưa được hỗ trợ trên thiết bị này.",
 };
 
 function errorCode(status: number): ServiceErrorCode {

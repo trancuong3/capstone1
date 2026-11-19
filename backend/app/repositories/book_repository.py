@@ -7,10 +7,22 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, case, cast, exists, func, not_, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
-from app.models import Book, BookPage, PageRevision, PageRevisionWord, Profile
+from app.models import (
+    AdminAiWorkflow,
+    AuditLog,
+    Book,
+    BookPage,
+    PageRevision,
+    PageRevisionWord,
+    Profile,
+)
+from app.policies.book_approval import BOOK_APPROVAL_POLICY_VERSION
+from sqlalchemy.dialects.postgresql import JSONB
+from app.database.role_cache import get_cached_profile_role
 
 
 class BookRepository:
@@ -20,11 +32,13 @@ class BookRepository:
         self.db = db
 
     async def list_books(self) -> list[Book]:
-        result = await self.db.execute(select(Book))
+        result = await self.db.execute(
+            select(Book).where(CatalogRepository.eligible_book())
+        )
         return list(result.scalars().all())
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def create(self, book: Book) -> Book:
         self.db.add(book)
@@ -39,9 +53,12 @@ class BookRepository:
     async def list_pages(self, book_id: UUID) -> list[BookPage]:
         query = (
             select(BookPage)
+            .join(Book, Book.Id == BookPage.BookId)
+            .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
             .where(
                 BookPage.BookId == book_id,
-                BookPage.LifecycleStatus != "PROCESSING",
+                CatalogRepository.eligible_book(),
+                CatalogRepository.eligible_page(),
             )
             .order_by(BookPage.PageNumber)
         )
@@ -54,7 +71,7 @@ class CatalogRepository:
         self.db = db
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await get_cached_profile_role(self.db, actor_id)
 
     @staticmethod
     def eligible_page():
@@ -65,16 +82,224 @@ class CatalogRepository:
             PageRevision.VerificationStatus == "VERIFIED",
         )
 
-    @classmethod
-    def eligible_book(cls):
-        return and_(
-            Book.LifecycleStatus == "ACTIVE",
-            exists(
-                select(BookPage.Id)
-                .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-                .where(BookPage.BookId == Book.Id, cls.eligible_page())
-            ),
+    @staticmethod
+    def current_page_revision_verified():
+        return exists(
+            select(PageRevision.Id).where(
+                PageRevision.Id == BookPage.CurrentVerifiedRevisionId,
+                PageRevision.PageId == BookPage.Id,
+                PageRevision.VerificationStatus == "VERIFIED",
+            ).correlate(BookPage)
         )
+
+    @staticmethod
+    def current_page_safety_approved():
+        return exists(
+            select(AdminAiWorkflow.Id)
+            .join(
+                PageRevision,
+                PageRevision.Id == BookPage.CurrentVerifiedRevisionId,
+            )
+            .where(
+                PageRevision.PageId == BookPage.Id,
+                AdminAiWorkflow.PageId == BookPage.Id,
+                AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
+                AdminAiWorkflow.Status == "READY_FOR_ADMIN_REVIEW",
+                AdminAiWorkflow.SafetyStatus == "CONFIRMED",
+                AdminAiWorkflow.SafetyConfirmedAt.is_not(None),
+                AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
+                AdminAiWorkflow.SafetyInputHash == AdminAiWorkflow.CandidateHash,
+                AdminAiWorkflow.FinalApprovedTextHash == AdminAiWorkflow.CandidateHash,
+                AdminAiWorkflow.OcrApprovedAt.is_not(None),
+                AdminAiWorkflow.OcrApprovedBy.is_not(None),
+                PageRevision.ProcessingMeta["admin_ai_workflow"][
+                    "workflow_id"
+                ].as_string() == cast(AdminAiWorkflow.Id, String),
+                PageRevision.ProcessingMeta["admin_ai_workflow"][
+                    "candidate_hash"
+                ].as_string() == AdminAiWorkflow.CandidateHash,
+                PageRevision.ProcessingMeta["admin_ai_workflow"][
+                    "safety_input_hash"
+                ].as_string() == AdminAiWorkflow.CandidateHash,
+                # REVIEW_REQUIRED can proceed only after the existing Admin
+                # Safety confirmation. NOT_RECOMMENDED and any HIGH finding
+                # remain blocked with no override policy in this workflow.
+                AdminAiWorkflow.Suitability.in_(
+                    ("SUITABLE", "SUITABLE_WITH_GUIDANCE", "REVIEW_REQUIRED")
+                ),
+                not_(AdminAiWorkflow.Findings.contains([{"severity": "HIGH"}])),
+            )
+            .correlate(BookPage)
+        )
+
+    @classmethod
+    def eligible_book(cls, *, require_active: bool = True):
+        child_content_page = exists(
+            select(BookPage.Id).where(
+                BookPage.BookId == Book.Id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
+            ).correlate(Book)
+        )
+        unready_page = exists(
+            select(BookPage.Id).where(
+                BookPage.BookId == Book.Id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
+                or_(
+                    BookPage.LifecycleStatus != "ACTIVE",
+                    not_(cls.current_page_revision_verified()),
+                    not_(cls.current_page_safety_approved()),
+                ),
+            ).correlate(Book)
+        )
+        latest_workflows = (
+            select(
+                AdminAiWorkflow.Id.label("workflow_id"),
+                AdminAiWorkflow.PageId.label("page_id"),
+                AdminAiWorkflow.CandidateHash.label("candidate_hash"),
+                AdminAiWorkflow.SafetyInputHash.label("safety_input_hash"),
+                AdminAiWorkflow.Suitability.label("suitability"),
+                AdminAiWorkflow.Status.label("workflow_status"),
+                AdminAiWorkflow.SafetyStatus.label("safety_status"),
+                AdminAiWorkflow.FinalApprovedTextHash.label("final_approved_text_hash"),
+                AdminAiWorkflow.SafetyConfirmedAt.label("safety_confirmed_at"),
+                AdminAiWorkflow.SafetyConfirmedBy.label("safety_confirmed_by"),
+                AdminAiWorkflow.OcrApprovedAt.label("ocr_approved_at"),
+                AdminAiWorkflow.OcrApprovedBy.label("ocr_approved_by"),
+                AdminAiWorkflow.Findings.label("findings"),
+                AdminAiWorkflow.SafetyMetadata.label("safety_metadata"),
+                AdminAiWorkflow.ProofreadMetadata.label("proofread_metadata"),
+                func.row_number().over(
+                    partition_by=AdminAiWorkflow.PageId,
+                    order_by=(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc()),
+                ).label("row_number"),
+            )
+            .subquery()
+        )
+        snapshot_pages = (
+            select(
+                BookPage.Id.label("page_id"),
+                BookPage.PageNumber.label("page_number"),
+                BookPage.LifecycleStatus.label("lifecycle_status"),
+                PageRevision.Id.label("revision_id"),
+                PageRevision.ContentHash.label("revision_content_hash"),
+                PageRevision.VerificationStatus.label("revision_status"),
+                PageRevision.ProcessingMeta["admin_ai_workflow"]["workflow_id"].as_string().label("revision_workflow_id"),
+                PageRevision.ProcessingMeta["admin_ai_workflow"]["candidate_hash"].as_string().label("revision_candidate_hash"),
+                PageRevision.ProcessingMeta["admin_ai_workflow"]["safety_input_hash"].as_string().label("revision_safety_input_hash"),
+                latest_workflows.c.workflow_id,
+                latest_workflows.c.candidate_hash,
+                latest_workflows.c.safety_input_hash,
+                latest_workflows.c.suitability,
+                latest_workflows.c.workflow_status,
+                latest_workflows.c.safety_status,
+                latest_workflows.c.final_approved_text_hash,
+                latest_workflows.c.safety_confirmed_at.is_not(None).label("safety_confirmed"),
+                latest_workflows.c.safety_confirmed_by.is_not(None).label("safety_confirmed_by"),
+                (
+                    latest_workflows.c.ocr_approved_at.is_not(None)
+                    & latest_workflows.c.ocr_approved_by.is_not(None)
+                ).label("ocr_approved"),
+                func.md5(
+                    cast(
+                        func.coalesce(latest_workflows.c.findings, func.jsonb_build_array()),
+                        String,
+                    )
+                ).label("findings_hash"),
+                func.md5(
+                    cast(
+                        func.coalesce(latest_workflows.c.safety_metadata, func.jsonb_build_object()),
+                        String,
+                    )
+                ).label("safety_metadata_hash"),
+                func.md5(
+                    cast(
+                        func.coalesce(latest_workflows.c.proofread_metadata, func.jsonb_build_object()),
+                        String,
+                    )
+                ).label("proofread_metadata_hash"),
+            )
+            .select_from(BookPage)
+            .outerjoin(
+                PageRevision,
+                (PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+                & (PageRevision.PageId == BookPage.Id),
+            )
+            .outerjoin(
+                latest_workflows,
+                (latest_workflows.c.page_id == BookPage.Id)
+                & (latest_workflows.c.row_number == 1),
+            )
+            .where(
+                BookPage.BookId == Book.Id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
+            )
+            .correlate(Book)
+            .subquery()
+        )
+        page_object = func.jsonb_build_object(
+            "page_id", cast(snapshot_pages.c.page_id, String),
+            "page_number", snapshot_pages.c.page_number,
+            "lifecycle_status", snapshot_pages.c.lifecycle_status,
+            "revision_id", cast(snapshot_pages.c.revision_id, String),
+            "revision_content_hash", snapshot_pages.c.revision_content_hash,
+            "revision_status", snapshot_pages.c.revision_status,
+            "revision_workflow_id", snapshot_pages.c.revision_workflow_id,
+            "revision_candidate_hash", snapshot_pages.c.revision_candidate_hash,
+            "revision_safety_input_hash", snapshot_pages.c.revision_safety_input_hash,
+            "workflow_id", cast(snapshot_pages.c.workflow_id, String),
+            "candidate_hash", snapshot_pages.c.candidate_hash,
+            "safety_input_hash", snapshot_pages.c.safety_input_hash,
+            "suitability", snapshot_pages.c.suitability,
+            "workflow_status", snapshot_pages.c.workflow_status,
+            "safety_status", snapshot_pages.c.safety_status,
+            "final_approved_text_hash", snapshot_pages.c.final_approved_text_hash,
+            "safety_confirmed", snapshot_pages.c.safety_confirmed,
+            "safety_confirmed_by", snapshot_pages.c.safety_confirmed_by,
+            "ocr_approved", snapshot_pages.c.ocr_approved,
+            "findings_hash", snapshot_pages.c.findings_hash,
+            "safety_metadata_hash", snapshot_pages.c.safety_metadata_hash,
+            "proofread_metadata_hash", snapshot_pages.c.proofread_metadata_hash,
+        )
+        current_snapshot = (
+            select(
+                func.coalesce(
+                    func.jsonb_agg(
+                        aggregate_order_by(
+                            page_object,
+                            snapshot_pages.c.page_number,
+                            snapshot_pages.c.page_id,
+                        )
+                    ),
+                    cast("[]", JSONB),
+                )
+            )
+            .select_from(snapshot_pages)
+            .scalar_subquery()
+        )
+        latest_book_decision_id = (
+            select(AuditLog.Id)
+            .where(
+                AuditLog.ResourceType == "book",
+                AuditLog.ResourceId == Book.Id,
+                AuditLog.Action.like("book.children.%"),
+            )
+            .order_by(AuditLog.CreatedAt.desc(), AuditLog.Id.desc())
+            .limit(1)
+            .correlate(Book)
+            .scalar_subquery()
+        )
+        current_book_approval = exists(
+            select(AuditLog.Id).where(
+                AuditLog.Id == latest_book_decision_id,
+                AuditLog.Action == "book.children.approved",
+                AuditLog.Metadata["policy"].as_string() == BOOK_APPROVAL_POLICY_VERSION,
+                AuditLog.Metadata["page_snapshot"] == current_snapshot,
+            )
+        ).correlate(Book)
+        criteria = [child_content_page, not_(unready_page), current_book_approval]
+        if require_active:
+            criteria.append(Book.LifecycleStatus == "ACTIVE")
+        return and_(*criteria)
 
     @staticmethod
     def search_pattern(value: str) -> str:
@@ -99,6 +324,16 @@ class CatalogRepository:
     async def is_eligible(self, book_id: UUID) -> bool:
         return (await self.db.scalar(select(Book.Id).where(Book.Id == book_id, self.eligible_book()))) is not None
 
+    async def is_ready_for_children(self, book_id: UUID) -> bool:
+        return (
+            await self.db.scalar(
+                select(Book.Id).where(
+                    Book.Id == book_id,
+                    self.eligible_book(require_active=False),
+                )
+            )
+        ) is not None
+
     async def previews(self, book_id: UUID):
         result = await self.db.execute(
             select(BookPage)
@@ -108,15 +343,11 @@ class CatalogRepository:
         )
         return result.scalars().all()
 
+
 class AdminCatalogRepository(CatalogRepository):
     @staticmethod
     def _latest_revision_subquery(*, book_id: UUID | None = None):
-        """Return one revision per active page, preserving numeric revision order.
-
-        RevisionNo is stored as text. Ordering by the length and lexical value of
-        its normalized ASCII digits gives integer ordering without unsafe casts.
-        Invalid/zero legacy values fall back to creation time and id.
-        """
+        """Return one revision per active page, preserving numeric revision order."""
         normalized_number = func.regexp_replace(PageRevision.RevisionNo, r"^0+", "")
         positive_number = and_(
             PageRevision.RevisionNo.op("~")(r"^[0-9]+$"),
@@ -131,7 +362,10 @@ class AdminCatalogRepository(CatalogRepository):
             PageRevision.DraftText.label("draft_text"),
             PageRevision.VerifiedText.label("verified_text"),
             PageRevision.VerifiedAt.label("verified_at"),
-            PageRevision.ProcessingMeta.label("processing_meta"),
+            func.jsonb_build_object(
+                "ai_proofread_audit",
+                PageRevision.ProcessingMeta["ai_proofread_audit"],
+            ).label("processing_meta"),
             func.row_number()
             .over(
                 partition_by=PageRevision.PageId,
@@ -272,8 +506,6 @@ class AdminCatalogRepository(CatalogRepository):
         return result.all()
 
     async def pages(self, book_id: UUID):
-        # The Admin page list and catalog counts represent active OCR pages only.
-        # Retired pages remain in PostgreSQL for revisions and historical reading data.
         result = await self.db.execute(
             select(BookPage)
             .where(
@@ -295,9 +527,6 @@ class AdminCatalogRepository(CatalogRepository):
         )
         rows = list(result.scalars().all())
 
-        # RevisionNo is stored as TEXT, so UUID/timestamp order alone can put a
-        # concurrent lower revision ahead of a newer one. Match the OCR repository's
-        # established numeric ordering and keep malformed legacy revisions visible last.
         def revision_order(row: PageRevision) -> tuple[int, int]:
             value = str(row.RevisionNo)
             if value.isascii() and value.isdecimal() and int(value) > 0:

@@ -170,7 +170,13 @@ class ReadingContentService:
                     elif event.Status == "FAILED":
                         unkeyed_failed += 1
                     corrected |= event.Status == "CONFIRMED"
-                    skipped |= event.Status == "UNCERTAIN" and event_meta.get("skip_reason") == "TECHNICAL_OR_MANUAL"
+                    skipped |= (
+                        event.Status in {"FAILED", "UNCERTAIN"}
+                        and event_meta.get("resolution_status") == "UNRESOLVED"
+                    ) or (
+                        event.Status == "UNCERTAIN"
+                        and event_meta.get("skip_reason") == "TECHNICAL_OR_MANUAL"
+                    )
                 incorrect = min(3, len(failed) + unkeyed_failed)
                 words.append(PracticeWordRead(page_id=report.PageId, page_revision_id=report.PageRevisionId,
                     word_id=word.word_id, retry_attempt_count=max(attempts, default=0), incorrect_retry_count=incorrect,
@@ -359,6 +365,14 @@ class ReadingContentService:
                 detail="ChildId and BookId are required",
             )
         await self.require_owned_child(child_id, actor_id)
+        if not await self.repository.book_is_eligible(book_id):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                    "message": "Sách chưa được phép sử dụng cho trẻ; OCR hoặc Child Safety chưa hoàn tất trên toàn bộ nội dung hiện tại.",
+                },
+            )
 
         page_id = payload.SelectedPageId or payload.selected_page_id
         requested_revision_id = (

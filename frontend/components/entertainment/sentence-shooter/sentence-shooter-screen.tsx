@@ -160,6 +160,10 @@ export function SentenceShooterScreen({
   const [cannonAngle, setCannonAngle] = useState(0);
   const [firingTokenId, setFiringTokenId] = useState("");
   const [wobbleTokenId, setWobbleTokenId] = useState("");
+  const [prefetchedNextRound, setPrefetchedNextRound] =
+    useState<SentenceShooterRoundDTO | null>(null);
+  const [isLoadingResult, setIsLoadingResult] = useState(false);
+  const [resultError, setResultError] = useState(false);
   const [projectile, setProjectile] = useState<{
     id: number;
     left: number;
@@ -171,6 +175,14 @@ export function SentenceShooterScreen({
   const cannonRef = useRef<HTMLDivElement>(null);
   const tokenButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const shotIdRef = useRef(0);
+  const actionLockRef = useRef(false);
+  const sessionEpochRef = useRef(0);
+  const inFlightAbortRef = useRef<AbortController | null>(null);
+  const pendingRetryRef = useRef<{
+    roundId: string;
+    tokenId: string;
+    requestId: string;
+  } | null>(null);
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
@@ -225,8 +237,17 @@ export function SentenceShooterScreen({
     [placedTokens],
   );
 
+  useEffect(() => {
+    return () => {
+      sessionEpochRef.current += 1;
+      inFlightAbortRef.current?.abort();
+      actionLockRef.current = false;
+    };
+  }, []);
+
   function selectToken(token: SentenceShooterTokenDTO) {
     if (
+      actionLockRef.current ||
       isBusy ||
       isPaused ||
       mode !== "playing" ||
@@ -234,21 +255,26 @@ export function SentenceShooterScreen({
     ) {
       return;
     }
+    actionLockRef.current = true;
     setSelectedTokenId(token.id);
     setHintTargetId("");
+    setFiringTokenId(token.id);
+    setError("");
+    setFeedback("");
 
     const target = tokenButtonRefs.current.get(token.id);
     const cannon = cannonRef.current;
-    if (!target || !cannon) return;
-    const targetRect = target.getBoundingClientRect();
-    const cannonRect = cannon.getBoundingClientRect();
-    const muzzleX = cannonRect.left + cannonRect.width / 2;
-    const muzzleY = cannonRect.top + cannonRect.height * 0.2;
-    const targetX = targetRect.left + targetRect.width / 2;
-    const targetY = targetRect.top + targetRect.height / 2;
-    const angle =
-      (Math.atan2(targetX - muzzleX, muzzleY - targetY) * 180) / Math.PI;
-    setCannonAngle(Math.max(-58, Math.min(58, angle)));
+    if (target && cannon) {
+      const targetRect = target.getBoundingClientRect();
+      const cannonRect = cannon.getBoundingClientRect();
+      const muzzleX = cannonRect.left + cannonRect.width / 2;
+      const muzzleY = cannonRect.top + cannonRect.height * 0.2;
+      const targetX = targetRect.left + targetRect.width / 2;
+      const targetY = targetRect.top + targetRect.height / 2;
+      const angle =
+        (Math.atan2(targetX - muzzleX, muzzleY - targetY) * 180) / Math.PI;
+      setCannonAngle(Math.max(-58, Math.min(58, angle)));
+    }
     void fireToken(token);
   }
 
@@ -275,16 +301,30 @@ export function SentenceShooterScreen({
   }
 
   async function startGame() {
-    if (!child || !selectedBook || isBusy) return;
+    if (!child || !selectedBook || actionLockRef.current || isBusy) return;
+    actionLockRef.current = true;
+    sessionEpochRef.current += 1;
+    const epoch = sessionEpochRef.current;
+    inFlightAbortRef.current?.abort();
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
     setIsBusy(true);
     setError("");
     try {
-      const created = await shooterService.createSession({
-        child_id: child.id,
-        book_id: selectedBook.id,
-        difficulty,
-        total_rounds: totalRounds,
-      });
+      const created = await shooterService.createSession(
+        {
+          child_id: child.id,
+          book_id: selectedBook.id,
+          difficulty,
+          total_rounds: totalRounds,
+        },
+        controller.signal,
+      );
+      if (epoch !== sessionEpochRef.current) return;
+      pendingRetryRef.current = null;
+      setPrefetchedNextRound(null);
+      setIsLoadingResult(false);
+      setResultError(false);
       setSession(created);
       setRound(created.round);
       setPlacedTokens([]);
@@ -296,28 +336,87 @@ export function SentenceShooterScreen({
       setMode("playing");
       setIsPaused(false);
     } catch {
-      setError(gameError);
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setError(gameError);
+      }
     } finally {
-      setIsBusy(false);
+      if (inFlightAbortRef.current === controller) {
+        inFlightAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        actionLockRef.current = false;
+        setIsBusy(false);
+      }
+    }
+  }
+
+  async function fetchCompletedResult(sessionId: string, epoch: number) {
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
+    setIsLoadingResult(true);
+    setResultError(false);
+    try {
+      const completedResult = await shooterService.result(
+        sessionId,
+        controller.signal,
+      );
+      if (epoch !== sessionEpochRef.current) return;
+      setResult(completedResult);
+    } catch {
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setResultError(true);
+      }
+    } finally {
+      if (inFlightAbortRef.current === controller) {
+        inFlightAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        setIsLoadingResult(false);
+      }
     }
   }
 
   async function fireToken(token: SentenceShooterTokenDTO) {
-    if (!session || !round || isBusy || isPaused) return;
+    if (!session || !round || isPaused) {
+      actionLockRef.current = false;
+      setFiringTokenId("");
+      return;
+    }
+    const epoch = sessionEpochRef.current;
+    const activeSessionId = session.session_id;
+    const activeRoundId = round.round_id;
+    const existingRetry = pendingRetryRef.current;
+    const requestId =
+      existingRetry &&
+      existingRetry.roundId === activeRoundId &&
+      existingRetry.tokenId === token.id
+        ? existingRetry.requestId
+        : crypto.randomUUID();
+    pendingRetryRef.current = {
+      roundId: activeRoundId,
+      tokenId: token.id,
+      requestId,
+    };
+
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
     setIsBusy(true);
-    setError("");
-    setFeedback("");
-    setFiringTokenId(token.id);
     setWobbleTokenId("");
     animateShot(token.id);
     if (soundEnabled) playSound("shot");
 
     try {
-      const response = await shooterService.shoot(session.session_id, {
-        round_id: round.round_id,
-        token_id: token.id,
-        request_id: crypto.randomUUID(),
-      });
+      const response = await shooterService.shoot(
+        activeSessionId,
+        {
+          round_id: activeRoundId,
+          token_id: token.id,
+          request_id: requestId,
+        },
+        controller.signal,
+      );
+      if (epoch !== sessionEpochRef.current) return;
+      pendingRetryRef.current = null;
       setFeedback(response.message);
       setSelectedTokenId("");
       if (response.is_correct) {
@@ -338,17 +437,11 @@ export function SentenceShooterScreen({
           );
           if (response.session_completed) {
             setFinalSentence(response.completed_sentence ?? "");
-            try {
-              const completedResult = await shooterService.result(
-                session.session_id,
-              );
-              setResult(completedResult);
-              setMode("result");
-            } catch {
-              setError(
-                "Câu cuối đã hoàn thành. Chưa tải được bảng kết quả; hãy thử tải lại kết quả.",
-              );
-            }
+            setResult(null);
+            setMode("result");
+            void fetchCompletedResult(activeSessionId, epoch);
+          } else {
+            setPrefetchedNextRound(response.next_round ?? null);
           }
         }
       } else {
@@ -356,11 +449,19 @@ export function SentenceShooterScreen({
         if (soundEnabled) playSound("wrong");
       }
     } catch {
-      setError("Chưa gửi được lượt bắn. Từ vẫn còn để bé thử lại nhé.");
-      setSelectedTokenId(token.id);
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setError("Chưa gửi được lượt bắn. Từ vẫn còn để bé thử lại nhé.");
+        setSelectedTokenId(token.id);
+      }
     } finally {
-      setIsBusy(false);
-      setFiringTokenId("");
+      if (inFlightAbortRef.current === controller) {
+        inFlightAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        actionLockRef.current = false;
+        setIsBusy(false);
+        setFiringTokenId("");
+      }
     }
   }
 
@@ -368,37 +469,84 @@ export function SentenceShooterScreen({
     if (
       !session ||
       !round ||
+      actionLockRef.current ||
       isBusy ||
       isPaused ||
       placedTokens.length >= round.token_count
     ) {
       return;
     }
+    actionLockRef.current = true;
+    const epoch = sessionEpochRef.current;
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
     setIsBusy(true);
     setError("");
     try {
       const hint = await shooterService.hint(
         session.session_id,
         round.round_id,
+        controller.signal,
       );
+      if (epoch !== sessionEpochRef.current) return;
       setHintTargetId(hint.target_token_id);
       setFeedback(hint.message);
     } catch {
-      setError("Chưa lấy được gợi ý. Bé có thể thử lại sau nhé.");
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setError("Chưa lấy được gợi ý. Bé có thể thử lại sau nhé.");
+      }
     } finally {
-      setIsBusy(false);
+      if (inFlightAbortRef.current === controller) {
+        inFlightAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        actionLockRef.current = false;
+        setIsBusy(false);
+      }
     }
   }
 
   async function continueToNextRound() {
-    if (!session || !round || isBusy) return;
-    setIsBusy(true);
+    if (!session || !round || actionLockRef.current || isBusy) return;
     setError("");
+    if (
+      prefetchedNextRound &&
+      prefetchedNextRound.round_id !== round.round_id
+    ) {
+      sessionEpochRef.current += 1;
+      pendingRetryRef.current = null;
+      const upcoming = prefetchedNextRound;
+      setPrefetchedNextRound(null);
+      setSession((current) =>
+        current
+          ? {
+              ...current,
+              round: upcoming,
+            }
+          : current,
+      );
+      setRound(upcoming);
+      setPlacedTokens([]);
+      setSelectedTokenId("");
+      setHintTargetId("");
+      setFeedback("");
+      return;
+    }
+
+    actionLockRef.current = true;
+    const epoch = sessionEpochRef.current;
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
+    setIsBusy(true);
     try {
       const next = await shooterService.nextRound(
         session.session_id,
         round.round_id,
+        controller.signal,
       );
+      if (epoch !== sessionEpochRef.current) return;
+      pendingRetryRef.current = null;
+      setPrefetchedNextRound(null);
       setSession((current) =>
         current
           ? {
@@ -415,31 +563,36 @@ export function SentenceShooterScreen({
       setHintTargetId("");
       setFeedback("");
     } catch {
-      setError("Chưa mở được câu tiếp theo. Bé hãy thử lại nhé.");
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setError("Chưa mở được câu tiếp theo. Bé hãy thử lại nhé.");
+      }
     } finally {
-      setIsBusy(false);
+      if (inFlightAbortRef.current === controller) {
+        inFlightAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        actionLockRef.current = false;
+        setIsBusy(false);
+      }
     }
   }
 
   async function loadCompletedResult() {
-    if (!session || isBusy) return;
-    setIsBusy(true);
-    setError("");
-    try {
-      const completedResult = await shooterService.result(session.session_id);
-      setResult(completedResult);
-      setMode("result");
-    } catch {
-      setError("Chưa tải được bảng kết quả. Bé hãy thử lại nhé.");
-    } finally {
-      setIsBusy(false);
-    }
+    if (!session) return;
+    setMode("result");
+    await fetchCompletedResult(session.session_id, sessionEpochRef.current);
   }
 
   async function exitGame() {
-    if (!session || isBusy) return;
+    if (!session) return;
     const shouldExit = window.confirm("Bé muốn kết thúc lượt chơi này chứ?");
     if (!shouldExit) return;
+    sessionEpochRef.current += 1;
+    inFlightAbortRef.current?.abort();
+    inFlightAbortRef.current = null;
+    actionLockRef.current = false;
+    pendingRetryRef.current = null;
+    setFiringTokenId("");
     setIsBusy(true);
     setError("");
     try {
@@ -452,6 +605,16 @@ export function SentenceShooterScreen({
   }
 
   function restartLobby() {
+    sessionEpochRef.current += 1;
+    inFlightAbortRef.current?.abort();
+    inFlightAbortRef.current = null;
+    actionLockRef.current = false;
+    pendingRetryRef.current = null;
+    setIsBusy(false);
+    setFiringTokenId("");
+    setPrefetchedNextRound(null);
+    setIsLoadingResult(false);
+    setResultError(false);
     setMode("lobby");
     setSession(null);
     setRound(null);
@@ -465,7 +628,11 @@ export function SentenceShooterScreen({
   }
 
   function readSentence() {
-    if (!result || typeof window === "undefined" || !window.speechSynthesis)
+    if (
+      !finalSentence ||
+      typeof window === "undefined" ||
+      !window.speechSynthesis
+    )
       return;
     const utterance = new SpeechSynthesisUtterance(finalSentence);
     if (!utterance.text) return;
@@ -501,7 +668,14 @@ export function SentenceShooterScreen({
     );
   }
 
-  if (mode === "result" && result) {
+  if (mode === "result" && (result || session)) {
+    const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
+    const summaryCompletedRounds =
+      result?.completed_rounds ?? session?.completed_rounds ?? 0;
+    const summaryTotalRounds =
+      result?.total_rounds ?? session?.total_rounds ?? 0;
+    const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
+
     return (
       <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
         <BookChildHeader
@@ -509,7 +683,7 @@ export function SentenceShooterScreen({
           child={child}
           mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
         />
-        <div className="relative overflow-hidden rounded-card border border-border bg-gradient-to-br from-[#FFF8D9] via-white to-[#E2F7F7] p-6 text-center shadow-sm sm:p-10">
+        <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
           <div
             aria-hidden="true"
             className="mb-3 flex justify-center gap-3 text-warning"
@@ -520,20 +694,20 @@ export function SentenceShooterScreen({
           </div>
           <p className="font-extrabold text-primary">Lượt chơi đã lưu</p>
           <h1 className="mt-2 text-heading font-extrabold text-ink">
-            {result.status === "COMPLETED"
-              ? "Giỏi quá, bé đã hoàn thành!"
-              : "Kết quả lượt chơi"}
+            {result && result.status !== "COMPLETED"
+              ? "Kết quả lượt chơi"
+              : "Giỏi quá, bé đã hoàn thành!"}
           </h1>
-          <p className="mt-2 text-body text-muted">{result.book.title}</p>
+          <p className="mt-2 text-body text-muted">{summaryBookTitle}</p>
           <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
             {[
               [
                 "Câu hoàn thành",
-                `${result.completed_rounds}/${result.total_rounds}`,
+                `${summaryCompletedRounds}/${summaryTotalRounds}`,
               ],
-              ["Từ ghép đúng", String(result.correct_count)],
-              ["Lần thử lại", String(result.mistakes_total)],
-              ["Gợi ý", String(result.hint_count)],
+              ["Từ ghép đúng", result ? String(result.correct_count) : "—"],
+              ["Lần thử lại", result ? String(result.mistakes_total) : "—"],
+              ["Gợi ý", result ? String(result.hint_count) : "—"],
             ].map(([label, value]) => (
               <div className="rounded-control bg-white/90 p-4" key={label}>
                 <p className="text-sm font-bold text-muted">{label}</p>
@@ -542,12 +716,32 @@ export function SentenceShooterScreen({
             ))}
           </div>
           <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-warning-surface px-5 py-3 text-xl font-extrabold text-warning">
-            <span aria-hidden="true">★</span> {result.total_stars} sao
+            <span aria-hidden="true">★</span> {summaryTotalStars} sao
           </p>
-          <p className="mt-3 text-sm font-semibold text-muted">
-            Thời gian chơi: {Math.floor(result.duration_seconds / 60)} phút{" "}
-            {result.duration_seconds % 60} giây
-          </p>
+          {result ? (
+            <p className="mt-3 text-sm font-semibold text-muted">
+              Thời gian chơi: {Math.floor(result.duration_seconds / 60)} phút{" "}
+              {result.duration_seconds % 60} giây
+            </p>
+          ) : isLoadingResult ? (
+            <p className="mt-3 text-sm font-semibold text-muted" role="status">
+              Đang tải chi tiết bảng tổng kết…
+            </p>
+          ) : resultError ? (
+            <div className="mt-3 flex flex-col items-center gap-2">
+              <p className="text-sm font-semibold text-danger">
+                Chưa tải được chi tiết bảng tổng kết.
+              </p>
+              <Button
+                onClick={() => void loadCompletedResult()}
+                size="compact"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden="true" className="size-4" /> Tải lại bảng
+                tổng kết
+              </Button>
+            </div>
+          ) : null}
           <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
             <Button
               className="sm:flex-1"
@@ -592,23 +786,24 @@ export function SentenceShooterScreen({
       : undefined;
 
     return (
-      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-5 px-4 py-4 sm:px-8 sm:py-7">
+      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5">
         <BookChildHeader
           backHref="/entertainment"
           child={child}
           mobileLabel="Khu vui học"
         />
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-4 shadow-sm sm:p-5">
+        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-4 py-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate font-extrabold text-ink">
+            <h1 className="truncate text-lg font-extrabold text-ink">
               {session.book.title}
-            </p>
+            </h1>
             <p className="mt-1 text-sm font-bold text-muted">
               Câu {round.round_number}/{session.total_rounds}
             </p>
           </div>
           <div
             className="flex items-center gap-3"
+            role="group"
             aria-label={`Đã ghép ${placedTokens.length} trên ${round.token_count} từ`}
           >
             <div className="h-3 w-24 overflow-hidden rounded-full bg-sky sm:w-36">
@@ -619,7 +814,10 @@ export function SentenceShooterScreen({
                 }}
               />
             </div>
-            <span className="inline-flex items-center gap-1 font-extrabold text-warning">
+            <span
+              aria-label={`${session.total_stars} sao`}
+              className="inline-flex items-center gap-1 font-extrabold text-warning"
+            >
               <span aria-hidden="true">★</span>
               {session.total_stars}
             </span>
@@ -639,8 +837,8 @@ export function SentenceShooterScreen({
               )}
             </button>
             <button
+              aria-label="Tạm dừng"
               className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
-              disabled={isBusy}
               onClick={() => setIsPaused(true)}
               type="button"
             >
@@ -649,7 +847,6 @@ export function SentenceShooterScreen({
             </button>
             <button
               className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
-              disabled={isBusy}
               onClick={() => void exitGame()}
               type="button"
             >
@@ -661,121 +858,126 @@ export function SentenceShooterScreen({
         {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
         <div
           ref={arenaRef}
-          className="relative isolate overflow-hidden rounded-card border border-border bg-gradient-to-b from-[#EAF8FF] via-white to-[#FFF8E8] p-4 shadow-sm sm:p-7"
+          className="relative isolate rounded-card border border-border bg-white p-4 sm:p-5"
         >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-16 -top-20 -z-10 size-56 rounded-full bg-purple/50 blur-3xl"
-          />
-          <div className="flex flex-col items-center gap-5">
-            <div
-              className="flex min-h-[120px] w-full flex-wrap items-center justify-center gap-3 rounded-card bg-white/75 p-4 sm:min-h-[145px] sm:gap-4 sm:p-6"
-              aria-label="Các từ để ghép"
-            >
-              {round.tokens.map((token, index) => {
-                const placed = placedTokenIds.has(token.id);
-                const selected = selectedTokenId === token.id;
-                const hinted = hintTargetId === token.id && !placed;
-                return (
-                  <button
-                    aria-pressed={selected}
+          <div className="flex flex-col gap-3">
+            <div className="space-y-2 rounded-control bg-cream px-3 py-3 sm:px-4">
+              <p className="font-bold text-ink">Câu của bé</p>
+              <div
+                role="list"
+                className="flex w-full flex-wrap gap-2"
+                aria-label="Các ô ghép câu"
+              >
+                {round.tokens.map((token, index) => (
+                  <div
+                    aria-label={
+                      placedTokens[index]
+                        ? `Ô ${index + 1}: ${placedTokens[index].text}`
+                        : `Ô ${index + 1} còn trống`
+                    }
                     className={[
-                      "min-h-12 rounded-full border px-4 py-2 text-lg font-extrabold text-ink shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-14 sm:px-5",
-                      placed
-                        ? "invisible pointer-events-none"
-                        : index % 3 === 0
-                          ? "border-white bg-white"
-                          : index % 3 === 1
-                            ? "border-[#BFE8F3] bg-[#E1F7FF]"
-                            : "border-[#F3E4AA] bg-[#FFF6CF]",
-                      selected ? "scale-105 ring-3 ring-primary" : "",
-                      hinted
-                        ? "ring-4 ring-warning shadow-[0_0_0_6px_rgba(255,217,104,0.25)]"
-                        : "",
-                      firingTokenId === token.id ? "opacity-70" : "",
-                      wobbleTokenId === token.id ? "sentence-token-wobble" : "",
+                      "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
+                      placedTokens[index]
+                        ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
+                        : "border-dashed border-[#B8CECA] bg-white/80 text-muted/60",
                     ].join(" ")}
-                    disabled={placed || isBusy || isPaused}
-                    key={token.id}
-                    onAnimationEnd={() => {
-                      if (wobbleTokenId === token.id) setWobbleTokenId("");
-                    }}
-                    onClick={() => selectToken(token)}
-                    ref={(element) => {
-                      if (element)
-                        tokenButtonRefs.current.set(token.id, element);
-                      else tokenButtonRefs.current.delete(token.id);
-                    }}
-                    type="button"
+                    key={index}
+                    role="listitem"
                   >
-                    {token.text}
-                  </button>
-                );
-              })}
+                    {placedTokens[index] ? (
+                      <>
+                        {" "}
+                        <Check
+                          aria-hidden="true"
+                          className="mr-1 size-4 shrink-0"
+                        />
+                        {placedTokens[index].text}
+                      </>
+                    ) : (
+                      "···"
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2 rounded-control bg-sky/45 px-3 py-3 sm:px-4">
+              <p className="font-bold text-ink">Chọn từ tiếp theo</p>
+              <div
+                role="group"
+                className="flex w-full flex-wrap items-center gap-2.5"
+                aria-label="Các từ để ghép"
+              >
+                {round.tokens.map((token) => {
+                  const placed = placedTokenIds.has(token.id);
+                  const selected = selectedTokenId === token.id;
+                  const hinted = hintTargetId === token.id && !placed;
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      aria-label={
+                        hinted ? `${token.text} · Từ gợi ý` : undefined
+                      }
+                      aria-busy={firingTokenId === token.id || undefined}
+                      className={[
+                        "min-h-12 rounded-control border px-4 py-2 text-lg font-extrabold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-14 sm:px-5",
+                        placed
+                          ? "invisible pointer-events-none"
+                          : "border-border bg-white",
+                        selected ? "ring-2 ring-primary" : "",
+                        hinted
+                          ? "border-[#d3a446] bg-warning-surface ring-1 ring-warning"
+                          : "",
+                        firingTokenId === token.id ? "opacity-70" : "",
+                        wobbleTokenId === token.id
+                          ? "sentence-token-wobble"
+                          : "",
+                      ].join(" ")}
+                      disabled={placed || isBusy || isPaused}
+                      key={token.id}
+                      onAnimationEnd={() => {
+                        if (wobbleTokenId === token.id) setWobbleTokenId("");
+                      }}
+                      onClick={() => selectToken(token)}
+                      ref={(element) => {
+                        if (element)
+                          tokenButtonRefs.current.set(token.id, element);
+                        else tokenButtonRefs.current.delete(token.id);
+                      }}
+                      type="button"
+                    >
+                      {token.text}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div
-              className="flex w-full flex-wrap justify-center gap-2"
-              aria-label="Các ô ghép câu"
-            >
-              {round.tokens.map((token, index) => (
-                <div
-                  aria-label={
-                    placedTokens[index]
-                      ? `Ô ${index + 1}: ${placedTokens[index].text}`
-                      : `Ô ${index + 1} còn trống`
-                  }
-                  className={[
-                    "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
-                    placedTokens[index]
-                      ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
-                      : "border-dashed border-[#B8CECA] bg-white/80 text-muted/60",
-                  ].join(" ")}
-                  key={index}
-                  role="listitem"
-                >
-                  {placedTokens[index]?.text ?? "···"}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex w-full flex-col items-center gap-3 py-1 sm:gap-4">
+            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
               <div
                 ref={cannonRef}
-                className="transition-transform duration-200 ease-out"
+                aria-hidden="true"
+                className="shrink-0 motion-safe:transition-transform"
               >
-                <ToyCannon
-                  angle={cannonAngle}
-                  className="h-28 w-28 sm:h-32 sm:w-32"
-                />
+                <ToyCannon angle={cannonAngle} className="size-14" />
               </div>
-              <div className="flex w-full max-w-xl flex-col items-center gap-2">
-                <p className="px-3 text-center text-sm font-bold leading-relaxed text-ink sm:text-base">
-                  Chạm vào một từ để khẩu súng tự ngắm và bắn ngôi sao.
-                </p>
-                <button
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-4 font-bold text-primary transition-[transform,background-color] duration-150 hover:bg-sky/75 active:scale-[0.98] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:opacity-55"
-                  disabled={isBusy || isPaused || roundComplete}
-                  onClick={() => void requestHint()}
-                  type="button"
-                >
-                  <Lightbulb aria-hidden="true" className="size-5" /> Gợi ý một
-                  từ
-                </button>
-              </div>
-            </div>
-
-            {feedback ? (
               <p
-                aria-live="polite"
-                className="min-h-7 text-center text-lg font-extrabold text-primary"
+                className="min-h-10 min-w-40 flex-1 content-center break-words text-sm font-bold text-primary"
                 role="status"
+                aria-live="polite"
               >
-                {feedback}
+                {firingTokenId
+                  ? "Đang kiểm tra từ bé chọn…"
+                  : feedback || "Bấm vào một từ để ghép câu."}
               </p>
-            ) : (
-              <div aria-hidden="true" className="min-h-7" />
-            )}
+              <button
+                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-control bg-warning-surface px-3 font-bold text-warning hover:bg-book-orange disabled:opacity-55"
+                disabled={isBusy || isPaused || roundComplete}
+                onClick={() => void requestHint()}
+                type="button"
+              >
+                <Lightbulb aria-hidden="true" className="size-5" /> Gợi ý một từ
+              </button>
+            </div>
             {roundComplete ? (
               <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-5 text-center">
                 <p className="text-xl font-extrabold text-success-ink">
@@ -849,7 +1051,6 @@ export function SentenceShooterScreen({
                 </Button>
                 <Button
                   className="sm:flex-1"
-                  disabled={isBusy}
                   onClick={() => void exitGame()}
                   variant="quiet"
                 >
@@ -870,13 +1071,13 @@ export function SentenceShooterScreen({
         child={child}
         mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
       />
-      <header className="flex flex-col gap-2">
+      <header className="flex flex-col gap-2 border-b border-border pb-5">
         <p className="font-extrabold text-primary">Xạ thủ ghép câu</p>
         <h1 className="text-heading font-extrabold text-ink">
           Chọn sách và bắt đầu chơi
         </h1>
         <p className="text-body text-muted">
-          Mỗi câu đều lấy từ nội dung sách đã được xác minh.
+          Chọn một cuốn sách rồi ghép các từ thành câu trong sách.
         </p>
       </header>
 
@@ -1009,7 +1210,7 @@ export function SentenceShooterScreen({
                 <button
                   aria-pressed={selected}
                   className={[
-                    "flex min-h-40 items-center gap-4 rounded-card border-2 bg-white p-4 text-left shadow-sm transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                     selected
                       ? "border-primary ring-2 ring-primary/20"
                       : "border-border hover:border-primary/60",
@@ -1021,10 +1222,7 @@ export function SentenceShooterScreen({
                   }}
                   type="button"
                 >
-                  <BookCover
-                    book={toBookCover(book)}
-                    className="h-36 w-24 shrink-0"
-                  />
+                  <BookCover book={toBookCover(book)} size="small" />
                   <span className="min-w-0">
                     <span className="block line-clamp-2 font-extrabold text-ink">
                       {book.title}

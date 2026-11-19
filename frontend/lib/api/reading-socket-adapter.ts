@@ -27,10 +27,7 @@ export interface ReadingSocketAdapter {
 
 export function createReadingSocketAdapter(): ReadingSocketAdapter {
   return {
-    subscribe(
-      _sessionId: string,
-      _onState: (state: ReadingSessionState) => void,
-    ): ReadingSocketUnsubscribe {
+    subscribe(): ReadingSocketUnsubscribe {
       return () => {};
     },
 
@@ -50,14 +47,11 @@ export function createReadingSocketAdapter(): ReadingSocketAdapter {
       return "ABORTED";
     },
 
-    async reconnect(
-      _sessionId: string,
-      _mode: ReadingReconnectDemoMode,
-    ): Promise<ReadingConnectionState> {
+    async reconnect(): Promise<ReadingConnectionState> {
       return "recovered";
     },
 
-    getSafetySnapshot(_state: ReadingUiState): ReadingRealtimeSnapshotUI {
+    getSafetySnapshot(): ReadingRealtimeSnapshotUI {
       return {
         connection: "connected",
         scoring_active: true,

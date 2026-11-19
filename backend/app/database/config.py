@@ -168,6 +168,18 @@ except Exception as error:
 if _database_url.drivername != "postgresql+asyncpg":
     raise ValueError("DATABASE_URL must use the postgresql+asyncpg driver")
 
+_url_sslmode = str(_database_url.query.get("sslmode") or "").strip().lower()
+_url_ssl = str(_database_url.query.get("ssl") or "").strip().lower()
+if not (os.getenv("DATABASE_SSL_REQUIRED") or "").strip() and (
+    _url_sslmode in {"require", "verify-ca", "verify-full"}
+    or _url_ssl in {"1", "true", "yes", "on", "require"}
+):
+    DATABASE_SSL_REQUIRED = True
+
+_url_sslrootcert = str(_database_url.query.get("sslrootcert") or "").strip()
+if not DATABASE_SSL_ROOT_CERT and _url_sslrootcert:
+    DATABASE_SSL_ROOT_CERT = _url_sslrootcert
+
 if APP_ENVIRONMENT == "production" and DATABASE_POOLER_MODE != "transaction":
     raise ValueError(
         "Production deployments must explicitly use DATABASE_POOLER_MODE=transaction"

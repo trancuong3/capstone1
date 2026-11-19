@@ -11,7 +11,7 @@ import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 export function SongCard({ song }: { song: KaraokeSongCard }) {
   const [coverFailed, setCoverFailed] = useState(false);
   return (
-    <Card className="h-full">
+    <Card className="song-cover h-full">
       {song.cover_url && !coverFailed ? (
         <Image
           src={song.cover_url}
@@ -41,7 +41,7 @@ export function SongCard({ song }: { song: KaraokeSongCard }) {
         {formatKaraokeTime(song.duration_ms)}
       </p>
       <ButtonLink
-        className="mt-auto min-h-16 break-words"
+        className="mt-auto min-h-12 break-words"
         style={{ height: "auto" }}
         href={`/karaoke/${song.song_id}?version=${song.version_id}`}
       >

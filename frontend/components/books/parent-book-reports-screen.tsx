@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+
 import { RefreshCw } from "lucide-react";
 
 import { AdminLoading } from "@/components/admin/admin-ui";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
@@ -80,28 +80,32 @@ export function ParentBookReportsScreen() {
   const last = Math.min(offset + limit, total);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 px-4 py-8 sm:px-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-bold text-primary">ViRead · Phụ huynh</p>
+          <p className="text-label font-bold text-primary">
+            ViRead · Phụ huynh
+          </p>
           <h1 className="mt-1 text-heading font-extrabold text-ink">
             Báo cáo chất lượng sách
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted">
+          <p className="mt-2 max-w-2xl text-body text-muted">
             Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => void load()} variant="secondary">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            className="w-auto"
+            onClick={() => void load()}
+            size="compact"
+            variant="secondary"
+          >
             <RefreshCw aria-hidden className="size-4" />
             Tải lại
           </Button>
-          <Link
-            className="inline-flex min-h-12 items-center rounded-control bg-primary px-4 font-bold text-white hover:bg-primary-hover"
-            href="/books"
-          >
+          <ButtonLink className="w-auto" href="/books" size="compact">
             Thư viện sách
-          </Link>
+          </ButtonLink>
         </div>
       </header>
 
@@ -134,7 +138,7 @@ export function ParentBookReportsScreen() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-bold text-ink">{item.book_title}</h2>
+                  <h2 className="font-semibold text-ink">{item.book_title}</h2>
                   <p className="mt-1 text-sm text-muted">
                     {issueLabels[item.issue_type]}
                     {item.page_number !== null
@@ -142,7 +146,7 @@ export function ParentBookReportsScreen() {
                       : " · Toàn bộ sách"}
                   </p>
                 </div>
-                <span className="rounded-full bg-sky px-3 py-1 text-sm font-bold text-primary-hover">
+                <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
                   {statusLabels[item.status]}
                 </span>
               </div>

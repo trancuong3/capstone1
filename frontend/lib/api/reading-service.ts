@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { requestApi } from "@/lib/api/api-client";
+import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { readingAssessmentSchema } from "@/lib/api/reading-assessment-schema";
 import type {
   ReadingCompletionSummaryUI,
@@ -348,37 +349,42 @@ export function createReadingService(): ReadingService {
           ? null
           : Math.min(32767, Math.max(startMs, Math.floor(input.endMs)));
 
-      await requestApi(
-        "/reading/events",
-        z.object({
-          Id: z.uuid(),
-          SessionId: z.uuid(),
-          PageId: z.uuid(),
-          PageRevisionId: z.uuid(),
-          WordId: z.uuid().nullable(),
-          Type: z.string(),
-          StartMs: z.number(),
-          EndMs: z.number().nullable(),
-          Confidence: z.number().nullable(),
-          Status: z.string(),
-          Metadata: z.record(z.string(), z.unknown()),
-          CreatedAt: z.string(),
-        }),
+      await withRequestDeadline(
+        (signal) =>
+          requestApi(
+            "/reading/events",
+            z.object({
+              Id: z.uuid(),
+              SessionId: z.uuid(),
+              PageId: z.uuid(),
+              PageRevisionId: z.uuid(),
+              WordId: z.uuid().nullable(),
+              Type: z.string(),
+              StartMs: z.number(),
+              EndMs: z.number().nullable(),
+              Confidence: z.number().nullable(),
+              Status: z.string(),
+              Metadata: z.record(z.string(), z.unknown()),
+              CreatedAt: z.string(),
+            }),
+            signal,
+            {
+              method: "POST",
+              body: {
+                SessionId: input.sessionId,
+                PageId: input.pageId,
+                PageRevisionId: input.pageRevisionId,
+                WordId: input.wordId,
+                Type: "WORD_RETRY",
+                StartMs: startMs,
+                EndMs: endMs,
+                Status: input.status,
+                Metadata: input.metadata ?? {},
+              },
+            },
+          ),
         undefined,
-        {
-          method: "POST",
-          body: {
-            SessionId: input.sessionId,
-            PageId: input.pageId,
-            PageRevisionId: input.pageRevisionId,
-            WordId: input.wordId,
-            Type: "WORD_RETRY",
-            StartMs: startMs,
-            EndMs: endMs,
-            Status: input.status,
-            Metadata: input.metadata ?? {},
-          },
-        },
+        15_000,
       );
     },
   };

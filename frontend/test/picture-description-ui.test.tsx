@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PictureDescriptionScreen } from "@/components/entertainment/picture-description/picture-description-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { createPictureDescriptionService } from "@/lib/api/picture-description-service";
+import { isServiceError } from "@/lib/api/service-error";
 import {
   childFixture,
   TEST_BOOK_ID,
@@ -360,7 +362,7 @@ describe("PictureDescriptionScreen", () => {
       screen.getByRole("button", { name: /Xem câu mẫu tham khảo/i }),
     ).toBeInTheDocument();
     expect(screen.queryByText("9/10 điểm")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("supports custom upload tab validation and book page selection", async () => {
     setupDefaultResponses();
@@ -562,5 +564,40 @@ describe("PictureDescriptionScreen", () => {
     await waitFor(() => {
       expect(ttsTexts).toContain("Cô giáo đang đọc sách cùng học sinh.");
     });
+  });
+
+  it("enforces request deadline and throws friendly Vietnamese 504 ServiceError on slow AI", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(init.signal?.reason),
+              { once: true },
+            );
+          }),
+      );
+      const service = createPictureDescriptionService();
+      const pending = service
+        .createSession({
+          child_id: TEST_CHILD_ID,
+          source_type: "SAMPLE",
+          sample_key: "sunny-garden",
+        })
+        .catch((err: unknown) => err);
+
+      await vi.advanceTimersByTimeAsync(45_050);
+      const caught = await pending;
+      expect(isServiceError(caught)).toBe(true);
+      if (isServiceError(caught)) {
+        expect(caught.status).toBe(504);
+        expect(caught.retryable).toBe(true);
+        expect(caught.message).toMatch(/phản hồi hơi lâu/i);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

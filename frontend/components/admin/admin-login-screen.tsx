@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LockKeyhole } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -64,23 +64,23 @@ export function AdminLoginScreen({
     }
   });
   return (
-    <div className="flex min-h-dvh w-full flex-col bg-canvas">
+    <div className="staff-login flex min-h-dvh w-full flex-col bg-canvas">
       <SiteHeader variant="admin-login" />
       <main className="grid w-full min-w-0 flex-1 place-items-center px-4 py-10">
-        <Card className="max-w-[560px] border border-border bg-white shadow-lg">
-          <div className="mx-auto grid size-16 place-items-center rounded-full bg-primary text-white">
-            <LockKeyhole aria-hidden className="size-8" />
-          </div>
-          <div className="text-center">
-            <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-primary">
+        <Card className="max-w-[560px] gap-4 border border-border bg-white sm:px-8">
+          <ShieldCheck aria-hidden className="size-14 text-primary" />
+          <div>
+            <p className="text-sm font-semibold text-primary">
               Khu vực quản trị
             </p>
-            <h1 className="mt-2 text-heading font-black">Đăng nhập quản trị</h1>
+            <h1 className="mt-2 text-heading font-extrabold text-ink">
+              Đăng nhập quản trị
+            </h1>
             <p className="mt-2 text-muted">
               Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.
             </p>
           </div>
-          <form className="flex flex-col gap-5" noValidate onSubmit={submit}>
+          <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
             {notice ? (
               <StatusMessage tone="error">{notice}</StatusMessage>
             ) : null}
@@ -106,7 +106,7 @@ export function AdminLoginScreen({
               {isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
             </Button>
           </form>
-          <p className="text-center text-sm text-muted">
+          <p className="text-body text-muted">
             Chỉ tài khoản có quyền quản trị mới có thể truy cập khu vực này.
           </p>
         </Card>

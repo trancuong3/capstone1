@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import ssl
+import sys
+import time
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
@@ -13,10 +17,12 @@ from sqlalchemy.pool import NullPool
 from app.diagnostic_logging import log_diagnostic
 
 from .config import (
+    APP_ENVIRONMENT,
     DATABASE_COMMAND_TIMEOUT,
     DATABASE_CONCURRENCY_LIMIT,
     DATABASE_CONCURRENCY_WAIT_TIMEOUT,
     DATABASE_CONNECT_TIMEOUT,
+    DATABASE_POOLER_MODE,
     DATABASE_SSL_REQUIRED,
     DATABASE_SSL_ROOT_CERT,
     DATABASE_URL,
@@ -202,12 +208,40 @@ if DATABASE_SSL_REQUIRED:
         raise RuntimeError("Database SSL context must verify CA and hostname")
     asyncpg_connect_args["ssl"] = ssl_context
 
-engine = create_async_engine(
-    sqlalchemy_database_url,
-    echo=False,
-    poolclass=NullPool,
-    connect_args=asyncpg_connect_args,
+_running_test_cli = any(
+    runner in (sys.argv[0] if sys.argv else "")
+    for runner in ("unittest", "pytest")
 )
+_use_null_pool = (
+    APP_ENVIRONMENT == "test"
+    or _running_test_cli
+    or (
+        DATABASE_POOLER_MODE == "local"
+        and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}
+    )
+)
+
+if _use_null_pool:
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        poolclass=NullPool,
+        connect_args=asyncpg_connect_args,
+    )
+else:
+    _base_pool_size = max(2, min(DATABASE_CONCURRENCY_LIMIT, 4))
+    _max_overflow = max(2, DATABASE_CONCURRENCY_LIMIT - _base_pool_size)
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        pool_size=_base_pool_size,
+        max_overflow=_max_overflow,
+        pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        pool_use_lifo=True,
+        connect_args=asyncpg_connect_args,
+    )
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -222,3 +256,52 @@ async def get_db():
     """Yield one request-scoped session; permits are held only during DB transactions."""
     async with AsyncSessionLocal() as session:
         yield session
+
+
+async def probe_database_connection(*, timeout: float | None = None) -> dict[str, Any]:
+    """Verify DNS resolution and read-only SELECT 1 connectivity without exposing secrets."""
+    effective_timeout = (
+        DATABASE_CONNECT_TIMEOUT if timeout is None else max(0.5, float(timeout))
+    )
+    started_at = time.perf_counter()
+    host = sqlalchemy_database_url.host
+    port = sqlalchemy_database_url.port or 5432
+    dns_resolved = False
+
+    try:
+        if host:
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.getaddrinfo(host, port, type=socket.SOCK_STREAM),
+                timeout=effective_timeout,
+            )
+        dns_resolved = True
+
+        async def _select_one() -> bool:
+            async with AsyncSessionLocal() as session:
+                return (await session.scalar(text("SELECT 1"))) == 1
+
+        ok = await asyncio.wait_for(_select_one(), timeout=effective_timeout)
+        return {
+            "ok": bool(ok),
+            "dns_resolved": dns_resolved,
+            "ssl_enabled": "ssl" in asyncpg_connect_args,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": DATABASE_POOLER_MODE,
+            "port": port,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error_type": None if ok else "UnexpectedProbeResult",
+        }
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        return {
+            "ok": False,
+            "dns_resolved": dns_resolved,
+            "ssl_enabled": "ssl" in asyncpg_connect_args,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": DATABASE_POOLER_MODE,
+            "port": port,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error_type": type(exc).__name__,
+        }

@@ -14,7 +14,9 @@ type Props = {
   result: Pick<
     ComparisonResult,
     "alignment" | "summary" | "page_id" | "page_revision_id"
-  >;
+  > & {
+    self_corrected_word_ids?: readonly string[];
+  };
   sessionId: string;
 };
 
@@ -27,8 +29,8 @@ type Hesitation = {
 const COLORS = {
   correct: "border-green-500 bg-green-100",
   missing: "border-red-500 bg-red-100",
-  wrong: "border-orange-500 bg-orange-100",
-  hesitation: "border-blue-500 bg-blue-100",
+  wrong: "border-red-500 bg-red-100",
+  hesitation: "border-purple-500 bg-purple-100",
   repeated: "border-purple-500 bg-purple-100",
 };
 
@@ -112,27 +114,27 @@ export function ReadingReport({ result, sessionId }: Props) {
   const hesitationSeconds = result.summary.hesitation_seconds;
 
   return (
-    <div className="space-y-5 rounded-xl border p-4">
-      <h2 className="text-xl font-bold">Báo cáo đọc</h2>
+    <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
+      <h2 className="text-xl font-semibold">Báo cáo đọc</h2>
 
       {/* Nội dung bài đọc */}
-      <div className="space-y-3 border-t pt-3">
+      <div className="space-y-3 border-t border-border pt-3">
         <h3 className="font-semibold">Nội dung bài đọc</h3>
 
         {pageError ? (
-          <p className="text-sm text-red-600">{pageError}</p>
+          <p className="text-label text-danger">{pageError}</p>
         ) : !page ? (
-          <p className="text-sm text-muted">Đang tải nội dung bài đọc...</p>
+          <p className="text-label text-muted">Đang tải nội dung bài đọc...</p>
         ) : (
           <article
-            className="relative min-h-[552px] w-full overflow-hidden rounded-[8px] bg-cream p-4 shadow-[0_8px_24px_rgba(33,61,66,0.06)] sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-8"
+            className="relative min-h-[360px] w-full overflow-hidden rounded-card border border-border bg-cream p-4 sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-6"
             data-page-id={page.page_id}
             data-page-revision-id={page.page_revision_id}
           >
             <div className="relative z-10 flex h-full flex-col">
               <header className="mb-2 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                  <span className="size-2 rounded-full bg-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-success-surface px-3 py-1 text-xs font-semibold text-success-ink">
+                  <span className="size-2 rounded-full bg-success-ink" />
                   Nội dung OCR đã xác minh
                 </span>
 
@@ -141,7 +143,14 @@ export function ReadingReport({ result, sessionId }: Props) {
                 </span>
               </header>
 
-              <BookPageContent page={page} comparisonResult={result} readOnly />
+              <BookPageContent
+                page={page}
+                comparisonResult={result}
+                selfCorrectedWordIds={
+                  new Set(result.self_corrected_word_ids ?? [])
+                }
+                readOnly
+              />
 
               <p className="mt-2 text-right text-label text-muted">
                 {page.page_number}
@@ -155,39 +164,40 @@ export function ReadingReport({ result, sessionId }: Props) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <p className="text-green-700">Từ đọc đúng</p>
-          <p className="text-2xl font-bold">{correctCount}</p>
+          <p className="text-2xl font-semibold">{correctCount}</p>
         </div>
 
         <div>
           <p className="text-red-600">Từ bỏ</p>
-          <p className="text-2xl font-bold">{missingCount}</p>
+          <p className="text-2xl font-semibold">{missingCount}</p>
         </div>
 
         <div>
-          <p className="text-orange-600">Từ đọc nhầm</p>
-          <p className="text-2xl font-bold">{wrongCount}</p>
+          <p className="text-red-600">Từ đọc nhầm</p>
+          <p className="text-2xl font-semibold">{wrongCount}</p>
         </div>
 
         <div>
           <p className="text-purple-700">Từ đọc thêm</p>
-          <p className="text-2xl font-bold">{extraCount}</p>
+          <p className="text-2xl font-semibold">{extraCount}</p>
         </div>
 
         <div>
           <p className="text-purple-700">Lặp từ</p>
-          <p className="text-2xl font-bold">{repeatedCount}</p>
+          <p className="text-2xl font-semibold">{repeatedCount}</p>
         </div>
 
         <div>
-          <p className="text-blue-700">Khoảng ngập ngừng</p>
-          <p className="text-2xl font-bold">{hesitations.length}</p>
+          <p className="text-purple-700">Khoảng ngập ngừng</p>
+          <p className="text-2xl font-semibold">{hesitations.length}</p>
         </div>
       </div>
 
       {/* Chú giải màu */}
-      <div className="flex flex-wrap gap-2 border-t pt-3 text-sm">
+      <div className="flex flex-wrap gap-2 border-t border-border pt-3 text-sm">
         {[
           ["Đọc đúng", COLORS.correct],
+          ["Đã đọc lại đúng", "border-green-600 bg-green-200"],
           ["Bỏ từ", COLORS.missing],
           ["Đọc nhầm", COLORS.wrong],
           ["Ngập ngừng", COLORS.hesitation],
@@ -200,7 +210,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Chi tiết lặp từ */}
-      <div className="space-y-2 border-t pt-3">
+      <div className="space-y-2 border-t border-border pt-3">
         <h3 className="font-semibold">Tình trạng lặp từ</h3>
 
         <p>
@@ -224,7 +234,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {/* Chi tiết ngập ngừng */}
-      <div className="space-y-2 border-t pt-3">
+      <div className="space-y-2 border-t border-border pt-3">
         <h3 className="font-semibold">Tình trạng ngập ngừng</h3>
 
         <p>
@@ -240,11 +250,12 @@ export function ReadingReport({ result, sessionId }: Props) {
           <ul className="list-disc space-y-1 pl-5">
             {hesitations.map((item, index) => (
               <li key={`${item.after_word}-${item.before_word}-${index}`}>
-                <span className="rounded border border-blue-500 bg-blue-100 px-1">
-                  {item.after_word}
-                </span>
+                {item.after_word}
                 {" → "}
-                {item.before_word}: dừng {item.pause.toFixed(2)} giây
+                <span className="rounded border border-purple-500 bg-purple-100 px-1">
+                  {item.before_word}
+                </span>
+                : dừng {item.pause.toFixed(2)} giây
               </li>
             ))}
           </ul>

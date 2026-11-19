@@ -36,6 +36,8 @@ const timedSpeechSchema = z.object({
       end: z.number().nonnegative(),
     }),
   ),
+  resolved_voice_id: z.string().nullable().optional(),
+  used_fallback_voice: z.boolean().optional(),
 });
 
 export type VoiceOption = z.infer<typeof voiceSchema>;
@@ -51,6 +53,8 @@ export interface TimedSpeech {
   readonly audio: Blob;
   readonly durationSeconds: number;
   readonly words: readonly WordTiming[];
+  readonly resolvedVoiceId?: string | null;
+  readonly usedFallbackVoice?: boolean;
 }
 
 export interface TimedSpeechOptions {
@@ -213,6 +217,8 @@ export function createVoiceStudioService(): VoiceStudioService {
         audio,
         durationSeconds: parsed.data.duration_seconds,
         words: parsed.data.words,
+        resolvedVoiceId: parsed.data.resolved_voice_id ?? null,
+        usedFallbackVoice: Boolean(parsed.data.used_fallback_voice),
       };
     },
   };

@@ -10,7 +10,7 @@ const avatarSizes = {
   md: "size-12 text-lg",
   lg: "size-24 text-3xl",
   xl: "size-32 text-4xl",
-  card: "size-[104px] text-4xl",
+  card: "size-[88px] text-2xl",
 } as const;
 
 export type ProfileAvatarSize = keyof typeof avatarSizes;
@@ -65,7 +65,7 @@ export function ProfileAvatar({
     <span
       aria-label={label}
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky font-extrabold leading-none text-primary",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-sky font-semibold leading-none text-primary",
         avatarSizes[size],
         className,
       )}

@@ -1,34 +1,24 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import {
   wordPresentationLabels,
   type WordPresentationState,
+  type PageWordEvidence,
+  wordStateForPage,
 } from "@/lib/reading/word-presentation";
 import { cn } from "@/lib/utils/cn";
-import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
-import type { ComparisonResult } from "@/lib/api/comparison-service";
-import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import type { ReadingPageWordDTO } from "@/types/reading";
 
-interface BookPageViewerProps {
-  correctWordIds?: Set<string>;
-  currentWordId: string | null;
+interface BookPageViewerProps extends PageWordEvidence {
+  title?: string;
+  illustration?: ReactNode;
   isTransitioning?: boolean;
-  mispronouncedWordIds?: Set<string>;
-  skippedWordIds?: Set<string>;
-  repeatedWordIds?: Set<string>;
-  hesitationWordIds?: Set<string>;
-  selfCorrectedWordIds?: ReadonlySet<string>;
-  unresolvedWordIds?: ReadonlySet<string>;
-  uncertainWordIds?: ReadonlySet<string>;
   onWordClick?: (word: ReadingPageWordDTO) => void;
-  page: ReadingPageDTO;
-  comparisonResult?: ComparisonResult | null;
   spokenWords?: Set<string>;
-  previewSnapshot?: RealtimeAlignmentSnapshot | null;
 }
 
 export function BookPageViewer(props: BookPageViewerProps) {
@@ -121,29 +111,15 @@ function PageSurface(props: BookPageViewerProps) {
     });
   }, [activeId, overlay]);
 
-  function stateFor(word: ReadingPageWordDTO): WordPresentationState {
-    const id = word.word_id;
-    const preview = previewSnapshot?.statusByWordId.get(id)?.status;
-    if (props.selfCorrectedWordIds?.has(id)) return "self-corrected";
-    if (props.unresolvedWordIds?.has(id)) return "unresolved";
-    if (props.uncertainWordIds?.has(id)) return "uncertain";
-    if (props.skippedWordIds?.has(id) || preview === "DELETE")
-      return "omission";
-    if (props.mispronouncedWordIds?.has(id) || preview === "SUBSTITUTE")
-      return "incorrect";
-    if (
-      props.correctWordIds?.has(id) ||
-      preview === "MATCH" ||
-      previewSnapshot?.previewMatchedWordIds.has(id)
-    )
-      return "correct";
-    return id === activeId ? "current" : "unread";
-  }
+  const stateFor = wordStateForPage(props);
   const overlayColors: Record<WordPresentationState, string> = {
     unread: "",
     current: "bg-yellow-300/25 ring-2 ring-yellow-500",
+    "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
     correct: "bg-green-300/25 ring-1 ring-green-600",
-    incorrect: "bg-orange-300/25 ring-1 ring-orange-600",
+    incorrect: "bg-red-300/25 ring-1 ring-red-600",
+    repeated: "bg-purple-300/25 ring-1 ring-purple-600",
+    hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
     omission: "bg-red-300/25 ring-1 ring-red-600",
     "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
     unresolved: "bg-red-300/25 ring-2 ring-red-700",
@@ -154,7 +130,7 @@ function PageSurface(props: BookPageViewerProps) {
       aria-busy={isTransitioning || undefined}
       aria-label={`Trang sách ${page.page_number}`}
       className={cn(
-        "mx-auto w-full min-w-0 max-w-[1008px] rounded-card border border-border bg-cream p-3 shadow-sm sm:p-6",
+        "reader-sheet mx-auto w-full min-w-0 max-w-[1104px]",
         isTransitioning && "opacity-60",
       )}
       data-page-id={page.page_id}
@@ -170,11 +146,16 @@ function PageSurface(props: BookPageViewerProps) {
               : "none"
       }
     >
-      <header className="flex items-center justify-between gap-3 text-sm font-semibold text-muted">
-        <span>Trang sách của bé</span>
-        <span>Trang {page.page_number}</span>
+      <header className="reader-bookplate">
+        <div className="min-w-0">
+          <p className="reader-folio">Trang {page.page_number}</p>
+          <h1 className="book-title break-words text-3xl sm:text-4xl">
+            {props.title ?? "Trang sách của bé"}
+          </h1>
+        </div>
+        {props.illustration}
       </header>
-      <div ref={rootRef} className="w-full min-w-0">
+      <div ref={rootRef} className="reader-leaf w-full min-w-0">
         {source && image !== "failed" ? (
           <Image
             key={source}
@@ -199,7 +180,7 @@ function PageSurface(props: BookPageViewerProps) {
         ) : null}
         {overlay && rect && source ? (
           <div
-            className="relative mt-4 w-full"
+            className="relative mt-4 w-full overflow-hidden"
             style={{ height: frame.height }}
             data-reading-panel="image"
           >
@@ -222,8 +203,8 @@ function PageSurface(props: BookPageViewerProps) {
                 height: rect.height,
               }}
             >
-              {page.words.map((word) => {
-                const state = stateFor(word);
+              {page.words.map((word, index) => {
+                const state = stateFor(word, index);
                 return (
                   <button
                     key={word.word_id}
@@ -241,7 +222,6 @@ function PageSurface(props: BookPageViewerProps) {
                     className={cn(
                       "absolute rounded-sm focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       overlayColors[state],
-                      word.word_id === activeId && "ring-2 ring-yellow-500",
                     )}
                     style={{
                       left: `${word.bbox[0] * 100}%`,
@@ -266,7 +246,7 @@ function PageSurface(props: BookPageViewerProps) {
                     ].includes(state) ? (
                       <span
                         aria-hidden="true"
-                        className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-extrabold text-ink"
+                        className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
                       >
                         {state === "self-corrected"
                           ? "↺"

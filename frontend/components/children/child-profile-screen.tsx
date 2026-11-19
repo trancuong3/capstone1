@@ -256,7 +256,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "loading") {
     return (
-      <section className="mx-auto w-full max-w-[640px]">
+      <section className="mx-auto w-full max-w-[744px]">
         <Card aria-busy="true" aria-label="Đang tải hồ sơ bé">
           <span className="sr-only" role="status">
             Đang tải…
@@ -274,7 +274,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "not-found") {
     return (
-      <section className="mx-auto w-full max-w-[720px]">
+      <section className="mx-auto w-full max-w-[744px]">
         <EmptyState
           headingLevel={1}
           action={
@@ -299,7 +299,7 @@ export function ChildProfileScreen({
 
   if (loadState.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
         <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
@@ -327,19 +327,19 @@ export function ChildProfileScreen({
   const description = fromRegistration
     ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
     : mode === "create"
-      ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
-      : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
+      ? "Tạo hồ sơ để bắt đầu hành trình đọc cùng ViRead."
+      : "Xem và chỉnh sửa hồ sơ của bé.";
 
   return (
     <>
-      <section className="mx-auto w-full max-w-[640px]">
-        <Card>
-          <div>
-            <h1 className="text-heading font-extrabold text-ink">{title}</h1>
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+        <div>
+          <h1 className="text-heading font-extrabold text-ink">{title}</h1>
 
-            <p className="mt-4 text-body text-muted sm:mt-6">{description}</p>
-          </div>
-
+          <p className="mt-2 text-body text-muted">{description}</p>
+        </div>
+        <Card className="gap-4 sm:px-8 sm:py-8">
+          <h2 className="text-2xl font-extrabold text-ink">Thông tin của bé</h2>
           {saveNotice === "created" ? (
             <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
           ) : null}
@@ -371,6 +371,7 @@ export function ChildProfileScreen({
 
           <ChildProfileForm
             avatarUrl={mode === "edit" ? child?.avatar_url : null}
+            showOptionalAvatarNote={mode === "create"}
             defaultValues={
               mode === "edit" && child
                 ? {
@@ -423,14 +424,12 @@ export function ChildProfileScreen({
               </Button>
             </>
           ) : null}
-
-          {!fromRegistration ? (
-            <ButtonLink href="/children" variant="quiet">
-              <ArrowLeft aria-hidden="true" className="size-5" />
-              Về danh sách hồ sơ
-            </ButtonLink>
-          ) : null}
         </Card>
+        {!fromRegistration ? (
+          <ButtonLink className="min-h-16" href="/children" variant="quiet">
+            Quay lại
+          </ButtonLink>
+        ) : null}
       </section>
 
       {child ? (

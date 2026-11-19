@@ -26,14 +26,13 @@ function Library({ child }: { child: ChildProfileDTO }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
   return (
-    <section className="mx-auto grid w-full max-w-[1120px] gap-6">
+    <section className="mx-auto grid w-full max-w-[1280px] gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="font-bold text-primary">CÙNG BÉ HÁT MỖI NGÀY</p>
           <h1 className="mt-2 text-heading font-extrabold">
             Hát vui cùng {child.alias}
           </h1>
-          <p className="mt-3 text-muted">
+          <p className="mt-3 text-body text-muted">
             Chọn một bài bé thích, nghe nhạc và cùng hát theo chữ nhé!
           </p>
         </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
+from app.diagnostic_logging import log_diagnostic
 from app.schemas.admin_book import AdminBookWriteRequest
 from app.schemas.admin_ocr import (
     AdminOcrCreateDraftRequest,
@@ -16,7 +18,18 @@ from app.schemas.admin_ocr import (
     AdminOcrVerifyRequest,
     AdminOcrWordInput,
 )
-from app.schemas.book import AdminBookMetadataResponse, AdminPageLifecycleRead, AdminRevisionDetailRead
+from app.schemas.admin_ai_workflow import (
+    AdminAiCandidateUpdate,
+    AdminAiSafetyDecision,
+    AdminAiWorkflowCreate,
+    AdminAiWorkflowRead,
+)
+from app.schemas.book import (
+    AdminBookMetadataResponse,
+    AdminDocumentUploadResponse,
+    AdminPageLifecycleRead,
+    AdminRevisionDetailRead,
+)
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
@@ -25,8 +38,10 @@ from app.services.admin_ocr_jobs import (
     OcrCorrectionQueueFull,
     admin_ocr_correction_jobs,
 )
+from app.services.admin_ai_workflow_service import AdminAiWorkflowService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class AdminOcrAiCorrectRequest(BaseModel):
@@ -91,7 +106,64 @@ async def upload_admin_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminOcrService(db).upload_page(actor_id, book_id, image, upload_id=upload_id)
+    detail = await AdminOcrService(db).upload_page(
+        actor_id, book_id, image, upload_id=upload_id
+    )
+    # OCR is complete and persisted at this point. Enqueue this page's durable
+    # proofreading workflow immediately so book processing can advance page by
+    # page; the worker performs inference after this request's transaction.
+    if detail.verification_status == "NEEDS_REVIEW" and detail.draft_text:
+        try:
+            workflow_request = AdminAiWorkflowCreate(
+                page_revision_id=detail.page_revision_id,
+                idempotency_key=detail.page_revision_id,
+                draft_text=detail.draft_text,
+                words=[
+                    AdminOcrWordInput(
+                        word_index=word.word_index,
+                        line_index=word.line_index,
+                        text=word.text,
+                        normalized_text=word.normalized_text,
+                        bbox=word.bbox,
+                        ocr_confidence=word.ocr_confidence,
+                    )
+                    for word in detail.words
+                ],
+            )
+            await AdminAiWorkflowService(db).start(
+                actor_id, detail.page_id, workflow_request
+            )
+        except Exception as exc:
+            # Keep successful OCR available for Admin review if automatic
+            # proofreading cannot be safely prepared (for example bad alignment).
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ai_workflow_auto_enqueue_failed",
+                stage="post_ocr_enqueue",
+                page_id=str(detail.page_id),
+                page_revision_id=str(detail.page_revision_id),
+                http_status=exc.status_code if isinstance(exc, HTTPException) else None,
+                exception=exc,
+            )
+    return detail
+
+
+@router.post(
+    "/admin/catalog/{book_id}/documents",
+    response_model=AdminDocumentUploadResponse,
+    status_code=201,
+)
+async def upload_admin_document(
+    book_id: UUID,
+    document: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).upload_document(
+        actor_id, book_id, document, upload_id=upload_id
+    )
 
 
 @router.post(
@@ -247,3 +319,89 @@ async def cancel_ai_correct_page_job(
     if job is None:
         raise HTTPException(status_code=404, detail="AI OCR job not found")
     return _job_read(job)
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows",
+    response_model=AdminAiWorkflowRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def start_admin_ai_workflow(
+    page_id: UUID,
+    payload: AdminAiWorkflowCreate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist one idempotent workflow request; workers perform inference later."""
+    return await AdminAiWorkflowService(db).start(actor_id, page_id, payload)
+
+
+@router.get(
+    "/admin/pages/{page_id}/revisions/{revision_id}/ai-workflows/latest",
+    response_model=AdminAiWorkflowRead | None,
+)
+async def get_latest_admin_ai_workflow(
+    page_id: UUID,
+    revision_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).get_latest(actor_id, page_id, revision_id)
+
+
+@router.get(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}",
+    response_model=AdminAiWorkflowRead,
+)
+async def get_admin_ai_workflow(
+    page_id: UUID,
+    workflow_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).get(actor_id, page_id, workflow_id)
+
+
+@router.patch(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/candidate",
+    response_model=AdminAiWorkflowRead,
+)
+async def update_admin_ai_candidate(
+    page_id: UUID,
+    workflow_id: UUID,
+    payload: AdminAiCandidateUpdate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).update_candidate(
+        actor_id, page_id, workflow_id, payload
+    )
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/retry",
+    response_model=AdminAiWorkflowRead,
+)
+async def retry_admin_ai_workflow(
+    page_id: UUID,
+    workflow_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).retry(actor_id, page_id, workflow_id)
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/safety-decision",
+    response_model=AdminAiWorkflowRead,
+)
+async def decide_admin_ai_safety(
+    page_id: UUID,
+    workflow_id: UUID,
+    payload: AdminAiSafetyDecision,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).decide_safety(
+        actor_id, page_id, workflow_id, payload
+    )

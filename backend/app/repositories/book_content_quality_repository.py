@@ -4,12 +4,13 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy import String, case, cast, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Book, BookPage, PageRevision, Profile
+from app.models import AuditLog, Book, BookPage, PageRevision, Profile
+from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
@@ -53,7 +54,8 @@ class BookContentQualityRepository:
         await self.db.refresh(entity)
 
     async def role(self, actor_id: UUID) -> str | None:
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        from app.database.role_cache import get_cached_profile_role
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def profile_for_update(self, actor_id: UUID) -> Profile | None:
         return await self.db.scalar(
@@ -68,6 +70,289 @@ class BookContentQualityRepository:
         if lock:
             query = query.with_for_update()
         return await self.db.scalar(query)
+
+    async def book_assessment_rows(self, book_id: UUID, *, lock: bool = False):
+        """Return every current book page, revision and latest page workflow.
+
+        This deliberately has no page/workflow limit: book approval must not be
+        based on the first 100 workflows returned by the history endpoint.
+        """
+        if lock:
+            await self.db.scalars(
+                select(BookPage)
+                .where(BookPage.BookId == book_id)
+                .order_by(BookPage.PageNumber, BookPage.Id)
+                .with_for_update()
+            )
+            await self.db.scalars(
+                select(AdminAiWorkflow)
+                .where(AdminAiWorkflow.BookId == book_id)
+                .with_for_update()
+            )
+        latest_workflow_id = (
+            select(AdminAiWorkflow.Id)
+            .where(AdminAiWorkflow.PageId == BookPage.Id)
+            .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
+            .limit(1)
+            .correlate(BookPage)
+            .scalar_subquery()
+        )
+        findings_fingerprint = func.md5(
+            cast(func.coalesce(AdminAiWorkflow.Findings, func.jsonb_build_array()), String)
+        )
+        safety_metadata_fingerprint = func.md5(
+            cast(func.coalesce(AdminAiWorkflow.SafetyMetadata, func.jsonb_build_object()), String)
+        )
+        proofread_metadata_fingerprint = func.md5(
+            cast(func.coalesce(AdminAiWorkflow.ProofreadMetadata, func.jsonb_build_object()), String)
+        )
+        result = await self.db.execute(
+            select(
+                BookPage,
+                PageRevision,
+                AdminAiWorkflow,
+                findings_fingerprint,
+                safety_metadata_fingerprint,
+                proofread_metadata_fingerprint,
+            )
+            .outerjoin(
+                PageRevision,
+                (PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+                & (PageRevision.PageId == BookPage.Id),
+            )
+            .outerjoin(AdminAiWorkflow, AdminAiWorkflow.Id == latest_workflow_id)
+            .where(BookPage.BookId == book_id)
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return list(result.all())
+
+    async def all_book_assessment_rows(self, book_ids: list[UUID]):
+        if not book_ids:
+            return []
+        latest_workflow_id = (
+            select(AdminAiWorkflow.Id)
+            .where(AdminAiWorkflow.PageId == BookPage.Id)
+            .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
+            .limit(1)
+            .correlate(BookPage)
+            .scalar_subquery()
+        )
+        result = await self.db.execute(
+            select(
+                BookPage.BookId,
+                BookPage,
+                PageRevision,
+                AdminAiWorkflow,
+                func.md5(
+                    cast(
+                        func.coalesce(AdminAiWorkflow.Findings, func.jsonb_build_array()),
+                        String,
+                    )
+                ),
+                func.md5(
+                    cast(
+                        func.coalesce(AdminAiWorkflow.SafetyMetadata, func.jsonb_build_object()),
+                        String,
+                    )
+                ),
+                func.md5(
+                    cast(
+                        func.coalesce(AdminAiWorkflow.ProofreadMetadata, func.jsonb_build_object()),
+                        String,
+                    )
+                ),
+            )
+            .outerjoin(
+                PageRevision,
+                (PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+                & (PageRevision.PageId == BookPage.Id),
+            )
+            .outerjoin(AdminAiWorkflow, AdminAiWorkflow.Id == latest_workflow_id)
+            .where(BookPage.BookId.in_(book_ids))
+            .order_by(BookPage.BookId, BookPage.PageNumber, BookPage.Id)
+        )
+        return list(result.all())
+
+    async def all_books_for_assessment(self, *, search: str | None = None):
+        """Return compact book/report counts used for global status totals."""
+        report_count = (
+            select(func.count(BookContentReport.Id))
+            .where(BookContentReport.BookId == Book.Id)
+            .correlate(Book)
+            .scalar_subquery()
+        )
+        open_report_count = (
+            select(func.count(BookContentReport.Id))
+            .where(
+                BookContentReport.BookId == Book.Id,
+                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
+            )
+            .correlate(Book)
+            .scalar_subquery()
+        )
+        finding_count = (
+            select(func.count(BookQualityFinding.Id))
+            .where(BookQualityFinding.BookId == Book.Id)
+            .correlate(Book)
+            .scalar_subquery()
+        )
+        needs_review_count = (
+            select(func.count(BookQualityFinding.Id))
+            .where(
+                BookQualityFinding.BookId == Book.Id,
+                BookQualityFinding.Status == "NEEDS_REVIEW",
+            )
+            .correlate(Book)
+            .scalar_subquery()
+        )
+        query = select(
+            Book,
+            report_count,
+            open_report_count,
+            finding_count,
+            needs_review_count,
+        )
+        if search and search.strip():
+            pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+            query = query.where(
+                or_(Book.Title.ilike(pattern, escape="\\"), Book.Name.ilike(pattern, escape="\\"))
+            )
+        result = await self.db.execute(query.order_by(Book.Title, Book.Id))
+        return list(result.all())
+
+    async def book_decisions(self, book_id: UUID, *, limit: int = 50) -> list[AuditLog]:
+        result = await self.db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.ResourceType == "book",
+                AuditLog.ResourceId == book_id,
+                AuditLog.Action.like("book.children.%"),
+            )
+            .order_by(AuditLog.CreatedAt.desc(), AuditLog.Id.desc())
+            .limit(limit)
+        )
+        return list(result.all())
+
+    async def book_decisions_for_books(self, book_ids: list[UUID]) -> list[AuditLog]:
+        if not book_ids:
+            return []
+        result = await self.db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.ResourceType == "book",
+                AuditLog.ResourceId.in_(book_ids),
+                AuditLog.Action.like("book.children.%"),
+            )
+            .order_by(AuditLog.ResourceId, AuditLog.CreatedAt, AuditLog.Id)
+        )
+        return list(result.all())
+
+    async def add_book_decision(
+        self,
+        *,
+        actor_id: UUID,
+        book_id: UUID,
+        action: str,
+        metadata: dict,
+        request_id: str,
+    ) -> AuditLog:
+        row = AuditLog(
+            ActorId=actor_id,
+            Action=action,
+            ResourceType="book",
+            ResourceId=book_id,
+            Metadata=metadata,
+            RequestId=request_id,
+        )
+        self.db.add(row)
+        await self.db.flush([row])
+        return row
+
+    async def ai_workflows_for_book(
+        self, book_id: UUID, *, limit: int = 100
+    ) -> list[AdminAiWorkflow]:
+        rows = await self.db.scalars(
+            select(AdminAiWorkflow)
+            .where(AdminAiWorkflow.BookId == book_id)
+            .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
+            .limit(limit)
+        )
+        return list(rows.all())
+
+    async def ai_workflow_summary_for_book(self, book_id: UUID) -> dict[str, int]:
+        latest = (
+            select(
+                AdminAiWorkflow.PageId.label("page_id"),
+                AdminAiWorkflow.Status.label("status"),
+                AdminAiWorkflow.SafetyStatus.label("safety_status"),
+                AdminAiWorkflow.SafetyInputHash.label("safety_hash"),
+                AdminAiWorkflow.CandidateHash.label("candidate_hash"),
+                AdminAiWorkflow.ProofreadText.label("proofread_text"),
+                AdminAiWorkflow.Findings.label("findings"),
+                func.row_number().over(
+                    partition_by=AdminAiWorkflow.PageId,
+                    order_by=(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc()),
+                ).label("row_number"),
+            )
+            .where(AdminAiWorkflow.BookId == book_id)
+            .subquery()
+        )
+        pages_total = int(await self.db.scalar(
+            select(func.count()).select_from(BookPage).where(BookPage.BookId == book_id)
+        ) or 0)
+        workflows_total = int(await self.db.scalar(
+            select(func.count()).select_from(AdminAiWorkflow).where(
+                AdminAiWorkflow.BookId == book_id
+            )
+        ) or 0)
+        counts = (await self.db.execute(
+            select(
+                func.count().label("pages_with_workflow"),
+                func.count(case((latest.c.proofread_text.is_not(None), 1))).label("proofreading_completed"),
+                func.count(case((
+                    (latest.c.safety_status.in_(["PROVISIONAL", "CONFIRMED"]))
+                    & (latest.c.safety_hash == latest.c.candidate_hash), 1
+                ))).label("safety_completed"),
+                func.count(case((latest.c.status.in_([
+                    "QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"
+                ]), 1))).label("active"),
+                func.count(case((latest.c.status == "READY_FOR_ADMIN_REVIEW", 1))).label("ready_for_review"),
+                func.count(case((latest.c.status == "FAILED", 1))).label("failed"),
+                func.count(case((
+                    (latest.c.safety_status == "STALE")
+                    | (
+                        latest.c.safety_hash.is_not(None)
+                        & (latest.c.safety_hash != latest.c.candidate_hash)
+                    ), 1
+                ))).label("safety_stale"),
+                func.count(case((
+                    (latest.c.status == "READY_FOR_ADMIN_REVIEW")
+                    | (latest.c.safety_status.in_(["FAILED", "STALE"])), 1
+                ))).label("needs_admin_review"),
+                func.coalesce(
+                    func.sum(func.jsonb_array_length(latest.c.findings)), 0
+                ).label("finding_count"),
+            ).where(latest.c.row_number == 1)
+        )).mappings().one()
+        return {
+            "pages_total": pages_total,
+            "workflows_total": workflows_total,
+            "pages_with_workflow": int(counts["pages_with_workflow"] or 0),
+            "pages_without_workflow": max(
+                0, pages_total - int(counts["pages_with_workflow"] or 0)
+            ),
+            "proofreading_completed": int(counts["proofreading_completed"] or 0),
+            "safety_completed": int(counts["safety_completed"] or 0),
+            "safety_stale": int(counts["safety_stale"] or 0),
+            "safety_unscanned": max(
+                0, pages_total - int(counts["safety_completed"] or 0)
+            ),
+            "active": int(counts["active"] or 0),
+            "ready_for_review": int(counts["ready_for_review"] or 0),
+            "failed": int(counts["failed"] or 0),
+            "needs_admin_review": int(counts["needs_admin_review"] or 0),
+            "finding_count": int(counts["finding_count"] or 0),
+        }
 
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
         query = select(BookPage).where(BookPage.Id == page_id)

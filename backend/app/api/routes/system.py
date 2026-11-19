@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Literal
+from typing import Annotated, List, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import literal, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,7 +17,12 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.reading import HistoryRepository, HistoryService
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.difficult_words_service import (
+    DifficultWordsService,
+    MAX_PRACTICE_AUDIO_BYTES,
+)
 from app.schemas import (
     AuditLogCreate,
     AuditLogResponse,
@@ -24,6 +30,13 @@ from app.schemas import (
     ConsentRecordResponse,
     ProgressReportCreate,
     ProgressReportResponse,
+)
+from app.schemas.difficult_words import (
+    DifficultWordPracticeAttemptRead,
+    DifficultWordPracticeCompleteRequest,
+    DifficultWordPracticeHistoryRead,
+    DifficultWordPracticeStartRequest,
+    PracticeStatusLiteral,
 )
 from app.schemas.system import (
     AdminAuditLogRead,
@@ -391,17 +404,189 @@ async def get_owned_progress_periods(
     ).periods(child_id, actor_id, cursor, limit)
 
 
+def _difficult_words_service(db: AsyncSession) -> DifficultWordsService:
+    return DifficultWordsService(
+        DifficultWordsRepository(db),
+        HistoryService(HistoryRepository(db)),
+    )
+
+
 @router.get("/difficult-words/{child_id}", response_model=list[DifficultWordRead])
 async def get_owned_difficult_words(
     child_id: UUID,
     period_start: date | None = None,
     period_end: date | None = None,
+    status_filter: PracticeStatusLiteral | None = None,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ProgressService(
-        ProgressRepository(db), HistoryService(HistoryRepository(db))
-    ).read(child_id, actor_id, period_start, period_end, words_only=True)
+    return await _difficult_words_service(db).list_difficult_words(
+        child_id,
+        actor_id,
+        period_start=period_start,
+        period_end=period_end,
+        status_filter=status_filter,
+    )
+
+
+@router.get(
+    "/difficult-words/{child_id}/practice/history",
+    response_model=DifficultWordPracticeHistoryRead,
+)
+async def get_difficult_word_practice_history(
+    child_id: UUID,
+    normalized_word: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).practice_history(
+        child_id,
+        actor_id,
+        normalized_word=normalized_word,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/evaluate",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def evaluate_difficult_word_direct(
+    child_id: UUID,
+    request_id: Annotated[UUID, Form()],
+    normalized_word: Annotated[str, Form(min_length=1, max_length=120)],
+    display_text: Annotated[str | None, Form(max_length=120)] = None,
+    file: Annotated[UploadFile | None, File(description="Child reading recording for this word")] = None,
+    audio_duration_ms: Annotated[int | None, Form(ge=0, le=60_000)] = None,
+    audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
+    browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
+    browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    book_id: Annotated[UUID | None, Form()] = None,
+    session_id: Annotated[UUID | None, Form()] = None,
+    page_id: Annotated[UUID | None, Form()] = None,
+    page_revision_id: Annotated[UUID | None, Form()] = None,
+    word_id: Annotated[UUID | None, Form()] = None,
+    context_phrase: Annotated[str | None, Form(max_length=240)] = None,
+    evidence_word_ids: Annotated[str | None, Form(max_length=4096)] = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    audio_bytes: bytes | None = None
+    filename = "practice.webm"
+    content_type: str | None = None
+    if file is not None:
+        filename = file.filename or "practice.webm"
+        content_type = file.content_type
+        try:
+            audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
+        finally:
+            await file.close()
+
+    parsed_evidence_ids: list[UUID] = []
+    if evidence_word_ids:
+        try:
+            raw_list = json.loads(evidence_word_ids)
+            if isinstance(raw_list, list):
+                for item in raw_list[:50]:
+                    if isinstance(item, str):
+                        parsed_evidence_ids.append(UUID(item))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="INVALID_EVIDENCE_WORD_IDS") from None
+
+    return await _difficult_words_service(db).evaluate_word_direct(
+        child_id,
+        actor_id,
+        request_id=request_id,
+        normalized_word=normalized_word,
+        display_text=display_text,
+        audio_bytes=audio_bytes,
+        filename=filename,
+        content_type=content_type,
+        audio_duration_ms=audio_duration_ms,
+        audio_quality_status=audio_quality_status,
+        browser_transcript=browser_transcript,
+        browser_confidence=browser_confidence,
+        evidence_word_ids=parsed_evidence_ids,
+        book_id=book_id,
+        session_id=session_id,
+        page_id=page_id,
+        page_revision_id=page_revision_id,
+        word_id=word_id,
+        context_phrase=context_phrase,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/start",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def start_difficult_word_practice(
+    child_id: UUID,
+    payload: DifficultWordPracticeStartRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).start_attempt(
+        child_id,
+        actor_id,
+        payload,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/{attempt_id}/evaluate-audio",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def evaluate_difficult_word_practice_audio(
+    child_id: UUID,
+    attempt_id: UUID,
+    completion_request_id: Annotated[UUID, Form()],
+    file: Annotated[UploadFile, File(description="Child reading recording for this word")],
+    audio_duration_ms: Annotated[int | None, Form(ge=0, le=60_000)] = None,
+    audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
+    browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
+    browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
+    finally:
+        await file.close()
+
+    return await _difficult_words_service(db).evaluate_audio_attempt(
+        child_id,
+        attempt_id,
+        actor_id,
+        completion_request_id=completion_request_id,
+        audio_bytes=audio_bytes,
+        filename=file.filename or "practice.webm",
+        content_type=file.content_type,
+        audio_duration_ms=audio_duration_ms,
+        audio_quality_status=audio_quality_status,
+        browser_transcript=browser_transcript,
+        browser_confidence=browser_confidence,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/{attempt_id}/complete",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def complete_difficult_word_practice(
+    child_id: UUID,
+    attempt_id: UUID,
+    payload: DifficultWordPracticeCompleteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).complete_attempt(
+        child_id,
+        attempt_id,
+        actor_id,
+        payload,
+    )
 
 
 class AdminSystemRepository:

@@ -242,7 +242,7 @@ export function AdminParentsScreen() {
 
       {notice ? (
         <div
-          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-bold"
+          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-semibold"
           role="status"
         >
           {notice}
@@ -265,17 +265,17 @@ export function AdminParentsScreen() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
-          <p className="text-sm font-bold text-muted">Tổng Parent</p>
+          <p className="text-sm font-semibold text-muted">Tổng Parent</p>
           <div className="flex items-center gap-3">
             <UsersRound aria-hidden className="size-8 text-primary" />
-            <p className="text-3xl font-black">
+            <p className="text-3xl font-semibold">
               {total.toLocaleString("vi-VN")}
             </p>
           </div>
         </Card>
         <Card className="bg-white">
-          <p className="text-sm font-bold text-muted">Phạm vi danh sách</p>
-          <p className="text-lg font-black">
+          <p className="text-sm font-semibold text-muted">Phạm vi danh sách</p>
+          <p className="text-lg font-semibold">
             {total === 0
               ? "Chưa có dữ liệu"
               : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
@@ -332,7 +332,7 @@ export function AdminParentsScreen() {
           }
         >
           {error === "auth" ? (
-            <Link className="font-extrabold underline" href="/admin/login">
+            <Link className="font-semibold underline" href="/admin/login">
               Đăng nhập lại
             </Link>
           ) : error === "forbidden" ? (
@@ -350,6 +350,7 @@ export function AdminParentsScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
+          icon={<UsersRound aria-hidden className="size-10 text-primary" />}
           title={
             search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"
           }
@@ -376,36 +377,37 @@ export function AdminParentsScreen() {
         />
       ) : (
         <>
-          <div className="grid gap-4">
+          <div className="grid gap-6 lg:grid-cols-2">
             {items.map((parent) => (
               <Card className="bg-white" key={parent.id}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                  <div className="grid size-12 shrink-0 place-items-center rounded-full bg-sky text-primary">
-                    <UsersRound aria-hidden className="size-6" />
-                  </div>
+                <div className="flex min-w-0 flex-col gap-4">
                   <div className="min-w-0 flex-1">
-                    <h2 className="break-words text-xl font-black text-ink">
+                    <h2 className="break-words text-xl font-semibold text-ink">
                       {parent.display_name?.trim() || "Chưa cập nhật tên"}
                     </h2>
                     <p className="mt-1 break-all text-xs text-muted">
                       ID: {parent.id}
                     </p>
                   </div>
-                  <dl className="grid grid-cols-2 gap-3 sm:min-w-64">
+                  <dl className="grid grid-cols-2 gap-3">
                     <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-bold text-muted">Ngày tạo</dt>
-                      <dd className="mt-1 font-bold">
+                      <dt className="text-xs font-semibold text-muted">
+                        Ngày tạo
+                      </dt>
+                      <dd className="mt-1 font-semibold">
                         {formatDate(parent.created_at)}
                       </dd>
                     </div>
                     <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-bold text-muted">Hồ sơ bé</dt>
-                      <dd className="mt-1 font-bold">
+                      <dt className="text-xs font-semibold text-muted">
+                        Hồ sơ bé
+                      </dt>
+                      <dd className="mt-1 font-semibold">
                         {parent.children_count}
                       </dd>
                     </div>
                   </dl>
-                  <div className="flex flex-wrap gap-2 sm:w-auto">
+                  <div className="grid gap-3 sm:grid-cols-3">
                     <ButtonLink
                       className="sm:w-auto"
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}

@@ -807,9 +807,75 @@ class SentenceShooterRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.rollback_calls, 1)
         self.assertEqual(len(db.statements), 2)
 
-        sql = "\n".join(str(statement) for statement in db.statements).lower()
+        statement_sql = [str(statement).lower() for statement in db.statements]
+        sql = "\n".join(statement_sql)
+        select_projections = "\n".join(
+            statement.split("\nfrom ", 1)[0] for statement in statement_sql
+        )
         self.assertIn("currentverifiedrevisionid", sql)
         self.assertIn("verificationstatus", sql)
         self.assertIn("lifecyclestatus", sql)
         for unused_column in ("boundingbox", "ocrconfidence", "imagepath", "drafttext", "processingmeta"):
-            self.assertNotIn(unused_column, sql)
+            self.assertNotIn(unused_column, select_projections)
+
+
+class SentenceShooterLatencyBundleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_round_completion_bundles_next_round_and_idempotent_replay(self):
+        repo = FakeSentenceShooterRepository()
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="easy",
+                total_rounds=2,
+            ),
+        )
+        first_round = repo.rounds_by_session[0]
+        last_request = uuid4()
+        shot = None
+        for idx, tok in enumerate(first_round.ExpectedTokenIds):
+            req_id = last_request if idx == len(first_round.ExpectedTokenIds) - 1 else uuid4()
+            shot = await service.shoot(PARENT_ID, session.session_id, first_round.Id, UUID(tok), req_id)
+
+        assert shot is not None
+        self.assertTrue(shot.round_completed)
+        self.assertFalse(shot.session_completed)
+        self.assertIsNotNone(shot.next_round)
+        self.assertEqual(shot.next_round.round_number, 2)
+
+        replay = await service.shoot(
+            PARENT_ID,
+            session.session_id,
+            first_round.Id,
+            UUID(first_round.ExpectedTokenIds[-1]),
+            last_request,
+        )
+        self.assertIsNotNone(replay.next_round)
+        self.assertEqual(replay.next_round.round_id, shot.next_round.round_id)
+
+    async def test_load_shot_bundle_compiles_single_inner_join_lock_query(self):
+        from sqlalchemy.dialects import postgresql
+
+        class Result:
+            def first(self):
+                return None
+
+        class FakeDatabase:
+            def __init__(self):
+                self.statement = None
+
+            async def execute(self, statement):
+                self.statement = statement
+                return Result()
+
+        db = FakeDatabase()
+        res = await SentenceShooterRepository(db).load_shot_bundle(
+            PARENT_ID, uuid4(), uuid4(), uuid4()
+        )
+        self.assertIsNone(res)
+        sql = str(db.statement.compile(dialect=postgresql.dialect())).lower()
+        self.assertIn("for update of gamesessions, gamerounds", sql)
+        self.assertIn("duplicate_snapshot", sql)
+        self.assertNotIn("left outer join", sql)

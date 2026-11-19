@@ -1,6 +1,4 @@
-import { Mail, MapPin, Phone } from "lucide-react";
 import Link from "next/link";
-
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { cn } from "@/lib/utils/cn";
 import { VIREAD_SUPPORT_EMAIL } from "@/lib/config/contact";
@@ -9,7 +7,6 @@ interface SiteFooterProps {
   readonly className?: string;
   readonly variant?: "public" | "admin" | "parent";
 }
-
 const parentLinks = [
   { href: "/dashboard", label: "Tổng quan" },
   { href: "/reports", label: "Tiến bộ" },
@@ -18,106 +15,70 @@ const parentLinks = [
   { href: "/profile", label: "Hồ sơ phụ huynh" },
   { href: "/help-support", label: "Trợ giúp & hỗ trợ" },
 ] as const;
+const linkClass =
+  "underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
-/** Keep this in document flow, outside main; the hosting layout sizes the page. */
 export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
   const isParent = variant === "parent";
   const isAdmin = variant === "admin";
-
   return (
     <footer
-      aria-label={isParent ? "Thông tin ViRead" : "Thông tin ViRead"}
+      aria-label="Thông tin ViRead"
       className={cn(
-        "mt-auto w-full shrink-0 border-t border-border bg-white",
+        "site-colophon mt-auto w-full shrink-0 border-t border-border bg-white",
         className,
       )}
     >
-      {isParent ? (
-        <>
-          <div className="mx-auto grid w-full max-w-[1376px] gap-8 px-4 py-8 sm:px-8 md:grid-cols-2 md:gap-10 lg:grid-cols-[1.2fr_1fr_0.8fr] lg:py-10">
-            <section aria-labelledby="footer-viread-brand" className="min-w-0">
-              <h2 className="sr-only" id="footer-viread-brand">
-                Thương hiệu ViRead
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 py-6 sm:px-8 xl:px-16">
+        <ViReadLogo
+          ariaLabel={
+            isParent ? "ViRead - về tổng quan" : "ViRead - về trang chủ"
+          }
+          href={isParent ? "/dashboard" : isAdmin ? "/admin/parents" : "/login"}
+        />
+        {isParent ? (
+          <div className="grid gap-6 md:grid-cols-3 md:gap-8">
+            <section aria-labelledby="footer-viread-brand">
+              <h2 className="font-bold text-ink" id="footer-viread-brand">
+                ViRead
               </h2>
-              <ViReadLogo
-                ariaLabel="ViRead - về tổng quan"
-                href="/dashboard"
-                size="md"
-              />
-              <p className="mt-3 max-w-md text-sm leading-6 text-muted">
+              <p className="mt-2 max-w-md text-sm leading-[1.4] text-muted">
                 Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng đọc
                 sách và theo dõi quá trình học tập.
               </p>
             </section>
-
             <section
               aria-labelledby="footer-viread-contact"
               className="min-w-0"
             >
-              <h2
-                className="text-sm font-extrabold uppercase tracking-wide text-ink"
-                id="footer-viread-contact"
-              >
+              <h2 className="font-bold text-ink" id="footer-viread-contact">
                 Thông tin liên hệ
               </h2>
-              <address className="mt-4 flex flex-col gap-3 text-sm not-italic leading-6 text-muted">
-                <p className="flex items-start gap-3">
-                  <MapPin
-                    aria-hidden="true"
-                    className="mt-1 size-4 shrink-0 text-primary"
-                  />
-                  <span>
-                    <span className="font-bold text-ink">Địa chỉ: </span>
-                    Đại học Duy Tân
-                  </span>
+              <address className="mt-2 space-y-1 text-sm not-italic text-muted">
+                <p>Đại học Duy Tân</p>
+                <p>
+                  <a
+                    className={cn(linkClass, "break-all")}
+                    href={"mailto:" + VIREAD_SUPPORT_EMAIL}
+                  >
+                    {VIREAD_SUPPORT_EMAIL}
+                  </a>
                 </p>
-                <p className="flex items-start gap-3">
-                  <Mail
-                    aria-hidden="true"
-                    className="mt-1 size-4 shrink-0 text-primary"
-                  />
-                  <span>
-                    <span className="font-bold text-ink">Email: </span>
-                    <a
-                      className="break-words underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      href={"mailto:" + VIREAD_SUPPORT_EMAIL}
-                    >
-                      {VIREAD_SUPPORT_EMAIL}
-                    </a>
-                  </span>
-                </p>
-                <p className="flex items-start gap-3">
-                  <Phone
-                    aria-hidden="true"
-                    className="mt-1 size-4 shrink-0 text-primary"
-                  />
-                  <span>
-                    <span className="font-bold text-ink">Số điện thoại: </span>
-                    <a
-                      className="underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      href="tel:0905373633"
-                    >
-                      0905373633
-                    </a>
-                  </span>
+                <p>
+                  <a className={linkClass} href="tel:0905373633">
+                    0905373633
+                  </a>
                 </p>
               </address>
             </section>
-
-            <nav aria-labelledby="footer-viread-links" className="min-w-0">
-              <h2
-                className="text-sm font-extrabold uppercase tracking-wide text-ink"
-                id="footer-viread-links"
-              >
+            <nav aria-labelledby="footer-viread-links">
+              <h2 className="font-bold text-ink" id="footer-viread-links">
                 Truy cập nhanh
               </h2>
-              <ul className="mt-4 flex flex-col items-start gap-2.5 text-sm">
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted">
                 {parentLinks.map(({ href, label }) => (
                   <li key={href}>
-                    <Link
-                      className="text-muted underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      href={href}
-                    >
+                    <Link className={linkClass} href={href}>
                       {label}
                     </Link>
                   </li>
@@ -125,31 +86,15 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               </ul>
             </nav>
           </div>
-          <div className="border-t border-border bg-canvas">
-            <p className="mx-auto w-full max-w-[1376px] px-4 py-4 text-sm leading-6 text-muted sm:px-8">
-              © 2026 ViRead. Bảo lưu mọi quyền.
-            </p>
-          </div>
-        </>
-      ) : (
-        <div className="mx-auto flex w-full max-w-[1376px] flex-col gap-3 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8">
-          <div className="min-w-0 space-y-2">
-            <ViReadLogo
-              ariaLabel="ViRead - về trang chủ"
-              href={isAdmin ? "/admin/parents" : "/login"}
-              size="md"
-            />
-            <p className="text-sm leading-relaxed text-muted">
-              {isAdmin
-                ? "Khu vực quản trị ViRead."
-                : "Đồng hành cùng bé trên hành trình đọc sách."}
-            </p>
-          </div>
-          <p className="text-sm leading-relaxed text-muted sm:shrink-0">
-            © 2026 ViRead.
-          </p>
-        </div>
-      )}
+        ) : isAdmin ? (
+          <p className="text-sm text-muted">Khu vực quản trị ViRead.</p>
+        ) : null}
+        <p
+          className={cn("text-sm leading-[1.4] text-muted", isParent && "mt-4")}
+        >
+          © 2026 ViRead.{!isAdmin ? " Bảo lưu mọi quyền." : ""}
+        </p>
+      </div>
     </footer>
   );
 }

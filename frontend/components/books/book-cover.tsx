@@ -12,13 +12,6 @@ const artworkByVariant: Record<ArtworkVariant, string> = {
   starfruit: "/images/figma/book-starfruit.svg",
 };
 
-const toneByVariant: Record<ArtworkVariant, string> = {
-  cat: "bg-book-orange",
-  garden: "bg-success-surface",
-  travel: "bg-sky",
-  starfruit: "bg-purple",
-};
-
 function resolveArtwork(book: BookListItemDTO): ArtworkVariant {
   const title = book.title.normalize("NFC").toLocaleLowerCase("vi");
 
@@ -42,6 +35,8 @@ interface BookCoverProps {
   className?: string;
   hero?: boolean;
   titleAsHeading?: boolean;
+  showTitle?: boolean;
+  size?: "default" | "medium" | "small";
 }
 
 export function BookCover({
@@ -49,15 +44,24 @@ export function BookCover({
   className,
   hero = false,
   titleAsHeading = false,
+  showTitle = true,
+  size = "default",
 }: BookCoverProps) {
   const artwork = resolveArtwork(book);
+  const compact = size !== "default";
+  const coverDimensions =
+    size === "small"
+      ? { width: 56, height: 80 }
+      : size === "medium"
+        ? { width: 112, height: 144 }
+        : undefined;
 
   if (hero) {
     return (
       <div
         className={cn(
           "relative h-[205px] w-full overflow-hidden rounded-control",
-          toneByVariant[artwork],
+          "bg-cream",
           className,
         )}
       >
@@ -76,30 +80,47 @@ export function BookCover({
   return (
     <div
       className={cn(
-        "flex h-60 w-full max-w-56 flex-col gap-2 rounded-control p-4",
-        toneByVariant[artwork],
+        "flex w-full flex-col items-center justify-center rounded-card bg-cream",
+        compact ? "shrink-0 gap-1 p-2" : "h-[260px] gap-4 p-6",
         className,
       )}
+      style={coverDimensions}
     >
-      {titleAsHeading ? (
-        <h2 className="line-clamp-2 text-[26px] font-bold leading-[1.4] text-ink">
-          {book.title}
-        </h2>
-      ) : (
-        <p className="line-clamp-2 text-[26px] font-bold leading-[1.4] text-ink">
-          {book.title}
-        </p>
-      )}
-      <div className="relative min-h-0 flex-1">
+      <div
+        className={cn(
+          "relative h-[144px] w-full max-w-[192px]",
+          compact && "min-h-0 flex-1",
+        )}
+      >
         <Image
           alt=""
           className="object-contain"
           fill
-          sizes="230px"
+          sizes={
+            size === "small" ? "56px" : size === "medium" ? "112px" : "192px"
+          }
           src={artworkByVariant[artwork]}
         />
       </div>
-      <p className="text-[14px] leading-[1.4] text-muted">MỘT CÂU CHUYỆN NHỎ</p>
+      {!showTitle ? null : titleAsHeading ? (
+        <h2
+          className={cn(
+            "line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
+            compact && "text-xs leading-tight",
+          )}
+        >
+          {book.title}
+        </h2>
+      ) : (
+        <p
+          className={cn(
+            "line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
+            compact && "text-xs leading-tight",
+          )}
+        >
+          {book.title}
+        </p>
+      )}
     </div>
   );
 }

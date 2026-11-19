@@ -21,18 +21,18 @@ function RegisterLoadingState() {
       <Card
         aria-busy="true"
         aria-label="Đang tải nội dung đăng ký"
-        className="mx-auto max-w-[560px] border border-border bg-white shadow-sm"
+        className="border border-border bg-white"
       >
         <span className="sr-only" role="status">
           Đang tải…
         </span>
         <Skeleton className="h-11 w-3/5" />
         <Skeleton className="h-7 w-4/5" />
-        <Skeleton className="h-[90px] w-full sm:h-24" />
-        <Skeleton className="h-[90px] w-full sm:h-24" />
-        <Skeleton className="h-[90px] w-full sm:h-24" />
         <Skeleton className="h-16 w-full" />
         <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-12 w-full" />
       </Card>
     </AuthShell>
   );
@@ -49,10 +49,7 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
   if (requiresEmailConfirmation) {
     return (
       <AuthShell>
-        <Card
-          className="mx-auto max-w-[560px] border border-border shadow-sm"
-          tone="success"
-        >
+        <Card className="border border-border" tone="success">
           <div>
             <h1 className="text-heading font-extrabold text-success-ink">
               Kiểm tra email nhé
@@ -77,15 +74,15 @@ export function RegisterScreen({ scenario }: RegisterScreenProps) {
 
   return (
     <AuthShell>
-      <Card className="mx-auto max-w-[560px] border border-border bg-white shadow-lg">
+      <Card className="border border-border bg-white">
         <div>
-          <p className="text-sm font-extrabold uppercase tracking-[0.12em] text-primary">
-            Bắt đầu cùng ViRead
+          <p className="text-sm font-semibold text-primary">
+            Tài khoản phụ huynh
           </p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
+          <h1 className="mt-1 text-heading font-extrabold leading-tight text-ink">
             Tạo tài khoản phụ huynh
           </h1>
-          <p className="mt-3 text-body leading-relaxed text-muted">
+          <p className="mt-2 text-body leading-6 text-muted">
             Tạo tài khoản để quản lý hồ sơ bé và theo dõi quá trình đọc sách.
           </p>
         </div>

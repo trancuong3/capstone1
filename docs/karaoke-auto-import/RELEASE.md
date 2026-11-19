@@ -1,5 +1,24 @@
 # Karaoke auto-import — bàn giao source và giới hạn triển khai
 
+## Cập nhật tích hợp PR #132 — 2026-11-19
+
+Source đã commit/push ở `43b6e823`, PR nháp
+[#132](https://github.com/trancuong3/capstone1/pull/132). Lượt sửa xung đột nhập
+`origin/main` tại `93ec8d3de413131b107f9f817e4703b6cfea00f1` vào nhánh feature.
+`warm-routes.ts` giữ đủ metadata-quality, viread-training và karaoke, dùng ID
+fixture karaoke111…; danh sách route và bộ lọc bằng phiên bản main. Registry
+model giữ cả KaraokeProcessingJob/Operation và các model mới của main.
+Các số liệu snapshot chưa merge ở mục bên dưới là bằng chứng lịch sử.
+
+Kiểm tra mới trên bản ghép: backend1.174 tests, OK,81 skipped do điều kiện môi
+trường (không cấu hình integration DB); frontend136 file,2.122/2.122 tests đạt.
+Format, lint, typecheck và build đạt (38/38 trang);4/4 ca browser desktop/mobile
+đạt, gồm upload→candidate→apply→review→publish bằng fixtures và warmup đủ các
+route admin trong đoạn xung đột. Không dùng Supabase thật. Bằng chứng lượt ghép
+ở `.cache/karaoke-benchmark/pr132-main-merge-verified-20261119/verification.json`
+trong workspace nghiên cứu. Không cộng với lượt baseline bên dưới. Các cổng
+quality/live acceptance vẫn chưa đạt; tính năng giữ mặc định tắt.
+
 ## Quyết định của chủ dự án, 2026-11-19
 
 Cho phép bỏ qua bước benchmark/reference độc lập/nghe duyệt đang chờ để làm

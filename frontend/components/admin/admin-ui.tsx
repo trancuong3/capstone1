@@ -20,6 +20,7 @@ export function AdminPageHeader({
 }) {
   return (
     <PageHeader
+      className="mb-6"
       action={actions}
       description={description}
       eyebrow={eyebrow}
@@ -52,7 +53,7 @@ export function AdminStatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
-        "inline-flex rounded-full px-3 py-1 text-sm font-extrabold",
+        "inline-flex w-fit items-center gap-2 rounded-md px-2.5 py-1 text-sm font-semibold before:size-1.5 before:rounded-full before:bg-current",
         tone,
       )}
     >
@@ -73,7 +74,7 @@ export function AdminLoading({
     >
       <div>
         <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-sky border-t-primary" />
-        <p className="font-bold text-muted">{label}</p>
+        <p className="font-semibold text-muted">{label}</p>
       </div>
     </div>
   );
@@ -100,7 +101,7 @@ export function AdminResultsPagination({
   return (
     <nav
       aria-label={`Điều hướng danh sách ${itemLabel}`}
-      className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-white px-4 py-3"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white px-5 py-3"
     >
       <p className="text-sm text-muted">
         Đang xem {firstItem}–{lastItem} / {total} {itemLabel}

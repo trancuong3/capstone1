@@ -9,6 +9,11 @@ mốc lịch sử bên dưới. Không đổi kết quả chất lượng thành
 Không tự merge, bật flags, áp dụng migration Supabase hoặc xuất bản bài hát.
 Các chốt nghe duyệt/cảnh báo/revision trước khi xuất bản từng bài vẫn giữ nguyên.
 
+Đã commit/push `43b6e823` và tạo PR nháp
+[#132](https://github.com/trancuong3/capstone1/pull/132). Lượt xử lý xung đột
+đồng bộ main `93ec8d3` vào nhánh feature, giữ đầy đủ routes/models hai phía;
+xem kết quả tích hợp mới ở đầu RELEASE.md. Không merge PR vào main.
+
 Hướng dẫn bàn giao và điều kiện triển khai/rollback:
 [RELEASE.md](RELEASE.md). Các kết quả kiểm thử bên dưới là bằng chứng local,
 không phải kết quả CI hoặc nghiệm thu môi trường thật.

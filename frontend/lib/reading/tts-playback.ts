@@ -1,10 +1,13 @@
 import type { SpeechService } from "@/lib/api/speech-service";
+import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import type {
   TimedSpeech,
   VoiceStudioService,
   WordTiming,
 } from "@/lib/api/voice-studio-service";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
+import { prepareWordSampleAudio } from "@/lib/reading/short-word-audio";
+import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getSpeechPreferences,
   type SpeechPreferences,
@@ -29,6 +32,10 @@ export type PlaybackState =
   | "fallback"
   | "error";
 export interface SpeechPlayOptions {
+  /** Use the word's pronunciation recording when one is available. */
+  wordSample?: boolean;
+  /** Prefer a Vietnamese device voice for spoken guidance. */
+  coaching?: boolean;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   /** Browser boundaries only; audio without timing never guesses word indexes. */
@@ -66,16 +73,44 @@ function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const SERVER_FALLBACK_VOICE_NOTICE =
+  "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng mặc định.";
+const BROWSER_FALLBACK_NOTICE =
+  "Giọng đọc máy chủ tạm bận, đang dùng giọng đọc tiếng Việt của trình duyệt.";
+
+// Original CC0 recordings by Penn Zero MSSJ for Lingua Libre on Wikimedia Commons.
+// https://commons.wikimedia.org/wiki/File:LL-Q9199_(vie)-Penn_Zero_MSSJ-thức.wav
+// https://commons.wikimedia.org/wiki/File:LL-Q9199_(vie)-Penn_Zero_MSSJ-thực.wav
+const WORD_RECORDINGS = new Map([
+  ["thức", "/audio/word-samples/thuc-sac.wav"],
+  ["thực", "/audio/word-samples/thuc-nang.wav"],
+]);
+const WORD_SAMPLE_MAX_RATE = 0.7;
+
+function selectVietnameseVoice(synthesis: SpeechSynthesis) {
+  const vietnamese = synthesis
+    .getVoices()
+    .filter((voice) => /^vi(?:[-_]|$)/iu.test(voice.lang));
+  return vietnamese.find((voice) => voice.localService) ?? vietnamese[0];
+}
+
 /** Owns one synthesis operation, ordered chunk queue and media clock. */
 export class TtsPlayback {
   private state: PlaybackState = "idle";
+  private fallbackNotice: string | null = null;
   private readonly listeners = new Set<() => void>();
   getState = (): PlaybackState => this.state;
+  getFallbackNotice = (): string | null => this.fallbackNotice;
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
+  };
+  private setFallbackNotice = (notice: string | null): void => {
+    if (notice === this.fallbackNotice) return;
+    this.fallbackNotice = notice;
+    this.listeners.forEach((listener) => listener());
   };
   private onState = (state: PlaybackState): void => {
     if (state === this.state) return;
@@ -89,10 +124,22 @@ export class TtsPlayback {
   private timedRetryAfter = 0;
   private readonly cache = new Map<string, TimedSpeech>();
   private cacheBytes = 0;
+  private readonly shortCache = new Map<
+    string,
+    { readonly audio: Blob; readonly usedFallbackVoice: boolean }
+  >();
+  private shortCacheBytes = 0;
   constructor(
     private readonly speech: SpeechService,
     private readonly studio: VoiceStudioService,
   ) {}
+
+  handlePreferencesChange = (): void => {
+    this.serverRetryAfter = 0;
+    this.timedRetryAfter = 0;
+    this.setFallbackNotice(null);
+    this.stop();
+  };
 
   stop = (): void => {
     const operation = this.current;
@@ -105,6 +152,8 @@ export class TtsPlayback {
     this.stop();
     this.cache.clear();
     this.cacheBytes = 0;
+    this.shortCache.clear();
+    this.shortCacheBytes = 0;
   };
   pause = (): void => {
     if (!this.current || this.current.paused) return;
@@ -156,11 +205,16 @@ export class TtsPlayback {
   }
   private async run(
     action: (operation: Operation) => Promise<void>,
+    speedLimit = Infinity,
   ): Promise<void> {
     this.stop();
+    const preferences = getSpeechPreferences();
     const operation: Operation = {
       controller: new AbortController(),
-      preferences: getSpeechPreferences(),
+      preferences: {
+        ...preferences,
+        speed: Math.min(preferences.speed, speedLimit),
+      },
       paused: false,
       started: false,
     };
@@ -185,38 +239,50 @@ export class TtsPlayback {
   }
 
   play = (text: string, options: SpeechPlayOptions = {}): Promise<void> =>
-    this.run(async (operation) => {
-      if (!text.trim()) throw unavailable();
-      let elapsed = 0;
-      for (const chunk of splitSpeechText(text, SHORT_TTS_MAX_CHARACTERS)) {
-        await this.waitIfPaused(operation);
-        this.ensure(operation);
-        const onStart = (duration: number) =>
-          this.started(operation, () => options.onPlay?.(duration));
-        const onTime = (time: number, duration: number) =>
-          options.onTimeUpdate?.(elapsed + time, elapsed + duration);
-        let source: Blob | null = null;
-        if (Date.now() >= this.serverRetryAfter) {
-          try {
-            source = await this.wait(
-              operation,
-              this.speech.synthesize(chunk.text, {
-                voiceId: operation.preferences.voiceId ?? undefined,
-                speed: operation.preferences.speed,
-                signal: operation.controller.signal,
-              }),
-            );
-            this.ensure(operation);
-          } catch (error) {
-            this.ensure(operation);
-            if (isAbort(error)) throw error;
-            this.serverRetryAfter = Date.now() + 60_000;
-          }
-        }
-        let duration = 0;
-        if (source) {
-          try {
-            duration = await this.playAudio(
+    this.run(
+      async (operation) => {
+        const spokenText = options.wordSample
+          ? normalizeVietnameseWord(text)
+          : options.coaching
+            ? text.normalize("NFC")
+            : text;
+        if (!spokenText.trim()) throw unavailable();
+        const recording = options.wordSample && WORD_RECORDINGS.get(spokenText);
+        let elapsed = 0;
+        for (const chunk of splitSpeechText(
+          spokenText,
+          SHORT_TTS_MAX_CHARACTERS,
+        )) {
+          await this.waitIfPaused(operation);
+          this.ensure(operation);
+          const onStart = (duration: number) =>
+            this.started(operation, () => options.onPlay?.(duration));
+          const onTime = (time: number, duration: number) =>
+            options.onTimeUpdate?.(elapsed + time, elapsed + duration);
+          const deviceText = options.wordSample
+            ? `${chunk.text}. ${chunk.text}.`
+            : chunk.text;
+          if (recording) {
+            this.setFallbackNotice(null);
+            let source: Blob | string = recording;
+            if (typeof OfflineAudioContext !== "undefined") {
+              try {
+                source = await withRequestDeadline(
+                  async (signal) => {
+                    const response = await fetch(recording, { signal });
+                    if (!response.ok) return recording;
+                    const original = await response.blob();
+                    const prepared = await prepareWordSampleAudio(original);
+                    return original === prepared ? recording : prepared;
+                  },
+                  operation.controller.signal,
+                  2000,
+                );
+              } catch {
+                this.ensure(operation);
+              }
+            }
+            elapsed += await this.playAudio(
               operation,
               source,
               undefined,
@@ -224,29 +290,119 @@ export class TtsPlayback {
               onStart,
               undefined,
               onTime,
+              operation.preferences.speed,
             );
-          } catch (error) {
-            this.ensure(operation);
-            if (isAbort(error) || error instanceof PartialPlaybackError)
-              throw error;
-            source = null;
+            continue;
           }
-        }
-        if (!source) {
-          this.onState("fallback");
-          duration = await this.playBrowser(
-            operation,
+          const deviceCanCoach =
+            options.coaching &&
+            typeof window !== "undefined" &&
+            window.speechSynthesis &&
+            selectVietnameseVoice(window.speechSynthesis);
+          if (options.wordSample || deviceCanCoach) {
+            try {
+              this.setFallbackNotice(null);
+              elapsed += await this.playBrowser(
+                operation,
+                deviceText,
+                onStart,
+                (index) => options.onWordChange?.(chunk.wordOffset + index),
+                onTime,
+              );
+              continue;
+            } catch (error) {
+              this.ensure(operation);
+              if (isAbort(error) || error instanceof PartialPlaybackError)
+                throw error;
+            }
+          }
+          let source: Blob | null = null;
+          let usedFallbackVoice = false;
+          const shortKey = JSON.stringify([
+            operation.preferences.voiceId,
+            operation.preferences.speed,
             chunk.text,
-            onStart,
-            (index) => options.onWordChange?.(chunk.wordOffset + index),
-            onTime,
-          );
+            Boolean(options.wordSample),
+          ]);
+          const cachedShort = this.shortCache.get(shortKey);
+          if (cachedShort) {
+            source = cachedShort.audio;
+            usedFallbackVoice = cachedShort.usedFallbackVoice;
+          } else if (Date.now() >= this.serverRetryAfter) {
+            try {
+              source = await this.wait(
+                operation,
+                this.speech.synthesize(chunk.text, {
+                  voiceId: operation.preferences.voiceId ?? undefined,
+                  speed: operation.preferences.speed,
+                  signal: operation.controller.signal,
+                }),
+              );
+              this.ensure(operation);
+              usedFallbackVoice = Boolean(
+                getSynthesizedAudioMeta(source)?.usedFallbackVoice,
+              );
+              if (options.wordSample)
+                source = await this.wait(
+                  operation,
+                  prepareWordSampleAudio(source),
+                );
+              this.cacheShort(shortKey, {
+                audio: source,
+                usedFallbackVoice,
+              });
+            } catch (error) {
+              this.ensure(operation);
+              if (isAbort(error)) throw error;
+              this.serverRetryAfter = Date.now() + 60_000;
+            }
+          }
+          let duration = 0;
+          if (source) {
+            this.setFallbackNotice(
+              usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+            );
+            try {
+              duration = await this.playAudio(
+                operation,
+                source,
+                undefined,
+                0,
+                onStart,
+                undefined,
+                onTime,
+              );
+            } catch (error) {
+              this.ensure(operation);
+              if (isAbort(error) || error instanceof PartialPlaybackError)
+                throw error;
+              this.shortCacheBytes -= source.size;
+              this.shortCache.delete(shortKey);
+              source = null;
+            }
+          }
+          if (!source) {
+            this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
+            this.onState("fallback");
+            duration = await this.playBrowser(
+              operation,
+              deviceText,
+              onStart,
+              (index) => options.onWordChange?.(chunk.wordOffset + index),
+              onTime,
+            );
+          }
+          elapsed += duration;
         }
-        elapsed += duration;
-      }
-      this.ensure(operation);
-      options.onEnded?.();
-    });
+        this.ensure(operation);
+        options.onEnded?.();
+      },
+      options.wordSample
+        ? WORD_SAMPLE_MAX_RATE
+        : options.coaching
+          ? 0.85
+          : undefined,
+    );
 
   playWithWordTimings = (
     words: readonly string[],
@@ -291,6 +447,9 @@ export class TtsPlayback {
             this.ensure(operation);
             this.cacheTimed(key, timed);
           }
+          this.setFallbackNotice(
+            timed.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+          );
           elapsed += await this.playAudio(
             operation,
             timed.audio,
@@ -315,6 +474,7 @@ export class TtsPlayback {
             await fallback();
             return;
           }
+          this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
           this.onState("fallback");
           for (const part of splitSpeechText(
             chunk.text,
@@ -335,6 +495,29 @@ export class TtsPlayback {
       options.onEnded?.();
     });
 
+  private cacheShort(
+    key: string,
+    entry: { readonly audio: Blob; readonly usedFallbackVoice: boolean },
+  ): void {
+    if (entry.audio.size > 4 * 1024 * 1024) return;
+    const prev = this.shortCache.get(key);
+    if (prev) {
+      this.shortCacheBytes -= prev.audio.size;
+      this.shortCache.delete(key);
+    }
+    this.shortCache.set(key, entry);
+    this.shortCacheBytes += entry.audio.size;
+    while (
+      this.shortCache.size > 16 ||
+      this.shortCacheBytes > 8 * 1024 * 1024
+    ) {
+      const first = this.shortCache.keys().next().value;
+      if (first === undefined) break;
+      this.shortCacheBytes -= this.shortCache.get(first)?.audio.size ?? 0;
+      this.shortCache.delete(first);
+    }
+  }
+
   private cacheTimed(key: string, speech: TimedSpeech): void {
     if (speech.audio.size > 8 * 1024 * 1024) return;
     this.cache.set(key, speech);
@@ -349,24 +532,38 @@ export class TtsPlayback {
 
   private async playAudio(
     operation: Operation,
-    source: Blob,
+    source: Blob | string,
     timeline: readonly WordTiming[] | undefined,
     offset: number,
     onStart: (duration: number) => void,
     onWord?: (index: number) => void,
     onTime?: (time: number, duration: number) => void,
+    playbackRate = 1,
   ): Promise<number> {
     this.ensure(operation);
-    if (!source.size || !source.type.startsWith("audio/")) throw unavailable();
+    if (
+      typeof source !== "string" &&
+      (!source.size || !source.type.startsWith("audio/"))
+    )
+      throw unavailable();
     await this.waitIfPaused(operation);
     this.ensure(operation);
-    const url = URL.createObjectURL(source);
+    const url =
+      typeof source === "string" ? source : URL.createObjectURL(source);
+    const releaseUrl = () => {
+      if (typeof source !== "string") URL.revokeObjectURL(url);
+    };
     let audio: HTMLAudioElement;
     try {
       audio = new Audio(url);
+      // Synthesized audio already includes the requested speed.
+      audio.defaultPlaybackRate = playbackRate;
+      audio.playbackRate = playbackRate;
+      audio.preservesPitch = true;
+      audio.volume = 1;
       this.ensure(operation);
     } catch (error) {
-      URL.revokeObjectURL(url);
+      releaseUrl();
       throw error;
     }
     return new Promise<number>((resolve, reject) => {
@@ -397,7 +594,7 @@ export class TtsPlayback {
             null;
         audio.pause();
         audio.src = "";
-        URL.revokeObjectURL(url);
+        releaseUrl();
         if (error) reject(error);
         else resolve(duration);
       };
@@ -483,8 +680,7 @@ export class TtsPlayback {
     operation: Operation,
     synthesis: SpeechSynthesis,
   ): Promise<SpeechSynthesisVoice> {
-    const choose = () =>
-      synthesis.getVoices().find((voice) => /^vi(?:[-_]|$)/iu.test(voice.lang));
+    const choose = () => selectVietnameseVoice(synthesis);
     const voice = choose();
     if (voice) return voice;
     if (synthesis.getVoices().length) throw unavailable();
@@ -531,6 +727,7 @@ export class TtsPlayback {
     utterance.voice = voice;
     utterance.rate = operation.preferences.speed;
     utterance.pitch = 1;
+    utterance.volume = 1;
     const estimate = Math.max(
       0.5,
       (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.preferences.speed),

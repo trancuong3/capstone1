@@ -100,7 +100,13 @@ describe("Report/Session real API contracts", () => {
   it("does not manufacture previous metrics or evidence when practice is unavailable", async () => {
     apiFetchFixture
       .mockResolvedValueOnce(Response.json(progressReportFixture))
-      .mockResolvedValueOnce(Response.json([difficultWordFixture]));
+      .mockResolvedValueOnce(Response.json([difficultWordFixture]))
+      .mockResolvedValueOnce(
+        Response.json(
+          { detail: "DIFFICULT_WORD_PRACTICE_STORAGE_UNAVAILABLE" },
+          { status: 503 },
+        ),
+      );
     const report = await createReportService().get(
       TEST_CHILD_ID,
       reportWindowFixture,
@@ -113,8 +119,8 @@ describe("Report/Session real API contracts", () => {
     const before = structuredClone(words);
     await expect(
       service.practice(TEST_CHILD_ID, words[0].normalized_word),
-    ).rejects.toMatchObject({ status: 501, retryable: false });
-    expect(apiFetchFixture).toHaveBeenCalledTimes(2);
+    ).rejects.toMatchObject({ status: 503, retryable: true });
+    expect(apiFetchFixture).toHaveBeenCalledTimes(3);
     expect(words).toEqual(before);
   });
 

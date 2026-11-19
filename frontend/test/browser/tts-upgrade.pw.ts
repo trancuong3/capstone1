@@ -294,24 +294,34 @@ async function installReading(
   return { api, requests, unexpected, writes, text, prompts };
 }
 
-test("Phase 3: selecting a second word keeps the newest word sample active", async ({
+test("Phase 3: a second word cancels the first device sample", async ({
   page,
 }) => {
   const fixture = await installReading(page);
   await page.getByRole("button", { name: "Bé", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
-    .toBe(false);
+    .poll(() => page.evaluate(() => window.__ttsProbe.utterances.length))
+    .toBe(1);
   await page.getByRole("button", { name: "mèo", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.audios[1]?.paused))
-    .toBe(false);
-  expect(await page.evaluate(() => window.__ttsProbe.audios[0].paused)).toBe(
-    true,
-  );
-  await expect(page.getByText("Đọc mẫu 1 chữ:")).toBeVisible();
-  expect(fixture.prompts.map((prompt) => prompt.text)).toEqual(["Bé", "mèo"]);
-  expect(fixture.prompts.every((prompt) => prompt.speed === 0.9)).toBe(true);
+    .poll(() => page.evaluate(() => window.__ttsProbe.utterances.length))
+    .toBe(2);
+
+  // Word samples prefer a Vietnamese device voice when available. A second
+  // selection must cancel the old utterance, not overlap it or call the server.
+  const playback = await page.evaluate(() => ({
+    texts: window.__ttsProbe.utterances.map((utterance) => utterance.text),
+    firstStopped: window.__ttsProbe.utterances[0]?.onend === null,
+    secondActive: typeof window.__ttsProbe.utterances[1]?.onend === "function",
+    cancelled: window.__ttsProbe.cancels,
+  }));
+  expect(playback.texts).toEqual(["bé. bé.", "mèo. mèo."]);
+  expect(playback.firstStopped).toBe(true);
+  expect(playback.secondActive).toBe(true);
+  expect(playback.cancelled).toBeGreaterThanOrEqual(1);
+  await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
+  expect(fixture.prompts).toEqual([]);
+  expect(fixture.requests).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });
 
@@ -454,7 +464,7 @@ test("Phase 3: browser fallback uses boundary events and stops safely", async ({
   });
   await expect(
     page.locator('[data-word-id="90000000-0000-4000-8000-000000000002"]'),
-  ).toHaveClass(/bg-yellow-300/);
+  ).toHaveAttribute("data-reading-state", "current");
   await page.screenshot({
     path: testInfo.outputPath("fallback-word-highlight.png"),
   });

@@ -38,7 +38,7 @@ describe("admin components", () => {
     navigationMock.replace.mockClear();
   });
 
-  it("uses compact buttons inside Admin and preserves the default size elsewhere", async () => {
+  it("uses Figma-sized buttons inside Admin and preserves the default size elsewhere", async () => {
     const services = createAdminServiceFixture();
     render(
       withAdminFixture(
@@ -51,12 +51,12 @@ describe("admin components", () => {
       ),
     );
     const logout = screen.getByRole("button", { name: "Đăng xuất" });
-    expect(logout.className).toContain("min-h-11");
+    expect(logout.className).toContain("min-h-12");
     expect(logout.className).not.toContain("h-16");
 
     const outsideButton = render(<Button>Parent action</Button>);
     expect(within(outsideButton.container).getByRole("button")).toHaveClass(
-      "h-16",
+      "min-h-14",
     );
   });
 
@@ -232,10 +232,20 @@ describe("admin components", () => {
     await screen.findByRole("heading", {
       name: adminBookListItemFixture.book.title,
     });
-    expect(screen.getByText("Đang hoạt động")).toBeInTheDocument();
     expect(
-      screen.getByText("3 trang · 1 cần duyệt · 1 đang xử lý · 1 đã duyệt"),
+      screen.getByText("Đang hoạt động", { exact: true }),
     ).toBeInTheDocument();
+    const pageStatus = screen.getByLabelText("Trạng thái trang sách");
+    expect(pageStatus).toHaveTextContent("3 trang");
+    expect(pageStatus).toHaveTextContent(
+      `Cần duyệt ${adminBookListItemFixture.needs_review_count}`,
+    );
+    expect(pageStatus).toHaveTextContent(
+      `Đang xử lý ${adminBookListItemFixture.processing_count}`,
+    );
+    expect(pageStatus).toHaveTextContent(
+      `Đã duyệt ${adminBookListItemFixture.verified_count}`,
+    );
     services.books.list.mockResolvedValueOnce([retired]);
     await user.selectOptions(screen.getByLabelText("Vòng đời"), "RETIRED");
     expect(await screen.findByText("Đã ngừng")).toBeInTheDocument();

@@ -1,6 +1,5 @@
 "use client";
 
-import { Archive, ArchiveRestore, PencilLine, Search } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -120,8 +119,8 @@ export function AdminBooksScreen() {
                   : "Đã kích hoạt lại sách",
               message:
                 nextStatus === "RETIRED"
-                  ? "Trạng thái mới đã được tải lại từ API. Dữ liệu sách và lịch sử đọc vẫn được giữ nguyên."
-                  : "Trạng thái mới đã được tải lại từ API và sách có thể xuất hiện lại trong catalog nếu đáp ứng quy tắc hiện hành.",
+                  ? "Các trang sách và lịch sử đọc đã được giữ lại."
+                  : "Sách có thể xuất hiện lại trong thư viện khi có trang đã duyệt.",
             }
           : {
               tone: "error",
@@ -140,9 +139,13 @@ export function AdminBooksScreen() {
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
-          cause.status === 422
-            ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
-            : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
+          cause.status === 409
+            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            : nextStatus === "ACTIVE" &&
+                isServiceError(cause) &&
+                cause.status === 422
+              ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
+              : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
       });
     } finally {
       setLifecycleBusyBookId(null);
@@ -159,25 +162,21 @@ export function AdminBooksScreen() {
       <AdminPageHeader
         eyebrow="Quản trị nội dung"
         title="Kho sách"
-        description="Quản lý tên sách, tiêu đề riêng biệt, metadata và trạng thái hoạt động của từng sách."
+        description="Chỉnh sửa thông tin sách và kiểm tra những trang đang chờ duyệt."
         actions={
-          <ButtonLink className="sm:w-auto" href="/admin/books/new">
+          <ButtonLink className="sm:w-auto sm:px-6" href="/admin/books/new">
             Tạo sách mới
           </ButtonLink>
         }
       />
-      <StatusMessage className="mb-6" tone="info">
-        Danh mục được tải từ API thật. Các thao tác cập nhật chỉ thay đổi
-        metadata hoặc vòng đời sách; trang sách, revision và lịch sử đọc được
-        giữ nguyên.
-      </StatusMessage>
-      <Card className="mb-6 bg-white">
-        <div className="grid gap-4 lg:grid-cols-[1fr_240px_240px]">
+      <p aria-label="Tổng quan kho sách" className="mb-4 text-sm text-muted">
+        {items
+          ? `${items.length} sách · ${items.filter((i) => i.book.lifecycle_status === "ACTIVE").length} đang hoạt động · ${items.reduce((t, i) => t + i.needs_review_count, 0)} trang cần duyệt OCR`
+          : "Đang tải…"}
+      </p>
+      <div className="mb-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute right-5 top-9 size-5 text-muted"
-            />
             <TextField
               label="Tìm theo tên sách, tiêu đề hoặc tác giả"
               onChange={(event) => setSearch(event.target.value)}
@@ -210,7 +209,7 @@ export function AdminBooksScreen() {
             <option value="VERIFIED">VERIFIED</option>
           </SelectField>
         </div>
-      </Card>
+      </div>
 
       {actionNotice ? (
         <StatusMessage
@@ -255,11 +254,11 @@ export function AdminBooksScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          description="Điều chỉnh bộ lọc hoặc kiểm tra dữ liệu sách trong database."
+          description="Thử tên sách khác hoặc thay đổi bộ lọc."
           title="Không tìm thấy sách"
         />
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-5">
           <AdminResultsPagination
             itemLabel="sách"
             onPageChange={setPageNumber}
@@ -276,75 +275,62 @@ export function AdminBooksScreen() {
               : `/admin/books/${encodeURIComponent(book.id)}/edit`;
 
             return (
-              <Card className="bg-white" key={book.id}>
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-                    <div className="min-w-0">
-                      <div className="mb-2 flex flex-wrap gap-2">
-                        <AdminStatusBadge status={book.lifecycle_status} />
-                        {item.parent_catalog_eligible ? (
-                          <span className="rounded-full bg-sky px-3 py-1 text-sm font-extrabold text-primary-hover">
-                            Có trong thư viện ba mẹ
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mb-1 text-sm text-muted">
-                        Tên sách:{" "}
-                        {book.name?.trim() ? book.name : "Chưa có tên sách"}
-                      </p>
-                      <Link
-                        className="inline-block rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
-                        href={`/admin/books/${encodeURIComponent(book.id)}`}
-                      >
-                        <h2 className="text-2xl font-black">
-                          {missingTitle ? "Chưa có tiêu đề" : book.title}
-                        </h2>
-                      </Link>
-                      <p className="text-muted">
-                        {book.author?.trim() ? book.author : "Chưa có tác giả"}{" "}
-                        · Khối {book.min_grade}–{book.max_grade}
-                      </p>
-                    </div>
-                    <p className="text-sm text-muted lg:max-w-72 lg:text-right">
-                      {item.page_count} trang · {item.needs_review_count} cần
-                      duyệt · {item.processing_count} đang xử lý ·{" "}
-                      {item.verified_count} đã duyệt
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                    <Link
-                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-control border border-border px-3 py-2 text-sm font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-primary"
-                      href={editHref}
-                    >
-                      <PencilLine aria-hidden className="size-4" />
-                      {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
-                    </Link>
-                    <Button
-                      className="h-auto min-h-11 w-auto px-3 py-2 text-sm"
-                      disabled={isBusy}
-                      isLoading={lifecycleBusyBookId === book.id}
-                      onClick={() => void changeLifecycle(book)}
-                      variant="secondary"
-                    >
-                      {book.lifecycle_status === "ACTIVE" ? (
-                        <Archive aria-hidden className="size-4" />
-                      ) : (
-                        <ArchiveRestore aria-hidden className="size-4" />
-                      )}
-                      {lifecycleBusyBookId === book.id
-                        ? "Đang cập nhật…"
-                        : book.lifecycle_status === "ACTIVE"
-                          ? "Ngừng hoạt động"
-                          : "Kích hoạt lại"}
-                    </Button>
-                    <Link
-                      className="inline-flex min-h-11 items-center justify-center rounded-control px-3 py-2 text-sm font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                      href={`/admin/books/${encodeURIComponent(book.id)}`}
-                    >
-                      Xem chi tiết / trang sách
-                    </Link>
-                  </div>
+              <Card className="catalog-admin-row" key={book.id}>
+                <Link
+                  className="w-fit rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
+                  href={`/admin/books/${encodeURIComponent(book.id)}`}
+                >
+                  <h2 className="break-words text-2xl font-extrabold text-ink">
+                    {missingTitle ? "Chưa có tiêu đề" : book.title}
+                  </h2>
+                </Link>
+                <p className="text-body text-muted">
+                  Tên sách: {book.name?.trim() ? book.name : "Chưa có tên sách"}{" "}
+                  · {book.author?.trim() ? book.author : "Chưa có tác giả"} ·
+                  Khối {book.min_grade}–{book.max_grade}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <AdminStatusBadge status={book.lifecycle_status} />
+                  {item.parent_catalog_eligible ? (
+                    <span className="rounded-control bg-sky px-3 py-1 text-sm font-bold text-primary">
+                      Có trong thư viện ba mẹ
+                    </span>
+                  ) : book.lifecycle_status === "ACTIVE" ? (
+                    <span className="rounded-control bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">
+                      Chưa đủ điều kiện thư viện trẻ em · OCR / Safety
+                    </span>
+                  ) : null}
+                </div>
+                <p
+                  aria-label="Trạng thái trang sách"
+                  className="text-label text-muted"
+                >
+                  {item.page_count} trang · Đang xử lý {item.processing_count} ·
+                  Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
+                  {item.verified_count}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <ButtonLink
+                    variant="secondary"
+                    href={`/admin/books/${encodeURIComponent(book.id)}`}
+                  >
+                    Xem các trang
+                  </ButtonLink>
+                  <ButtonLink variant="quiet" href={editHref}>
+                    {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
+                  </ButtonLink>
+                  <Button
+                    disabled={isBusy}
+                    isLoading={lifecycleBusyBookId === book.id}
+                    onClick={() => void changeLifecycle(book)}
+                    variant="quiet"
+                  >
+                    {lifecycleBusyBookId === book.id
+                      ? "Đang cập nhật…"
+                      : book.lifecycle_status === "ACTIVE"
+                        ? "Ngừng hoạt động"
+                        : "Kích hoạt lại"}
+                  </Button>
                 </div>
               </Card>
             );

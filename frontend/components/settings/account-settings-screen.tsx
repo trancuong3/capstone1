@@ -1,19 +1,11 @@
 "use client";
 
-import {
-  ArrowRight,
-  CalendarClock,
-  Eye,
-  EyeOff,
-  LockKeyhole,
-  Mail,
-  ShieldCheck,
-  UserRound,
-} from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Mail } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
+import { FormPage } from "@/components/common/form-page";
 import { Card } from "@/components/common/card";
 import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
@@ -58,8 +50,8 @@ function PasswordField({
   autoComplete: string;
 }) {
   return (
-    <div className="flex min-h-[88px] w-full flex-col gap-2 rounded-control border border-border bg-white px-4 py-3">
-      <label className="text-label font-bold text-muted" htmlFor={id}>
+    <div className="flex min-h-[72px] w-full flex-col gap-1 rounded-control border border-border bg-white px-4 py-3">
+      <label className="text-label font-semibold text-muted" htmlFor={id}>
         {label}
       </label>
       <div className="flex min-w-0 items-center gap-2">
@@ -107,6 +99,7 @@ export function AccountSettingsScreen() {
   const [isRequestingRecovery, setIsRequestingRecovery] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [showPasswordEditor, setShowPasswordEditor] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -263,89 +256,14 @@ export function AccountSettingsScreen() {
   const isEmailPasswordAccount = user.providers?.includes("email") ?? false;
   const emailStatus = verificationLabel(profile);
 
-  return (
-    <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
-      <PageHeader
-        description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
-        eyebrow="Tài khoản ViRead"
-        title="Cài đặt tài khoản"
-      />
-
-      <Card>
-        <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-            <UserRound aria-hidden="true" className="size-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-extrabold text-ink">
-              Thông tin tài khoản
-            </h2>
-            <p className="text-sm text-muted">
-              Thông tin lấy từ Supabase Auth và hồ sơ phụ huynh.
-            </p>
-          </div>
-        </div>
-
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Tên hiển thị</dt>
-            <dd className="mt-1 break-words text-body font-bold text-ink">
-              {displayName}
-            </dd>
-          </div>
-          <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">Email tài khoản</dt>
-            <dd className="mt-1 break-all text-body font-bold text-ink">
-              {email || "Không thể tải thông tin"}
-            </dd>
-            <p className="mt-1 text-label text-muted">{emailStatus}</p>
-            {profile.pending_email ? (
-              <p className="mt-2 break-all text-sm text-amber-700">
-                Email mới đang chờ xác nhận:{" "}
-                <strong>{profile.pending_email}</strong>
-              </p>
-            ) : null}
-          </div>
-          <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">
-              Vai trò tài khoản
-            </dt>
-            <dd className="mt-1 text-body font-bold text-ink">
-              {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
-            </dd>
-          </div>
-          <div className="rounded-control bg-canvas p-4">
-            <dt className="text-label font-bold text-muted">
-              Trạng thái email
-            </dt>
-            <dd className="mt-1 flex items-center gap-2 text-body font-bold text-ink">
-              <ShieldCheck aria-hidden="true" className="size-5 text-primary" />
-              {emailStatus}
-            </dd>
-          </div>
-        </dl>
-        <ButtonLink
-          className="sm:w-auto sm:self-start"
-          href="/profile"
-          variant="secondary"
-        >
-          Quản lý hồ sơ <ArrowRight aria-hidden="true" className="size-5" />
-        </ButtonLink>
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-            <LockKeyhole aria-hidden="true" className="size-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-extrabold text-ink">Đổi mật khẩu</h2>
-            <p className="text-sm text-muted">
-              Cập nhật mật khẩu để bảo vệ tài khoản ViRead của bạn.
-            </p>
-          </div>
-        </div>
-
+  if (showPasswordEditor)
+    return (
+      <FormPage
+        title="Đổi mật khẩu"
+        description="Dùng mật khẩu riêng biệt để bảo vệ tài khoản của bạn."
+        width="standard"
+        onBack={() => setShowPasswordEditor(false)}
+      >
         {notice ? (
           <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage>
         ) : null}
@@ -412,20 +330,89 @@ export function AccountSettingsScreen() {
             </Button>
           </div>
         )}
-      </Card>
+      </FormPage>
+    );
+
+  return (
+    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-4">
+      <PageHeader
+        description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
+        eyebrow="Tài khoản ViRead"
+        title="Cài đặt tài khoản"
+      />
 
       <Card>
         <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-            <Mail aria-hidden="true" className="size-5" />
-          </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">
+            <h2 className="text-2xl font-extrabold text-ink">
+              Thông tin tài khoản
+            </h2>
+          </div>
+        </div>
+
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-label font-semibold text-muted">
+              Tên hiển thị
+            </dt>
+            <dd className="mt-1 break-words text-body font-semibold text-ink">
+              {displayName}
+            </dd>
+          </div>
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-label font-semibold text-muted">
+              Email tài khoản
+            </dt>
+            <dd className="mt-1 break-all text-body font-semibold text-ink">
+              {email || "Không thể tải thông tin"}
+            </dd>
+            {profile.pending_email ? (
+              <p className="mt-2 break-all text-sm text-warning">
+                Email mới đang chờ xác nhận:{" "}
+                <strong>{profile.pending_email}</strong>
+              </p>
+            ) : null}
+          </div>
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-label font-semibold text-muted">
+              Vai trò tài khoản
+            </dt>
+            <dd className="mt-1 text-body font-semibold text-ink">
+              {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
+            </dd>
+          </div>
+          <div className="rounded-control border border-border bg-white px-4 py-3">
+            <dt className="text-label font-semibold text-muted">
+              Trạng thái email
+            </dt>
+            <dd className="mt-1 flex items-center gap-2 text-body font-semibold text-ink">
+              {emailStatus}
+            </dd>
+          </div>
+        </dl>
+        <ButtonLink
+          className="sm:w-auto sm:self-start"
+          href="/profile"
+          variant="secondary"
+        >
+          Quản lý hồ sơ <ArrowRight aria-hidden="true" className="size-5" />
+        </ButtonLink>
+      </Card>
+
+      <Button
+        className="sm:max-w-72"
+        variant="secondary"
+        onClick={() => setShowPasswordEditor(true)}
+      >
+        Đổi mật khẩu
+      </Button>
+
+      <Card>
+        <div className="flex items-center gap-3">
+          <div>
+            <h2 className="text-2xl font-extrabold text-ink">
               Email và xác minh
             </h2>
-            <p className="text-sm text-muted">
-              Quản lý email hiện tại và yêu cầu xác minh email mới.
-            </p>
           </div>
         </div>
         <p className="text-body text-muted">
@@ -434,7 +421,7 @@ export function AccountSettingsScreen() {
             : "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh."}
         </p>
         <Link
-          className="font-bold text-primary underline-offset-4 hover:underline"
+          className="font-semibold text-primary underline-offset-4 hover:underline"
           href="/profile"
         >
           Mở hồ sơ phụ huynh
@@ -443,11 +430,8 @@ export function AccountSettingsScreen() {
 
       <Card>
         <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-full bg-sky text-primary">
-            <CalendarClock aria-hidden="true" className="size-5" />
-          </div>
           <div>
-            <h2 className="text-lg font-extrabold text-ink">
+            <h2 className="text-2xl font-extrabold text-ink">
               Quản lý lịch nhắc đọc sách
             </h2>
             <p className="text-sm text-muted">
