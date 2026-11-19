@@ -179,9 +179,11 @@ test("Parent stored history → detail, report counts and words", async ({
   // The microphone may be unavailable in isolated CI, in which case the
   // practice offers a safe resume action instead of its initial start button.
   await expect(
-    page.getByRole("button", {
-      name: /^(Tiếp tục luyện|Tạm dừng|Dừng ghi âm)$/,
-    }),
+    page
+      .getByRole("button", {
+        name: /^(Tiếp tục luyện|Tạm dừng|Dừng ghi âm)$/,
+      })
+      .first(),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
