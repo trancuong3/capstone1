@@ -294,7 +294,7 @@ async function installReading(
   return { api, requests, unexpected, writes, text, prompts };
 }
 
-test("Phase 3: selecting a second word cancels the previous Vietnamese device sample", async ({
+test("Phase 3: a second word cancels the first device sample", async ({
   page,
 }) => {
   const fixture = await installReading(page);
