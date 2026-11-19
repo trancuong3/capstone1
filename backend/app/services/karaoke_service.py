@@ -17,11 +17,17 @@ from app.schemas.karaoke import (
 from app.services.karaoke_media_service import inspect_audio, normalize_cover, read_upload
 from app.services.karaoke_storage_service import KaraokeStorage, URL_TTL
 from app.services.karaoke_lyrics import clear_timings, timing_issues
+from app.services.karaoke_processing_review import (
+    clear_review, content_fingerprint, fingerprint, quality_flags, reviewed_current,
+)
+from app.schemas.karaoke_processing_types import ProcessingReviewRead, ProcessingSummary
 
 logger = logging.getLogger(__name__)
 META = ("title", "author", "min_grade", "max_grade", "source_note", "usage_note")
 ASSETS = ("audio_path", "cover_path", "audio_sha256", "timed_audio_sha256",
-          "audio_size_bytes", "duration_ms", "lyrics")
+          "audio_size_bytes", "duration_ms", "lyrics", "reference_audio_path",
+          "reference_audio_sha256", "reference_audio_size_bytes", "reference_duration_ms",
+          "requires_processing_review", "origin_job_id")
 
 
 def content_issues(version, *, require_binding=True):
@@ -51,6 +57,11 @@ class KaraokeService:
     def __init__(self, repository: KaraokeRepository, storage=None):
         self.repository = repository
         self.storage = storage or KaraokeStorage()
+        # Existing pure service doubles remain usable for manual-content tests.
+        # Production always supplies the SQL repository on the shared session.
+        from app.repositories.karaoke_processing_repository import KaraokeProcessingRepository
+        self.processing = (KaraokeProcessingRepository(repository.db)
+                           if hasattr(repository, "db") else None)
 
     async def _actor(self, actor_id, role):
         actor = await self.repository.actor(actor_id)
@@ -85,17 +96,62 @@ class KaraokeService:
             **{key: getattr(version, key) for key in META},
             id=version.id, version_no=version.version_no, state=version.state,
             has_audio=bool(version.audio_path), has_cover=bool(version.cover_path),
+            audio_sha256=version.audio_sha256,
+            has_reference_audio=bool(getattr(version, "reference_audio_path", None)),
+            reference_audio_sha256=getattr(version, "reference_audio_sha256", None),
             duration_ms=version.duration_ms, audio_size_bytes=version.audio_size_bytes,
             lyrics=version.lyrics, created_at=version.created_at,
             updated_at=version.updated_at, published_at=version.published_at,
         )
 
-    def _detail(self, state):
+    async def _detail(self, state):
+        summary = None
+        review = ProcessingReviewRead()
+        if self.processing:
+            latest = (await self.processing.latest_summaries([state.song.id])).get(state.song.id)
+            summary = self._processing_summary(latest)
+        if state.draft:
+            draft = state.draft
+            origin = (await self.processing.get(draft.origin_job_id, state.song.id)
+                      if self.processing and draft.origin_job_id else None)
+            review = ProcessingReviewRead(
+                required=bool(draft.requires_processing_review),
+                current_content_fingerprint=content_fingerprint(draft),
+                reviewed=reviewed_current(draft), reviewed_at=draft.reviewed_at,
+                quality_flags=quality_flags(origin),
+            )
         return AdminDetail(
             song_id=state.song.id, status=state.song.status, revision=state.song.revision,
             draft=self._version(state.draft), published=self._version(state.published),
             created_at=state.song.created_at, updated_at=state.song.updated_at,
+            processing_summary=summary, processing_review=review,
         )
+
+    @staticmethod
+    def _processing_summary(job):
+        if job is None:
+            return None
+        return ProcessingSummary(
+            job_id=job.id, **{key: getattr(job, key) for key in (
+                "draft_version_id", "status", "stage", "safe_error_code",
+                "retry_policy", "updated_at",
+            )},
+        )
+
+    async def _invalidate(self, state):
+        clear_review(state.draft)
+        if self.processing:
+            active = await self.processing.outstanding(state.draft.id, lock=True)
+            if active:
+                self.processing.stale(active)
+
+    async def _publication_issues(self, state):
+        issues = []
+        if self.processing and await self.processing.outstanding(state.draft.id):
+            issues.append(ValidationIssue(code="PROCESSING_IN_PROGRESS", field="processing"))
+        if state.draft.requires_processing_review and not reviewed_current(state.draft):
+            issues.append(ValidationIssue(code="PROCESSING_REVIEW_REQUIRED", field="processing"))
+        return issues
 
     @staticmethod
     def _summary(state):
@@ -112,18 +168,33 @@ class KaraokeService:
         )
 
     async def create(self, actor_id, payload):
+        self.creation_replayed = False
         async with self.repository.write():
             await self._actor(actor_id, "admin")
+            key = payload.creation_request_id
+            values = {field: getattr(payload, field) for field in META}
+            request_hash = fingerprint(values)
+            if key is not None:
+                await self.repository.creation_lock()
+                previous = await self.repository.creation_state(actor_id, key)
+                if previous:
+                    if previous.song.creation_request_fingerprint != request_hash:
+                        raise HTTPException(409, "Karaoke create intent changed")
+                    self.creation_replayed = True
+                    return await self._detail(previous)
             state = await self.repository.create(actor_id, {
-                **payload.model_dump(), "lyrics": Lyrics().model_dump(mode="json"),
+                **values, "lyrics": Lyrics().model_dump(mode="json"),
             })
-            result = self._detail(state)
+            if key is not None:
+                state.song.creation_request_id = key
+                state.song.creation_request_fingerprint = request_hash
+            result = await self._detail(state)
         return result
 
     async def detail(self, actor_id, song_id):
         async with self.repository.read():
             await self._actor(actor_id, "admin")
-            return self._detail(await self._state(song_id))
+            return await self._detail(await self._state(song_id))
 
     async def admin_list(self, actor_id, *, search="", status=None, limit=12, offset=0):
         async with self.repository.read():
@@ -131,7 +202,14 @@ class KaraokeService:
             states, total = await self.repository.list_states(
                 search=search, status=status, grade=None, limit=limit, offset=offset,
             )
-            return AdminList(items=[self._summary(state) for state in states],
+            summaries = (await self.processing.latest_summaries([s.song.id for s in states])
+                         if self.processing else {})
+            items = []
+            for state in states:
+                item = self._summary(state)
+                item.processing_summary = self._processing_summary(summaries.get(state.song.id))
+                items.append(item)
+            return AdminList(items=items,
                              total=total, limit=limit, offset=offset)
 
     async def draft(self, actor_id, song_id, payload):
@@ -142,27 +220,34 @@ class KaraokeService:
                 if state.published is None:
                     raise HTTPException(409, "Karaoke published version is missing")
                 values = {key: deepcopy(getattr(state.published, key)) for key in (*META, *ASSETS)}
+                values["requires_processing_review"] = bool(values["requires_processing_review"])
                 state.draft = await self.repository.add_draft(
                     song_id, actor_id, await self.repository.next_version(song_id), values,
                 )
+                clear_review(state.draft)
                 await self.repository.bump(state.song, payload.expected_revision)
-            result = self._detail(state)
+            result = await self._detail(state)
         return result
 
     async def save(self, actor_id, song_id, payload):
         async with self.repository.write():
             await self._actor(actor_id, "admin")
             state = await self._state(song_id, payload, lock=True)
+            new_lyrics = payload.lyrics.model_dump(mode="json")
+            if (all(getattr(state.draft, key) == getattr(payload, key) for key in META)
+                    and state.draft.lyrics == new_lyrics):
+                return await self._detail(state)
+            await self._invalidate(state)
             for key in META:
                 setattr(state.draft, key, getattr(payload, key))
-            state.draft.lyrics = payload.lyrics.model_dump(mode="json")
+            state.draft.lyrics = new_lyrics
             # Missing metadata need not prevent binding complete timing to audio.
             timing_errors = [issue for issue in content_issues(state.draft, require_binding=False)
                              if issue.field in {"audio", "lyrics"}]
             state.draft.timed_audio_sha256 = None if timing_errors else state.draft.audio_sha256
             state.draft.updated_at = utcnow()
             await self.repository.bump(state.song, payload.expected_revision)
-            result = self._detail(state)
+            result = await self._detail(state)
         return result
 
     async def _admin_snapshot(self, actor_id, song_id, payload=None):
@@ -181,6 +266,12 @@ class KaraokeService:
         if state.draft is None:
             raise HTTPException(409, "Karaoke draft is missing")
         issues = content_issues(state.draft)
+        async with self.repository.read():
+            await self._actor(actor_id, "admin")
+            current = await self._state(song_id)
+            if current.song.revision != state.song.revision:
+                raise HTTPException(409, "Karaoke revision changed")
+            issues.extend(await self._publication_issues(current))
         if state.draft.audio_path:
             try:
                 await self._media_available(song_id, state.draft)
@@ -191,13 +282,18 @@ class KaraokeService:
 
     async def publish(self, actor_id, song_id, payload):
         initial = await self._admin_snapshot(actor_id, song_id, payload)
+        async with self.repository.read():
+            await self._actor(actor_id, "admin")
+            current = await self._state(song_id, payload)
+            if await self._publication_issues(current):
+                raise HTTPException(422, "Karaoke processing review is required")
         if content_issues(initial.draft):
             raise HTTPException(422, "Karaoke draft is not ready to publish")
         await self._media_available(song_id, initial.draft)
         async with self.repository.write():
             await self._actor(actor_id, "admin")
             state = await self._state(song_id, payload, lock=True)
-            if content_issues(state.draft):
+            if content_issues(state.draft) or await self._publication_issues(state):
                 raise HTTPException(422, "Karaoke draft is not ready to publish")
             if state.published:
                 state.published.state = "SUPERSEDED"
@@ -207,7 +303,7 @@ class KaraokeService:
             state.song.published_version_id = state.draft.id
             state.published, state.draft = state.draft, None
             await self.repository.bump(state.song, payload.expected_revision)
-            result = self._detail(state)
+            result = await self._detail(state)
         return result
 
     async def visibility(self, actor_id, song_id, payload):
@@ -223,7 +319,7 @@ class KaraokeService:
             state = await self._state(song_id, payload, lock=True)
             state.song.status = "PUBLISHED" if payload.visible else "HIDDEN"
             await self.repository.bump(state.song, payload.expected_revision)
-            result = self._detail(state)
+            result = await self._detail(state)
         return result
 
     async def _cleanup(self, path, song_id):
@@ -237,7 +333,7 @@ class KaraokeService:
             # cannot prove it unreferenced. Never delete somebody's published audio.
             logger.warning("karaoke_orphan_reference_check_failed")
 
-    async def upload(self, actor_id, song_id, payload, file, *, cover=False):
+    async def upload(self, actor_id, song_id, payload, file, *, cover=False, reference=False):
         try:
             await self._admin_snapshot(actor_id, song_id, payload)
             data = await read_upload(file, MAX_COVER_BYTES if cover else MAX_AUDIO_BYTES)
@@ -256,8 +352,14 @@ class KaraokeService:
             async with self.repository.write():
                 await self._actor(actor_id, "admin")
                 state = await self._state(song_id, payload, lock=True)
+                await self._invalidate(state)
                 if cover:
                     state.draft.cover_path = path
+                elif reference:
+                    state.draft.reference_audio_path = path
+                    state.draft.reference_audio_sha256 = audio.sha256
+                    state.draft.reference_audio_size_bytes = audio.size_bytes
+                    state.draft.reference_duration_ms = audio.duration_ms
                 else:
                     state.draft.audio_path = path
                     state.draft.audio_sha256 = audio.sha256
@@ -267,11 +369,25 @@ class KaraokeService:
                     state.draft.lyrics = clear_timings(state.draft.lyrics)
                 state.draft.updated_at = utcnow()
                 await self.repository.bump(state.song, payload.expected_revision)
-                result = self._detail(state)
+                result = await self._detail(state)
             return result
         except BaseException:
             await self._cleanup(path, song_id)
             raise
+
+    async def delete_reference(self, actor_id, song_id, payload):
+        async with self.repository.write():
+            await self._actor(actor_id, "admin")
+            state = await self._state(song_id, payload, lock=True)
+            if state.draft.reference_audio_path:
+                await self._invalidate(state)
+                for field in ("reference_audio_path", "reference_audio_sha256",
+                              "reference_audio_size_bytes", "reference_duration_ms"):
+                    setattr(state.draft, field, None)
+                state.draft.updated_at = utcnow()
+                await self.repository.bump(state.song, payload.expected_revision)
+            result = await self._detail(state)
+        return result
 
     async def _media_dto(self, song_id, version):
         await self._media_available(song_id, version)

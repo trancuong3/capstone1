@@ -474,7 +474,7 @@ class KaraokeApiTests(unittest.TestCase):
                     payload = {"expected_revision": 1, "visible": False}
                 if path == "/karaoke/admin/songs" or (path.endswith("/draft") and method == "POST"):
                     payload = {} if path.endswith("/songs") else {"expected_revision": 1}
-                if path.endswith(("/audio", "/cover")):
+                if method == "POST" and path.endswith(("/audio", "/cover", "/reference-audio")):
                     response = self.client.post(path, data={k: str(v) for k, v in payload.items()},
                                                 files={"file": ("test.mp3", mp3_fixture(), "audio/mpeg")})
                 else:

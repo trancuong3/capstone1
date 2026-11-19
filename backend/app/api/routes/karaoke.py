@@ -2,7 +2,7 @@
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -23,7 +23,7 @@ async def get_karaoke_service(db=Depends(get_db)):
     except (IntegrityError, ConcurrentKaraokeUpdate):
         await db.rollback()
         raise HTTPException(409, "Karaoke data changed; reload and try again") from None
-    except (SQLAlchemyError, ValidationError):
+    except (SQLAlchemyError, ValidationError, ValueError):
         await db.rollback()
         raise HTTPException(503, "Karaoke data is temporarily unavailable") from None
 
@@ -40,10 +40,13 @@ async def admin_songs(
 
 @router.post("/admin/songs", response_model=AdminDetail, status_code=201)
 async def create_song(
-    payload: SongCreate, actor_id: UUID = Depends(get_current_parent_id),
+    payload: SongCreate, response: Response, actor_id: UUID = Depends(get_current_parent_id),
     service=Depends(get_karaoke_service),
 ):
-    return await service.create(actor_id, payload)
+    result = await service.create(actor_id, payload)
+    if getattr(service, "creation_replayed", False):
+        response.status_code = 200
+    return result
 
 
 @router.get("/admin/songs/{song_id}", response_model=AdminDetail)
@@ -90,6 +93,24 @@ async def upload_cover(
 async def validate_draft(song_id: UUID, actor_id: UUID = Depends(get_current_parent_id),
                          service=Depends(get_karaoke_service)):
     return await service.validation(actor_id, song_id)
+
+
+@router.post("/admin/songs/{song_id}/draft/reference-audio", response_model=AdminDetail)
+async def upload_reference(
+    song_id: UUID, file: UploadFile = File(...), expected_revision: int = Form(..., ge=1),
+    draft_version_id: UUID = Form(...), actor_id: UUID = Depends(get_current_parent_id),
+    service=Depends(get_karaoke_service),
+):
+    return await service.upload(actor_id, song_id, DraftRequest(
+        expected_revision=expected_revision, draft_version_id=draft_version_id,
+    ), file, reference=True)
+
+
+@router.delete("/admin/songs/{song_id}/draft/reference-audio", response_model=AdminDetail)
+async def delete_reference(song_id: UUID, payload: DraftRequest,
+                           actor_id: UUID = Depends(get_current_parent_id),
+                           service=Depends(get_karaoke_service)):
+    return await service.delete_reference(actor_id, song_id, payload)
 
 
 @router.get("/admin/songs/{song_id}/draft/preview", response_model=DraftPreview)

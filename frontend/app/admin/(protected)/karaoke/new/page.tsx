@@ -1,5 +1,10 @@
-import { KaraokeEditorScreen } from "@/components/admin/karaoke/karaoke-editor-screen";
+import { KaraokeWorkspaceScreen } from "@/components/admin/karaoke/karaoke-workspace-screen";
 
-export default function Page() {
-  return <KaraokeEditorScreen key="new" />;
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ mode?: string | string[] }>;
+}) {
+  const { mode } = await searchParams;
+  return <KaraokeWorkspaceScreen key="new" advanced={mode === "advanced"} />;
 }

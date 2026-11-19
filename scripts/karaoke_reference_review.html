@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="vi">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; media-src 'self' file:; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"
+  />
+  <title>Kiểm tra mốc hát độc lập</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f3f8f7;
+      color: #203e49;
+      font:
+        17px/1.5 system-ui,
+        sans-serif;
+    }
+    main {
+      max-width: 1000px;
+      margin: auto;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 28px;
+      margin: 0 0 12px;
+    }
+    section {
+      background: white;
+      border: 1px solid #cee1e2;
+      border-radius: 18px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .notice {
+      background: #fff3dd;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    button,
+    select,
+    input {
+      font: inherit;
+      padding: 10px;
+      border: 1px solid #8bb6bc;
+      border-radius: 9px;
+      max-width: 100%;
+    }
+    button {
+      cursor: pointer;
+      color: #164e5a;
+      background: #e3f4f5;
+      min-height: 44px;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 3px solid #bd6100;
+      outline-offset: 3px;
+    }
+    input[type="number"] {
+      width: 140px;
+    }
+    input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      vertical-align: middle;
+    }
+    label {
+      display: block;
+      margin: 8px 0;
+    }
+    .current {
+      font-size: 34px;
+      font-weight: 700;
+      margin: 15px 0;
+      color: #087684;
+    }
+    #line {
+      font-size: 20px;
+    }
+    audio {
+      width: 100%;
+      margin: 10px 0;
+    }
+    #words {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    #words button[aria-pressed="true"] {
+      outline: 3px solid #107d89;
+      background: #fff0bd;
+    }
+    #words button.done {
+      background: #dcefdc;
+    }
+    .small {
+      font-size: 14px;
+      color: #516974;
+    }
+    #status {
+      min-height: 28px;
+      white-space: pre-wrap;
+    }
+    a {
+      color: #075d75;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 500px) {
+      main {
+        padding: 12px;
+      }
+      section {
+        padding: 14px;
+      }
+      h1 {
+        font-size: 24px;
+      }
+      .current {
+        font-size: 28px;
+      }
+    }
+  </style>
+  <main>
+    <h1>Đánh dấu mốc hát độc lập</h1>
+    <section class="notice">
+      Trang này chỉ phát MP3 gốc, không hiển thị mốc do AI dự đoán. Hai lượt
+      đánh dấu được giữ riêng. Kết quả xuất ra vẫn cần kiểm tra sai khác; không
+      tự nghiệm thu hoặc xuất bản bài hát.
+    </section>
+    <section>
+      <label for="track">Chọn bài</label
+      ><select id="track"></select>
+      <label for="reviewer">Người đánh dấu (biệt danh, không cần email)</label
+      ><input id="reviewer" maxlength="80" autocomplete="off" />
+      <div class="controls">
+        <label for="pass">Lượt đánh dấu</label
+        ><select id="pass">
+          <option value="0">Lượt 1</option>
+          <option value="1">Lượt 2 độc lập</option></select
+        ><span id="progress"></span>
+      </div>
+      <audio id="song" controls preload="metadata"></audio>
+      <div class="controls">
+        <label for="speed">Tốc độ nghe</label
+        ><select id="speed">
+          <option value="1">1×</option>
+          <option value="0.75">0,75×</option>
+          <option value="0.5">0,5×</option></select
+        ><button id="back">Lùi 1 giây</button
+        ><button id="play">Phát / Dừng</button><output id="clock">0 ms</output>
+      </div>
+      <p class="small">
+        Chọn tiếng, nghe rồi bấm “Đặt đầu” / “Đặt cuối”. Có thể nhập mốc bằng
+        ms. Phím S/E đặt đầu/cuối; mũi tên trái/phải đổi tiếng khi không gõ
+        trong ô nhập. Lượt 2 không điền lại mốc từ lượt 1.
+      </p>
+    </section>
+    <section>
+      <p id="line"></p>
+      <p class="current" id="unit"></p>
+      <div class="controls">
+        <button id="previous">Tiếng trước</button
+        ><button id="next">Tiếng sau</button
+        ><button id="seek">Nghe từ mốc đã đặt</button>
+      </div>
+      <div class="controls">
+        <label
+          >Đầu (ms)<input id="start" type="number" min="0" step="1" /></label
+        ><button id="markStart">Đặt đầu tại vị trí phát</button
+        ><label
+          >Cuối (ms)<input id="end" type="number" min="0" step="1" /></label
+        ><button id="markEnd">Đặt cuối tại vị trí phát</button
+        ><button id="clear">Xóa mốc tiếng này</button>
+      </div>
+      <label
+        ><input id="difficult" type="checkbox" /> Khó nghe / cần kiểm tra
+        lại</label
+      >
+      <label>Ghi chú tiếng này<input id="note" maxlength="400" /></label>
+      <div id="words" aria-label="Các tiếng trong bài"></div>
+    </section>
+    <section>
+      <label
+        ><input id="lyricsMatch" type="checkbox" /> Tôi đã nghe và xác nhận lời
+        khớp đầy đủ bản thu này</label
+      >
+      <label
+        ><input id="independent" type="checkbox" /> Lượt này tôi đánh dấu theo
+        âm thanh, không chép mốc dự đoán của AI</label
+      >
+      <div class="controls">
+        <button id="export">Lưu các lượt đã đánh dấu (JSON)</button
+        ><label
+          >Khôi phục bản lưu<input
+            id="restore"
+            type="file"
+            accept="application/json,.json"
+        /></label>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p class="small">
+        Chưa có cơ chế tự lưu. Hãy tải JSON trước khi đóng trang; có thể mở lại
+        bằng “Khôi phục bản lưu”. Không gửi dữ liệu lên mạng. JSON giữ cả tiếng
+        chưa có mốc và ghi chú, không loại tiếng khó khỏi phép đo.
+      </p>
+    </section>
+    <section class="small">
+      <p id="attribution"></p>
+      <a id="source" target="_blank" rel="noopener noreferrer"
+        >Nguồn chính thức</a
+      >
+      · <a id="license" target="_blank" rel="noopener noreferrer">Giấy phép</a>
+      <p>
+        Không sử dụng logo hoặc hình nhân vật của nguồn. Trang này không kết nối
+        Supabase và không đổi dự án.
+      </p>
+    </section>
+  </main>
+  <script type="application/json" id="data">
+    "__REVIEW_DATA__"
+  </script>
+  <script>
+    "use strict";
+    const corpus = JSON.parse(document.getElementById("data").textContent);
+    const el = (id) => document.getElementById(id),
+      audio = el("song");
+    let index = 0,
+      position = 0,
+      pass = 0,
+      dirty = false;
+    const flatten = (t) =>
+      t.lyrics.lines.flatMap((l) =>
+        l.syllables.map((u) => ({ ...u, line_id: l.id, line_text: l.text })),
+      );
+    const blankPass = (t) => ({
+      reviewer: "",
+      lyrics_match: false,
+      independent: false,
+      units: flatten(t).map((u) => ({
+        id: u.id,
+        text: u.text,
+        start_ms: null,
+        end_ms: null,
+        difficult: false,
+        note: "",
+      })),
+    });
+    let records = corpus.tracks.map((t) => ({
+      id: t.id,
+      audio_sha256: t.audio_sha256,
+      lyrics_sha256: t.lyrics_sha256,
+      passes: [blankPass(t), blankPass(t)],
+    }));
+    const track = () => corpus.tracks[index],
+      active = () => records[index].passes[pass],
+      unit = () => active().units[position];
+    function message(text) {
+      el("status").textContent = text;
+    }
+    function valid(u) {
+      return (
+        Number.isInteger(u.start_ms) &&
+        Number.isInteger(u.end_ms) &&
+        u.start_ms >= 0 &&
+        u.start_ms < u.end_ms &&
+        u.end_ms <= track().duration_ms
+      );
+    }
+    function refresh() {
+      const units = flatten(track()),
+        u = unit();
+      el("line").textContent = units[position].line_text;
+      el("unit").textContent = `${position + 1}/${units.length} · ${u.text}`;
+      el("start").value = u.start_ms ?? "";
+      el("end").value = u.end_ms ?? "";
+      el("difficult").checked = u.difficult;
+      el("note").value = u.note;
+      el("reviewer").value = active().reviewer;
+      el("lyricsMatch").checked = active().lyrics_match;
+      el("independent").checked = active().independent;
+      el("previous").disabled = position === 0;
+      el("next").disabled = position === units.length - 1;
+      el("seek").disabled = u.start_ms === null;
+      el("progress").textContent =
+        `${active().units.filter(valid).length}/${units.length} tiếng có cặp mốc`;
+      el("words").replaceChildren();
+      active().units.forEach((word, i) => {
+        const b = document.createElement("button");
+        b.textContent = word.text;
+        b.setAttribute("aria-pressed", String(i === position));
+        if (valid(word)) b.className = "done";
+        b.onclick = () => {
+          position = i;
+          refresh();
+        };
+        el("words").append(b);
+      });
+    }
+    function changeTrack() {
+      audio.pause();
+      audio.src = track().audio_url;
+      audio.load();
+      audio.playbackRate = Number(el("speed").value);
+      position = 0;
+      el("attribution").textContent = track().attribution;
+      for (const [id, url] of [
+        ["source", track().source_url],
+        ["license", track().license_url],
+      ]) {
+        el(id).href = /^https:\/\//.test(url) ? url : "#";
+      }
+      refresh();
+      message("");
+    }
+    corpus.tracks.forEach((t, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = `${i + 1}. ${t.title}`;
+      el("track").append(o);
+    });
+    el("track").onchange = () => {
+      index = Number(el("track").value);
+      changeTrack();
+    };
+    el("pass").onchange = () => {
+      audio.pause();
+      pass = Number(el("pass").value);
+      position = 0;
+      refresh();
+      message("Lượt hiện tại không được điền mốc từ lượt kia.");
+    };
+    function toggle() {
+      if (audio.paused)
+        audio
+          .play()
+          .catch(() =>
+            message(
+              "Không phát được MP3. Giữ trang HTML cùng thư mục các file nguồn.",
+            ),
+          );
+      else audio.pause();
+    }
+    el("play").onclick = toggle;
+    el("back").onclick = () => {
+      audio.currentTime = Math.max(0, audio.currentTime - 1);
+    };
+    el("speed").onchange = () => {
+      audio.playbackRate = Number(el("speed").value);
+    };
+    audio.ontimeupdate = () => {
+      el("clock").textContent = `${Math.round(audio.currentTime * 1000)} ms`;
+    };
+    audio.onerror = () =>
+      message("Không tải được MP3 gốc; không đánh dấu trên âm thanh khác.");
+    function mark(field, value) {
+      if (
+        value !== null &&
+        (!Number.isInteger(value) || value < 0 || value > track().duration_ms)
+      ) {
+        message("Mốc phải là số nguyên ms trong bài.");
+        refresh();
+        return;
+      }
+      unit()[field] = value;
+      dirty = true;
+      refresh();
+      message(
+        valid(unit())
+          ? "Đã lưu mốc trong phiên này."
+          : "Tiếng này còn thiếu mốc hoặc đầu/cuối chưa hợp lệ.",
+      );
+    }
+    el("markStart").onclick = () =>
+      mark("start_ms", Math.round(audio.currentTime * 1000));
+    el("markEnd").onclick = () =>
+      mark("end_ms", Math.round(audio.currentTime * 1000));
+    el("start").onchange = () =>
+      mark(
+        "start_ms",
+        el("start").value === "" ? null : Number(el("start").value),
+      );
+    el("end").onchange = () =>
+      mark("end_ms", el("end").value === "" ? null : Number(el("end").value));
+    el("clear").onclick = () => {
+      unit().start_ms = null;
+      unit().end_ms = null;
+      dirty = true;
+      refresh();
+    };
+    el("seek").onclick = () => {
+      if (unit().start_ms !== null)
+        audio.currentTime = Math.max(0, (unit().start_ms - 300) / 1000);
+    };
+    function move(delta) {
+      position = Math.min(
+        active().units.length - 1,
+        Math.max(0, position + delta),
+      );
+      refresh();
+    }
+    el("previous").onclick = () => move(-1);
+    el("next").onclick = () => move(1);
+    el("difficult").onchange = () => {
+      unit().difficult = el("difficult").checked;
+      dirty = true;
+    };
+    el("note").oninput = () => {
+      unit().note = el("note").value;
+      dirty = true;
+    };
+    el("reviewer").oninput = () => {
+      active().reviewer = el("reviewer").value;
+      dirty = true;
+    };
+    el("lyricsMatch").onchange = () => {
+      active().lyrics_match = el("lyricsMatch").checked;
+      dirty = true;
+    };
+    el("independent").onchange = () => {
+      active().independent = el("independent").checked;
+      dirty = true;
+    };
+    document.addEventListener("keydown", (e) => {
+      if (
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        e.repeat ||
+        ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(e.target.tagName)
+      )
+        return;
+      const actions = {
+        s: () => el("markStart").click(),
+        e: () => el("markEnd").click(),
+        ArrowLeft: () => move(-1),
+        ArrowRight: () => move(1),
+      };
+      const fn = actions[e.key];
+      if (fn) {
+        e.preventDefault();
+        fn();
+      }
+    });
+    function exportData() {
+      return {
+        schema_version: 1,
+        kind: "independent-listening-work-in-progress",
+        manifest_sha256: corpus.manifest_sha256,
+        exported_at: new Date().toISOString(),
+        prediction_visible: false,
+        provenance_verified: false,
+        accepted: false,
+        reference_lyrics: null,
+        records,
+        disagreements: records.flatMap((r) =>
+          r.passes[0].units.map((u, i) => {
+            const v = r.passes[1].units[i];
+            return {
+              track_id: r.id,
+              unit_id: u.id,
+              start_delta_ms:
+                u.start_ms === null || v.start_ms === null
+                  ? null
+                  : Math.abs(u.start_ms - v.start_ms),
+              end_delta_ms:
+                u.end_ms === null || v.end_ms === null
+                  ? null
+                  : Math.abs(u.end_ms - v.end_ms),
+              difficult: u.difficult || v.difficult,
+            };
+          }),
+        ),
+      };
+    }
+    el("export").onclick = () => {
+      const blob = new Blob([JSON.stringify(exportData(), null, 2)], {
+          type: "application/json",
+        }),
+        url = URL.createObjectURL(blob),
+        a = document.createElement("a");
+      a.href = url;
+      a.download =
+        "karaoke-reference-review-" +
+        new Date().toISOString().replace(/[:.]/g, "-") +
+        ".json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      dirty = false;
+      message(
+        "Đã xuất bản lưu. Chưa coi là reference đạt: cần kiểm tra đủ mốc, sai khác giữa hai lượt và xác nhận của người nghe.",
+      );
+    };
+    function checkRestore(data) {
+      if (
+        data?.kind !== "independent-listening-work-in-progress" ||
+        data.manifest_sha256 !== corpus.manifest_sha256 ||
+        !Array.isArray(data.records) ||
+        data.records.length !== records.length
+      )
+        throw Error();
+      return data.records.map((r, i) => {
+        const t = corpus.tracks[i],
+          expected = flatten(t);
+        if (
+          r.id !== t.id ||
+          r.audio_sha256 !== t.audio_sha256 ||
+          r.lyrics_sha256 !== t.lyrics_sha256 ||
+          !Array.isArray(r.passes) ||
+          r.passes.length !== 2
+        )
+          throw Error();
+        return {
+          id: t.id,
+          audio_sha256: t.audio_sha256,
+          lyrics_sha256: t.lyrics_sha256,
+          passes: r.passes.map((p) => {
+            if (
+              typeof p.reviewer !== "string" ||
+              p.reviewer.length > 80 ||
+              typeof p.lyrics_match !== "boolean" ||
+              typeof p.independent !== "boolean" ||
+              !Array.isArray(p.units) ||
+              p.units.length !== expected.length
+            )
+              throw Error();
+            return {
+              reviewer: p.reviewer,
+              lyrics_match: p.lyrics_match,
+              independent: p.independent,
+              units: p.units.map((u, j) => {
+                if (
+                  u.id !== expected[j].id ||
+                  u.text !== expected[j].text ||
+                  typeof u.difficult !== "boolean" ||
+                  typeof u.note !== "string" ||
+                  u.note.length > 400 ||
+                  [u.start_ms, u.end_ms].some(
+                    (v) =>
+                      v !== null &&
+                      (!Number.isInteger(v) || v < 0 || v > t.duration_ms),
+                  )
+                )
+                  throw Error();
+                return {
+                  id: u.id,
+                  text: u.text,
+                  start_ms: u.start_ms,
+                  end_ms: u.end_ms,
+                  difficult: u.difficult,
+                  note: u.note,
+                };
+              }),
+            };
+          }),
+        };
+      });
+    }
+    el("restore").onchange = async () => {
+      const file = el("restore").files[0];
+      if (!file) return;
+      if (
+        dirty &&
+        !confirm(
+          "Khôi phục sẽ thay các mốc chưa tải xuống. Bạn đã lưu chúng chưa?",
+        )
+      )
+        return;
+      try {
+        if (file.size > 2097152) throw Error();
+        const restored = checkRestore(JSON.parse(await file.text()));
+        audio.pause();
+        records = restored;
+        dirty = false;
+        refresh();
+        message("Đã khôi phục bản lưu đúng bộ dữ liệu.");
+      } catch {
+        message(
+          "Bản lưu không hợp lệ hoặc thuộc bộ dữ liệu khác; dữ liệu hiện tại giữ nguyên.",
+        );
+      } finally {
+        el("restore").value = "";
+      }
+    };
+    addEventListener("beforeunload", (e) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+    changeTrack();
+  </script>
+</html>

@@ -34,6 +34,9 @@ export default async function warmRoutes(): Promise<void> {
       "/admin/audit-logs",
       "/admin/health",
       "/admin/books/new",
+      "/admin/karaoke",
+      "/admin/karaoke/new",
+      `/admin/karaoke/${book}/edit`,
     ],
   } as const;
   for (const role of ["parent", "admin"] as const) {
