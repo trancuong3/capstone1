@@ -13,7 +13,7 @@ from sqlalchemy import literal, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_current_parent_id, get_db, require_admin_id, require_parent_id
 from app.api.routes.reading import HistoryRepository, HistoryService
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
@@ -56,16 +56,39 @@ from app.schemas.system import (
 router = APIRouter()
 
 
+async def _require_owned_child(db: AsyncSession, actor_id: UUID, child_id: UUID) -> None:
+    """Use a non-enumerating owner predicate before any child-scoped write."""
+    owned_id = await db.scalar(
+        select(ChildProfile.Id).where(
+            ChildProfile.Id == child_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
+    if owned_id is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+
 @router.get("/reports", response_model=List[ProgressReportResponse])
-async def get_reports(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách báo cáo tiến độ"""
-    result = await db.execute(select(ProgressReport))
+async def get_reports(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Only the signed-in parent's children's reports."""
+    result = await db.execute(
+        select(ProgressReport)
+        .join(ChildProfile, ProgressReport.ChildId == ChildProfile.Id)
+        .where(ChildProfile.ParentId == actor_id)
+    )
     return result.scalars().all()
 
 
 @router.post("/reports", response_model=ProgressReportResponse)
-async def create_report(report_in: ProgressReportCreate, db: AsyncSession = Depends(get_db)):
-    """Tạo báo cáo tiến độ học tập mới"""
+async def create_report(
+    report_in: ProgressReportCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_owned_child(db, actor_id, report_in.ChildId)
     new_report = ProgressReport(**report_in.model_dump())
     db.add(new_report)
     await db.commit()
@@ -74,15 +97,31 @@ async def create_report(report_in: ProgressReportCreate, db: AsyncSession = Depe
 
 
 @router.get("/consents", response_model=List[ConsentRecordResponse])
-async def get_consents(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách các bản ghi đồng ý (Consent)"""
-    result = await db.execute(select(ConsentRecord))
+async def get_consents(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Consent is visible only when both parent and child belong to the actor."""
+    result = await db.execute(
+        select(ConsentRecord)
+        .join(ChildProfile, ConsentRecord.ChildId == ChildProfile.Id)
+        .where(
+            ConsentRecord.ParentId == actor_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
     return result.scalars().all()
 
 
 @router.post("/consents", response_model=ConsentRecordResponse)
-async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi nhận quyền riêng tư/đồng ý (Consent) mới"""
+async def create_consent(
+    consent_in: ConsentRecordCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    if consent_in.ParentId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _require_owned_child(db, actor_id, consent_in.ChildId)
     new_consent = ConsentRecord(**consent_in.model_dump())
     db.add(new_consent)
     await db.commit()
@@ -91,15 +130,24 @@ async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Dep
 
 
 @router.get("/logs", response_model=List[AuditLogResponse])
-async def get_audit_logs(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách log kiểm toán hệ thống"""
+async def get_audit_logs(
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Raw audit records are restricted to active administrators."""
     result = await db.execute(select(AuditLog))
     return result.scalars().all()
 
 
 @router.post("/logs", response_model=AuditLogResponse)
-async def create_audit_log(log_in: AuditLogCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi log hệ thống"""
+async def create_audit_log(
+    log_in: AuditLogCreate,
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # A client must not impersonate another actor in an audit trail.
+    if log_in.ActorId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     new_log = AuditLog(**log_in.model_dump())
     db.add(new_log)
     await db.commit()
