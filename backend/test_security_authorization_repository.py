@@ -8,7 +8,7 @@ import os
 import unittest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
@@ -18,6 +18,8 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from sqlalchemy.dialects import postgresql
 
 from app.api.routes.reading import HistoryRepository
+from app.database.role_cache import get_cached_profile_role
+from app.repositories.admin_parent_repository import AdminParentRepository
 from app.api.routes.system import AdminSystemRepository, LegacyReportRepository, ProgressRepository
 from app.repositories.tutor_question_repository import TutorQuestionRepository
 from app.services.tutor_question_service import TutorQuestionService
@@ -167,6 +169,49 @@ class OwnershipRepositoryTests(unittest.IsolatedAsyncioTestCase):
         repository.add_questions.assert_not_called()
         repository.commit.assert_not_awaited()
         self.assertEqual(repository.release.await_count, 2)
+
+
+    async def test_role_cache_queries_require_active_profile(self):
+        # A mock DB intentionally bypasses caching and captures the actual
+        # authorization SQL without touching a production profile.
+        db = MagicMock()
+        db.scalar = AsyncMock(return_value=None)
+        await get_cached_profile_role(db, ACTOR)
+        sql, params = compiled(db.scalar.await_args.args[0])
+        self.assertIn("profiles.active", sql)
+        self.assertIn(ACTOR, params)
+        self.assertIn(1, params)
+
+    async def test_admin_deactivation_invalidates_cached_parent_role(self):
+        db = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = ACTOR
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+        with patch("app.repositories.admin_parent_repository.invalidate_cached_role") as invalidate:
+            changed = await AdminParentRepository(db).soft_delete_parent(ACTOR)
+        self.assertTrue(changed)
+        db.commit.assert_awaited_once()
+        invalidate.assert_called_once_with(ACTOR)
+        sql, params = compiled(db.execute.await_args.args[0])
+        self.assertIn("profiles.active", sql)
+        self.assertIn("profiles.role", sql)
+        self.assertIn(ACTOR, params)
+        self.assertIn("parent", params)
+
+    async def test_deactivation_does_not_invalidate_on_missing_profile(self):
+        db = MagicMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=result)
+        db.rollback = AsyncMock()
+        db.commit = AsyncMock()
+        with patch("app.repositories.admin_parent_repository.invalidate_cached_role") as invalidate:
+            changed = await AdminParentRepository(db).soft_delete_parent(ACTOR)
+        self.assertFalse(changed)
+        db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
+        invalidate.assert_not_called()
 
 
 if __name__ == "__main__":
