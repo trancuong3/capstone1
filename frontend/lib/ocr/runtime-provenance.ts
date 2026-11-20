@@ -45,6 +45,7 @@ const SAFE_REASONS = new Set([
   "requested_checkpoint_not_loaded",
   "vietocr_inference_error",
   "vietocr_no_result",
+  "vietocr_unavailable",
   "paddle_unavailable",
   "paddle_no_text",
   "paddle_inference_error",
