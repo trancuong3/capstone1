@@ -82,7 +82,8 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 """
                 CREATE TABLE profiles (
                     id uuid PRIMARY KEY,
-                    role text NOT NULL
+                    role text NOT NULL,
+                    active smallint NOT NULL DEFAULT 1
                 )
                 """,
                 """
@@ -714,6 +715,26 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # This source revision is already admin-verified; verified state has
         # higher priority than historical disagreement in its original OCR candidates.
         self.assertEqual(first_word["review_color_group"], "green")
+
+    async def test_inactive_admin_is_denied_before_ocr_draft_write(self):
+        # Active status must be checked against the disposable database schema,
+        # not only asserted via a mocked SQL statement.
+        async with self.engine.begin() as connection:
+            await connection.execute(
+                text("UPDATE profiles SET active = 0 WHERE id = :id"),
+                {"id": ACTOR},
+            )
+
+        async with self.sessions() as session:
+            service = AdminOcrService(session)
+            with self.assertRaises(Exception) as raised:
+                await service.create_edit_draft(ACTOR, PAGE_ID, R1_ID)
+            self.assertEqual(getattr(raised.exception, "status_code", None), 403)
+            count = await session.scalar(
+                text("SELECT count(*) FROM pagerevisions WHERE pageid = :page"),
+                {"page": PAGE_ID},
+            )
+        self.assertEqual(count, 1)
 
     async def test_duplicate_concurrent_draft_is_rejected_after_row_lock(self):
         async def create():
