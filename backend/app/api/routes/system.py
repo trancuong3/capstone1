@@ -753,7 +753,7 @@ class AdminSystemRepository:
         self.db = db
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
 
     async def logs(self, action: str | None, resource_type: str | None, offset: int, limit: int):
         query = select(AuditLog)
