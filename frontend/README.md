@@ -2,7 +2,7 @@
 
 ReadAlong Vision là giao diện web hỗ trợ ba mẹ chọn sách, tạo hồ sơ cho bé và theo dõi một buổi đọc tương tác. Repository hiện chứa bản frontend responsive dành cho máy tính, máy tính bảng và điện thoại.
 
-Auth phụ huynh và Admin đã dùng **Supabase Auth thật** khi truy cập bình thường. Các route riêng tư được bảo vệ phía server bằng session đã xác minh và `profiles.role`; những khu vực dữ liệu nghiệp vụ khác vẫn dùng typed mock services. Muốn chạy Auth thật cần cấu hình `.env.local`.
+Auth phụ huynh và Admin sử dụng **Supabase Auth thật** khi truy cập bình thường; các route riêng tư xác minh session và `profiles.role`. Frontend có **typed API services gọi FastAPI thật** cho hồ sơ, sách, buổi đọc, lịch sử, báo cáo và nhiều luồng quản trị. Một số component vẫn có mock/fixture cho test và trình diễn state; không đồng nhất fixture đó với persistence production. Muốn chạy các API cần cấu hình frontend/backend, Auth, database và các dịch vụ liên quan.
 
 ## Trạng thái dự án
 
@@ -15,7 +15,7 @@ Các khu vực giao diện đã có:
 - Lịch sử đọc, báo cáo tiến bộ và danh sách từ cần luyện.
 - Khu vực Admin quản lý sách, trang sách, OCR/revision, audit log và health.
 
-Những thao tác trên chỉ thay đổi dữ liệu trong bộ nhớ của trình duyệt. Tải lại trang có thể đưa dữ liệu về fixture ban đầu.
+**Lưu ý phạm vi:** Các thao tác API có token và backend/database phù hợp có thể được lưu bền vững; chỉ những đường dẫn fixture/mock phục vụ demo/test mới giữ dữ liệu ở bộ nhớ trình duyệt. Không mặc định mọi màn hình chỉ dùng mock hoặc mọi dịch vụ backend đều sẵn sàng trên production.
 
 ## Yêu cầu môi trường
 
@@ -28,7 +28,7 @@ Những thao tác trên chỉ thay đổi dữ liệu trong bộ nhớ của tr�
 Sau khi clone repository, mở PowerShell hoặc Terminal tại thư mục dự án:
 
 ```powershell
-cd readalong-vision
+cd capstone1
 cd frontend
 npm ci
 Copy-Item .env.example .env.local
@@ -58,9 +58,9 @@ Mock Auth chỉ kiểm thử trạng thái của form phía client; nó không t
 ### Lộ trình xem nhanh
 
 1. Mở `/login` và đăng nhập bằng tài khoản phụ huynh Supabase thật.
-2. Tại `/dashboard`, chọn Bé An rồi mở thư viện sách.
-3. Chọn “Chú Mèo Nhỏ”, xem trước trang và bắt đầu buổi đọc.
-4. Mở `/reports` hoặc `/sessions` để xem dữ liệu báo cáo mẫu.
+2. Tại `/dashboard`, chọn hồ sơ bé thuộc tài khoản của bạn rồi mở thư viện sách (Bé An chỉ là dữ liệu ví dụ trong fixture).
+3. Chọn sách đã được backend công bố ACTIVE + VERIFIED, xem trước trang và bắt đầu buổi đọc (tên sách mẫu chỉ có trong fixture nếu dữ liệu test được nạp).
+4. Mở `/reports` hoặc `/sessions` để xem dữ liệu trả về từ backend cho hồ sơ bé được chọn; các query `?state=...` chỉ mô phỏng trạng thái ở môi trường được phép.
 5. Mở `/admin/login` bằng tài khoản Supabase có `profiles.role = admin`; dùng query `state` chỉ khi cần xem trạng thái form mock.
 
 Để dừng development server, quay lại Terminal và nhấn `Ctrl+C`.
@@ -117,7 +117,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Books    | `/books`                               | Tìm kiếm, lọc danh mục ACTIVE + VERIFIED                   |
 | Books    | `/books/[bookId]`                      | Chi tiết, chọn trang bắt đầu và khoảng trang               |
 | Reading  | `/reading-preparation`                 | Xác minh microphone và tạo session cho hồ sơ đã chọn       |
-| Reading  | `/reading/[sessionId]`                 | Trình diễn trạng thái buổi đọc, không dùng camera/mic thật |
+| Reading  | `/reading/[sessionId]`                 | Luồng đọc và ghi nhận evidence; phụ thuộc cấu hình mic/STT/TTS và API |
 | Sessions | `/sessions`                            | Lịch sử buổi đọc theo bé                                   |
 | Sessions | `/sessions/[sessionId]`                | Chi tiết lịch sử gắn revision                              |
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
@@ -129,7 +129,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Admin    | `/admin/books/[bookId]`                | Chi tiết sách, upload trang, lifecycle                     |
 | Admin    | `/admin/books/[bookId]/pages/[pageId]` | Review OCR/revision, verify và reprocess                   |
 | Admin    | `/admin/audit-logs`                    | Nhật ký kiểm toán an toàn                                  |
-| Admin    | `/admin/health`                        | Trạng thái vận hành mô phỏng                               |
+| Admin    | `/admin/health`                        | Giao diện health/diagnostics từ backend; trạng thái test có fixture |
 
 ### Luồng xác minh thiết bị và quét trang sách
 
