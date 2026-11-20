@@ -68,7 +68,7 @@ async def prepare_database():
                 -- Database roles are cluster-wide: the separate OCR migration
                 -- fixture may already have created them on this same disposable
                 -- PostgreSQL service. Never drop or replace existing roles.
-                DO $ BEGIN
+                DO $role_setup$ BEGIN
                     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
                         CREATE ROLE anon NOLOGIN;
                     END IF;
@@ -78,7 +78,7 @@ async def prepare_database():
                     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
                         CREATE ROLE service_role NOLOGIN;
                     END IF;
-                END $;
+                END $role_setup$;
                 CREATE TABLE public.profiles (
                     id uuid PRIMARY KEY, role text NOT NULL, displayname text,
                     contact_phone text, avatar_path text, active smallint NOT NULL DEFAULT 1,
