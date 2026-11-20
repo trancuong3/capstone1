@@ -511,4 +511,174 @@ describe("child karaoke microphone lifecycle", () => {
     });
     expect(recognizers).toHaveLength(2);
   });
+
+  it("highlights live right/wrong words while singing and allows finishing early to score the song", async () => {
+    const recognizers = installRecognition();
+    stage();
+    // Start in free mode first, then switch to scored mode while playing
+    clickButton("Bắt đầu hát");
+    await finishPreparation();
+    expect(
+      screen.getByRole("button", { name: "Hát có chấm điểm" }),
+    ).not.toBeDisabled();
+    clickButton("Hát có chấm điểm");
+    clickButton("Bắt đầu hát");
+    await act(async () => recognizers[0].onstart?.());
+    await finishPreparation();
+    const capture = recognizers[1];
+    act(() => {
+      capture.onstart?.();
+      audios[0].currentTime = 1.4;
+      audios[0].dispatchEvent(new Event("timeupdate"));
+      // Interim result while singing: "bé nói" ("bé" right, "nói" wrong for "hát")
+      capture.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: false,
+            0: { transcript: "bé nói", confidence: 0.95 },
+          },
+        ],
+      });
+    });
+    const activeLine = screen.getByTestId("karaoke-active-line");
+    expect(
+      activeLine.querySelector('[data-word-state="preview-matched"]'),
+    ).toHaveTextContent("Bé");
+    expect(
+      activeLine.querySelector('[data-word-state="preview-different"]'),
+    ).toHaveTextContent("hát");
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Đúng: 1",
+    );
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Chưa đúng: 1",
+    );
+
+    // Final result: "bé nói vui" ("bé" matched, "hát" different, "vui" matched)
+    act(() => {
+      phrase(capture, 1, 3.8);
+      capture.onresult?.(finalResults("bé nói vui"));
+    });
+    expect(
+      activeLine.querySelector('[data-word-state="different"]'),
+    ).toHaveTextContent("hát (chưa đúng lời)");
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Đúng: 2",
+    );
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Chưa đúng: 1",
+    );
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Tỉ lệ đúng: 67%",
+    );
+
+    // Finish and score the song via the dedicated button
+    clickButton("Kết thúc & chấm điểm");
+    act(() => capture.onend?.());
+    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
+    expect(screen.getByText("67/100", { exact: true })).toBeVisible();
+    const breakdown = screen.getByTestId("karaoke-score-breakdown");
+    expect(breakdown).toHaveTextContent("Hát đúng2");
+    expect(breakdown).toHaveTextContent("Chưa đúng1");
+    expect(breakdown).toHaveTextContent("Bỏ qua0");
+  });
+
+  it("marks unsung words as Bỏ qua in real time as the audio plays past them", async () => {
+    const { capture } = await scoredStage();
+    // Advance playback continuously through syllable 1 (1000..1500) and syllable 2 (1800..2500) without singing
+    for (const ms of [500, 1000, 1300, 1660]) {
+      act(() => {
+        audios[0].currentTime = ms / 1000;
+        audios[0].dispatchEvent(new Event("timeupdate"));
+      });
+    }
+    const activeLine = screen.getByTestId("karaoke-active-line");
+    expect(
+      activeLine.querySelectorAll('[data-word-state="omitted"]'),
+    ).toHaveLength(1);
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Bỏ qua: 1",
+    );
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Tỉ lệ đúng: 0%",
+    );
+
+    // Continue silent playback past syllable 2 (1800..2500) and syllable 3 (2600..4000)
+    for (const ms of [2000, 2400, 2660, 3100, 3600, 3950]) {
+      act(() => {
+        audios[0].currentTime = ms / 1000;
+        audios[0].dispatchEvent(new Event("timeupdate"));
+      });
+    }
+    expect(
+      activeLine.querySelectorAll('[data-word-state="omitted"]'),
+    ).toHaveLength(2);
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Bỏ qua: 2",
+    );
+
+    // Finish song without singing any words -> all 3 played words are Bỏ qua (0/100)
+    clickButton("Kết thúc & chấm điểm");
+    act(() => capture.onend?.());
+    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
+    expect(screen.getByText("0/100", { exact: true })).toBeVisible();
+    const breakdown = screen.getByTestId("karaoke-score-breakdown");
+    expect(breakdown).toHaveTextContent("Hát đúng0");
+    expect(breakdown).toHaveTextContent("Chưa đúng0");
+    expect(breakdown).toHaveTextContent("Bỏ qua3");
+  });
+
+  it("recognizes soft/quiet singing via multi-alternatives, tone/phonetic tolerance and interim flushing", async () => {
+    const { capture } = await scoredStage();
+    // 1. Soft singing with low confidence (0.28), alternative 1 having soft tone shift "bè hat",
+    //    and interim result for "vùi" that closes without a final event
+    act(() => {
+      phrase(capture, 1, 2.4);
+      capture.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            0: { transcript: "ờ ừm", confidence: 0.28 },
+            1: { transcript: "bè hat", confidence: 0.25 },
+            length: 2,
+          } as unknown as ReturnType<typeof finalResults>["results"][number],
+        ],
+      });
+    });
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Đúng: 2",
+    );
+
+    // 2. Quiet trailing syllable "vui" only appears as an interim result ("vùi") before ending
+    act(() => {
+      audios[0].currentTime = 3.2;
+      audios[0].dispatchEvent(new Event("timeupdate"));
+      capture.onresult?.({
+        resultIndex: 1,
+        results: [
+          {
+            isFinal: true,
+            0: { transcript: "bè hat", confidence: 0.28 },
+          },
+          {
+            isFinal: false,
+            0: { transcript: "vùi", confidence: 0.22 },
+          },
+        ],
+      });
+    });
+    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
+      "Đúng: 3",
+    );
+
+    clickButton("Kết thúc & chấm điểm");
+    act(() => capture.onend?.());
+    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
+    expect(screen.getByText("100/100", { exact: true })).toBeVisible();
+    const breakdown = screen.getByTestId("karaoke-score-breakdown");
+    expect(breakdown).toHaveTextContent("Hát đúng3");
+    expect(breakdown).toHaveTextContent("Bỏ qua0");
+  });
 });
