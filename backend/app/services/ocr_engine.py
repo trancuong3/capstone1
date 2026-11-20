@@ -263,6 +263,10 @@ def _attach_vietocr_provenance(
         snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
     elif status == "no_result" and not snapshot.get("fallback_reason"):
         snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
+    elif (snapshot.get("model_load_status") == "unavailable"
+          or status in {"not_installed", "not_initialized", "disabled"}):
+        if not snapshot.get("fallback_reason"):
+            snapshot = {**snapshot, "fallback_reason": "vietocr_unavailable"}
     metadata["vietocr_runtime_provenance"] = {
         **snapshot,
         "model_inference_status": status,
