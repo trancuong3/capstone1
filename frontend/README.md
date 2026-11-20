@@ -117,7 +117,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Books    | `/books`                               | Tìm kiếm, lọc danh mục ACTIVE + VERIFIED                   |
 | Books    | `/books/[bookId]`                      | Chi tiết, chọn trang bắt đầu và khoảng trang               |
 | Reading  | `/reading-preparation`                 | Xác minh microphone và tạo session cho hồ sơ đã chọn       |
-| Reading  | `/reading/[sessionId]`                 | Luồng đọc và ghi nhận evidence; phụ thuộc cấu hình mic/STT/TTS và API |
+| Reading  | `/reading/[sessionId]`                 | Luồng đọc qua API, dùng mic/STT/TTS khi cấu hình           |
 | Sessions | `/sessions`                            | Lịch sử buổi đọc theo bé                                   |
 | Sessions | `/sessions/[sessionId]`                | Chi tiết lịch sử gắn revision                              |
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
@@ -129,7 +129,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Admin    | `/admin/books/[bookId]`                | Chi tiết sách, upload trang, lifecycle                     |
 | Admin    | `/admin/books/[bookId]/pages/[pageId]` | Review OCR/revision, verify và reprocess                   |
 | Admin    | `/admin/audit-logs`                    | Nhật ký kiểm toán an toàn                                  |
-| Admin    | `/admin/health`                        | Giao diện health/diagnostics từ backend; trạng thái test có fixture |
+| Admin    | `/admin/health`                        | Health backend và trạng thái fixture khi kiểm thử          |
 
 ### Luồng xác minh thiết bị và quét trang sách
 
