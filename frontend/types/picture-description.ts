@@ -1,6 +1,7 @@
 export type PictureSourceType = "BOOK_PAGE" | "CUSTOM_UPLOAD" | "SAMPLE";
 export type PictureSessionStatus = "ACTIVE" | "COMPLETED";
 export type PictureInputMode = "VOICE" | "TEXT";
+export type PictureEvaluationSource = "AI" | "FALLBACK";
 
 export interface PictureVocabItemDTO {
   readonly word: string;
@@ -56,6 +57,7 @@ export interface PictureAttemptDTO {
   readonly transcript_text: string;
   readonly score_out_of_10: number;
   readonly stars: number;
+  readonly evaluation_source?: PictureEvaluationSource;
   readonly feedback: PictureEvaluationFeedbackDTO;
   readonly created_at: string;
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from app.services.picture_description_ai import (
     PictureAiError,
     PictureDescriptionAiConfig,
     _compute_stars,
+    evaluate_description_with_guide_fallback,
 )
 from app.services.picture_description_service import (
     PictureDescriptionService,
@@ -505,6 +507,271 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(copied_fb.stars, 2)
         self.assertIn("câu mẫu", copied_fb.improvement_tip)
 
+    async def test_gemini_sends_minimal_thinking_config_and_retries_without_on_400(self):
+        captured_configs: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode("utf-8"))
+            gen_cfg = body["generationConfig"]
+            captured_configs.append(gen_cfg)
+            if "thinkingConfig" in gen_cfg:
+                return httpx.Response(
+                    400,
+                    json={"error": {"message": "Thinking level MINIMAL is not supported"}},
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": f"<think>internal</think>\n{json.dumps(_evaluation_json_payload(score_out_of_10=9), ensure_ascii=False)}"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model=None,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có gì trong tranh?"],
+            child_transcript="Chú mèo màu cam đang ngủ ngon trên ghế gỗ giữa vườn hoa.",
+        )
+
+        self.assertEqual(model_used, "gemini-3.1-flash-lite")
+        self.assertEqual(feedback.score_out_of_10, 9)
+        self.assertEqual(len(captured_configs), 2)
+        self.assertEqual(captured_configs[0]["thinkingConfig"], {"thinkingLevel": "MINIMAL"})
+        self.assertNotIn("thinkingConfig", captured_configs[1])
+
+    async def test_gemini_503_falls_back_to_extra_model_and_transient_retry(self):
+        calls: list[str] = []
+
+        def handler_extra(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            if "gemma-4-26b-a4b-it" in request.url.path:
+                body = json.loads(request.content.decode("utf-8"))
+                self.assertNotIn("thinkingConfig", body["generationConfig"])
+                return httpx.Response(
+                    200,
+                    json={
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "text": json.dumps(
+                                                _evaluation_json_payload(score_out_of_10=8),
+                                                ensure_ascii=False,
+                                            )
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(503, json={"error": {"message": "high demand"}})
+
+        ai_extra = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                extra_models=("gemma-4-26b-a4b-it",),
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler_extra),
+        )
+        fb, model_used = await ai_extra.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript="Chú mèo cam ngủ trên chiếc ghế gỗ giữa vườn hoa hướng dương.",
+        )
+        self.assertEqual(model_used, "gemma-4-26b-a4b-it")
+        self.assertEqual(fb.score_out_of_10, 8)
+        self.assertEqual(len(calls), 3)
+
+        # Transient retry pass recovers when a short 503 spike clears on pass 2.
+        retry_hits = 0
+
+        def handler_retry(_request: httpx.Request) -> httpx.Response:
+            nonlocal retry_hits
+            retry_hits += 1
+            if retry_hits == 1:
+                return httpx.Response(503, json={"error": {"message": "temporary spike"}})
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            _evaluation_json_payload(score_out_of_10=9),
+                                            ensure_ascii=False,
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai_retry = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model=None,
+                transient_retries=1,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler_retry),
+        )
+        fb_retry, model_retry = await ai_retry.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript="Chú mèo cam ngủ ngon trên chiếc ghế gỗ giữa vườn hoa.",
+        )
+        self.assertEqual(model_retry, "gemini-3.1-flash-lite")
+        self.assertEqual(fb_retry.score_out_of_10, 9)
+        self.assertEqual(retry_hits, 2)
+
+    async def test_string_false_is_child_safe_blocks_unsafe_image(self):
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model=None,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(
+                lambda _req: httpx.Response(
+                    200,
+                    json={
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "text": json.dumps(
+                                                _guide_json_payload(is_child_safe="false"),
+                                                ensure_ascii=False,
+                                            )
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                )
+            ),
+        )
+        with self.assertRaises(PictureAiError) as ctx:
+            await ai.analyze_picture(
+                image_bytes=_sample_png_bytes(),
+                mime_type="image/png",
+                child_grade=2,
+            )
+        self.assertEqual(ctx.exception.detail, "UNSAFE_PICTURE")
+
+    def test_guide_grounded_fallback_evaluator_scores_relevant_and_offtopic_accurately(self):
+        guide = PictureGuideRead.model_validate(_guide_json_payload())
+
+        good_fb, model_tag = evaluate_description_with_guide_fallback(
+            guide=guide,
+            child_grade=2,
+            child_transcript="Trong vườn nắng ấm có chú mèo nằm cuộn tròn ngủ trên ghế gỗ bên cạnh hoa hướng dương.",
+        )
+        self.assertEqual(model_tag, "guide-fallback")
+        self.assertTrue(good_fb.is_relevant)
+        self.assertGreaterEqual(good_fb.score_out_of_10, 8)
+        self.assertEqual(good_fb.stars, 3)
+        self.assertGreaterEqual(len(good_fb.matched_details), 2)
+
+        offtopic_fb, _ = evaluate_description_with_guide_fallback(
+            guide=guide,
+            child_grade=2,
+            child_transcript="Alo thằng em đi hàng em Linh",
+        )
+        self.assertFalse(offtopic_fb.is_relevant)
+        self.assertEqual(offtopic_fb.score_out_of_10, 0)
+        self.assertEqual(offtopic_fb.stars, 0)
+        self.assertEqual(offtopic_fb.matched_details, [])
+
+    async def test_hedged_gemini_races_fallback_when_primary_stalls(self):
+        async def slow_then_fast(request: httpx.Request) -> httpx.Response:
+            if "gemini-3.1-flash-lite" in request.url.path:
+                await asyncio.sleep(2.0)
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            _evaluation_json_payload(score_out_of_10=9),
+                                            ensure_ascii=False,
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="test-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                hedged_gemini=True,
+                hedge_stagger_seconds=0.05,
+                timeout_seconds=5,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(slow_then_fast),
+        )
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn",
+            guiding_questions=["Có ai?"],
+            child_transcript="Chú mèo cam đang ngủ ngon trên ghế gỗ giữa vườn hoa.",
+        )
+        self.assertEqual(model_used, "gemini-3.5-flash-lite")
+        self.assertEqual(feedback.score_out_of_10, 9)
+
 
 class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
     def _make_repo_mock(self, *, role: str = "parent", grade: int = 2) -> MagicMock:
@@ -786,6 +1053,161 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
             evaluated.session.image_url,
             "https://signed.example/books/123/page-4.png?token=abc",
         )
+
+    async def test_service_uses_curated_sample_and_guide_fallback_on_transient_ai_outage(self):
+        parent_id = uuid4()
+        child_id = uuid4()
+        session_id = uuid4()
+        now = datetime.now(timezone.utc)
+        repo = self._make_repo_mock(role="parent", grade=2)
+
+        async def fake_create(orm_session):
+            return SessionProjection(
+                Id=orm_session.Id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=None,
+                BookPageId=None,
+                SourceType="SAMPLE",
+                SampleKey="sunny-garden",
+                ImagePath=orm_session.ImagePath,
+                ImageMimeType="image/jpeg",
+                ChildGrade=2,
+                SceneTitle=orm_session.SceneTitle,
+                PromptPayload=orm_session.PromptPayload,
+                Status="ACTIVE",
+                BestStars=0,
+                BestScore=0,
+                AttemptsCount=0,
+                AiModelUsed=orm_session.AiModelUsed,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+
+        repo.create_session = AsyncMock(side_effect=fake_create)
+
+        ai_mock = MagicMock(spec=GeminiPictureDescriptionAI)
+        ai_mock.analyze_picture = AsyncMock(
+            side_effect=PictureAiError(
+                code="AI_OVERLOADED",
+                status_code=503,
+                detail="AI_RATE_LIMITED",
+                retryable=True,
+            )
+        )
+        service = PictureDescriptionService(repo, ai_client=ai_mock)
+        created = await service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type="SAMPLE",
+            sample_key="sunny-garden",
+        )
+        self.assertEqual(created.scene_title, "Khu vườn đầy nắng")
+        self.assertGreaterEqual(len(created.guide.suggested_vocabulary), 5)
+
+        # Evaluate falls back to guide-fallback on retryable timeout -> evaluation_source == "FALLBACK"
+        stored = SessionProjection(
+            Id=session_id,
+            ChildProfileId=child_id,
+            ParentId=parent_id,
+            BookId=None,
+            BookPageId=None,
+            SourceType="SAMPLE",
+            SampleKey="sunny-garden",
+            ImagePath="sample://sunny-garden.jpg",
+            ImageMimeType="image/jpeg",
+            ChildGrade=2,
+            SceneTitle=created.scene_title,
+            PromptPayload=created.guide.model_dump(mode="json"),
+            Status="ACTIVE",
+            BestStars=0,
+            BestScore=0,
+            AttemptsCount=0,
+            AiModelUsed="builtin-sample-guide",
+            CreatedAt=now,
+            UpdatedAt=now,
+        )
+        repo.get_owned_session_projection = AsyncMock(return_value=stored)
+
+        async def fake_save_attempt(**kwargs):
+            att = kwargs["attempt"]
+            att_proj = AttemptProjection(
+                Id=att.Id,
+                SessionId=session_id,
+                AttemptNumber=1,
+                InputMode=att.InputMode,
+                TranscriptText=att.TranscriptText,
+                ScoreOutOf10=att.ScoreOutOf10,
+                Stars=att.Stars,
+                FeedbackPayload=att.FeedbackPayload,
+                AiModelUsed=att.AiModelUsed,
+                CreatedAt=now,
+            )
+            upd = SessionProjection(
+                Id=session_id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=None,
+                BookPageId=None,
+                SourceType="SAMPLE",
+                SampleKey="sunny-garden",
+                ImagePath="sample://sunny-garden.jpg",
+                ImageMimeType="image/jpeg",
+                ChildGrade=2,
+                SceneTitle=created.scene_title,
+                PromptPayload=created.guide.model_dump(mode="json"),
+                Status=kwargs["new_status"],
+                BestStars=kwargs["new_best_stars"],
+                BestScore=kwargs["new_best_score"],
+                AttemptsCount=1,
+                AiModelUsed="builtin-sample-guide",
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            repo.list_attempts = AsyncMock(return_value=[att_proj])
+            return upd, att_proj
+
+        repo.save_attempt_and_update_session = AsyncMock(side_effect=fake_save_attempt)
+        ai_mock.evaluate_description = AsyncMock(
+            side_effect=PictureAiError(
+                code="AI_TIMEOUT",
+                status_code=504,
+                detail="AI_TIMEOUT",
+                retryable=True,
+            )
+        )
+
+        evaluated = await service.evaluate_attempt(
+            parent_id,
+            session_id,
+            PictureEvaluateRequest(
+                transcript_text="Trong khu vườn nắng ấm có chú mèo cam nằm cuộn tròn trên ghế gỗ bên hoa hướng dương.",
+                input_mode="TEXT",
+            ),
+        )
+        self.assertEqual(evaluated.latest_attempt.evaluation_source, "FALLBACK")
+        self.assertGreaterEqual(evaluated.latest_attempt.score_out_of_10, 8)
+        self.assertEqual(evaluated.latest_attempt.stars, 3)
+
+        # Non-retryable AI_AUTH_FAILED must still raise HTTPException (never silently mask auth errors).
+        ai_mock.evaluate_description = AsyncMock(
+            side_effect=PictureAiError(
+                code="AI_AUTH_FAILED",
+                status_code=502,
+                detail="AI_AUTH_FAILED",
+                retryable=False,
+            )
+        )
+        with self.assertRaises(HTTPException) as auth_ctx:
+            await service.evaluate_attempt(
+                parent_id,
+                session_id,
+                PictureEvaluateRequest(
+                    transcript_text="Chú mèo cam ngủ trên ghế gỗ.",
+                    input_mode="TEXT",
+                ),
+            )
+        self.assertEqual(auth_ctx.exception.detail, "AI_AUTH_FAILED")
 
 
 class TestPictureDescriptionRoutes(unittest.TestCase):

@@ -696,4 +696,142 @@ describe("PictureDescriptionScreen", () => {
       ).value,
     ).toBe("");
   });
+
+  it("shows inline evaluation error with retry and supports re-grading FALLBACK attempts with AI", async () => {
+    let evaluateCalls = 0;
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/picture-description/catalog") {
+        return Response.json(catalogPayload);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json([]);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        init?.method === "POST"
+      ) {
+        return Response.json(baseSession, { status: 201 });
+      }
+      if (
+        path === `/games/picture-description/sessions/${TEST_SESSION_ID}/evaluate`
+      ) {
+        evaluateCalls += 1;
+        const body = JSON.parse(String(init?.body)) as {
+          transcript_text: string;
+          input_mode: string;
+        };
+        if (evaluateCalls === 1) {
+          return Response.json({ detail: "AI_TIMEOUT" }, { status: 504 });
+        }
+        if (evaluateCalls === 2) {
+          const fallbackAttempt = {
+            attempt_id: "41000000-0000-4000-8000-000000000021",
+            attempt_number: 1,
+            input_mode: body.input_mode,
+            transcript_text: body.transcript_text,
+            score_out_of_10: 8,
+            stars: 3,
+            evaluation_source: "FALLBACK",
+            feedback: {
+              ...evaluatedFeedback,
+              score_out_of_10: 8,
+              praise_message: "Chấm nhanh theo gợi ý tranh thành công!",
+            },
+            created_at: "2026-11-19T14:00:00Z",
+          };
+          return Response.json({
+            session: {
+              ...baseSession,
+              status: "COMPLETED",
+              best_stars: 3,
+              best_score: 8,
+              attempts_count: 1,
+              attempts: [fallbackAttempt],
+            },
+            latest_attempt: fallbackAttempt,
+          });
+        }
+        const aiAttempt = {
+          attempt_id: "41000000-0000-4000-8000-000000000022",
+          attempt_number: 2,
+          input_mode: body.input_mode,
+          transcript_text: body.transcript_text,
+          score_out_of_10: 9,
+          stars: 3,
+          evaluation_source: "AI",
+          feedback: evaluatedFeedback,
+          created_at: "2026-11-19T14:01:00Z",
+        };
+        return Response.json({
+          session: {
+            ...baseSession,
+            status: "COMPLETED",
+            best_stars: 3,
+            best_score: 9,
+            attempts_count: 2,
+            attempts: [aiAttempt],
+          },
+          latest_attempt: aiAttempt,
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByText("Khu vườn đầy nắng");
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
+    await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
+
+    const textarea = screen.getByLabelText("Nội dung bé mô tả bức tranh");
+    await user.type(
+      textarea,
+      "Chú mèo cam ngủ ngon trên ghế gỗ giữa vườn hoa hướng dương.",
+    );
+
+    // 1st click hits 504 AI_TIMEOUT -> inline error + draft preserved + retry button shown
+    await user.click(
+      screen.getByRole("button", { name: /Gửi cô giáo AI chấm bài/i }),
+    );
+    expect(
+      await screen.findByText(/Trợ lý AI suy nghĩ hơi lâu một chút/i),
+    ).toBeInTheDocument();
+    expect((textarea as HTMLTextAreaElement).value).toContain("Chú mèo cam");
+
+    // 2nd click via inline "Thử chấm lại ngay" -> succeeds with FALLBACK badge & re-grade button
+    await user.click(
+      screen.getByRole("button", { name: /Thử chấm lại ngay/i }),
+    );
+    expect(
+      await screen.findByText("Chấm nhanh theo gợi ý tranh thành công!"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/hệ thống đã chấm nhanh theo gợi ý của bức tranh/i),
+    ).toBeInTheDocument();
+
+    // 3rd click via "Chấm lại bằng cô giáo AI" -> upgrades to full AI evaluation
+    await user.click(
+      screen.getByRole("button", { name: /Chấm lại bằng cô giáo AI/i }),
+    );
+    expect(
+      await screen.findByText(
+        "Cô khen bé quan sát rất tinh mắt và viết câu trọn ý!",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/hệ thống đã chấm nhanh theo gợi ý của bức tranh/i),
+    ).not.toBeInTheDocument();
+    expect(evaluateCalls).toBe(3);
+  });
 });

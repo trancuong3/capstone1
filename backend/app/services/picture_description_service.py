@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -11,6 +12,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from app.diagnostic_logging import log_diagnostic
 from app.models import PictureDescriptionAttempt, PictureDescriptionSession
 from app.repositories.picture_description_repository import (
     AttemptProjection,
@@ -18,6 +20,7 @@ from app.repositories.picture_description_repository import (
     SessionProjection,
 )
 from app.schemas.picture_description import (
+    EvaluationSource,
     InputMode,
     PictureAttemptRead,
     PictureBookPageItem,
@@ -29,9 +32,14 @@ from app.schemas.picture_description import (
     PictureSampleItem,
     PictureSessionRead,
     PictureSessionSummaryRead,
+    PictureVocabItem,
     SourceType,
 )
-from app.services.picture_description_ai import GeminiPictureDescriptionAI, PictureAiError
+from app.services.picture_description_ai import (
+    GeminiPictureDescriptionAI,
+    PictureAiError,
+    evaluate_description_with_guide_fallback,
+)
 from app.services.storage_service import (
     StorageUploadFailure,
     create_signed_image_url,
@@ -39,6 +47,8 @@ from app.services.storage_service import (
     download_object,
     upload_object,
 )
+
+logger = logging.getLogger(__name__)
 
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "picture_description"
@@ -55,6 +65,7 @@ class SamplePictureSpec:
     title: str
     theme: str
     description: str
+    default_guide: PictureGuideRead
 
     @property
     def image_url(self) -> str:
@@ -76,6 +87,28 @@ SAMPLE_CATALOG: tuple[SamplePictureSpec, ...] = (
         title="Khu vườn đầy nắng",
         theme="Thiên nhiên",
         description="Chú mèo cam ngủ trưa trên ghế gỗ giữa vườn hoa hướng dương rực rỡ.",
+        default_guide=PictureGuideRead(
+            is_child_safe=True,
+            scene_title="Khu vườn đầy nắng",
+            scene_summary="Chú mèo cam đang cuộn tròn ngủ trên ghế gỗ giữa khu vườn đầy nắng có hoa hướng dương, bình tưới nước và bươm bướm.",
+            guiding_questions=[
+                "Trong bức tranh có con vật nào và đang làm gì?",
+                "Xung quanh chỗ con vật nằm có những loài hoa hay đồ vật gì?",
+                "Khung cảnh thời tiết và bầu không khí trong vườn như thế nào?",
+            ],
+            suggested_vocabulary=[
+                PictureVocabItem(word="mèo cam", hint="Chú mèo lông màu vàng cam"),
+                PictureVocabItem(word="cuộn tròn", hint="Tư thế nằm ngủ ngoan, ấm áp"),
+                PictureVocabItem(word="ghế gỗ", hint="Chiếc ghế bằng gỗ đặt trong vườn"),
+                PictureVocabItem(word="hướng dương", hint="Loài hoa to màu vàng tươi"),
+                PictureVocabItem(word="bình tưới", hint="Dụng cụ dùng để tưới nước cho cây"),
+                PictureVocabItem(word="nắng ấm", hint="Ánh sáng dịu nhẹ từ mặt trời"),
+            ],
+            model_sample_sentences=[
+                "Dưới ánh nắng ấm áp, chú mèo cam đang cuộn tròn ngủ ngon trên chiếc ghế gỗ giữa khu vườn.",
+                "Xung quanh ghế gỗ có những bông hoa hướng dương nở rực rỡ và chiếc bình tưới cây xinh xắn.",
+            ],
+        ),
     ),
     SamplePictureSpec(
         sample_key="lakeside-picnic",
@@ -83,6 +116,28 @@ SAMPLE_CATALOG: tuple[SamplePictureSpec, ...] = (
         title="Chuyến dã ngoại bên hồ",
         theme="Bạn bè & Thiên nhiên",
         description="Hai bạn nhỏ vui đùa dưới gốc xoài xanh bên mặt hồ có vịt trắng bơi lội.",
+        default_guide=PictureGuideRead(
+            is_child_safe=True,
+            scene_title="Dã ngoại bên hồ",
+            scene_summary="Hai bạn nhỏ ngồi dã ngoại trên thảm cỏ dưới tán cây xanh bên bờ hồ có đàn vịt trắng bơi lội và bầu trời trong xanh.",
+            guiding_questions=[
+                "Trong bức tranh có những bạn nhỏ nào và các bạn đang làm gì?",
+                "Trên mặt nước và xung quanh bãi cỏ có những con vật hay đồ vật nào?",
+                "Bé thấy khung cảnh thiên nhiên và cảm xúc của các bạn ra sao?",
+            ],
+            suggested_vocabulary=[
+                PictureVocabItem(word="dã ngoại", hint="Chuyến đi chơi, ăn uống ngoài trời"),
+                PictureVocabItem(word="bờ hồ", hint="Khoảng đất cỏ xanh sát mặt nước"),
+                PictureVocabItem(word="vịt trắng", hint="Những chú vịt lông trắng bơi trên hồ"),
+                PictureVocabItem(word="tán cây", hint="Cành lá xanh tỏa bóng mát"),
+                PictureVocabItem(word="giỏ đồ ăn", hint="Chiếc giỏ đựng trái cây và bánh"),
+                PictureVocabItem(word="vui vẻ", hint="Gương mặt rạng rỡ, tươi cười"),
+            ],
+            model_sample_sentences=[
+                "Hai bạn nhỏ đang ngồi trò chuyện vui vẻ trên tấm thảm dưới tán cây xanh mát bên bờ hồ.",
+                "Trên mặt hồ yên ả có những chú vịt trắng đang tung tăng bơi lội dưới ánh nắng dịu nhẹ.",
+            ],
+        ),
     ),
     SamplePictureSpec(
         sample_key="happy-classroom",
@@ -90,6 +145,28 @@ SAMPLE_CATALOG: tuple[SamplePictureSpec, ...] = (
         title="Phòng học vui vẻ",
         theme="Trường lớp",
         description="Cô giáo và các bạn nhỏ cùng học đọc sách bên ô cửa sổ đầy nắng.",
+        default_guide=PictureGuideRead(
+            is_child_safe=True,
+            scene_title="Trong lớp học",
+            scene_summary="Cô giáo đứng cầm sách mỉm cười dịu dàng trước bảng xanh, ba bạn học sinh hào hứng giơ tay phát biểu trong lớp học ngập nắng.",
+            guiding_questions=[
+                "Trong bức tranh có những ai và mỗi người đang làm gì?",
+                "Trên bảng và xung quanh phòng học có những đồ vật gì quen thuộc?",
+                "Không khí giờ học trong tranh trông vui tươi như thế nào?",
+            ],
+            suggested_vocabulary=[
+                PictureVocabItem(word="cô giáo", hint="Người đứng giảng bài và cầm quyển sách"),
+                PictureVocabItem(word="học sinh", hint="Các bạn nhỏ ngồi ngay ngắn ở bàn học"),
+                PictureVocabItem(word="giơ tay", hint="Động tác xin phát biểu ý kiến"),
+                PictureVocabItem(word="bảng xanh", hint="Tấm bảng lớn phía trước lớp học"),
+                PictureVocabItem(word="cửa sổ", hint="Ô cửa đón ánh nắng và có chậu cây"),
+                PictureVocabItem(word="hào hứng", hint="Vẻ mặt vui tươi, thích thú khi học"),
+            ],
+            model_sample_sentences=[
+                "Trong lớp học ngập tràn ánh nắng, cô giáo dịu dàng cầm sách và mỉm cười nhìn cả lớp.",
+                "Ba bạn học sinh ngồi ngay ngắn, hào hứng giơ tay phát biểu bên khung cửa sổ có nhiều cây xanh.",
+            ],
+        ),
     ),
 )
 SAMPLE_BY_KEY: dict[str, SamplePictureSpec] = {
@@ -231,6 +308,9 @@ class PictureDescriptionService:
     @staticmethod
     def _to_attempt_read(attempt: AttemptProjection) -> PictureAttemptRead:
         feedback = PictureEvaluationFeedbackRead.model_validate(attempt.FeedbackPayload)
+        evaluation_source: EvaluationSource = (
+            "FALLBACK" if attempt.AiModelUsed == "guide-fallback" else "AI"
+        )
         return PictureAttemptRead(
             attempt_id=attempt.Id,
             attempt_number=attempt.AttemptNumber,
@@ -238,6 +318,7 @@ class PictureDescriptionService:
             transcript_text=attempt.TranscriptText,
             score_out_of_10=attempt.ScoreOutOf10,
             stars=attempt.Stars,
+            evaluation_source=evaluation_source,
             feedback=feedback,
             created_at=attempt.CreatedAt,
         )
@@ -397,6 +478,8 @@ class PictureDescriptionService:
         uploaded_new_object = False
         context_hint: str | None = None
 
+        sample_spec: SamplePictureSpec | None = None
+
         if source_type == "SAMPLE":
             spec = SAMPLE_BY_KEY.get((sample_key or "").strip())
             if spec is None:
@@ -406,6 +489,7 @@ class PictureDescriptionService:
                     detail="INVALID_SAMPLE",
                 )
             await self.repository.db.rollback()
+            sample_spec = spec
             image_bytes = _load_sample_bytes(spec)
             image_mime = "image/jpeg"
             storage_path = spec.storage_ref
@@ -460,7 +544,19 @@ class PictureDescriptionService:
                 context_hint=context_hint,
             )
         except PictureAiError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            if source_type == "SAMPLE" and sample_spec is not None and exc.retryable:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="picture_sample_curated_guide_fallback",
+                    stage="picture_analyze",
+                    reason_code=exc.code,
+                    sample_key=sample_spec.sample_key,
+                )
+                guide = sample_spec.default_guide
+                model_used = "builtin-sample-guide"
+            else:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
         if source_type == "CUSTOM_UPLOAD":
             try:
@@ -556,7 +652,22 @@ class PictureDescriptionService:
                 previous_tip=previous_tip,
             )
         except PictureAiError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            if exc.retryable:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="picture_evaluate_guide_fallback",
+                    stage="picture_evaluate",
+                    reason_code=exc.code,
+                )
+                feedback, model_used = evaluate_description_with_guide_fallback(
+                    guide=guide,
+                    child_grade=session.ChildGrade,
+                    child_transcript=payload.transcript_text,
+                    previous_score=previous_score,
+                )
+            else:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
         now = datetime.now(timezone.utc)
         new_best_stars = max(int(session.BestStars), int(feedback.stars))

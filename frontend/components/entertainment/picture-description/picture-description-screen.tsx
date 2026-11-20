@@ -295,6 +295,7 @@ export function PictureDescriptionScreen() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [evaluateError, setEvaluateError] = useState<string | null>(null);
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [playingSpeechKey, setPlayingSpeechKey] = useState<string | null>(null);
@@ -466,6 +467,7 @@ export function PictureDescriptionScreen() {
       setLiveTranscript("");
       setInputMode("TEXT");
       setActionError(null);
+      setEvaluateError(null);
       setVoiceMessage(null);
     },
     [stopSpeechPlayback],
@@ -771,13 +773,21 @@ export function PictureDescriptionScreen() {
     setInputMode("TEXT");
     setVoiceMessage(null);
     setActionError(null);
+    setEvaluateError(null);
   };
 
-  const handleEvaluate = async () => {
+  const handleEvaluate = async (
+    overrideTranscript?: string,
+    overrideMode?: PictureInputMode,
+  ) => {
     if (!session || !pictureService || isEvaluating) return;
-    const trimmed = descriptionText.trim();
+    const rawText =
+      overrideTranscript !== undefined ? overrideTranscript : descriptionText;
+    const trimmed = rawText.trim();
     if (!trimmed) {
-      setActionError("Bé hãy nói hoặc viết ít nhất 1 câu mô tả bức tranh nhé.");
+      setEvaluateError(
+        "Bé hãy nói hoặc viết ít nhất 1 câu mô tả bức tranh nhé.",
+      );
       return;
     }
 
@@ -787,13 +797,14 @@ export function PictureDescriptionScreen() {
     requestControllerRef.current = controller;
 
     setActionError(null);
+    setEvaluateError(null);
     setIsEvaluating(true);
     try {
       const response = await pictureService.evaluate(
         session.session_id,
         {
           transcript_text: trimmed,
-          input_mode: inputMode,
+          input_mode: overrideMode ?? inputMode,
         },
         controller.signal,
       );
@@ -801,11 +812,14 @@ export function PictureDescriptionScreen() {
       setSession(response.session);
       setSelectedAttemptId(response.latest_attempt.attempt_id);
       setVoiceMessage(null);
+      setEvaluateError(null);
       setPracticeTab("RESULT");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
-      setActionError(isServiceError(error) ? error.message : defaultGameError);
+      setEvaluateError(
+        isServiceError(error) ? error.message : defaultGameError,
+      );
     } finally {
       setIsEvaluating(false);
     }
@@ -910,6 +924,7 @@ export function PictureDescriptionScreen() {
               setSession(null);
               setSelectedAttemptId(null);
               setActionError(null);
+              setEvaluateError(null);
             }}
             size="compact"
             type="button"
@@ -1585,6 +1600,7 @@ export function PictureDescriptionScreen() {
                       onChange={(event) => {
                         const nextValue = event.target.value;
                         setDescriptionText(nextValue);
+                        if (evaluateError) setEvaluateError(null);
                         if (!nextValue.trim() || inputMode !== "VOICE") {
                           setInputMode("TEXT");
                         }
@@ -1593,6 +1609,42 @@ export function PictureDescriptionScreen() {
                       value={descriptionText}
                     />
                   </label>
+
+                  {isEvaluating ? (
+                    <div
+                      aria-live="polite"
+                      className="mt-3 flex items-center gap-2.5 rounded-control border border-primary/25 bg-sky/25 px-3.5 py-2.5 text-sm font-bold text-primary"
+                    >
+                      <RefreshCw
+                        aria-hidden="true"
+                        className="size-4 shrink-0 animate-spin"
+                      />
+                      <span>
+                        Cô giáo AI đang ngắm tranh và đọc kỹ bài kể của bé, đợi
+                        cô vài giây nhé...
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {evaluateError ? (
+                    <div className="mt-3">
+                      <StatusMessage tone="error">
+                        <div className="flex flex-wrap items-center justify-between gap-2.5">
+                          <span>{evaluateError}</span>
+                          <Button
+                            disabled={isEvaluating || !descriptionText.trim()}
+                            onClick={() => void handleEvaluate()}
+                            size="compact"
+                            type="button"
+                            variant="secondary"
+                          >
+                            <RefreshCw aria-hidden="true" className="size-4" />
+                            Thử chấm lại ngay
+                          </Button>
+                        </div>
+                      </StatusMessage>
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-0.5">
@@ -1945,6 +1997,47 @@ export function PictureDescriptionScreen() {
                     )}
                   </Button>
                 </div>
+
+                {activeAttempt.evaluation_source === "FALLBACK" ? (
+                  <div className="mt-4">
+                    <StatusMessage tone="info">
+                      <div className="flex flex-wrap items-center justify-between gap-2.5">
+                        <span>
+                          Cô giáo AI đang tạm bận nên hệ thống đã chấm nhanh
+                          theo gợi ý của bức tranh để bé nhận phản hồi ngay.
+                        </span>
+                        <Button
+                          disabled={isEvaluating}
+                          onClick={() =>
+                            void handleEvaluate(
+                              activeAttempt.transcript_text,
+                              activeAttempt.input_mode,
+                            )
+                          }
+                          size="compact"
+                          type="button"
+                          variant="secondary"
+                        >
+                          <RefreshCw
+                            aria-hidden="true"
+                            className={
+                              "size-4 " + (isEvaluating ? "animate-spin" : "")
+                            }
+                          />
+                          {isEvaluating
+                            ? "Đang chấm lại..."
+                            : "Chấm lại bằng cô giáo AI"}
+                        </Button>
+                      </div>
+                    </StatusMessage>
+                  </div>
+                ) : null}
+
+                {evaluateError ? (
+                  <div className="mt-3">
+                    <StatusMessage tone="error">{evaluateError}</StatusMessage>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 rounded-control border border-border bg-sky/15 px-3.5 py-2.5">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-muted">

@@ -68,6 +68,7 @@ const attemptSchema = z.object({
   transcript_text: z.string(),
   score_out_of_10: z.number().int().min(0).max(10),
   stars: z.number().int().min(0).max(3),
+  evaluation_source: z.enum(["AI", "FALLBACK"]).optional().default("AI"),
   feedback: feedbackSchema,
   created_at: z.string(),
 });
