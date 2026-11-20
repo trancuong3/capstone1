@@ -164,7 +164,7 @@
     {id:"p14",title:"Rà soát luồng OCR/AI và worker trên môi trường triển khai",category:"AI / OCR",status:"not_tested",detail:"Phân biệt code, job test và dịch vụ production thực sự hoạt động.",url:"https://github.com/trancuong3/capstone1"}
   ];
   let state=loadState();
-  let github={commits:[],prs:[],issues:[],runs:[],releases:[],repo:null,branch:null};
+  let github={commits:null,prs:null,issues:null,runs:null,releases:null,repo:null,branch:null};
   let toastTimer=null;
   function loadState(){
     try{
@@ -255,26 +255,26 @@
     return '<div class="activity-row"><div class="activity-symbol">'+symbol+'</div><div><strong><a href="'+esc(safeUrl)+'" target="_blank" rel="noreferrer">'+esc(title)+'</a></strong><p>'+esc(sub)+'</p></div></div>';
   }
   function renderActivity(){
-    const commitRows=github.commits.map(c=>{
+    const commitRows=(Array.isArray(github.commits)?github.commits:[]).map(c=>{
       const sha=(c.sha||"").slice(0,7),msg=((c.commit&&c.commit.message)||"").split("\n")[0],date=c.commit&&c.commit.author&&c.commit.author.date;
       return activityRow("⌘",sha+" · "+msg,timeAgo(date),c.html_url);
-    }).join("")||'<div class="empty">Không lấy được commit hoặc repository chưa có dữ liệu.</div>';
-    const prRows=github.prs.map(p=>activityRow("⑂","#"+p.number+" · "+p.title,(p.draft?"Draft · ":"")+ "Cập nhật "+timeAgo(p.updated_at),p.html_url)).join("")||'<div class="empty">Không có pull request đang mở.</div>';
-    const runRows=github.runs.map(r=>{
+    }).join("")||(github.commits===null?'<div class="empty">Không thể tải commits từ GitHub API.</div>':'<div class="empty">Repository chưa có commit để hiển thị.</div>');
+    const prRows=(Array.isArray(github.prs)?github.prs:[]).map(p=>activityRow("⑂","#"+p.number+" · "+p.title,(p.draft?"Draft · ":"")+ "Cập nhật "+timeAgo(p.updated_at),p.html_url)).join("")||'<div class="empty">Không có pull request đang mở.</div>';
+    const runRows=(Array.isArray(github.runs)?github.runs:[]).map(r=>{
       const result=r.status==="completed"?(r.conclusion||"completed"):r.status;
       return activityRow("◉",r.name||r.display_title||"Workflow",result+" · "+timeAgo(r.updated_at),r.html_url);
-    }).join("")||'<div class="empty">GitHub Actions API không khả dụng hoặc chưa có workflow run.</div>';
-    const releaseRows=github.releases.map(r=>activityRow("⬇",r.name||r.tag_name,(r.prerelease?"Pre-release · ":"")+fmtDate(r.published_at),r.html_url)).join("")||'<div class="empty">Chưa có release công khai hoặc API không khả dụng.</div>';
+    }).join("")||(github.runs===null?'<div class="empty">Không thể đọc GitHub Actions API.</div>':'<div class="empty">Chưa có workflow run.</div>');
+    const releaseRows=(Array.isArray(github.releases)?github.releases:[]).map(r=>activityRow("⬇",r.name||r.tag_name,(r.prerelease?"Pre-release · ":"")+fmtDate(r.published_at),r.html_url)).join("")||'<div class="empty">Chưa có release công khai hoặc API không khả dụng.</div>';
     ["overviewCommits","allCommits"].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=commitRows;});
     ["overviewPrs","allPrs"].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=prRows;});
     document.getElementById("allRuns").innerHTML=runRows;
     document.getElementById("allReleases").innerHTML=releaseRows;
-    if(github.commits[0]){
+    if(Array.isArray(github.commits)&&github.commits[0]){
       document.getElementById("kpiCommit").textContent=(github.commits[0].sha||"").slice(0,7);
       const d=github.commits[0].commit&&github.commits[0].commit.author&&github.commits[0].commit.author.date;
       document.getElementById("kpiCommitFoot").textContent="main · "+timeAgo(d);
     }else document.getElementById("kpiCommitFoot").textContent="Không lấy được commit";
-    if(github.runs[0]){
+    if(Array.isArray(github.runs)&&github.runs[0]){
       const r=github.runs[0],value=r.status==="completed"?(r.conclusion||"completed"):r.status;
       document.getElementById("kpiWorkflow").textContent=value;
       document.getElementById("kpiWorkflowFoot").textContent=(r.name||"Workflow")+" · "+timeAgo(r.updated_at);
@@ -304,12 +304,12 @@
         if(key==="runs")github.runs=(result.value.workflow_runs||[]);
         else if(key==="issues")github.issues=(result.value||[]).filter(x=>!x.pull_request);
         else github[key]=result.value;
-      }else{failures++;if(key==="runs")github.runs=[];if(key==="releases")github.releases=[];}
+      }else{failures++;github[key]=null;}
     });
     document.getElementById("kpiPrs").textContent=Array.isArray(github.prs)?github.prs.length:"—";
-    document.getElementById("kpiPrsFoot").textContent="Open pull requests";
+    document.getElementById("kpiPrsFoot").textContent=Array.isArray(github.prs)?"Open pull requests":"Không thể tải dữ liệu";
     document.getElementById("kpiIssues").textContent=Array.isArray(github.issues)?github.issues.length:"—";
-    document.getElementById("kpiIssuesFoot").textContent="Issues đang mở, không tính PR";
+    document.getElementById("kpiIssuesFoot").textContent=Array.isArray(github.issues)?"Issues đang mở, không tính PR":"Không thể tải dữ liệu";
     renderActivity();
     const now=new Date();label.textContent="Đồng bộ "+now.toLocaleTimeString("vi-VN",{hour:"2-digit",minute:"2-digit"});
     dot.style.background=failures===0?"var(--green)":"var(--amber)";
