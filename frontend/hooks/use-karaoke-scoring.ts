@@ -2,13 +2,11 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { KaraokeLyrics } from "@/types/karaoke";
-import {
-  BrowserTranscriptCollector,
-  type BrowserRecognitionEventLike,
-} from "@/lib/reading/browser-transcript-collector";
+import type { BrowserRecognitionEventLike } from "@/lib/reading/browser-transcript-collector";
 import {
   LiveSingingAttempt,
   type LiveSingingScore,
+  type LiveWordState,
 } from "@/lib/karaoke/live-singing-score";
 
 type Status =
@@ -28,6 +26,8 @@ type Snapshot = {
   liveScore: LiveSingingScore | null;
   songScore: LiveSingingScore | null;
   error: string | null;
+  previewWords: ReadonlyMap<string, LiveWordState>;
+  liveTranscript: string;
 };
 
 interface Recognition {
@@ -85,12 +85,15 @@ function errorName(error: unknown) {
     return error.name;
 }
 
+const emptyPreview: ReadonlyMap<string, LiveWordState> = new Map();
 const idle: Snapshot = {
   status: "idle",
   score: null,
   liveScore: null,
   songScore: null,
   error: null,
+  previewWords: emptyPreview,
+  liveTranscript: "",
 };
 const supported = () => Boolean(recognitionConstructor());
 const serverSupported = () => false;
@@ -101,13 +104,42 @@ const maxEmptyRestarts = 2;
 
 type SpeechWindow = { start: number; end: number };
 
+function hasUsableSingingConfidence(confidence?: number): boolean {
+  // Singing pitch and soft/quiet voices ("hát bé") often produce lower ASR
+  // confidence (0.18–0.49) than flat spoken prose while still rejecting noise (<=0.15).
+  return (
+    confidence === undefined ||
+    confidence === 0 ||
+    (Number.isFinite(confidence) && confidence >= 0.18 && confidence <= 1)
+  );
+}
+
+function extractAlternatives(
+  result: BrowserRecognitionEventLike["results"][number] | undefined,
+): string[] {
+  if (!result) return [];
+  const list: string[] = [];
+  const raw = result as unknown as Record<
+    number,
+    { transcript?: string } | undefined
+  > & { length?: number };
+  const limit = Math.max(1, typeof raw.length === "number" ? raw.length : 5);
+  for (let k = 0; k < limit; k++) {
+    const text = raw[k]?.transcript?.trim();
+    if (text && !list.includes(text)) list.push(text);
+  }
+  return list;
+}
+
 // SpeechRecognition provides final text without word timestamps. Prefer speech
 // activity measured on the native music clock; a result-only interval is usable
 // only while short enough to locate its utterance. Never invent earlier times.
 class CaptureWindows {
-  private readonly collector = new BrowserTranscriptCollector();
+  private readonly finalSlots = new Set<number>();
   private windows: SpeechWindow[] = [];
   private speakingFrom: number | null = null;
+  private interimFrom: number | null = null;
+  private lastInterimText = "";
   private hasSpeechEvents = false;
   private startedAt: number;
   private lastFinalMs: number;
@@ -147,21 +179,99 @@ class CaptureWindows {
     this.speakingFrom = null;
   };
 
+  flushInterim(attempt: LiveSingingAttempt): boolean {
+    const text = this.lastInterimText.trim();
+    const from = this.interimFrom;
+    this.lastInterimText = "";
+    this.interimFrom = null;
+    if (!text || from === null) return false;
+    const start = Math.max(from, this.startedAt);
+    const end = Math.max(this.now(), start + 200);
+    return (
+      end - start <= 12000 && attempt.accept(text, start, end, this.startedAt)
+    );
+  }
+
   consume(event: BrowserRecognitionEventLike, attempt: LiveSingingAttempt) {
-    const finals: { text: string; usable: boolean }[] = [];
-    this.collector.addResults(event, (text, usable) => {
-      finals.push({ text, usable });
-      return usable;
-    });
-    if (!finals.length) return false;
-    const end = this.now();
+    const now = this.now();
+    let interimText = "";
+    const startIdx = Math.max(
+      0,
+      Number.isSafeInteger(event.resultIndex) ? event.resultIndex : 0,
+    );
+    const finals: {
+      text: string;
+      alternatives: string[];
+      usable: boolean;
+    }[] = [];
+
+    for (let i = startIdx; i < event.results.length; i++) {
+      const res = event.results[i];
+      if (!res) continue;
+      const alternatives = extractAlternatives(res);
+      if (!res.isFinal) {
+        if (alternatives.length) {
+          const from = Math.max(
+            this.interimFrom ??
+              this.speakingFrom ??
+              Math.max(this.startedAt, now - 400),
+            this.startedAt,
+          );
+          const part = attempt.bestAlternative(
+            alternatives,
+            from,
+            now,
+            this.startedAt,
+          );
+          if (part) interimText += (interimText ? " " : "") + part;
+        }
+        continue;
+      }
+      if (this.finalSlots.has(i)) continue;
+      if (alternatives.length) {
+        const usable = hasUsableSingingConfidence(res[0]?.confidence);
+        this.finalSlots.add(i);
+        finals.push({
+          text: alternatives[0],
+          alternatives,
+          usable,
+        });
+      }
+    }
+
+    if (interimText && this.interimFrom === null) {
+      this.interimFrom =
+        this.speakingFrom ?? Math.max(this.startedAt, now - 400);
+    }
+
+    if (!finals.length) {
+      if (!interimText)
+        return { changed: false, preview: emptyPreview, transcript: "" };
+      this.lastInterimText = interimText;
+      const from = Math.max(this.interimFrom ?? this.startedAt, this.startedAt);
+      const preview = attempt.preview(
+        interimText,
+        from,
+        Math.max(now, from + 200),
+        this.startedAt,
+      );
+      return {
+        changed: true,
+        preview,
+        transcript: interimText,
+      };
+    }
+    const interimStart = this.interimFrom;
+    this.interimFrom = null;
+    this.lastInterimText = "";
+    const end = now;
     const previous = this.lastFinalMs;
     this.lastFinalMs = end;
     if (this.overflow) {
       this.overflow = false;
       this.windows = [];
       this.speakingFrom = null;
-      return false;
+      return { changed: false, preview: emptyPreview, transcript: "" };
     }
     const ranges = this.windows;
     this.windows = [];
@@ -172,25 +282,75 @@ class CaptureWindows {
       !ranges.length &&
       !this.hasSpeechEvents &&
       end - previous <= (this.sliced ? 8000 : 4000)
-    )
+    ) {
       ranges.push({ start: previous, end });
-    const assign = (text: string, range: SpeechWindow) =>
-      range.end > range.start &&
-      range.end - range.start <= 12000 &&
-      attempt.accept(
-        text,
-        Math.max(range.start, this.startedAt),
+    } else if (!ranges.length && interimStart !== null && end > interimStart) {
+      ranges.push({ start: interimStart, end });
+    }
+    const assign = (
+      alternatives: readonly string[],
+      range: SpeechWindow,
+    ): { ok: boolean; chosen: string } => {
+      if (range.end <= range.start || range.end - range.start > 12000)
+        return { ok: false, chosen: "" };
+      const from = Math.max(range.start, this.startedAt);
+      const chosen = attempt.bestAlternative(
+        alternatives,
+        from,
         range.end,
         this.startedAt,
       );
-    if (ranges.length === 1 && finals.every((slot) => slot.usable))
-      return assign(finals.map((slot) => slot.text).join(" "), ranges[0]);
-    if (ranges.length !== finals.length) return false;
+      const ok = attempt.accept(chosen, from, range.end, this.startedAt);
+      return { ok, chosen };
+    };
+    if (ranges.length === 1 && finals.every((slot) => slot.usable)) {
+      const joinedChosen = finals
+        .map((slot) =>
+          attempt.bestAlternative(
+            slot.alternatives,
+            Math.max(ranges[0].start, this.startedAt),
+            ranges[0].end,
+            this.startedAt,
+          ),
+        )
+        .join(" ");
+      const { ok } = assign([joinedChosen], ranges[0]);
+      return {
+        changed: ok,
+        preview: emptyPreview,
+        transcript: ok ? joinedChosen : "",
+      };
+    }
+    if (finals.length === 1 && finals[0].usable && ranges.length > 1) {
+      const merged: SpeechWindow = {
+        start: ranges[0].start,
+        end: Math.max(ranges.at(-1)!.end, end),
+      };
+      const { ok, chosen } = assign(finals[0].alternatives, merged);
+      return {
+        changed: ok,
+        preview: emptyPreview,
+        transcript: ok ? chosen : "",
+      };
+    }
+    if (ranges.length !== finals.length)
+      return { changed: false, preview: emptyPreview, transcript: "" };
     let changed = false;
+    const acceptedParts: string[] = [];
     finals.forEach((slot, index) => {
-      if (slot.usable && assign(slot.text, ranges[index])) changed = true;
+      if (slot.usable) {
+        const { ok, chosen } = assign(slot.alternatives, ranges[index]);
+        if (ok) {
+          changed = true;
+          acceptedParts.push(chosen);
+        }
+      }
     });
-    return changed;
+    return {
+      changed,
+      preview: emptyPreview,
+      transcript: changed ? acceptedParts.join(" ") : "",
+    };
   }
 }
 
@@ -234,6 +394,8 @@ class KaraokeMicSession {
       score,
       liveScore: this.snapshot.liveScore,
       songScore: this.savedSong ? this.savedSong.snapshot.score : score,
+      previewWords: this.snapshot.previewWords ?? emptyPreview,
+      liveTranscript: this.snapshot.liveTranscript ?? "",
     };
     for (const listener of this.listeners) listener();
   }
@@ -316,7 +478,7 @@ class KaraokeMicSession {
     } else this.reset();
     this.getTime = clock;
     this.practiceLyrics = lineId ? { ...lyrics, lines } : null;
-    this.attempt = new LiveSingingAttempt(this.practiceLyrics ?? lyrics);
+    this.attempt = new LiveSingingAttempt(this.practiceLyrics ?? lyrics, true);
     this.snapshot = { ...idle, liveScore: this.attempt.result(!!lineId) };
     this.emptyRestarts = 0;
     this.update("arming");
@@ -445,12 +607,13 @@ class KaraokeMicSession {
       const recognition = new Constructor();
       const windows = new CaptureWindows(this.getTime, this.trackInput);
       let capturing = false;
+      let noSpeech = false;
       this.windows = windows;
       this.recognition = recognition;
       recognition.lang = "vi-VN";
       recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 5;
 
       recognition.onstart = () => {
         if (this.recognition !== recognition) return;
@@ -471,11 +634,14 @@ class KaraokeMicSession {
       recognition.onresult = (event) => {
         if (this.recognition !== recognition || !capturing || !this.attempt)
           return;
-        if (windows.consume(event, this.attempt)) {
+        const outcome = windows.consume(event, this.attempt);
+        if (outcome.changed) {
           this.emptyRestarts = 0;
           this.snapshot = {
             ...this.snapshot,
             liveScore: this.attempt.result(!!this.savedSong),
+            previewWords: outcome.preview,
+            liveTranscript: outcome.transcript || this.snapshot.liveTranscript,
           };
           this.update(this.snapshot.status);
         }
@@ -485,18 +651,35 @@ class KaraokeMicSession {
         recognition.onspeechend = windows.speechEnd;
       }
       recognition.onerror = ({ error }) => {
-        if (this.recognition !== recognition || error === "no-speech") return;
+        if (this.recognition !== recognition) return;
+        if (error === "no-speech") {
+          noSpeech = true;
+          return;
+        }
         this.fail(microphoneError(error));
       };
       recognition.onend = () => {
         if (this.recognition !== recognition) return;
         const deliberate = this.drainingSlice;
         const finishing = this.snapshot.status === "finishing";
+        if (
+          !probe &&
+          capturing &&
+          this.attempt &&
+          windows.flushInterim(this.attempt)
+        ) {
+          this.emptyRestarts = 0;
+          this.snapshot = {
+            ...this.snapshot,
+            liveScore: this.attempt.result(!!this.savedSong),
+            previewWords: emptyPreview,
+          };
+        }
         this.release(false, !probe && !finishing);
         if (finishing) this.complete();
         else if (
           probe ||
-          (!deliberate && ++this.emptyRestarts > maxEmptyRestarts)
+          (!deliberate && !noSpeech && ++this.emptyRestarts > maxEmptyRestarts)
         )
           this.fail(microphoneError());
         else {
@@ -542,7 +725,7 @@ class KaraokeMicSession {
       return;
     this.pause();
     if (repeatPractice && this.practiceLyrics) {
-      this.attempt = new LiveSingingAttempt(this.practiceLyrics);
+      this.attempt = new LiveSingingAttempt(this.practiceLyrics, true);
       this.snapshot = {
         ...this.snapshot,
         liveScore: this.attempt.result(true),
@@ -553,8 +736,34 @@ class KaraokeMicSession {
     this.resume();
   };
 
+  observePlayback = (fromMs: number, toMs: number) => {
+    if (!this.attempt || !["listening", "armed"].includes(this.snapshot.status))
+      return;
+    if (
+      this.attempt.observePlayback(
+        fromMs,
+        toMs,
+        150,
+        this.snapshot.previewWords,
+      )
+    ) {
+      this.snapshot = {
+        ...this.snapshot,
+        liveScore: this.attempt.result(!!this.savedSong),
+      };
+      this.update(this.snapshot.status);
+    }
+  };
+
   private complete(error = this.snapshot.error) {
+    if (this.attempt && this.windows) {
+      this.windows.flushInterim(this.attempt);
+    }
     this.release(true);
+    this.attempt?.flushPlayedOmissions(
+      this.getTime(),
+      this.snapshot.previewWords,
+    );
     const result = this.attempt?.result(!!this.savedSong || !!error);
     this.attempt = null;
     if (result && result.kind !== "insufficient")
@@ -631,6 +840,7 @@ export function useKaraokeScoring(
     supported: available,
     listening: state.status === "listening",
     arm,
+    observePlayback: session.observePlayback,
     endPractice: session.endPractice,
     seekBoundary: session.seekBoundary,
     pause: session.pause,
