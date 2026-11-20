@@ -1,10 +1,9 @@
-"""Legacy comprehension API with session ownership and server-side answer grading.
+"""Legacy comprehension compatibility routes.
 
-The active reading UI uses /tutor/sessions/*; these legacy routes must not bypass
-its parent isolation or let clients choose their own correctness scores.
+The active reading UI uses the authenticated /tutor/sessions/* API. This
+compatibility adapter must not bypass its trusted generation or grading service.
 """
 
-from unicodedata import normalize
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,28 +16,25 @@ from app.models import (
     ComprehensionAnswer,
     ComprehensionQuestion,
     ReadingSession,
-    ReadingSessionPage,
 )
+from app.repositories.tutor_question_repository import TutorQuestionRepository
 from app.schemas import (
-    ComprehensionQuestionResponse,
     ComprehensionQuestionCreate,
-    ComprehensionAnswerResponse,
     ComprehensionAnswerCreate,
+    ComprehensionAnswerResponse,
 )
+from app.schemas.comprehension import ComprehensionQuestionPublic
+from app.services.tutor_question_service import TutorQuestionService
 
 router = APIRouter()
 
 
-def _normalize_answer(value: str) -> str:
-    return normalize("NFC", value).strip().casefold()
-
-
-@router.get("/questions", response_model=list[ComprehensionQuestionResponse])
+@router.get("/questions", response_model=list[ComprehensionQuestionPublic])
 async def get_questions(
     actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Do not return another parent's prompts, expected answers or source spans."""
+    """List only owned questions, without grading keys or private source data."""
     result = await db.execute(
         select(ComprehensionQuestion)
         .join(ReadingSession, ComprehensionQuestion.SessionId == ReadingSession.Id)
@@ -48,31 +44,17 @@ async def get_questions(
     return result.scalars().all()
 
 
-@router.post("/questions", response_model=ComprehensionQuestionResponse)
+@router.post("/questions", status_code=403)
 async def create_question(
-    question_in: ComprehensionQuestionCreate,
-    actor_id: UUID = Depends(require_parent_id),
-    db: AsyncSession = Depends(get_db),
+    _question_in: ComprehensionQuestionCreate,
+    _actor_id: UUID = Depends(require_parent_id),
 ):
-    """Only add questions to a page and revision in an owned reading session."""
-    owned_session = await db.scalar(
-        select(ReadingSession.Id)
-        .join(ChildProfile, ReadingSession.ChildId == ChildProfile.Id)
-        .join(ReadingSessionPage, ReadingSessionPage.SessionId == ReadingSession.Id)
-        .where(
-            ReadingSession.Id == question_in.SessionId,
-            ChildProfile.ParentId == actor_id,
-            ReadingSessionPage.PageId == question_in.PageId,
-            ReadingSessionPage.PageRevisionId == question_in.PageRevisionId,
-        )
-    )
-    if owned_session is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    question = ComprehensionQuestion(**question_in.model_dump())
-    db.add(question)
-    await db.commit()
-    await db.refresh(question)
-    return question
+    """Fail closed: clients may not fabricate trusted tutor questions.
+
+    The supported generator is POST /tutor/sessions/{session_id}/questions/generate,
+    which validates the finished reading session and sources the answers itself.
+    """
+    raise HTTPException(status_code=403, detail="Use the authenticated tutor question generator")
 
 
 @router.post("/answers", response_model=ComprehensionAnswerResponse)
@@ -81,11 +63,12 @@ async def create_answer(
     actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Look up the question through the owner before writing an answer.
+    """Route legacy submissions through the trusted, idempotent tutor grader."""
+    submitted = answer_in.Answer.strip()
+    if not submitted or len(submitted) > 200:
+        raise HTTPException(status_code=422, detail="Invalid answer")
 
-    The supplied score and is_correct fields are legacy-compatible inputs,
-    but never authoritative: correctness is calculated on the server.
-    """
+    # Resolve question through the owner before even invoking the grading service.
     question = await db.scalar(
         select(ComprehensionQuestion)
         .join(ReadingSession, ComprehensionQuestion.SessionId == ReadingSession.Id)
@@ -97,22 +80,18 @@ async def create_answer(
     )
     if question is None:
         raise HTTPException(status_code=404, detail="Resource not found")
-    allowed = [question.ExpectedAnswer]
-    if isinstance(question.AcceptedAnswers, list):
-        allowed.extend(
-            item for item in question.AcceptedAnswers if isinstance(item, str)
+
+    outcome = await TutorQuestionService(
+        TutorQuestionRepository(db)
+    ).submit_answer(question.SessionId, answer_in.QuestionId, actor_id, submitted)
+
+    # Return the stored row (including its original CreatedAt when idempotent).
+    answer = await db.scalar(
+        select(ComprehensionAnswer).where(
+            ComprehensionAnswer.Id == outcome.answer_id,
+            ComprehensionAnswer.QuestionId == answer_in.QuestionId,
         )
-    normalized = _normalize_answer(answer_in.Answer)
-    correct = bool(normalized) and any(
-        normalized == _normalize_answer(item) for item in allowed
     )
-    answer = ComprehensionAnswer(
-        QuestionId=answer_in.QuestionId,
-        Answer=answer_in.Answer,
-        IsCorrect=correct,
-        Score=1.0 if correct else 0.0,
-    )
-    db.add(answer)
-    await db.commit()
-    await db.refresh(answer)
+    if answer is None:
+        raise HTTPException(status_code=503, detail="Answer persistence unavailable")
     return answer
