@@ -7,6 +7,8 @@ used. Each test removes only its own random schema.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from datetime import datetime, timezone
 import json
 from math import ceil
 import os
@@ -33,6 +35,9 @@ from app.models import (
 )
 from app.models.reading_comparison_report import ReadingComparisonReport
 from app.repositories.reading_content_repository import ReadingContentRepository
+from app.repositories.book_content_quality_repository import BookContentQualityRepository
+from app.services.book_content_quality_service import BookContentQualityService
+from app.policies.book_approval import BOOK_APPROVAL_POLICY_VERSION
 from app.schemas.reading import (
     CompareReadingRequest, ReadingEventCreate, ReadingPageNavigationCreate,
 )
@@ -68,13 +73,18 @@ class Phase7PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         self.actor = UUID("11111111-1111-4111-8111-111111111111")
         self.foreign_actor = UUID("11111111-1111-4111-8111-111111111112")
+        self.admin_actor = UUID("11111111-1111-4111-8111-111111111113")
         self.child = UUID("22222222-2222-4222-8222-222222222222")
         self.book = UUID("33333333-3333-4333-8333-333333333333")
         self.pages = [UUID(f"55555555-5555-4555-8555-{number:012d}") for number in (555555555555, 555555555556)]
         self.revisions = [UUID(f"66666666-6666-4666-8666-{number:012d}") for number in (666666666666, 666666666667)]
         self.words = [[UUID(f"90000000-0000-4000-8000-{index*10+position+1:012d}") for position in range(3)] for index in range(2)]
         async with self.sessions() as db:
-            db.add_all([Profile(Id=self.actor, Role="parent"), Profile(Id=self.foreign_actor, Role="parent")])
+            db.add_all([
+                Profile(Id=self.actor, Role="parent"),
+                Profile(Id=self.foreign_actor, Role="parent"),
+                Profile(Id=self.admin_actor, Role="admin"),
+            ])
             await db.flush()
             db.add(ChildProfile(Id=self.child, ParentId=self.actor, Alias="Phase 7 fixture", Grade=2))
             db.add(Book(Id=self.book, Title="Phase 7 fixture", MinGrade=1, MaxGrade=3, LifecycleStatus="ACTIVE"))
@@ -94,6 +104,53 @@ class Phase7PostgresTests(unittest.IsolatedAsyncioTestCase):
                     db.add(PageRevisionWord(Id=self.words[index][position], PageRevisionId=self.revisions[index],
                                             WordIndex=position, LineIndex=0, Text=token, NormalizedText=token.lower(),
                                             BoundingBox=[0.1+position*0.2, 0.1, 0.15, 0.1]))
+            # The real catalog now requires both per-page Admin safety sign-off
+            # and a current book-level approval snapshot. Build exactly that
+            # evidence in this disposable test schema rather than bypassing
+            # production authorization or changing reading service behavior.
+            approved_text = "Bé mèo đọc"
+            approved_hash = hashlib.sha256(approved_text.encode("utf-8")).hexdigest()
+            approval_time = datetime.now(timezone.utc)
+            for index in range(2):
+                revision = await db.get(PageRevision, self.revisions[index])
+                workflow_id = uuid4()
+                revision.ProcessingMeta = {
+                    "admin_ai_workflow": {
+                        "workflow_id": str(workflow_id),
+                        "candidate_hash": approved_hash,
+                        "safety_input_hash": approved_hash,
+                    }
+                }
+                db.add(AdminAiWorkflow(
+                    Id=workflow_id, PageId=self.pages[index],
+                    BookId=self.book, PageRevisionId=self.revisions[index],
+                    ActorId=self.admin_actor, IdempotencyKey=uuid4(),
+                    OriginalText=approved_text, InputText=approved_text,
+                    ImagePath="phase7-fixture/page.png",
+                    OriginalOcrHash=approved_hash, AdminInputHash=approved_hash,
+                    CandidateText=approved_text, CandidateHash=approved_hash,
+                    SafetyInputHash=approved_hash,
+                    FinalApprovedTextHash=approved_hash,
+                    Status="READY_FOR_ADMIN_REVIEW",
+                    SafetyStatus="CONFIRMED", Suitability="SUITABLE",
+                    SafetyConfirmedAt=approval_time, SafetyConfirmedBy=self.admin_actor,
+                    OcrApprovedAt=approval_time, OcrApprovedBy=self.admin_actor,
+                ))
+            await db.flush()
+            # Use the production snapshot builder so its fingerprint format
+            # stays identical to the eligibility predicate (no test-only bypass).
+            rows = await BookContentQualityRepository(db).book_assessment_rows(self.book)
+            snapshot = BookContentQualityService._page_snapshot(rows)
+            self.assertEqual(len(snapshot), 2)
+            db.add(AuditLog(
+                Id=uuid4(), ActorId=self.admin_actor,
+                Action="book.children.approved", ResourceType="book",
+                ResourceId=self.book, RequestId="phase7-disposable-fixture",
+                Metadata={
+                    "policy": BOOK_APPROVAL_POLICY_VERSION,
+                    "page_snapshot": snapshot,
+                },
+            ))
             await db.commit()
         self.session_id = await self.new_session(UUID("44444444-4444-4444-8444-444444444444"))
 
