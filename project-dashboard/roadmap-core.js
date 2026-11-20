@@ -56,5 +56,35 @@
       personal: items.filter(task => !byId.has(task.id)).length
     };
   }
-  return { parseIssue, reconcileIssues, compareLegacy };
+  const ROADMAP_IDS = Object.freeze(Array.from({length:14},(_,i)=>"p"+(i+1)));
+  const REPO = "trancuong3/capstone1";
+  function validateSnapshot(snapshot) {
+    if (!snapshot || snapshot.schemaVersion !== 1 || snapshot.repository !== REPO) {
+      throw new Error("Unsupported ViRead snapshot schema or repository");
+    }
+    const generatedAt = Date.parse(snapshot.generatedAt);
+    if (!Number.isFinite(generatedAt) || generatedAt < Date.parse("2026-01-01T00:00:00Z") ||
+        generatedAt > Date.now() + 10*60*1000) {
+      throw new Error("Invalid snapshot generation time");
+    }
+    if (!Array.isArray(snapshot.roadmap) || snapshot.roadmap.length !== ROADMAP_IDS.length) {
+      throw new Error("Incomplete shared roadmap snapshot");
+    }
+    snapshot.roadmap.forEach((task,i)=>{
+      if (!task || task.id !== ROADMAP_IDS[i] || !STATUSES.has(task.status) ||
+          !/^(P0|P1|P2|P3)$/.test(task.priority) ||
+          typeof task.title !== "string" || typeof task.category !== "string" ||
+          !/^https:\/\/github\.com\/trancuong3\/capstone1\/issues\/[0-9]+$/.test(task.url||"") ||
+          !Number.isInteger(task.issueNumber) || task.issueNumber<1) {
+        throw new Error("Invalid snapshot roadmap item: "+ROADMAP_IDS[i]);
+      }
+    });
+    const activity=snapshot.activity;
+    if (!activity || ["commits","prs","issues","runs","releases"].some(key=>activity[key] !== null && !Array.isArray(activity[key]))) {
+      throw new Error("Incomplete public GitHub activity snapshot");
+    }
+    return snapshot;
+  }
+  return { parseIssue, reconcileIssues, compareLegacy, validateSnapshot, ROADMAP_IDS };
+
 });

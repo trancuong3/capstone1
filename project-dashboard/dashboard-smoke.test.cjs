@@ -20,6 +20,14 @@ function fakeIssues() {
     };
   });
 }
+function fakeSnapshot(issues=fakeIssues()){
+  return {
+    schemaVersion:1,repository:"trancuong3/capstone1",generatedAt:new Date().toISOString(),
+    roadmap:issues.map(core.parseIssue),
+    activity:{commits:[],prs:[],issues:[],runs:[],releases:[],repo:{},branch:{}},
+    warnings:[]
+  };
+}
 function boot(options={}) {
   const nodes=new Map(), handlers=new Map(), store=new Map(Object.entries(options.storage||{}));
   function getElementById(id){
@@ -35,24 +43,19 @@ function boot(options={}) {
     setItem(key,value){store.set(key,String(value));},
     removeItem(key){store.delete(key);}
   };
-  const data=options.issues||fakeIssues();
+  const data=options.snapshot||fakeSnapshot(options.issues||fakeIssues());
+  const fetchCalls=[];
   async function fetch(url){
-    if(options.fail)return {ok:false,status:403,headers:{get:()=>null}};
-    let response={};
-    if(url.includes("/issues?state=all"))response=data;
-    else if(url.includes("/issues?state=open"))response=data;
-    else if(url.includes("/actions/runs"))response={workflow_runs:[]};
-    else if(url.endsWith("/branches/main"))response={protected:false};
-    else if(url.endsWith("/capstone1"))response={};
-    else response=[];
-    return {ok:true,status:200,headers:{get:()=>null},json:async()=>response};
+    fetchCalls.push(url);
+    if(options.fail)return {ok:false,status:503};
+    return {ok:true,status:200,json:async()=>data};
   }
   const document={getElementById,querySelectorAll:()=>[],addEventListener(){},hidden:false};
   const window={ViReadRoadmapCore:core,scrollTo(){}};
   const sandbox={document,window,ViReadRoadmapCore:core,localStorage,fetch,
     setInterval(){},clearTimeout(){},setTimeout(){},console};
   vm.runInNewContext(script,sandbox,{timeout:3000});
-  return {nodes,store,handlers,element:getElementById};
+  return {nodes,store,handlers,fetchCalls,element:getElementById};
 }
 async function flush(){await new Promise(resolve=>setImmediate(resolve));}
 
@@ -60,6 +63,7 @@ test("renders authoritative Issue status and caches it separately from legacy no
   const original={tasks:[{id:"p3",title:"Local changed",status:"done"},{id:"custom-x",status:"todo"}],note:"My private note"};
   const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
   await flush();
+  assert.deepEqual(app.fetchCalls,["./data/hub-snapshot.json"]); // never call api.github.com
   const html=app.element("taskGrid").innerHTML;
   assert.match(html,/p3 · Task p3/);
   assert.match(html,/Bị chặn/);
@@ -74,12 +78,45 @@ test("renders authoritative Issue status and caches it separately from legacy no
   assert.match(app.element("roadmapSyncNotice").textContent,/GitHub Issues/);
 });
 
-test("API failure shows a truthful error while retaining last successful shared snapshot",async()=>{
+test("static JSON fetch failure shows a truthful error and retains cached roadmap",async()=>{
   const cached={syncedAt:"2026-11-20T11:00:00Z",tasks:fakeIssues().map(core.parseIssue)};
   const app=boot({fail:true,storage:{"viread-shared-roadmap-v1":JSON.stringify(cached)}});
   await flush();
-  assert.match(app.element("roadmapSyncNotice").textContent,/Không thể đồng bộ Roadmap/);
-  assert.match(app.element("roadmapSyncNotice").textContent,/403/);
+  assert.match(app.element("roadmapSyncNotice").textContent,/Không tải được JSON công khai/);
+  assert.match(app.element("roadmapSyncNotice").textContent,/503/);
   assert.match(app.element("taskGrid").innerHTML,/Task p3/);
   assert.equal(JSON.parse(app.store.get("viread-shared-roadmap-v1")).syncedAt,cached.syncedAt);
+});
+
+test("corrupted snapshot cannot replace a valid cached roadmap",async()=>{
+  const cached={syncedAt:"2026-11-20T11:00:00Z",tasks:fakeIssues().map(core.parseIssue)};
+  const invalid=fakeSnapshot();
+  invalid.roadmap[2].status="invalid-state";
+  const app=boot({snapshot:invalid,storage:{"viread-shared-roadmap-v1":JSON.stringify(cached)}});
+  await flush();
+  assert.match(app.element("roadmapSyncNotice").textContent,/Invalid snapshot roadmap item/);
+  assert.match(app.element("taskGrid").innerHTML,/Task p3/);
+  assert.equal(JSON.parse(app.store.get("viread-shared-roadmap-v1")).syncedAt,cached.syncedAt);
+  assert.deepEqual(app.fetchCalls,["./data/hub-snapshot.json"]);
+});
+test("personal note persists after simulated reload without uploading data",async()=>{
+  const app=boot();
+  await flush();
+  const note=app.element("projectNote");
+  note.value="ViRead lưu ghi chú tiếng Việt";
+  app.handlers.get("projectNote:input")();
+  const saved=app.store.get("viread-project-hub-v1");
+  assert.equal(JSON.parse(saved).note,note.value);
+  const reopened=boot({storage:{"viread-project-hub-v1":saved}});
+  await flush();
+  assert.equal(reopened.element("projectNote").value,note.value);
+  assert.deepEqual(reopened.fetchCalls,["./data/hub-snapshot.json"]);
+});
+test("stale but valid published snapshot is clearly labelled",async()=>{
+  const snapshot=fakeSnapshot();
+  snapshot.generatedAt=new Date(Date.now()-3*60*60*1000).toISOString();
+  const app=boot({snapshot});
+  await flush();
+  assert.match(app.element("roadmapSyncNotice").textContent,/snapshot đã quá 2 giờ/);
+  assert.match(app.element("roadmapSyncNotice").textContent,/Không phải thời gian thực/);
 });
