@@ -307,12 +307,22 @@ export interface AuditLogPageDTO {
 
 export type OperationalHealthStatusUI = "HEALTHY" | "DEGRADED" | "UNAVAILABLE";
 
+export type RuntimeHealthDetailUI =
+  | "installed"
+  | "initialized"
+  | "loaded"
+  | "healthy"
+  | "failed"
+  | "unknown"
+  | "disabled";
+
 export interface HealthServiceItemUI {
   readonly id: string;
   readonly label: string;
   readonly status: OperationalHealthStatusUI;
   readonly checked_at: ISODateTime;
   readonly safe_message: string;
+  readonly detail_status?: RuntimeHealthDetailUI | null;
 }
 
 export interface HealthSnapshotUI {

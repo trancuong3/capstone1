@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, List, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import literal, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,6 +19,11 @@ from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressR
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.runtime_diagnostics import (
+    collect_ocr_health,
+    collect_worker_health,
+    probe_storage_health,
+)
 from app.services.difficult_words_service import (
     DifficultWordsService,
     MAX_PRACTICE_AUDIO_BYTES,
@@ -821,16 +826,16 @@ class AdminSystemService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Audit contract is not available yet") from None
 
-    async def health(self):
-        # Probes the API, database, local OCR model, and voice providers.
+    async def health(self, workers: dict[str, object] | None = None):
+        # Lightweight, bounded probes. Never initialize OCR weights from Health.
         try:
             database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
         except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
             database_ready = False
 
         try:
-            local_ocr_status, local_ocr_message = await LocalOcrCorrector.probe(
-                LocalOcrConfig.from_environment()
+            local_ocr_status, local_ocr_message = await asyncio.wait_for(
+                LocalOcrCorrector.probe(LocalOcrConfig.from_environment()), timeout=4
             )
         except LocalCorrectionError:
             local_ocr_status, local_ocr_message = (
@@ -844,14 +849,45 @@ class AdminSystemService:
             )
 
         try:
-            tts_status, tts_message = await self.voice_provider.probe_tts()
+            tts_status, tts_message = await asyncio.wait_for(
+                self.voice_provider.probe_tts(), timeout=5
+            )
         except Exception:
             tts_status, tts_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ TTS."
 
         try:
-            stt_status, stt_message = await self.voice_provider.probe_stt()
+            stt_status, stt_message = await asyncio.wait_for(
+                self.voice_provider.probe_stt(), timeout=5
+            )
         except Exception:
             stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
+
+        try:
+            ocr_details = await asyncio.wait_for(
+                asyncio.to_thread(collect_ocr_health), timeout=3
+            )
+        except Exception:
+            # Never imply engine readiness after an inconclusive probe.
+            ocr_details = [
+                dict(id=key, label=label, status="DEGRADED", detail_status="unknown",
+                     safe_message="Chưa xác minh được trạng thái runtime OCR.")
+                for key, label in (
+                    ("paddleocr", "PaddleOCR"), ("vietocr", "VietOCR"),
+                    ("tesseract", "Tesseract"),
+                    ("tesseract_vie", "Tesseract tiếng Việt"),
+                )
+            ]
+
+        try:
+            storage_details = await asyncio.wait_for(
+                probe_storage_health(), timeout=3
+            )
+        except Exception:
+            storage_details = dict(
+                id="storage", label="Supabase Storage", status="DEGRADED",
+                detail_status="unknown",
+                safe_message="Chưa thể xác minh trạng thái Storage.",
+            )
 
         checked_at = datetime.now(timezone.utc)
         items = [
@@ -896,6 +932,14 @@ class AdminSystemService:
             ),
         ]
 
+        items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
+        items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
+        if workers is not None:
+            items.extend(
+                AdminHealthItemRead(**entry, checked_at=checked_at)
+                for entry in collect_worker_health(workers)
+            )
+
         statuses = [item.status for item in items]
         overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"
 
@@ -922,8 +966,12 @@ async def get_admin_audit_logs(
 
 @router.get("/admin/health", response_model=AdminHealthRead)
 async def get_admin_health(
-    actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)
+    request: Request,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
 ):
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
-    return await service.health()
+    return await service.health(
+        workers=getattr(request.app.state, "background_workers", None) or {}
+    )

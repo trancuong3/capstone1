@@ -11,7 +11,17 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
-import type { HealthSnapshotUI } from "@/types/admin";
+import type { HealthSnapshotUI, RuntimeHealthDetailUI } from "@/types/admin";
+
+const detailLabels: Record<RuntimeHealthDetailUI, string> = {
+  installed: "Đã cài",
+  initialized: "Đã khởi tạo",
+  loaded: "Đã nạp model",
+  healthy: "Đã xác minh",
+  failed: "Gặp lỗi",
+  unknown: "Chưa xác minh",
+  disabled: "Chưa chạy",
+};
 
 export function AdminHealthScreen() {
   const { health } = useAdminServices();
@@ -43,7 +53,7 @@ export function AdminHealthScreen() {
       <AdminPageHeader
         eyebrow="Operational review"
         title="Tình trạng vận hành"
-        description="Backend kiểm tra FastAPI, Database, AI OCR cục bộ, TTS và STT"
+        description="Kiểm tra nhẹ FastAPI, Database, OCR, Tesseract, worker, TTS và STT; không tải model OCR khi mở trang."
         actions={
           <Button
             disabled={!snapshot && !error}
@@ -87,6 +97,11 @@ export function AdminHealthScreen() {
                   </h2>
                   <AdminStatusBadge status={service.status} />
                 </div>
+                {service.detail_status && (
+                  <p className="text-xs font-semibold text-muted">
+                    Trạng thái kỹ thuật: {detailLabels[service.detail_status]}
+                  </p>
+                )}
                 <p className="text-muted">{service.safe_message}</p>
                 <p className="text-xs text-muted">
                   {new Date(service.checked_at).toLocaleString("vi-VN")}
