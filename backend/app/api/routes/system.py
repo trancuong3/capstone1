@@ -19,7 +19,11 @@ from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressR
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
-from app.services.runtime_diagnostics import collect_ocr_health, collect_worker_health
+from app.services.runtime_diagnostics import (
+    collect_ocr_health,
+    collect_worker_health,
+    probe_storage_health,
+)
 from app.services.difficult_words_service import (
     DifficultWordsService,
     MAX_PRACTICE_AUDIO_BYTES,
@@ -874,6 +878,17 @@ class AdminSystemService:
                 )
             ]
 
+        try:
+            storage_details = await asyncio.wait_for(
+                probe_storage_health(), timeout=3
+            )
+        except Exception:
+            storage_details = dict(
+                id="storage", label="Supabase Storage", status="DEGRADED",
+                detail_status="unknown",
+                safe_message="Chưa thể xác minh trạng thái Storage.",
+            )
+
         checked_at = datetime.now(timezone.utc)
         items = [
             AdminHealthItemRead(
@@ -917,6 +932,7 @@ class AdminSystemService:
             ),
         ]
 
+        items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
         if workers is not None:
             items.extend(
