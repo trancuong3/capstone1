@@ -61,6 +61,20 @@ test("fails closed on duplicate task IDs",async()=>{
   items.push({...issue(1),number:177,html_url:"https://github.com/trancuong3/capstone1/issues/177"});
   await assert.rejects(buildSnapshot(fixture({issues:items}).getJson),/Duplicate roadmap task ID/);
 });
+test("detects duplicate stable IDs on later paginated Issue pages",async()=>{
+  const first=Array.from({length:14},(_,i)=>issue(i+1));
+  while(first.length<100)first.push({number:first.length+300,title:"Unrelated",body:"",html_url:""});
+  const second=[{...issue(1),number:88,html_url:"https://github.com/trancuong3/capstone1/issues/88"}];
+  const calls=[];
+  const getJson=async endpoint=>{
+    calls.push(endpoint);
+    if(endpoint.endsWith("page=1"))return first;
+    if(endpoint.endsWith("page=2"))return second;
+    throw new Error("Unexpected extra page");
+  };
+  await assert.rejects(fetchRoadmapIssues(getJson),/Duplicate roadmap task ID: p1/);
+  assert.equal(calls.length,2);
+});
 test("fails closed on corrupted statuses",async()=>{
   const items=Array.from({length:14},(_,i)=>issue(i+1));
   items[3]=issue(4,"invented");
