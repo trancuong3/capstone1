@@ -80,7 +80,7 @@
       }
     });
     const activity=snapshot.activity;
-    if (!activity || ["commits","prs","issues","runs","releases"].some(key=>!Array.isArray(activity[key]))) {
+    if (!activity || ["commits","prs","issues","runs","releases"].some(key=>activity[key] !== null && !Array.isArray(activity[key]))) {
       throw new Error("Incomplete public GitHub activity snapshot");
     }
     return snapshot;
