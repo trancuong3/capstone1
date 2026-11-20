@@ -40,12 +40,14 @@ jobs:
               raise SystemExit("Dashboard script block was not found.")
           if '<html lang="vi"' not in source.lower():
               raise SystemExit("Expected Vietnamese HTML document language.")
-          if "localStorage" not in source or "api.github.com" not in source:
+          if "localStorage" not in source or "api.github.com" not in source or 'roadmap-core.js' not in source:
               raise SystemExit("Expected local task storage and public GitHub API integration.")
           Path("/tmp/viread-project-dashboard.js").write_text(match.group(1), encoding="utf-8")
           print("Dashboard HTML and script block checks passed.")
           PY
           node --check /tmp/viread-project-dashboard.js
+          node --check project-dashboard/roadmap-core.js
+          node --test project-dashboard/roadmap-core.test.cjs
 
   deploy:
     name: Deploy GitHub Pages
