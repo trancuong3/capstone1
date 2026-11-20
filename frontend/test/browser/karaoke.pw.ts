@@ -390,6 +390,202 @@ test("catalog failures differ from empty; playback updates need explicit action"
   ).toBeEnabled();
 });
 
+type ScoringBrowserFixture = {
+  audio: HTMLAudioElement;
+  listening: boolean;
+  liveTracks: number;
+  tracksStarted: number;
+  sing: (startSeconds: number, endSeconds: number, text: string) => void;
+};
+type ScoringPage = Window & { __singingFixture: ScoringBrowserFixture };
+
+test("child live scoring confirms actual syllables and preserves song results after practice", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    // A disconnected Web Audio destination provides silent, real audio tracks.
+    // This test cannot prompt for the device mic or call a speech service.
+    const tracks = new Set<MediaStreamTrack>();
+    let context: AudioContext | undefined;
+    let tracksStarted = 0;
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async (constraints: MediaStreamConstraints) => {
+        if (!constraints.audio || constraints.video)
+          throw new Error("Expected audio-only capture");
+        context ??= new AudioContext();
+        const stream = context.createMediaStreamDestination().stream;
+        stream.getTracks().forEach((track) => tracks.add(track));
+        return stream;
+      },
+    });
+    window.addEventListener(
+      "pagehide",
+      () => {
+        tracks.forEach((track) => track.stop());
+        void context?.close();
+      },
+      { once: true },
+    );
+    class Recognizer {
+      static active?: Recognizer;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onspeechstart: (() => void) | null = null;
+      onspeechend: (() => void) | null = null;
+      onresult: ((e: unknown) => void) | null = null;
+      start(track: MediaStreamTrack) {
+        if (!tracks.has(track))
+          throw new Error("Expected an explicit fixture audio track");
+        if (track.readyState === "ended")
+          throw new DOMException("Track is ended", "InvalidStateError");
+        tracksStarted++;
+        Recognizer.active = this;
+        queueMicrotask(() => this.onstart?.());
+      }
+      stop() {
+        if (Recognizer.active === this) Recognizer.active = undefined;
+        queueMicrotask(() => this.onend?.());
+      }
+      abort() {
+        if (Recognizer.active === this) Recognizer.active = undefined;
+      }
+    }
+    const control = {
+      audio: null as HTMLAudioElement | null,
+      get listening() {
+        return !!Recognizer.active;
+      },
+      get liveTracks() {
+        return [...tracks].filter((track) => track.readyState === "live")
+          .length;
+      },
+      get tracksStarted() {
+        return tracksStarted;
+      },
+      sing(startSeconds: number, endSeconds: number, text: string) {
+        const current = Recognizer.active;
+        if (!current || !this.audio || this.audio.paused)
+          throw new Error("Expected active capture and playback");
+        this.audio.currentTime = startSeconds;
+        current.onspeechstart?.();
+        this.audio.currentTime = endSeconds;
+        current.onspeechend?.();
+        current.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: true, 0: { transcript: text, confidence: 0.99 } },
+          ],
+        });
+        this.audio.dispatchEvent(new Event("timeupdate"));
+      },
+    };
+    Object.defineProperty(window, "__singingFixture", { value: control });
+    Object.defineProperty(window, "SpeechRecognition", {
+      value: Recognizer,
+      configurable: true,
+    });
+    window.Audio = new Proxy(window.Audio, {
+      construct(target, args) {
+        const audio = Reflect.construct(target, args) as HTMLAudioElement;
+        control.audio = audio;
+        return audio;
+      },
+    });
+  });
+
+  const { state, base } = await fixture(page);
+  const lyrics = syllableLyrics();
+  const line = lyrics.lines[0];
+  // Longer tail keeps the checked live lyric visible on slow CI machines.
+  line.end_ms = 11000;
+  line.syllables![2].end_ms = 11000;
+  state.lyrics = lyrics;
+  await enter(page);
+  await page
+    .getByRole("link", { name: `Hát bài ${state.title}`, exact: true })
+    .click();
+  const stage = page.getByRole("region", { name: "Hát cùng bé", exact: true });
+  const action = (name: string) =>
+    stage.getByRole("button", { name, exact: true });
+  const listening = () =>
+    page.waitForFunction(
+      () =>
+        (window as unknown as ScoringPage).__singingFixture.listening &&
+        !(window as unknown as ScoringPage).__singingFixture.audio.paused,
+    );
+
+  await action("Hát có chấm điểm").click();
+  await action("Bắt đầu hát").click();
+  await listening();
+  await action("Tạm dừng").click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as ScoringPage).__singingFixture.listening,
+      ),
+    )
+    .toBe(false);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as ScoringPage).__singingFixture.liveTracks,
+    ),
+  ).toBe(0);
+  await action("Hát tiếp").click();
+  await listening();
+  await page.evaluate(() =>
+    (window as unknown as ScoringPage).__singingFixture.sing(1, 3.1, "bé vui"),
+  );
+  const marked = stage
+    .getByTestId("karaoke-active-line")
+    .locator("[data-heard]");
+  await expect(marked).toHaveCount(2);
+  expect(
+    await marked.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-heard")),
+    ),
+  ).toEqual([line.syllables![0].id + "/0", line.syllables![2].id + "/0"]);
+
+  await page.evaluate(() => {
+    const audio = (window as unknown as ScoringPage).__singingFixture.audio;
+    audio.currentTime = audio.duration - 0.1;
+  });
+  const result = stage.getByRole("region", { name: "Kết quả đúng lời" });
+  await expect(result).toContainText("67 điểm đúng lời");
+  await expect(result).toContainText("Đã đánh giá 3/3 tiếng");
+  await action("Luyện lại câu 1").click();
+  await listening();
+  await page.evaluate(() =>
+    (window as unknown as ScoringPage).__singingFixture.sing(
+      1,
+      3.1,
+      "bé hát vui",
+    ),
+  );
+  await page.evaluate(() => {
+    const audio = (window as unknown as ScoringPage).__singingFixture.audio;
+    audio.currentTime = 11.1;
+    audio.dispatchEvent(new Event("timeupdate"));
+  });
+  await expect(result).toContainText("Bé hát khớp 3/3 tiếng");
+  await expect(result).not.toContainText("điểm đúng lời");
+  await action("Về kết quả bài hát").click();
+  await expect(result).toContainText("67 điểm đúng lời");
+  expect(
+    await page.evaluate(
+      () => (window as unknown as ScoringPage).__singingFixture.liveTracks,
+    ),
+  ).toBe(0);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as ScoringPage).__singingFixture.tracksStarted,
+    ),
+  ).toBeGreaterThanOrEqual(3);
+  await noOverflow(page);
+  expect(state.unexpected).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
 test("child stage supports preparation, practice, slow loops, enlarged view and a friendly ending", async ({
   page,
 }, info) => {

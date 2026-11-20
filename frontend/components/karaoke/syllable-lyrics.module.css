@@ -18,6 +18,11 @@
   text-underline-offset: 0.25em;
   text-decoration-thickness: 3px;
 }
+.heard {
+  background-color: var(--ra-color-success-surface, #d3f3db);
+  border-radius: 0.15em;
+  box-shadow: 0 0.09em 0 var(--ra-color-success-ink, #22683e);
+}
 @media (prefers-reduced-motion: reduce) {
   .fill {
     clip-path: none;

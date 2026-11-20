@@ -120,7 +120,12 @@ describe("child karaoke stage", () => {
     expect(container.querySelector('[data-state="active"]')).toHaveStyle({
       "--karaoke-fill": "50%",
     });
+    act(() => audio.dispatchEvent(new Event("stalled")));
+    expect(screen.getByTestId("karaoke-cue")).toHaveTextContent("Câu đang hát");
     act(() => audio.dispatchEvent(new Event("waiting")));
+    expect(screen.getByTestId("karaoke-cue")).toHaveTextContent(
+      "Đang tải nhạc",
+    );
     act(() => vi.advanceTimersByTime(10000));
     expect(container.querySelector('[data-state="active"]')).toHaveStyle({
       "--karaoke-fill": "50%",
@@ -220,5 +225,274 @@ describe("child karaoke stage", () => {
     expect(
       screen.getByRole("button", { name: "Mở rộng màn hát" }),
     ).toHaveFocus();
+  });
+});
+
+// SpeechRecognition delivers permission, final results and end as independent
+// events. Tests control the order, just as the browser can delay the last words.
+function installRecognition() {
+  const instances: Recognition[] = [];
+  class Recognition {
+    onspeechstart: (() => void) | null = null;
+    onspeechend: (() => void) | null = null;
+    onstart: (() => void) | null = null;
+    onend: (() => void) | null = null;
+    onerror: ((event: { error: string }) => void) | null = null;
+    onresult: ((event: ReturnType<typeof finalResults>) => void) | null = null;
+    start = vi.fn();
+    stop = vi.fn();
+    abort = vi.fn();
+    constructor() {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("SpeechRecognition", Recognition);
+  return instances;
+}
+function finalResults(...phrases: string[]) {
+  return {
+    resultIndex: 0,
+    results: phrases.map((transcript) => ({
+      isFinal: true,
+      0: { transcript, confidence: 0.99 },
+    })),
+  };
+}
+function clickButton(name: string) {
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+function phrase(
+  capture: ReturnType<typeof installRecognition>[number],
+  from: number,
+  to: number,
+) {
+  audios[0].currentTime = from;
+  capture.onspeechstart?.();
+  audios[0].currentTime = to;
+  capture.onspeechend?.();
+  audios[0].dispatchEvent(new Event("timeupdate"));
+}
+function finishSong() {
+  act(() => {
+    const audio = audios[0];
+    audio.currentTime = audio.duration;
+    audio.ended = true;
+    audio.paused = true;
+    audio.dispatchEvent(new Event("ended"));
+  });
+}
+async function scoredStage() {
+  const recognizers = installRecognition();
+  const view = stage();
+  clickButton("Hát có chấm điểm");
+  clickButton("Bắt đầu hát");
+  const probe = recognizers[0];
+  expect(probe.start).toHaveBeenCalledOnce();
+  expect(audios[0].play).not.toHaveBeenCalled();
+  await act(async () => probe.onstart?.());
+  await finishPreparation();
+  expect(audios[0].play).toHaveBeenCalledOnce();
+  const capture = recognizers[1];
+  expect(capture.start).toHaveBeenCalledOnce();
+  act(() => capture.onstart?.());
+  return { view, recognizers, capture };
+}
+
+describe("child karaoke microphone lifecycle", () => {
+  it("waits for permission before playback and lets the child sing freely after denial", async () => {
+    const recognizers = installRecognition();
+    stage();
+    clickButton("Hát có chấm điểm");
+    expect(recognizers).toHaveLength(0);
+    clickButton("Bắt đầu hát");
+    expect(recognizers[0].start).toHaveBeenCalledOnce();
+    await finishPreparation();
+    expect(audios[0].play).not.toHaveBeenCalled();
+    await act(async () => recognizers[0].onerror?.({ error: "not-allowed" }));
+    clickButton("Hát tự do");
+    clickButton("Bắt đầu hát");
+    await finishPreparation();
+    expect(audios[0].play).toHaveBeenCalledOnce();
+    expect(recognizers).toHaveLength(1);
+    finishSong();
+    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+  });
+
+  it("keeps earlier finals on resume and ignores queued callbacks from before the pause", async () => {
+    const { recognizers, capture } = await scoredStage();
+    const oldResult = capture.onresult!;
+    act(() => {
+      phrase(capture, 1, 1.5);
+      oldResult(finalResults("bé"));
+    });
+    clickButton("Tạm dừng");
+    expect(capture.abort).toHaveBeenCalledOnce();
+    act(() => oldResult(finalResults("bé", "hát")));
+    clickButton("Hát tiếp");
+    await act(async () => {});
+    const resumed = recognizers.at(-1)!;
+    expect(resumed).not.toBe(capture);
+    act(() => {
+      resumed.onstart?.();
+      phrase(resumed, 2.6, 3.9);
+      resumed.onresult?.(finalResults("vui"));
+    });
+    finishSong();
+    act(() => resumed.onend?.());
+    expect(screen.getByText("Đã đánh giá 2/3 tiếng.")).toBeVisible();
+    expect(screen.queryByText(/\d+ điểm đúng lời/)).toBeNull();
+  });
+
+  it("flushes the last final after native end and closes the score exactly once", async () => {
+    const { capture, recognizers } = await scoredStage();
+    const finishResult = capture.onresult!;
+    const finishCycle = capture.onend!;
+    act(() => {
+      phrase(capture, 1, 1.5);
+      finishResult(finalResults("bé"));
+      phrase(capture, 1.8, 2.5);
+    });
+    // Native media can pause before the ended event. The MP3 clock can also
+    // stop a few milliseconds short of the metadata duration stored by admin.
+    act(() => {
+      audios[0].duration = 19.998;
+      audios[0].currentTime = 19.998;
+      audios[0].ended = true;
+      audios[0].pause();
+    });
+    finishSong();
+    expect(capture.stop).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    act(() => {
+      finishResult(finalResults("bé", "hát"));
+      finishCycle();
+    });
+    expect(screen.getByText("Đã đánh giá 2/3 tiếng.")).toBeVisible();
+    act(() => {
+      finishResult(finalResults("bé", "hát", "vui"));
+      finishCycle();
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getAllByText("Đã đánh giá 2/3 tiếng.")).toHaveLength(1);
+    expect(recognizers).toHaveLength(2);
+  });
+
+  it("closes the score using accepted finals when the browser never sends end", async () => {
+    const { capture } = await scoredStage();
+    const lastResult = capture.onresult!;
+    act(() => {
+      phrase(capture, 1, 1.5);
+      lastResult(finalResults("bé"));
+    });
+    finishSong();
+    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    act(() => vi.advanceTimersByTime(3000));
+    expect(screen.getByText("Đã đánh giá 1/3 tiếng.")).toBeVisible();
+    act(() => lastResult(finalResults("bé", "hát vui")));
+    expect(screen.getByText("Đã đánh giá 1/3 tiếng.")).toBeVisible();
+  });
+
+  it("ignores a permission grant after the child cancels the start", async () => {
+    const recognizers = installRecognition();
+    stage();
+    clickButton("Hát có chấm điểm");
+    clickButton("Bắt đầu hát");
+    const oldStart = recognizers[0].onstart!;
+    clickButton("Hủy chuẩn bị");
+    await act(async () => oldStart());
+    await finishPreparation();
+    expect(audios[0].play).not.toHaveBeenCalled();
+    expect(recognizers).toHaveLength(1);
+    expect(recognizers[0].abort).toHaveBeenCalledOnce();
+  });
+
+  it("isolates a replay even when results from the previous song arrive late", async () => {
+    const { capture, recognizers } = await scoredStage();
+    const oldResult = capture.onresult!;
+    act(() => {
+      phrase(capture, 1, 4);
+      oldResult(finalResults("bé hát vui"));
+    });
+    finishSong();
+    act(() => capture.onend?.());
+    expect(screen.getByText("100 điểm đúng lời")).toBeVisible();
+    clickButton("Hát lại bài này");
+    await act(async () => recognizers.at(-1)!.onstart?.());
+    await finishPreparation();
+    const replay = recognizers.at(-1)!;
+    expect(replay).not.toBe(capture);
+    act(() => {
+      replay.onstart?.();
+      oldResult(finalResults("bé hát vui"));
+    });
+    finishSong();
+    act(() => replay.onend?.());
+    expect(screen.getByText(/Mình chưa nghe rõ/)).toBeVisible();
+    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+  });
+
+  it("retains the words heard before a network error without grading the silent remainder", async () => {
+    const { capture } = await scoredStage();
+    act(() => {
+      phrase(capture, 1, 1.5);
+      capture.onresult?.(finalResults("bé"));
+      capture.onerror?.({ error: "network" });
+    });
+    finishSong();
+    expect(screen.getByText("Đã đánh giá 1/3 tiếng.")).toBeVisible();
+    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+  });
+
+  it("marks the exact live words, isolates speaker backing and preserves the song score after practice", async () => {
+    const { capture, recognizers } = await scoredStage();
+    expect(audios[0]).toHaveProperty("muted", true);
+    const headphones = screen.getByRole("checkbox", { name: /tai nghe/ });
+    fireEvent.click(headphones);
+    expect(audios[0]).toHaveProperty("muted", false);
+    fireEvent.click(headphones);
+    expect(audios[0]).toHaveProperty("muted", true);
+    act(() => {
+      phrase(capture, 1, 3.9);
+      capture.onresult?.(finalResults("bé vui"));
+    });
+    const confirmed = screen
+      .getByTestId("karaoke-active-line")
+      .querySelectorAll("[data-heard]");
+    expect([...confirmed].map((el) => el.textContent)).toEqual([
+      "Bé (đã nghe khớp)",
+      "vui (đã nghe khớp)",
+    ]);
+    finishSong();
+    act(() => capture.onend?.());
+    expect(screen.getByText("67 điểm đúng lời")).toBeVisible();
+    clickButton("Luyện lại câu 1");
+    await act(async () => recognizers.at(-1)!.onstart?.());
+    await finishPreparation();
+    const practice = recognizers.at(-1)!;
+    act(() => {
+      practice.onstart?.();
+      phrase(practice, 1, 3.99);
+      practice.onresult?.(finalResults("bé hát vui"));
+      audios[0].currentTime = 4.1;
+      audios[0].dispatchEvent(new Event("timeupdate"));
+    });
+    act(() => practice.onend?.());
+    expect(
+      screen.getByText("Bé hát khớp 3/3 tiếng trong phần đã nghe."),
+    ).toBeVisible();
+    clickButton("Về kết quả bài hát");
+    expect(screen.getByText("67 điểm đúng lời")).toBeVisible();
+  });
+
+  it("releases the listening microphone when the child leaves the song", async () => {
+    const { view, capture, recognizers } = await scoredStage();
+    const lateEnd = capture.onend!;
+    view.unmount();
+    expect(capture.abort).toHaveBeenCalledOnce();
+    act(() => {
+      lateEnd();
+      vi.advanceTimersByTime(5000);
+    });
+    expect(recognizers).toHaveLength(2);
   });
 });
