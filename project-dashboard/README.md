@@ -51,10 +51,10 @@ Run locally with any static server (or open `project-dashboard/index.html` in a 
 
 ```bash
 node --check project-dashboard/roadmap-core.js
-node --test project-dashboard/roadmap-core.test.cjs
+node --test project-dashboard/roadmap-core.test.cjs project-dashboard/dashboard-smoke.test.cjs
 ```
 
-The PR workflow `.github/workflows/project-dashboard-pages.yml` also validates the inline script and runs the roadmap parser tests. It deploys Pages **only on main**, never on PR creation.
+The PR workflow `.github/workflows/project-dashboard-pages.yml` also validates the inline script and runs the roadmap parser and UI/network smoke tests. It deploys Pages **only on main**, never on PR creation.
 
 ## Other dashboard views
 
