@@ -43,14 +43,10 @@ async function fetchRoadmapIssues(getJson){
     const batch=await getJson("/issues?state=all&per_page=100&page="+page);
     if(!Array.isArray(batch))throw new Error("Issue API returned invalid JSON");
     all.push(...batch);
-    const count=new Set(all.filter(x=>!x.pull_request).map(x=>{
-      const match=(x.body||"").match(/<!--\s*viread-roadmap:v1\s*[\s\S]*?\bid:\s*(p\d+)\b/);
-      return match&&match[1];
-    }).filter(Boolean));
-    if(ROADMAP_IDS.every(id=>count.has(id)))return reconcileIssues(all,ROADMAP_IDS);
-    if(batch.length<100)break;
+    if(batch.length<100)return reconcileIssues(all,ROADMAP_IDS);
   }
-  return reconcileIssues(all,ROADMAP_IDS); // fail closed if incomplete or duplicate
+  // Do not claim there are no duplicate task IDs in an unvisited page.
+  throw new Error("GitHub Issues pagination exceeded the safety limit");
 }
 async function buildSnapshot(getJson,{now=new Date(),sha=""}={}){
   const roadmap=await fetchRoadmapIssues(getJson); // required; never publish partial tasks
