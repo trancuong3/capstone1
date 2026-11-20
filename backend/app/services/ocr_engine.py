@@ -2540,7 +2540,13 @@ def _attach_engine_statuses(
 
 
 def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
-    """Run Paddle page detection and optional VietOCR recognition with truthful fallback states."""
+    """Run OCR with per-scan evidence of the verified Predictor actually used.
+
+    Snapshot the per-thread result of _get_ocr_engines immediately, before
+    another request can switch the globally cached Predictor. Never serialize
+    registry pointers or the local checkpoint path to scan metadata.
+    """
+    _scan_runtime_context.provenance = None
     try:
         paddle_engine, vietocr_engine = _get_ocr_engines()
     except OcrEngineUnavailable:
@@ -2553,36 +2559,55 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
                 f"({_paddle_initialization_error or _paddle_initialization_status})."
             )
         )
-        return _attach_engine_statuses(
-            fallback,
-            {
-                "paddleocr": _paddle_initialization_status,
-                "vietocr": "not_run",
-                "tesseract": "success",
-            },
-            {
-                "paddleocr": paddle_reason,
-                "vietocr": "VietOCR recognition requires PaddleOCR line regions.",
-            },
+        return _attach_vietocr_provenance(
+            _attach_engine_statuses(
+                fallback,
+                {
+                    "paddleocr": _paddle_initialization_status,
+                    "vietocr": "not_run",
+                    "tesseract": "success",
+                },
+                {
+                    "paddleocr": paddle_reason,
+                    "vietocr": "VietOCR recognition requires PaddleOCR line regions.",
+                },
+            ),
+            None,
+            skipped_reason="paddle_unavailable",
         )
+    scan_snapshot = getattr(_scan_runtime_context, "provenance", None)
+    _scan_runtime_context.provenance = None
+    # If a test or external caller supplies an engine without the verified
+    # loader, it must never inherit a hash from the previous scan.
+    if not isinstance(scan_snapshot, dict):
+        scan_snapshot = _scan_vietocr_snapshot(vietocr_engine)
 
     try:
-        return _extract_text_and_boxes_dual_engine(
+        result = _extract_text_and_boxes_dual_engine(
             image_bytes, paddle_engine, vietocr_engine
         )
+        return _attach_vietocr_provenance(result, scan_snapshot)
     except OcrNoTextDetected:
         fallback = _extract_text_and_boxes_tesseract(image_bytes)
-        return _attach_engine_statuses(
-            fallback,
-            {"paddleocr": "no_result", "vietocr": "not_run", "tesseract": "success"},
-            {"vietocr": "PaddleOCR did not produce line regions for VietOCR."},
+        return _attach_vietocr_provenance(
+            _attach_engine_statuses(
+                fallback,
+                {"paddleocr": "no_result", "vietocr": "not_run", "tesseract": "success"},
+                {"vietocr": "PaddleOCR did not produce line regions for VietOCR."},
+            ),
+            scan_snapshot,
+            skipped_reason="paddle_no_text",
         )
     except OcrEngineUnavailable:
         fallback = _extract_text_and_boxes_tesseract(image_bytes)
-        return _attach_engine_statuses(
-            fallback,
-            {"paddleocr": "error", "vietocr": "not_run", "tesseract": "success"},
-            {"vietocr": "PaddleOCR failed before VietOCR received line regions."},
+        return _attach_vietocr_provenance(
+            _attach_engine_statuses(
+                fallback,
+                {"paddleocr": "error", "vietocr": "not_run", "tesseract": "success"},
+                {"vietocr": "PaddleOCR failed before VietOCR received line regions."},
+            ),
+            scan_snapshot,
+            skipped_reason="paddle_inference_error",
         )
     except Exception:
         # A post-initialization pipeline bug is not proof that either OCR engine
