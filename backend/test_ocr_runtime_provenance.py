@@ -278,7 +278,11 @@ class RuntimeProvenanceTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 ocr_engine._v2_artifact_from_storage(active)
-            self.assertFalse((Path(self.temp.name) / f"viread-vietocr-v2-{expected}.pth.assembling").exists())
+            self.assertEqual(
+                list(Path(self.temp.name).glob(f"viread-vietocr-v2-{expected}-*.assembling")),
+                [],
+                "Invalid shards must not retain partial checkpoint files",
+            )
             chunks["private/chunk-b"] = b"part B"
             path, config, config_sha = ocr_engine._v2_artifact_from_storage(active)
             self.assertIsNone(config)
