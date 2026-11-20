@@ -54,7 +54,7 @@ begin
 
   if to_regclass('public.idx_readingevents_session_start_id') is not null
      and pg_get_indexdef(
-       'public.idx_readingevents_session_start_id'::regclass
+       to_regclass('public.idx_readingevents_session_start_id')
      ) is distinct from
        'CREATE INDEX idx_readingevents_session_start_id ON public.readingevents USING btree (sessionid, startms, id)' then
     raise exception 'reading_index_optimization: readingevents index definition drift';
@@ -62,7 +62,7 @@ begin
 
   if to_regclass('public.idx_readingsessions_child_started_id') is not null
      and pg_get_indexdef(
-       'public.idx_readingsessions_child_started_id'::regclass
+       to_regclass('public.idx_readingsessions_child_started_id')
      ) is distinct from
        'CREATE INDEX idx_readingsessions_child_started_id ON public.readingsessions USING btree (childid, startedat DESC, id DESC)' then
     raise exception 'reading_index_optimization: readingsessions index definition drift';
