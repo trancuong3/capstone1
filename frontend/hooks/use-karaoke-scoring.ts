@@ -607,6 +607,18 @@ export function useKaraokeScoring(
     serverSupported,
   );
   useEffect(() => session.reset, [session, lyrics]);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") session.reset();
+    };
+    const onAndroidBackground = () => session.reset();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("viread:android-background", onAndroidBackground);
+    };
+  }, [session]);
   const arm = useCallback(
     (lineId?: string) => session.arm(lyrics, getCurrentMs, lineId),
     [session, lyrics, getCurrentMs],

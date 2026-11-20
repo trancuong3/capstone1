@@ -475,6 +475,20 @@ export function useSpeechRecorder(
 
   useEffect(() => cancel, [cancel]);
 
+  // Never retain a live mic when the Android activity or browser tab is hidden.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") cancel();
+    };
+    const onAndroidBackground = () => cancel();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("viread:android-background", onAndroidBackground);
+    };
+  }, [cancel]);
+
   const getStream = useCallback(() => streamRef.current, []);
   const getIsSpeaking = useCallback(() => isSpeakingRef.current, []);
 

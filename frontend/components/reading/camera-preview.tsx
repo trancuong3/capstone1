@@ -47,6 +47,7 @@ export function CameraPreview({
   const cameraRequestRef = useRef<Promise<MediaStream> | null>(null);
   const cameraEffectCountRef = useRef(0);
   const ignoreCameraEndedRef = useRef(false);
+  const cameraSuspendedRef = useRef(false);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
@@ -83,6 +84,7 @@ export function CameraPreview({
 
   useEffect(() => {
     if (!enableScanner) return;
+    cameraSuspendedRef.current = false;
     let active = true;
     cameraEffectCountRef.current += 1;
 
@@ -104,7 +106,11 @@ export function CameraPreview({
         if (cameraRequestRef.current === request) {
           cameraRequestRef.current = null;
         }
-        if (!active || !mountedRef.current) {
+        if (!active || !mountedRef.current || cameraSuspendedRef.current) {
+          if (cameraSuspendedRef.current) {
+            acquiredStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           if (cameraEffectCountRef.current === 0) {
             acquiredStream.getTracks().forEach((track) => track.stop());
           }
@@ -152,6 +158,30 @@ export function CameraPreview({
       scanAbortRef.current?.abort();
       scanAbortRef.current = null;
       if (cameraEffectCountRef.current === 0) stopCamera();
+    };
+  }, [enableScanner, onCameraUnavailable, stopCamera]);
+
+  // Android native background and browser tab suspension must release camera.
+  // The scanner intentionally requires a fresh user action on resume.
+  useEffect(() => {
+    if (!enableScanner) return;
+    const suspend = () => {
+      if (cameraSuspendedRef.current) return;
+      cameraSuspendedRef.current = true;
+      scanAbortRef.current?.abort();
+      setIsScanning(false);
+      setAutoScan(false);
+      stopCamera();
+      onCameraUnavailable?.();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") suspend();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", suspend);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("viread:android-background", suspend);
     };
   }, [enableScanner, onCameraUnavailable, stopCamera]);
 
