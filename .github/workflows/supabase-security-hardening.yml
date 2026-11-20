@@ -1,13 +1,14 @@
 name: Supabase Security Hardening (Disposable PostgreSQL)
 
+# Do not filter paths: this check can be required for *every* PR into main.
+# A path-filtered required workflow could remain indefinitely pending.
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
-    paths:
-      - "supabase/migrations/20261120100000_supabase_security_hardening.sql"
-      - "supabase/tests/security_hardening_disposable.sql"
-      - ".github/workflows/supabase-security-hardening.yml"
 
 permissions:
   contents: read
