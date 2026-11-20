@@ -202,6 +202,9 @@ class AdminHealthItemRead(BaseModel):
     status: Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"]
     checked_at: datetime
     safe_message: str
+    detail_status: Literal[
+        "installed", "initialized", "loaded", "healthy", "failed", "unknown", "disabled"
+    ] | None = None
 
 
 class AdminHealthRead(BaseModel):

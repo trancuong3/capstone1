@@ -22,6 +22,13 @@ export function createHealthService(): HealthService {
               status,
               checked_at: z.iso.datetime({ offset: true }),
               safe_message: z.string(),
+              detail_status: z
+                .enum([
+                  "installed", "initialized", "loaded", "healthy",
+                  "failed", "unknown", "disabled",
+                ])
+                .nullable()
+                .optional(),
             }),
           ),
         }),
