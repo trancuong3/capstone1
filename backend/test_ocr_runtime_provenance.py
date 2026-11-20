@@ -168,7 +168,14 @@ class RuntimeProvenanceTests(unittest.TestCase):
             _, old_engine = ocr_engine._get_ocr_engines()
             pointer["value"] = new_active
             self.artifacts.pop("FLOW2_ADMIN_VERIFIED")
-            _, still_loaded = ocr_engine._get_ocr_engines()
+            # After the Flow 2 download fails, the runtime first attempts to
+            # load verified Original. Force that SECOND attempt to fail too:
+            # only then must the prior Flow 1 Predictor remain in service.
+            with patch.object(
+                ocr_engine.Cfg, "load_config_from_name",
+                side_effect=RuntimeError("test-only Original load failure"),
+            ):
+                _, still_loaded = ocr_engine._get_ocr_engines()
             self.assertIs(still_loaded, old_engine)
             result = ocr_engine._scan_runtime_context.provenance
             self.assertEqual(result["model_profile"], "FLOW1_EXTERNAL_TRDG")
@@ -176,6 +183,17 @@ class RuntimeProvenanceTests(unittest.TestCase):
             self.assertNotEqual(result["checkpoint_sha256"], new_active["checkpoint_sha256"])
             self.assertEqual(result["model_load_status"], "stale_loaded")
             self.assertEqual(result["fallback_reason"], "checkpoint_unavailable_or_invalid")
+
+    def test_flow2_download_failure_uses_original_when_original_is_healthy(self):
+        with self.runtime(self.active("FLOW2_ADMIN_VERIFIED")):
+            self.artifacts.pop("FLOW2_ADMIN_VERIFIED")
+            _, engine = ocr_engine._get_ocr_engines()
+            self.assertIsInstance(engine, FakePredictor)
+            snapshot = ocr_engine._scan_runtime_context.provenance
+            self.assertEqual(snapshot["model_profile"], "ORIGINAL")
+            self.assertEqual(snapshot["checkpoint_sha256"], self.hashes["ORIGINAL"])
+            self.assertEqual(snapshot["model_load_status"], "fallback_loaded")
+            self.assertEqual(snapshot["fallback_reason"], "checkpoint_unavailable_or_invalid")
 
     def test_runtime_identity_survives_concurrent_registry_switch(self):
         with self.runtime(self.active("FLOW1_EXTERNAL_TRDG")):
