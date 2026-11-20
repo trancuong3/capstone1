@@ -1097,6 +1097,14 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 detail_status: "failed",
               },
               {
+                id: "storage",
+                label: "Supabase Storage",
+                status: "HEALTHY",
+                checked_at: timestamp,
+                safe_message: "Storage phản hồi kiểm tra bucket (không đọc file).",
+                detail_status: "healthy",
+              },
+              {
                 id: "book_quality",
                 label: "Book quality worker",
                 status: "DEGRADED",
@@ -1123,6 +1131,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(screen.getByText("Trạng thái kỹ thuật: Chưa chạy")).toBeInTheDocument();
     expect(
       screen.getByText("Thiếu dữ liệu nhận diện tiếng Việt (vie)."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Storage phản hồi kiểm tra bucket (không đọc file)."),
     ).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
