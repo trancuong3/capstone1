@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 SourceType = Literal["BOOK_PAGE", "CUSTOM_UPLOAD", "SAMPLE"]
 SessionStatus = Literal["ACTIVE", "COMPLETED"]
 InputMode = Literal["VOICE", "TEXT"]
+EvaluationSource = Literal["AI", "FALLBACK"]
 
 
 class PictureVocabItem(BaseModel):
@@ -68,6 +69,7 @@ class PictureAttemptRead(BaseModel):
     transcript_text: str
     score_out_of_10: int = Field(..., ge=0, le=10)
     stars: int = Field(..., ge=0, le=3)
+    evaluation_source: EvaluationSource = "AI"
     feedback: PictureEvaluationFeedbackRead
     created_at: datetime
 
@@ -96,6 +98,8 @@ class PictureSessionSummaryRead(BaseModel):
     session_id: UUID
     child_id: UUID
     source_type: SourceType
+    sample_key: str | None = None
+    book_page_id: UUID | None = None
     scene_title: str
     image_url: str
     status: SessionStatus
