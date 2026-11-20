@@ -35,7 +35,7 @@ jobs:
           import re
 
           source = Path("project-dashboard/index.html").read_text(encoding="utf-8")
-          match = re.search(r"<script>([\\s\\S]*?)</script>", source, re.IGNORECASE)
+          match = re.search(r"<script>([\s\S]*?)</script>", source, re.IGNORECASE)
           if not match:
               raise SystemExit("Dashboard script block was not found.")
           if '<html lang="vi"' not in source.lower():
