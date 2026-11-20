@@ -208,12 +208,14 @@ async def lifespan(_app: FastAPI):
             name="viread_ocr_flow2_auto_training_worker",
         )
     local_trainer_process = None
-    local_training_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "true").strip().lower() not in {
-        "0", "false", "no", "off",
-    }
+    # Dedicated training is opt-in. The subprocess itself defaults to disabled;
+    # starting it without an explicit opt-in wastes memory and fails on Render.
+    local_training_enabled = os.getenv(
+        "VIREAD_LOCAL_TRAINING_ENABLED", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
     local_autostart_enabled = os.getenv(
-        "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART", "true"
-    ).strip().lower() not in {"0", "false", "no", "off"}
+        "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
     if APP_ENVIRONMENT != "test" and local_training_enabled and local_autostart_enabled:
         try:
             local_trainer_process = await asyncio.create_subprocess_exec(
