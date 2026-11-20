@@ -6,12 +6,19 @@ import type { LiveSingingScore } from "@/lib/karaoke/live-singing-score";
 
 export function KaraokeScoreCard({
   score,
+  practice = false,
   onPractice,
 }: {
   score: LiveSingingScore;
+  practice?: boolean;
   onPractice?: (lineId: string) => void;
 }) {
   const { overallAccuracy, matchedWords, evaluatedWords, totalWords } = score;
+  const points =
+    overallAccuracy ??
+    (!practice && score.kind === "partial" && evaluatedWords > 0
+      ? Math.round((100 * matchedWords) / evaluatedWords)
+      : null);
   const suggested =
     score.lineScores.find((line) => line.matchedWords < line.words.length) ??
     score.lineScores[0];
@@ -21,23 +28,26 @@ export function KaraokeScoreCard({
       aria-label="Kết quả đúng lời"
       className="mx-auto grid w-full max-w-lg gap-3 rounded-card bg-white p-5 text-center shadow-sm"
     >
-      {overallAccuracy !== null && (
-        <div>
-          <div aria-hidden className="flex justify-center gap-1 text-amber-700">
-            {Array.from({ length: 5 }, (_, i) => (
-              <Star
-                key={i}
-                className={
-                  i < Math.round(overallAccuracy / 20)
-                    ? "size-7 fill-amber-300"
-                    : "size-7 opacity-30"
-                }
-              />
-            ))}
-          </div>
-          <p className="text-heading font-extrabold text-primary">
-            {overallAccuracy} điểm đúng lời
+      {points !== null && (
+        <div className="grid gap-1">
+          <p className="font-bold">
+            {score.kind === "whole" ? "Điểm đúng lời" : "Điểm phần đã nghe"}
           </p>
+          <p className="text-5xl font-extrabold text-primary">{points}/100</p>
+        </div>
+      )}
+      {overallAccuracy !== null && (
+        <div aria-hidden className="flex justify-center gap-1 text-amber-700">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Star
+              key={i}
+              className={
+                i < Math.round(overallAccuracy / 20)
+                  ? "size-7 fill-amber-300"
+                  : "size-7 opacity-30"
+              }
+            />
+          ))}
         </div>
       )}
       <p role="status" className="font-bold">

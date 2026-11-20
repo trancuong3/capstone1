@@ -26,6 +26,18 @@
   padding: clamp(1rem, 4vw, 3rem) 0;
   text-align: center;
 }
+.countIn {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+  color: var(--ra-color-primary-hover);
+}
+.countdown {
+  font-size: clamp(4.5rem, 16vw, 8rem);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .line {
   font-size: clamp(1.9rem, 4.8vw, 3.5rem);
   line-height: 1.65;

@@ -312,21 +312,23 @@ export function KaraokeStage({
     if (player.ready) togglePlay();
   }
   const status =
-    countdown !== null
-      ? `Chuẩn bị · ${countdown}`
+    countdown !== null || scoring.status === "arming"
+      ? "Chuẩn bị"
       : player.waiting
         ? "Đang tải nhạc…"
-        : activeLine
-          ? player.playing
-            ? "Câu đang hát"
-            : "Câu để hát"
-          : next
-            ? secondsToNext !== null && secondsToNext <= 3
-              ? `Vào lời sau ${secondsToNext} giây`
-              : "Đoạn nhạc · Chuẩn bị câu tiếp theo"
-            : "Cùng nghe đoạn nhạc cuối nhé";
-  const displayed =
-    countdown !== null ? (practiceLine ?? lines[0]) : activeLine;
+        : !started && !practiceLine && player.currentMs === 0
+          ? "Bấm Bắt đầu hát"
+          : activeLine
+            ? player.playing
+              ? "Câu đang hát"
+              : "Câu để hát"
+            : !player.playing
+              ? "Bấm Hát tiếp"
+              : next
+                ? secondsToNext !== null && secondsToNext <= 3
+                  ? `Vào lời sau ${secondsToNext} giây`
+                  : "Đoạn nhạc · Chuẩn bị câu tiếp theo"
+                : "Cùng nghe đoạn nhạc cuối nhé";
   const finalScore =
     scoring.score ??
     (scoring.status === "insufficient" ? scoring.liveScore : null);
@@ -477,7 +479,11 @@ export function KaraokeStage({
           >
             <p
               role="status"
-              className="flex items-center gap-2 font-bold text-primary"
+              className={
+                countdown === null
+                  ? "flex items-center gap-2 font-bold text-primary"
+                  : styles.countIn
+              }
               data-testid="karaoke-cue"
             >
               {scoring.listening && (
@@ -487,46 +493,53 @@ export function KaraokeStage({
                 />
               )}
               {status}
-            </p>
-            <p className={styles.line} data-testid="karaoke-active-line">
-              {displayed ? (
-                countdown !== null ? (
-                  displayed.text
-                ) : displayed.syllables?.length || scoredMode ? (
-                  <SyllableLyrics
-                    line={displayed}
-                    currentMs={player.currentMs}
-                    evidence={
-                      scoredMode
-                        ? scoring.liveScore?.lineScores.find(
-                            (l) => l.lineId === displayed.id,
-                          )
-                        : undefined
-                    }
-                  />
-                ) : (
-                  displayed.text
-                )
-              ) : (
-                (next?.text ?? "Cùng nghe nhạc nhé!")
+              {countdown !== null && (
+                <span
+                  className={styles.countdown}
+                  data-testid="karaoke-countdown"
+                >
+                  {countdown}
+                </span>
               )}
             </p>
-            {activeLine && next && (
-              <p className={styles.next}>Tiếp theo: {next.text}</p>
+            {countdown === null && (
+              <>
+                <p className={styles.line} data-testid="karaoke-active-line">
+                  {activeLine ? (
+                    <SyllableLyrics
+                      line={activeLine}
+                      currentMs={player.currentMs}
+                      highlightActive
+                      evidence={
+                        scoredMode
+                          ? scoring.liveScore?.lineScores.find(
+                              (l) => l.lineId === activeLine.id,
+                            )
+                          : undefined
+                      }
+                    />
+                  ) : (
+                    (next?.text ?? "Cùng nghe nhạc nhé!")
+                  )}
+                </p>
+                {activeLine && next && (
+                  <p className={styles.next}>Tiếp theo: {next.text}</p>
+                )}
+                <p className="text-sm text-muted">
+                  {practiceLine
+                    ? `Đang luyện câu ${lines.indexOf(practiceLine) + 1}`
+                    : activeLine
+                      ? `Câu ${activeIndex + 1} / ${lines.length}`
+                      : "Bé sẵn sàng hát cùng mình nhé"}
+                </p>
+              </>
             )}
-            <p className="text-sm text-muted">
-              {practiceLine
-                ? `Đang luyện câu ${lines.indexOf(practiceLine) + 1}`
-                : activeLine
-                  ? `Câu ${activeIndex + 1} / ${lines.length}`
-                  : "Bé sẵn sàng hát cùng mình nhé"}
-            </p>
           </div>
           {practiceLine && scoring.status === "finishing" && (
             <p role="status">Đang nghe nốt câu cuối…</p>
           )}
           {practiceLine && scoring.score && (
-            <KaraokeScoreCard score={scoring.score} />
+            <KaraokeScoreCard score={scoring.score} practice />
           )}
           {practiceLine && scoring.status === "insufficient" && (
             <p role="status">Mình chưa nghe rõ. Bé thử lại nhé!</p>
