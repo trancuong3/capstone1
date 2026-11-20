@@ -7,7 +7,8 @@ private Supabase credentials, or production records are used.
 import os
 import unittest
 from datetime import date, datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import UUID
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
@@ -17,8 +18,10 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from sqlalchemy.dialects import postgresql
 
 from app.api.routes.reading import HistoryRepository
-from app.api.routes.system import LegacyReportRepository, ProgressRepository
+from app.api.routes.system import AdminSystemRepository, LegacyReportRepository, ProgressRepository
 from app.repositories.tutor_question_repository import TutorQuestionRepository
+from app.services.tutor_question_service import TutorQuestionService
+from fastapi import HTTPException
 
 ACTOR = UUID("11111111-1111-4111-8111-111111111111")
 CHILD = UUID("22222222-2222-4222-8222-222222222222")
@@ -125,6 +128,45 @@ class OwnershipRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("readingsessions.id", sql)
         self.assertIn(ACTOR, params)
         self.assertIn(SESSION, params)
+
+
+    async def test_history_and_admin_roles_exclude_inactive_profiles(self):
+        for repo_type in (HistoryRepository, AdminSystemRepository):
+            with self.subTest(repository=repo_type.__name__):
+                db = MagicMock()
+                db.scalar = AsyncMock(return_value=None)
+                await repo_type(db).role(ACTOR)
+                sql, params = compiled(db.scalar.await_args.args[0])
+                self.assertIn("profiles.active", sql)
+                self.assertIn(ACTOR, params)
+                self.assertIn(1, params)
+
+    async def test_tutor_refuses_to_insert_when_session_reopens_during_generation(self):
+        repository = MagicMock()
+        repository.owned_session = AsyncMock(return_value=SimpleNamespace(
+            Id=SESSION, State="COMPLETED"
+        ))
+        repository.owned_session_for_update = AsyncMock(return_value=SimpleNamespace(
+            Id=SESSION, State="ACTIVE"
+        ))
+        repository.questions = AsyncMock(return_value=[])
+        repository.release = AsyncMock()
+        repository.add_questions = Mock()
+        repository.commit = AsyncMock()
+
+        service = TutorQuestionService(repository)
+        service.config = SimpleNamespace(enabled=True)
+        service._source_pages = AsyncMock(return_value=[object()])
+        service.generator = SimpleNamespace(
+            generate=AsyncMock(return_value=SimpleNamespace(questions=[object()])),
+        )
+        with self.assertRaises(HTTPException) as caught:
+            await service.generate_for_session(SESSION, ACTOR)
+        self.assertEqual(caught.exception.status_code, 409)
+        repository.owned_session_for_update.assert_awaited_once_with(SESSION, ACTOR)
+        repository.add_questions.assert_not_called()
+        repository.commit.assert_not_awaited()
+        self.assertEqual(repository.release.await_count, 2)
 
 
 if __name__ == "__main__":
