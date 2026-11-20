@@ -162,7 +162,10 @@ export function useKaraokePlayer(
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      document.removeEventListener("viread:android-background", onAndroidBackground);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
       invalidate();
       cancelAnimationFrame(frame);
       listeners.forEach(([event, listener]) =>

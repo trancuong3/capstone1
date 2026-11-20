@@ -616,7 +616,10 @@ export function useKaraokeScoring(
     document.addEventListener("viread:android-background", onAndroidBackground);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      document.removeEventListener("viread:android-background", onAndroidBackground);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
     };
   }, [session]);
   const arm = useCallback(
