@@ -205,7 +205,7 @@ class HistoryRepository:
         return await ReadingComparisonRepository(self.db).list_for_session(session_id)
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
 
     async def owned_child(self, child_id: UUID, actor_id: UUID):
         return await self.db.scalar(select(ChildProfile.Id).where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id))
