@@ -142,7 +142,7 @@ public final class MainActivity extends Activity {
                 String[] types = params.getAcceptTypes();
                 List<String> validTypes = new ArrayList<>();
                 for (String type : types) {
-                    if (type != null && !type.isBlank() && type.contains("/")) {
+                    if (type != null && !type.trim().isEmpty() && type.contains("/")) {
                         validTypes.add(type);
                     }
                 }
