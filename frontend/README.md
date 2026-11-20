@@ -117,7 +117,7 @@ Người chỉ muốn xem giao diện không bắt buộc chạy các lệnh ki�
 | Books    | `/books`                               | Tìm kiếm, lọc danh mục ACTIVE + VERIFIED                   |
 | Books    | `/books/[bookId]`                      | Chi tiết, chọn trang bắt đầu và khoảng trang               |
 | Reading  | `/reading-preparation`                 | Xác minh microphone và tạo session cho hồ sơ đã chọn       |
-| Reading  | `/reading/[sessionId]`                 | Luồng đọc qua API, dùng mic/STT/TTS khi cấu hình           |
+| Reading  | `/reading/[sessionId]`                 | Buổi đọc qua API, dùng mic/STT/TTS khi có cấu hình phù hợp |
 | Sessions | `/sessions`                            | Lịch sử buổi đọc theo bé                                   |
 | Sessions | `/sessions/[sessionId]`                | Chi tiết lịch sử gắn revision                              |
 | Reports  | `/reports`                             | Báo cáo tiến bộ 30 ngày                                    |
