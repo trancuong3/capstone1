@@ -12,6 +12,17 @@ from app.services.admin_ocr_local import LocalOcrConfig
 
 
 class LocalOcrHealthTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # No live Storage API calls from the OCR health unit tests.
+        storage = AsyncMock(return_value={
+            "id": "storage", "label": "Supabase Storage",
+            "status": "HEALTHY", "detail_status": "healthy",
+            "safe_message": "Test bucket responded.",
+        })
+        patcher = patch("app.api.routes.system.probe_storage_health", new=storage)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_health_reports_local_provider_and_does_not_call_gemini(self):
         repository = AsyncMock()
         repository.probe_database.return_value = True
