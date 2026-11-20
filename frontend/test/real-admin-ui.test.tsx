@@ -1101,7 +1101,8 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 label: "Supabase Storage",
                 status: "HEALTHY",
                 checked_at: timestamp,
-                safe_message: "Storage phản hồi kiểm tra bucket (không đọc file).",
+                safe_message:
+                  "Storage phản hồi kiểm tra bucket (không đọc file).",
                 detail_status: "healthy",
               },
               {
@@ -1128,7 +1129,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       screen.getByRole("heading", { name: "Tesseract tiếng Việt" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Trạng thái kỹ thuật: Đã cài")).toBeInTheDocument();
-    expect(screen.getByText("Trạng thái kỹ thuật: Chưa chạy")).toBeInTheDocument();
+    expect(
+      screen.getByText("Trạng thái kỹ thuật: Chưa chạy"),
+    ).toBeInTheDocument();
     expect(
       screen.getByText("Thiếu dữ liệu nhận diện tiếng Việt (vie)."),
     ).toBeInTheDocument();
