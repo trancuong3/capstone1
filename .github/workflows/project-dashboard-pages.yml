@@ -1,6 +1,10 @@
 name: Deploy ViRead Project Hub
 
 on:
+  pull_request:
+    paths:
+      - "project-dashboard/**"
+      - ".github/workflows/project-dashboard-pages.yml"
   push:
     branches:
       - main
@@ -11,15 +15,46 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "github-pages"
   cancel-in-progress: true
 
 jobs:
+  validate:
+    name: Validate static dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract and validate dashboard JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path("project-dashboard/index.html").read_text(encoding="utf-8")
+          match = re.search(r"<script>([\\s\\S]*?)</script>", source, re.IGNORECASE)
+          if not match:
+              raise SystemExit("Dashboard script block was not found.")
+          if "<html lang=\\"vi\\"".replace("\\\\", "") not in source.lower():
+              raise SystemExit("Expected Vietnamese HTML document language.")
+          if "localStorage" not in source or "api.github.com" not in source:
+              raise SystemExit("Expected local task storage and public GitHub API integration.")
+          Path("/tmp/viread-project-dashboard.js").write_text(match.group(1), encoding="utf-8")
+          print("Dashboard HTML and script block checks passed.")
+          PY
+          node --check /tmp/viread-project-dashboard.js
+
   deploy:
+    name: Deploy GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: validate
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
