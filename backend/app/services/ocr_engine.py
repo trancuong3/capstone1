@@ -172,6 +172,22 @@ def _verified_vietocr_instance(
         logger.warning("Loaded VietOCR instance cannot be weak-referenced for provenance")
 
 
+def _inference_model_profile(predictor: Any | None) -> str:
+    """Select preprocessing from the inference instance, never a mutable global.
+
+    An untracked engine (e.g. a synthetic test double) uses the Original
+    preprocessing path and still gets NO verified checkpoint SHA in metadata.
+    """
+    if predictor is not None:
+        try:
+            proof = _vietocr_verified_runtime.get(predictor)
+        except TypeError:
+            proof = None
+        if proof:
+            return str(proof["model_profile"])
+    return "ORIGINAL"
+
+
 def _scan_vietocr_snapshot(
     predictor: Any | None,
     *,
@@ -1540,7 +1556,7 @@ def _recognize_uncertain_word_crops(
         else:
             try:
                 vietocr_crops = crops
-                if _vietocr_active_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                if _inference_model_profile(vietocr_engine) in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
                     vietocr_crops = [preprocess_line_array(crop) for crop in crops]
                 pil_crops = [
                     Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
@@ -2186,7 +2202,7 @@ def _extract_text_and_boxes_dual_engine(
             try:
                 with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
                     prediction_image = line_img_pil
-                    if _vietocr_active_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                    if _inference_model_profile(vietocr_engine) in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
                         prediction_image = Image.fromarray(
                             cv2.cvtColor(preprocess_line_array(dewarped_img_scaled), cv2.COLOR_BGR2RGB)
                         )
