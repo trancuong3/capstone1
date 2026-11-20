@@ -657,7 +657,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                 except Exception as exc:
                     _vietocr_initialization_status = "not_initialized"
                     _vietocr_initialization_error = type(exc).__name__
-                    load_fallback_reason = "model_initialization_failed"
+                    load_fallback_reason = load_fallback_reason or "model_initialization_failed"
                     logger.warning("VietOCR initialization failed: %s", type(exc).__name__)
 
         _scan_runtime_context.provenance = _scan_vietocr_snapshot(
