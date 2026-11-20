@@ -38,7 +38,7 @@ jobs:
           match = re.search(r"<script>([\\s\\S]*?)</script>", source, re.IGNORECASE)
           if not match:
               raise SystemExit("Dashboard script block was not found.")
-          if "<html lang=\\"vi\\"".replace("\\\\", "") not in source.lower():
+          if '<html lang="vi"' not in source.lower():
               raise SystemExit("Expected Vietnamese HTML document language.")
           if "localStorage" not in source or "api.github.com" not in source:
               raise SystemExit("Expected local task storage and public GitHub API integration.")
