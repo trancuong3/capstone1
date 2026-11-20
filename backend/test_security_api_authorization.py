@@ -6,7 +6,7 @@ The SQL assertions ensure the endpoint owner predicates cannot silently vanish.
 
 import os
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import UUID
@@ -37,10 +37,20 @@ class FakeDb:
         self.owned = True
         self.statements = []
         self.rows = []
+        started = datetime(2026, 1, 3, 2, 0, tzinfo=timezone.utc)
+        self.sessions = [(started, started + timedelta(minutes=3))]
+        self.trusted_snapshot = None
         self.question = SimpleNamespace(
-            Id=QUESTION,
-            ExpectedAnswer="mèo",
-            AcceptedAnswers=["con mèo"],
+            Id=QUESTION, SessionId=SESSION, PageId=PAGE,
+            PageRevisionId=REVISION, Type="FACTUAL",
+            Prompt="Con gi?", Difficulty="EASY",
+            CreatedAt=started, SourceSpan={"choices": ["mèo", "chó"]},
+            ExpectedAnswer="mèo", AcceptedAnswers=["con mèo"],
+        )
+        self.answer_row = SimpleNamespace(
+            Id=UUID("99999999-9999-4999-8999-999999999999"),
+            QuestionId=QUESTION, Answer="con mèo", IsCorrect=True,
+            Score=1.0, CreatedAt=started,
         )
         self.scalar = AsyncMock(side_effect=self._scalar)
         self.execute = AsyncMock(side_effect=self._execute)
@@ -53,6 +63,10 @@ class FakeDb:
         self.statements.append(sql)
         if "profiles.role" in sql:
             return self.role
+        if "progressreports" in sql and "summary" in sql:
+            return self.trusted_snapshot
+        if "comprehensionanswers" in sql and "comprehensionquestions" not in sql:
+            return self.answer_row if self.owned else None
         if "comprehensionquestions" in sql and "readingsessions" in sql:
             return self.question if self.owned else None
         if "readingsessionpages" in sql:
@@ -62,7 +76,10 @@ class FakeDb:
         return None
 
     async def _execute(self, statement):
-        self.statements.append(str(statement).lower())
+        sql = str(statement).lower()
+        self.statements.append(sql)
+        if "readingsessions.startedat" in sql and "readingsessions.endedat" in sql:
+            return SimpleNamespace(all=lambda: self.sessions if self.owned else [])
         return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: self.rows))
 
     async def _refresh(self, record):
@@ -193,20 +210,13 @@ class ApiAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/system/consents", payload).status_code, 403)
         self.db.add.assert_not_called()
 
-    def test_other_parent_session_or_question_is_not_accessible(self):
+    def test_other_parent_question_cannot_be_answered(self):
         self.db.owned = False
-        self.assertEqual(
-            self.request("POST", "/comprehension/questions", QUESTION_BODY).status_code,
-            404,
-        )
         self.assertEqual(
             self.request("POST", "/comprehension/answers", ANSWER).status_code,
             404,
         )
         self.db.add.assert_not_called()
-        session_sql = self.db.assert_owner_filter("readingsessionpages")
-        self.assertIn("readingsessionpages.pageid", session_sql)
-        self.assertIn("readingsessionpages.pagerevisionid", session_sql)
         self.db.assert_owner_filter("comprehensionquestions")
 
     def test_owner_can_read_scoped_reports_consents_and_questions(self):
@@ -217,22 +227,35 @@ class ApiAuthorizationTests(unittest.TestCase):
         self.db.assert_owner_filter("consentrecords")
         self.db.assert_owner_filter("comprehensionquestions")
 
-    def test_owner_can_write_report_consent_and_question(self):
-        self.assertEqual(self.request("POST", "/system/reports", REPORT).status_code, 200)
+    def test_owner_can_create_server_derived_report_and_consent_only(self):
+        response = self.request("POST", "/system/reports", REPORT)
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()["Summary"]
+        self.assertEqual(summary["completed_sessions"], 1)
+        self.assertEqual(summary["reading_duration_ms"], 180000)
+        self.assertEqual(summary["source"], "server_completed_sessions_v1")
         self.assertEqual(self.request("POST", "/system/consents", CONSENT).status_code, 200)
         self.assertEqual(
             self.request("POST", "/comprehension/questions", QUESTION_BODY).status_code,
-            200,
+            403,
         )
-        self.assertEqual(self.db.add.call_count, 3)
-        self.db.assert_owner_filter("readingsessionpages")
+        self.assertEqual(self.db.add.call_count, 2)
+        self.assertTrue(any("for update" in sql for sql in self.db.statements))
+        sql = self.db.assert_owner_filter("readingsessions")
+        self.assertIn("readingsessions.state", sql)
 
-    def test_server_grades_answer_instead_of_trusting_client_score(self):
-        response = self.request("POST", "/comprehension/answers", ANSWER)
+    def test_legacy_answer_routes_through_tutor_grader_and_ignores_spoofed_score(self):
+        with patch("app.api.routes.comprehension.TutorQuestionService.submit_answer",
+                   new_callable=AsyncMock) as grader:
+            grader.return_value = SimpleNamespace(answer_id=self.db.answer_row.Id)
+            response = self.request("POST", "/comprehension/answers", ANSWER)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["IsCorrect"])
         self.assertEqual(response.json()["Score"], 1.0)
+        self.assertEqual(grader.await_count, 1)
+        self.assertEqual(grader.await_args.args, (SESSION, QUESTION, PARENT, "con mèo"))
         self.db.assert_owner_filter("comprehensionquestions")
+        self.db.add.assert_not_called()
 
     def test_admin_can_read_logs_but_cannot_impersonate_actor(self):
         self.db.role = "admin"
@@ -252,6 +275,66 @@ class ApiAuthorizationTests(unittest.TestCase):
             response = self.client.get("/books/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
+
+
+    def test_legacy_question_read_never_exposes_answer_or_generation_metadata(self):
+        self.db.rows = [self.db.question]
+        response = self.request("GET", "/comprehension/questions")
+        self.assertEqual(response.status_code, 200)
+        question = response.json()[0]
+        self.assertEqual(question["Id"], str(QUESTION))
+        for forbidden in ("ExpectedAnswer", "AcceptedAnswers", "SourceSpan"):
+            self.assertNotIn(forbidden, question)
+
+    def test_legacy_question_creation_is_disabled_for_owner(self):
+        response = self.request("POST", "/comprehension/questions", QUESTION_BODY)
+        self.assertEqual(response.status_code, 403)
+        self.db.add.assert_not_called()
+
+    def test_forged_report_metric_is_rejected_without_db_writes(self):
+        payload = {**REPORT, "Summary": {"completed_sessions": 9999}}
+        response = self.request("POST", "/system/reports", payload)
+        self.assertEqual(response.status_code, 422)
+        self.db.add.assert_not_called()
+        self.db.scalar.assert_not_awaited()
+
+    def test_report_period_validation_precedes_db_access(self):
+        for start, end in (("2026-01-08", "2026-01-07"),
+                           ("2026-12-01", "2026-12-07"),
+                           ("2024-01-01", "2026-01-07")):
+            with self.subTest(start=start, end=end):
+                payload = {**REPORT, "PeriodStart": start, "PeriodEnd": end}
+                self.assertEqual(self.request("POST", "/system/reports", payload).status_code, 422)
+        self.db.add.assert_not_called()
+        self.db.scalar.assert_not_awaited()
+
+    def test_report_without_finished_sessions_is_409_not_fabricated_zero(self):
+        self.db.sessions = []
+        response = self.request("POST", "/system/reports", REPORT)
+        self.assertEqual(response.status_code, 409)
+        self.db.add.assert_not_called()
+
+    def test_repeating_trusted_report_period_is_idempotent(self):
+        self.db.trusted_snapshot = SimpleNamespace(
+            Id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ChildId=CHILD, PeriodStart=date(2026, 1, 1),
+            PeriodEnd=date(2026, 1, 7),
+            Summary={"source": "server_completed_sessions_v1",
+                     "completed_sessions": 1, "reading_duration_ms": 180000},
+            GeneratedAt=datetime(2026, 1, 8, tzinfo=timezone.utc),
+        )
+        response = self.request("POST", "/system/reports", REPORT)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["Id"], str(self.db.trusted_snapshot.Id))
+        self.db.add.assert_not_called()
+        self.assertFalse(any("readingsessions.startedat" in sql for sql in self.db.statements))
+
+    def test_blank_or_oversized_answer_rejected_before_db(self):
+        for answer in (" ", "x" * 201):
+            with self.subTest(size=len(answer)):
+                body = {**ANSWER, "Answer": answer}
+                self.assertEqual(self.request("POST", "/comprehension/answers", body).status_code, 422)
+        self.db.scalar.assert_not_awaited()
 
 
 if __name__ == "__main__":
