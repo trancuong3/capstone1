@@ -57,7 +57,7 @@
 
     <section class="page active" id="page-overview">
       <div class="page-heading"><div><div class="eyebrow">VIREAD · PRODUCT CONTROL CENTER</div><h1>Tổng quan phát triển</h1><p>Một nơi để nhìn thấy sản phẩm đang ở đâu, việc gì cần làm tiếp theo và APK đã sẵn sàng đến mức nào.</p></div></div>
-      <div class="hero"><div class="hero-inner"><div class="eyebrow">BUILD · VERIFY · SHIP</div><h2>Từ codebase đến ứng dụng Android thực sự.</h2><p>Theo dõi tiến độ frontend, backend, AI/OCR và Android. Dashboard lấy hoạt động repository trực tiếp từ GitHub; roadmap và ghi chú cá nhân được lưu trên trình duyệt hiện tại.</p><div class="hero-meta"><span class="chip">Next.js · FastAPI</span><span class="chip">Supabase</span><span class="chip">Android WebView</span><span class="chip">Zero-cost hosting</span></div></div></div>
+      <div class="hero"><div class="hero-inner"><div class="eyebrow">BUILD · VERIFY · SHIP</div><h2>Từ codebase đến ứng dụng Android thực sự.</h2><p>Theo dõi tiến độ frontend, backend, AI/OCR và Android. Dashboard lấy hoạt động repository trực tiếp từ GitHub; roadmap dùng chung được đồng bộ từ GitHub Issues; ghi chú cá nhân vẫn chỉ lưu trên trình duyệt.</p><div class="hero-meta"><span class="chip">Next.js · FastAPI</span><span class="chip">Supabase</span><span class="chip">Android WebView</span><span class="chip">Zero-cost hosting</span></div></div></div>
       <div class="grid kpis">
         <div class="card"><div class="kpi-top"><span>Pull requests đang mở</span><span class="kpi-icon">⑂</span></div><div class="kpi-value" id="kpiPrs">—</div><div class="kpi-foot" id="kpiPrsFoot">Đang lấy dữ liệu GitHub</div></div>
         <div class="card"><div class="kpi-top"><span>Issues đang mở</span><span class="kpi-icon">◎</span></div><div class="kpi-value" id="kpiIssues">—</div><div class="kpi-foot" id="kpiIssuesFoot">Không tính pull request</div></div>
@@ -81,10 +81,10 @@
     </section>
 
     <section class="page" id="page-roadmap">
-      <div class="page-heading"><div><div class="eyebrow">PLAN · EXECUTE · VERIFY</div><h1>Lộ trình & công việc</h1><p>Roadmap khởi tạo từ các bằng chứng đã kiểm tra trong repository và đợt audit Android. Bạn có thể cập nhật trạng thái, thêm việc mới hoặc ghi lại bằng chứng.</p></div><button class="btn primary" id="addTaskBtn">＋ Thêm đầu việc</button></div>
-      <div class="info-box">Trạng thái công việc trong roadmap là dữ liệu theo dõi cá nhân, được lưu trong localStorage của trình duyệt. Chúng chưa tự động tạo GitHub Issue và không thay đổi mã nguồn.</div>
+      <div class="page-heading"><div><div class="eyebrow">PLAN · EXECUTE · VERIFY</div><h1>Lộ trình & công việc</h1><p>Roadmap khởi tạo từ các bằng chứng đã kiểm tra trong repository và đợt audit Android. Coding agent cập nhật Issue với bằng chứng; dashboard hiển thị trạng thái dùng chung chỉ đọc.</p></div><div class="top-actions"><button class="btn" id="importLocalBtn">Nhập bản lưu cục bộ</button><button class="btn primary" id="exportLocalBtn">Xuất dữ liệu cục bộ</button><input id="importLocalFile" type="file" accept=".json,application/json" hidden></div></div>
+      <div class="info-box" id="roadmapSyncNotice" role="status">Đang đọc Roadmap dùng chung từ GitHub Issues. Trạng thái không thể chỉnh sửa ẩn danh; coding agent cập nhật qua GitHub.</div><div class="notice" id="legacyConflictNotice" role="status" style="margin-top:10px"></div>
       <div class="task-toolbar"><input class="field" id="taskSearch" placeholder="Tìm đầu việc…" aria-label="Tìm đầu việc"><select class="field" id="taskCategoryFilter"><option value="all">Tất cả mảng</option><option>Frontend</option><option>Backend</option><option>AI / OCR</option><option>Android</option><option>Release</option><option>Project</option></select><select class="field" id="taskStatusFilter"><option value="all">Tất cả trạng thái</option><option value="blocked">Bị chặn</option><option value="in_progress">Đang làm</option><option value="review">Cần xác minh</option><option value="todo">Chưa bắt đầu</option><option value="not_tested">Chưa kiểm thử</option><option value="done">Hoàn thành</option></select></div>
-      <div class="grid kpis" style="margin-top:0"><div class="card"><div class="kpi-top">Tổng đầu việc</div><div class="kpi-value" id="taskTotal">0</div><div class="kpi-foot">Trong roadmap cá nhân</div></div><div class="card"><div class="kpi-top">Hoàn thành</div><div class="kpi-value" id="taskDone">0</div><div class="kpi-foot">Có bằng chứng hoàn thành</div></div><div class="card"><div class="kpi-top">Đang làm</div><div class="kpi-value" id="taskProgress">0</div><div class="kpi-foot">Đang triển khai</div></div><div class="card"><div class="kpi-top">Blocker</div><div class="kpi-value" id="taskBlocked">0</div><div class="kpi-foot">Cần xử lý trước</div></div></div>
+      <div class="grid kpis" style="margin-top:0"><div class="card"><div class="kpi-top">Tổng đầu việc</div><div class="kpi-value" id="taskTotal">0</div><div class="kpi-foot">14 nhiệm vụ từ GitHub Issues</div></div><div class="card"><div class="kpi-top">Hoàn thành</div><div class="kpi-value" id="taskDone">0</div><div class="kpi-foot">Có bằng chứng hoàn thành</div></div><div class="card"><div class="kpi-top">Đang làm</div><div class="kpi-value" id="taskProgress">0</div><div class="kpi-foot">Đang triển khai</div></div><div class="card"><div class="kpi-top">Blocker</div><div class="kpi-value" id="taskBlocked">0</div><div class="kpi-foot">Cần xử lý trước</div></div></div>
       <div class="task-grid" id="taskGrid"></div>
       <div class="section-head"><div><h2>Ghi chú dự án</h2><p>Lưu nhanh quyết định, vấn đề và việc cần nhớ trên trình duyệt này.</p></div><span class="status todo" id="noteStatus">Chưa có ghi chú</span></div>
       <textarea id="projectNote" placeholder="Ví dụ: URL frontend production đã xác nhận là …; thiết bị Android test là …; kết quả kiểm tra mới nhất …"></textarea><div class="note-help">Ghi chú không được gửi lên GitHub hoặc máy chủ. Xóa dữ liệu trình duyệt có thể làm mất ghi chú này.</div>
@@ -117,28 +117,18 @@
       </div>
       <footer>GitHub REST API có giới hạn request cho truy cập ẩn danh. Dashboard không sử dụng token, không đọc dữ liệu riêng tư và không ghi ngược lên repository.</footer>
     </section>
-    <footer>ViRead Project Hub · phiên bản khởi tạo · Repository: trancuong3/capstone1 · Các số liệu roadmap là dữ liệu theo dõi cục bộ, không phải báo cáo nghiệm thu tự động.</footer>
+    <footer>ViRead Project Hub · Repository: trancuong3/capstone1 · Roadmap dùng chung được đọc từ GitHub Issues; chứng cứ nghiệm thu phải được kiểm chứng riêng.</footer>
   </main>
 </div>
 
-<dialog id="taskDialog">
-  <form id="taskForm">
-    <h2>Thêm đầu việc mới</h2>
-    <div class="form-grid">
-      <label>Tên công việc<input class="field" name="title" required maxlength="120" placeholder="Ví dụ: Kiểm thử camera trên Android 14"></label>
-      <label>Mảng<select class="field" name="category"><option>Android</option><option>Frontend</option><option>Backend</option><option>AI / OCR</option><option>Release</option><option>Project</option></select></label>
-      <label>Trạng thái<select class="field" name="status"><option value="todo">Chưa bắt đầu</option><option value="in_progress">Đang làm</option><option value="blocked">Bị chặn</option><option value="review">Cần xác minh</option><option value="not_tested">Chưa kiểm thử</option><option value="done">Hoàn thành</option></select></label>
-      <label>Mô tả / bằng chứng<input class="field" name="detail" maxlength="220" placeholder="Ghi rõ tiêu chí hoặc đường dẫn kiểm chứng"></label>
-    </div>
-    <div class="dialog-actions"><button type="button" class="btn ghost" id="cancelTask">Hủy</button><button type="submit" class="btn primary">Thêm công việc</button></div>
-  </form>
-</dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="./roadmap-core.js"></script>
 <script>
 (function(){
   "use strict";
   const OWNER="trancuong3", REPO="capstone1", API="https://api.github.com/repos/"+OWNER+"/"+REPO;
   const STORAGE_KEY="viread-project-hub-v1";
+  const CACHE_KEY="viread-shared-roadmap-v1", IMPORTS_KEY="viread-roadmap-local-imports-v1";
   const STATUS={
     done:{label:"Hoàn thành",cls:"done"},
     in_progress:{label:"Đang làm",cls:"in_progress"},
@@ -165,17 +155,74 @@
   ];
   let state=loadState();
   let github={commits:null,prs:null,issues:null,runs:null,releases:null,repo:null,branch:null};
-  let toastTimer=null;
+  let toastTimer=null, lastAttempt=0;
   function loadState(){
-    try{
-      const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");
-      if(saved&&Array.isArray(saved.tasks))return {tasks:saved.tasks,note:typeof saved.note==="string"?saved.note:""};
-    }catch(e){}
-    return {tasks:seedTasks.map(t=>({...t})),note:""};
+    let local=null, cache=null, imports=[];
+    try{local=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");}catch(e){}
+    try{cache=JSON.parse(localStorage.getItem(CACHE_KEY)||"null");}catch(e){}
+    try{imports=JSON.parse(localStorage.getItem(IMPORTS_KEY)||"[]");}catch(e){}
+    const cached=cache&&Array.isArray(cache.tasks)&&cache.tasks.length===seedTasks.length&&
+      seedTasks.every((t,i)=>cache.tasks[i]&&cache.tasks[i].id===t.id&&
+        Object.prototype.hasOwnProperty.call(STATUS,cache.tasks[i].status)&&
+        /^https:\/\/github\.com\/trancuong3\/capstone1\/issues\/\d+$/.test(cache.tasks[i].url||""))?cache.tasks:null;
+    return {
+      tasks:(cached||seedTasks).map(t=>({...t})),
+      sharedAt:cached?cache.syncedAt:null,
+      note:local&&typeof local.note==="string"?local.note:"",
+      legacyTasks:local&&Array.isArray(local.tasks)?local.tasks:[],
+      imports:Array.isArray(imports)?imports:[]
+    };
   }
-  function saveState(){
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}
-    catch(e){showToast("Không thể lưu localStorage. Hãy kiểm tra quyền lưu trữ của trình duyệt.");}
+  function saveLocalNote(){
+    try{
+      let existing={};
+      try{existing=JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}")||{};}catch(e){}
+      existing.note=state.note;
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(existing));
+    }catch(e){showToast("Không thể lưu ghi chú trên trình duyệt.");}
+  }
+  function saveRoadmapCache(){
+    try{localStorage.setItem(CACHE_KEY,JSON.stringify({syncedAt:state.sharedAt,tasks:state.tasks}));}
+    catch(e){showToast("Không thể lưu bộ nhớ đệm Roadmap.");}
+  }
+  function renderLegacyNotice(){
+    const local=ViReadRoadmapCore.compareLegacy(state.legacyTasks,state.tasks);
+    const imported=state.imports.reduce((n,item)=>{
+      const result=ViReadRoadmapCore.compareLegacy(item.tasks,state.tasks);
+      return {changed:n.changed+result.changed,personal:n.personal+result.personal};
+    },{changed:0,personal:0});
+    const count=state.legacyTasks.length;
+    const el=document.getElementById("legacyConflictNotice");
+    el.textContent="Dữ liệu riêng được giữ nguyên: "+count+" task trong localStorage gốc, "+
+      state.imports.length+" bản đã nhập. Có "+(local.changed+imported.changed)+" trạng thái khác GitHub và "+
+      (local.personal+imported.personal)+" task cá nhân chưa có Issue. Chúng không tự ghi đè Roadmap dùng chung; hãy xuất JSON để xử lý thủ công.";
+  }
+  function exportLocal(){
+    try{
+      let original=null;
+      try{original=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");}catch(e){}
+      const bundle={format:"viread-local-export-v1",exportedAt:new Date().toISOString(),
+        legacy:original||{tasks:[],note:state.note},imports:state.imports,
+        sharedSnapshot:{syncedAt:state.sharedAt,tasks:state.tasks}};
+      const blob=new Blob([JSON.stringify(bundle,null,2)],{type:"application/json"});
+      const url=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=url;a.download="viread-local-roadmap-backup.json";
+      document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+      showToast("Đã xuất bản sao cục bộ; không ghi dữ liệu lên GitHub.");
+    }catch(e){showToast("Không thể xuất dữ liệu cục bộ.");}
+  }
+  async function importLocal(file){
+    if(!file||file.size>1024*1024){showToast("Chỉ chấp nhận JSON tối đa 1 MB.");return;}
+    try{
+      const incoming=JSON.parse(await file.text());
+      const legacy=incoming&&incoming.legacy&&Array.isArray(incoming.legacy.tasks)?incoming.legacy:incoming;
+      if(!legacy||!Array.isArray(legacy.tasks))throw new Error("Thiếu tasks");
+      const record={importedAt:new Date().toISOString(),tasks:legacy.tasks,note:typeof legacy.note==="string"?legacy.note:""};
+      const next=state.imports.concat([record]).slice(-10);
+      localStorage.setItem(IMPORTS_KEY,JSON.stringify(next));
+      state.imports=next;renderLegacyNotice();
+      showToast("Đã nhập bản sao để đối chiếu; không thay đổi trạng thái chung hay ghi chú hiện tại.");
+    }catch(e){showToast("JSON không hợp lệ hoặc không thể lưu bản nhập.");}
   }
   function esc(value){
     return String(value==null?"":value).replace(/[&<>"']/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];});
@@ -213,17 +260,31 @@
     }).join("");
   }
   function renderFocus(){
-    const priority=state.tasks.filter(t=>t.status==="blocked"||t.status==="in_progress"||t.status==="review"||t.status==="todo").slice(0,4);
-    document.getElementById("focusList").innerHTML=priority.length?priority.map((t,i)=>'<div class="focus-item"><div class="focus-num">'+(i+1)+'</div><div><strong>'+esc(t.title)+'</strong><span>'+esc(t.detail||t.category)+' · '+esc((STATUS[t.status]||STATUS.todo).label)+'</span></div></div>').join(""):'<div class="empty">Chưa có đầu việc ưu tiên.</div>';
+    const priorityRank={P0:0,P1:1,P2:2,P3:3};
+    const statusRank={in_progress:0,blocked:1,review:2,todo:3,not_tested:4,done:5};
+    const priority=state.tasks.filter(t=>t.status!=="done").sort((a,b)=>
+      (priorityRank[a.priority]??9)-(priorityRank[b.priority]??9)||
+      (statusRank[a.status]??9)-(statusRank[b.status]??9)).slice(0,4);
+    document.getElementById("focusList").innerHTML=priority.length?priority.map((t,i)=>
+      '<div class="focus-item"><div class="focus-num">'+(i+1)+'</div><div><strong>'+esc(t.title)+
+      '</strong><span>'+esc(t.priority||"")+" · "+esc(t.detail||t.category)+" · "+
+      esc((STATUS[t.status]||STATUS.todo).label)+'</span></div></div>').join(""):
+      '<div class="empty">Chưa có đầu việc ưu tiên.</div>';
   }
   function renderMiniChecklist(){
     const items=state.tasks.filter(t=>t.category==="Android").slice(0,5);
     document.getElementById("apkMiniChecklist").innerHTML=items.map(t=>'<div class="check-row"><span>'+ (t.status==="done"?"✓":"○") +'</span><label>'+esc(t.title)+'<small>'+esc((STATUS[t.status]||STATUS.todo).label)+'</small></label></div>').join("")||'<div class="empty">Chưa có checklist Android.</div>';
   }
   function renderTaskCard(t){
-    const opts=Object.keys(STATUS).map(k=>'<option value="'+k+'" '+(t.status===k?"selected":"")+'>'+esc(STATUS[k].label)+'</option>').join("");
-    const link=t.url&&/^https:\/\//.test(t.url)?'<a href="'+esc(t.url)+'" target="_blank" rel="noreferrer">Mở bằng chứng ↗</a>':'<span></span>';
-    return '<article class="task" data-task-id="'+esc(t.id)+'"><div class="task-head"><div><h3>'+esc(t.title)+'</h3><p>'+esc(t.detail||"Chưa có mô tả.")+'</p></div>'+statusBadge(t.status)+'</div><div class="task-meta"><span class="task-category">'+esc(t.category)+'</span>'+link+'</div><div class="task-controls" style="margin-top:11px"><select class="field" data-task-status="'+esc(t.id)+'" aria-label="Cập nhật trạng thái">'+opts+'</select><button class="icon-btn" data-delete-task="'+esc(t.id)+'" aria-label="Xóa đầu việc" title="Xóa đầu việc">×</button></div></article>';
+    const issue=t.url&&/^https:\/\/github\.com\//.test(t.url)?
+      '<a href="'+esc(t.url)+'" target="_blank" rel="noopener noreferrer">GitHub Issue ↗</a>':'';
+    const evidence=t.evidenceUrl&&/^https:\/\//.test(t.evidenceUrl)?
+      '<a href="'+esc(t.evidenceUrl)+'" target="_blank" rel="noopener noreferrer">Bằng chứng ↗</a>':'';
+    return '<article class="task" data-task-id="'+esc(t.id)+'"><div class="task-head"><div><h3>'+
+      esc(t.id)+' · '+esc(t.title)+'</h3><p>'+esc(t.detail||"Chưa có mô tả.")+'</p></div>'+
+      statusBadge(t.status)+'</div><div class="task-meta"><span class="task-category">'+
+      esc(t.category)+' · '+esc(t.priority||"Chờ đồng bộ")+'</span><span>'+issue+' '+evidence+
+      '</span></div><p class="muted" style="margin:8px 0 0">Cập nhật: '+esc(fmtDate(t.updatedAt))+'</p></article>';
   }
   function renderTasks(){
     const query=(document.getElementById("taskSearch").value||"").toLowerCase();
@@ -236,7 +297,7 @@
     document.getElementById("taskProgress").textContent=state.tasks.filter(t=>t.status==="in_progress").length;
     document.getElementById("taskBlocked").textContent=state.tasks.filter(t=>t.status==="blocked").length;
     document.getElementById("androidTaskGrid").innerHTML=state.tasks.filter(t=>t.category==="Android"||t.category==="Release").map(renderTaskCard).join("");
-    renderStreams();renderFocus();renderMiniChecklist();
+    renderStreams();renderFocus();renderMiniChecklist();renderLegacyNotice();
   }
   function setView(name){
     document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id==="page-"+name));
@@ -247,8 +308,44 @@
   }
   async function fetchJson(path){
     const response=await fetch(API+path,{headers:{"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},cache:"no-store"});
-    if(!response.ok)throw new Error("GitHub API "+response.status);
+    if(!response.ok){
+      const reset=response.headers.get("X-RateLimit-Reset");
+      const when=reset&&Number(reset)>0?" · thử lại sau "+fmtDate(Number(reset)*1000):"";
+      throw new Error("GitHub API "+response.status+when);
+    }
     return response.json();
+  }
+  async function fetchRoadmapIssues(){
+    const all=[],expected=seedTasks.map(t=>t.id),core=window.ViReadRoadmapCore;
+    if(!core)throw new Error("Không tải được bộ đọc dữ liệu Roadmap.");
+    for(let page=1;page<=10;page++){
+      const batch=await fetchJson("/issues?state=all&per_page=100&page="+page);
+      if(!Array.isArray(batch))throw new Error("GitHub Issues API không trả về danh sách.");
+      all.push(...batch);
+      const present=new Set(all.map(x=>{
+        const match=typeof x.body==="string"&&x.body.match(/<!--\s*viread-roadmap:v1\s*[\s\S]*?\bid:\s*(p\d+)\b/);
+        return match?match[1]:null;
+      }));
+      if(expected.every(id=>present.has(id)))break;
+      if(batch.length<100)break;
+      if(page===10)throw new Error("Vượt giới hạn phân trang GitHub Issues.");
+    }
+    return core.reconcileIssues(all,expected);
+  }
+  function applyRoadmap(tasks){
+    state.tasks=tasks;
+    state.sharedAt=new Date().toISOString();
+    saveRoadmapCache();
+    renderTasks();
+  }
+  function setRoadmapMessage(error){
+    const el=document.getElementById("roadmapSyncNotice");
+    const timestamp=state.sharedAt?"Lần đồng bộ thành công: "+fmtDate(state.sharedAt)+". ":"";
+    el.textContent=error?
+      "Không thể đồng bộ Roadmap ("+String(error.message||error)+"). "+timestamp+
+      "Đang hiển thị bản lưu gần nhất hoặc dữ liệu khởi tạo chưa xác minh. Có thể thử nút Đồng bộ GitHub. ":
+      "Roadmap dùng chung từ GitHub Issues. "+timestamp+
+      "Trạng thái chỉ do coding agent/nhân sự có quyền GitHub cập nhật; ghi chú cá nhân giữ trong trình duyệt.";
   }
   function activityRow(symbol,title,sub,url){
     const safeUrl=typeof url==="string"&&/^https:\/\//.test(url)?url:"#";
@@ -285,6 +382,8 @@
   }
   async function syncGithub(){
     const btn=document.getElementById("refreshBtn"),dot=document.getElementById("syncDot"),label=document.getElementById("syncLabel");
+    if(btn.disabled)return;
+    lastAttempt=Date.now();
     btn.disabled=true;btn.textContent="Đang đồng bộ…";dot.style.background="var(--amber)";label.textContent="Đang lấy dữ liệu";
     const jobs=[
       ["repo",()=>fetchJson("")],
@@ -293,25 +392,32 @@
       ["issues",()=>fetchJson("/issues?state=open&per_page=100")],
       ["runs",()=>fetchJson("/actions/runs?per_page=5")],
       ["releases",()=>fetchJson("/releases?per_page=5")],
-      ["branch",()=>fetchJson("/branches/main")]
+      ["branch",()=>fetchJson("/branches/main")],
+      ["roadmap",fetchRoadmapIssues]
     ];
     const settled=await Promise.allSettled(jobs.map(j=>j[1]()));
-    let successes=0,failures=0;
+    let successes=0,failures=0,roadmapError=null;
     settled.forEach((result,i)=>{
       const key=jobs[i][0];
       if(result.status==="fulfilled"){
         successes++;
-        if(key==="runs")github.runs=(result.value.workflow_runs||[]);
+        if(key==="roadmap")applyRoadmap(result.value);
+        else if(key==="runs")github.runs=result.value.workflow_runs||[];
         else if(key==="issues")github.issues=(result.value||[]).filter(x=>!x.pull_request);
         else github[key]=result.value;
-      }else{failures++;github[key]=null;}
+      }else{
+        failures++;
+        if(key==="roadmap")roadmapError=result.reason;
+        else github[key]=null;
+      }
     });
+    setRoadmapMessage(roadmapError);
     document.getElementById("kpiPrs").textContent=Array.isArray(github.prs)?github.prs.length:"—";
     document.getElementById("kpiPrsFoot").textContent=Array.isArray(github.prs)?"Open pull requests":"Không thể tải dữ liệu";
     document.getElementById("kpiIssues").textContent=Array.isArray(github.issues)?github.issues.length:"—";
     document.getElementById("kpiIssuesFoot").textContent=Array.isArray(github.issues)?"Issues đang mở, không tính PR":"Không thể tải dữ liệu";
     renderActivity();
-    const now=new Date();label.textContent="Đồng bộ "+now.toLocaleTimeString("vi-VN",{hour:"2-digit",minute:"2-digit"});
+    const now=new Date();label.textContent="Kiểm tra "+now.toLocaleTimeString("vi-VN",{hour:"2-digit",minute:"2-digit"});
     dot.style.background=failures===0?"var(--green)":"var(--amber)";
     if(successes===0){label.textContent="GitHub API không khả dụng";dot.style.background="var(--red)";}
     btn.disabled=false;btn.textContent="↻ Đồng bộ GitHub";
@@ -320,40 +426,24 @@
   document.querySelectorAll("[data-go]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();setView(a.dataset.go);}));
   document.getElementById("refreshBtn").addEventListener("click",syncGithub);
   ["taskSearch","taskCategoryFilter","taskStatusFilter"].forEach(id=>document.getElementById(id).addEventListener(id==="taskSearch"?"input":"change",renderTasks));
-  document.getElementById("taskGrid").addEventListener("change",e=>{
-    const id=e.target.dataset.taskStatus;if(!id)return;
-    const task=state.tasks.find(t=>t.id===id);if(!task)return;
-    task.status=e.target.value;saveState();renderTasks();showToast("Đã cập nhật trạng thái công việc.");
-  });
-  document.getElementById("androidTaskGrid").addEventListener("change",e=>{
-    const id=e.target.dataset.taskStatus;if(!id)return;
-    const task=state.tasks.find(t=>t.id===id);if(!task)return;
-    task.status=e.target.value;saveState();renderTasks();showToast("Đã cập nhật trạng thái công việc.");
-  });
-  function deleteTask(e){
-    const id=e.target.dataset.deleteTask;if(!id)return;
-    if(!confirm("Xóa đầu việc này khỏi roadmap trên trình duyệt?"))return;
-    state.tasks=state.tasks.filter(t=>t.id!==id);saveState();renderTasks();showToast("Đã xóa đầu việc.");
-  }
-  document.getElementById("taskGrid").addEventListener("click",deleteTask);
-  document.getElementById("androidTaskGrid").addEventListener("click",deleteTask);
-  const dialog=document.getElementById("taskDialog");
-  document.getElementById("addTaskBtn").addEventListener("click",()=>dialog.showModal());
-  document.getElementById("cancelTask").addEventListener("click",()=>dialog.close());
-  document.getElementById("taskForm").addEventListener("submit",e=>{
-    e.preventDefault();const data=new FormData(e.target);
-    const id="custom-"+Date.now().toString(36);
-    state.tasks.unshift({id,title:String(data.get("title")||"").trim(),category:String(data.get("category")),status:String(data.get("status")),detail:String(data.get("detail")||"").trim(),url:""});
-    saveState();renderTasks();e.target.reset();dialog.close();showToast("Đã thêm đầu việc mới.");
+  document.getElementById("exportLocalBtn").addEventListener("click",exportLocal);
+  document.getElementById("importLocalBtn").addEventListener("click",()=>document.getElementById("importLocalFile").click());
+  document.getElementById("importLocalFile").addEventListener("change",async e=>{
+    await importLocal(e.target.files&&e.target.files[0]);
+    e.target.value="";
   });
   const note=document.getElementById("projectNote");note.value=state.note;
   note.addEventListener("input",()=>{
-    state.note=note.value;saveState();
+    state.note=note.value;saveLocalNote();
     const s=document.getElementById("noteStatus");s.textContent="Đã lưu trên trình duyệt";s.className="status done";
   });
   if(state.note){document.getElementById("noteStatus").textContent="Đã có ghi chú";document.getElementById("noteStatus").className="status done";}
   renderTasks();
+  document.getElementById("roadmapSyncNotice").textContent="Đang kiểm tra GitHub Issues…"+(state.sharedAt?" Bản lưu gần nhất: "+fmtDate(state.sharedAt):" Chưa có dữ liệu đã đồng bộ.");
   syncGithub();
+  const REFRESH_INTERVAL=15*60*1000;
+  setInterval(()=>{if(!document.hidden&&Date.now()-lastAttempt>=REFRESH_INTERVAL)syncGithub();},60*1000);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden&&Date.now()-lastAttempt>=REFRESH_INTERVAL)syncGithub();});
 })();
 </script>
 </body>
