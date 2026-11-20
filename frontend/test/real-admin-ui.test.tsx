@@ -1073,7 +1073,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       screen.queryByRole("heading", { name: "OCR" }),
     ).not.toBeInTheDocument();
   });
-  it("distinguishes installed, missing language data and disabled workers", async () => {
+  it("shows independent OCR and worker states", async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith("/system/admin/health")
         ? Response.json({
