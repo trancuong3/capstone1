@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import threading
 import unicodedata
+from weakref import WeakKeyDictionary
 from typing import Any
 import yaml
 from app.services.word_box_geometry import build_geometry_evidence
@@ -133,11 +134,128 @@ _vietocr_initialization_error: str | None = None
 _vietocr_active_checkpoint_sha: str | None = None
 _vietocr_active_profile = "ORIGINAL"
 _vietocr_active_config_sha: str | None = None
+# This is actual loaded Predictor identity -> verified local checkpoint, NOT
+# merely the current database active-model pointer. Weak refs do not hold old
+# 150 MB models alive after another worker swaps the active Predictor.
+_vietocr_verified_runtime: WeakKeyDictionary[Any, dict[str, Any]] = WeakKeyDictionary()
+_scan_runtime_context = threading.local()
+_OCR_RUNTIME_PROVENANCE_VERSION = "vietocr_loaded_checkpoint_v1"
 _active_model_info_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
 _active_model_cache_lock = threading.Lock()
 _ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 _ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
 _ORIGINAL_VOCAB_SIZE = 229
+
+
+def _verified_vietocr_instance(
+    predictor: Any,
+    *,
+    model_profile: str,
+    checkpoint_sha256: str,
+    config_sha256: str | None,
+) -> None:
+    """Bind a VERIFIED on-disk checkpoint digest to the exact Predictor instance.
+
+    Called only AFTER loading Predictor from the verified file. Never bind a
+    requested registry hash or weights path directly to scan metadata.
+    """
+    try:
+        _vietocr_verified_runtime[predictor] = {
+            "model_profile": model_profile,
+            "checkpoint_sha256": checkpoint_sha256,
+            "config_sha256": config_sha256,
+        }
+    except TypeError:
+        # A predictor with no weakref support can still recognize text, but its
+        # runtime identity cannot be proved safely. Report unverified, not a
+        # potentially misleading profile/SHA.
+        logger.warning("Loaded VietOCR instance cannot be weak-referenced for provenance")
+
+
+def _scan_vietocr_snapshot(
+    predictor: Any | None,
+    *,
+    requested_profile: str | None = None,
+    requested_sha: str | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Capture provenance of the predictor actually passed to inference.
+
+    For historical/mocked/untracked Predictor instances the hash is unknown.
+    Profile and SHA are never inferred from the active-model database row.
+    """
+    proof: dict[str, Any] | None = None
+    if predictor is not None:
+        try:
+            proof = _vietocr_verified_runtime.get(predictor)
+        except TypeError:
+            pass
+    if predictor is None:
+        status = "unavailable"
+    elif proof is None:
+        status = "unverified"
+    elif (
+        requested_sha is not None
+        and (proof["checkpoint_sha256"] != requested_sha
+             or proof["model_profile"] != requested_profile)
+    ):
+        status = (
+            "fallback_loaded" if proof["model_profile"] == "ORIGINAL"
+            else "stale_loaded"
+        )
+    elif fallback_reason:
+        status = "fallback_loaded"
+    else:
+        status = "loaded"
+    return {
+        "provenance_version": _OCR_RUNTIME_PROVENANCE_VERSION,
+        "model_profile": proof["model_profile"] if proof else None,
+        "checkpoint_sha256": proof["checkpoint_sha256"] if proof else None,
+        "config_sha256": proof["config_sha256"] if proof else None,
+        "model_load_status": status,
+        "fallback_reason": fallback_reason,
+        "engine_version": _package_version("vietocr"),
+    }
+
+
+def _attach_vietocr_provenance(
+    result: dict[str, object],
+    snapshot: dict[str, Any] | None,
+    *,
+    skipped_reason: str | None = None,
+) -> dict[str, object]:
+    """Persist an immutable scan-time snapshot, not mutable engine globals."""
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    snapshot = snapshot or _scan_vietocr_snapshot(None)
+    status = (metadata.get("engine_statuses") or {}).get("vietocr") if isinstance(
+        metadata.get("engine_statuses"), dict
+    ) else "not_run"
+    if skipped_reason or metadata.get("engine") == "tesseract":
+        snapshot = {
+            **snapshot,
+            "model_profile": None,
+            "checkpoint_sha256": None,
+            "config_sha256": None,
+            "model_load_status": "not_run",
+            "fallback_reason": skipped_reason or snapshot.get("fallback_reason") or "tesseract_fallback",
+        }
+    elif status == "error" and not snapshot.get("fallback_reason"):
+        snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
+    elif status == "no_result" and not snapshot.get("fallback_reason"):
+        snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
+    metadata["vietocr_runtime_provenance"] = {
+        **snapshot,
+        "model_inference_status": status,
+    }
+    # Selected fields are duplicated for legacy scan consumers and Admin OCR
+    # Diagnostics. None means not proven/not run; it MUST NOT be substituted
+    # with the registry's requested SHA.
+    for key in ("model_profile", "checkpoint_sha256", "model_load_status", "fallback_reason"):
+        metadata[key] = snapshot.get(key)
+    result["metadata"] = metadata
+    return result
 
 
 def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -329,6 +447,11 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_import_status, _paddle_import_error
     global _vietocr_import_status, _vietocr_import_error
 
+    # Each scan receives a fresh context, including if _get_ocr_engines fails.
+    _scan_runtime_context.provenance = None
+    requested_profile: str | None = None
+    requested_sha: str | None = None
+    load_fallback_reason: str | None = None
     with _engine_lock:
         if not _ocr_dependencies_loaded:
             _ocr_dependencies_loaded = True
@@ -397,10 +520,12 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
         active_model = _active_viread_model()
         active_profile = str((active_model or {}).get("profile", "ORIGINAL"))
         active_sha = str((active_model or {}).get("checkpoint_sha256", _ORIGINAL_VIETOCR_SHA256)).lower()
+        requested_profile, requested_sha = active_profile, active_sha
         if active_profile == "ORIGINAL" and active_sha != _ORIGINAL_VIETOCR_SHA256:
             logger.error("VietOCR registry Original pointer failed baseline hash validation")
             active_model = None
             active_sha = _ORIGINAL_VIETOCR_SHA256
+            load_fallback_reason = "invalid_original_registry_pointer"
         if active_profile not in {
             "ORIGINAL", "FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED",
             "FLOW1_VERIFIED", "FLOW2_EXTERNAL_TRDG",
@@ -408,6 +533,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             active_model = None
             active_profile = "ORIGINAL"
             active_sha = _ORIGINAL_VIETOCR_SHA256
+            load_fallback_reason = "unsupported_model_profile"
 
         candidate_weights_path: str | None = None
         custom_config_dict: dict[str, Any] | None = None
@@ -418,6 +544,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                 candidate_weights_path, custom_config_dict, active_config_sha = _v2_artifact_from_storage(active_model)
             except Exception as exc:
                 logger.warning("Could not load fine-tuned VietOCR artifact: %s", type(exc).__name__)
+                load_fallback_reason = "checkpoint_unavailable_or_invalid"
                 active_model = None
                 active_profile = "ORIGINAL"
                 active_sha = _ORIGINAL_VIETOCR_SHA256
@@ -478,7 +605,19 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
 
                     if target_device == "cpu":
                         torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
+                    # Final on-disk verification immediately precedes publication
+                    # of this instance. All scans using it receive this digest,
+                    # even if the registry changes in a concurrent request.
+                    verified_checkpoint_sha = _sha256_path(viet_config["weights"])
+                    if verified_checkpoint_sha != active_sha:
+                        raise ValueError("Loaded VietOCR checkpoint hash differs from expected")
                     next_engine = Predictor(viet_config)
+                    _verified_vietocr_instance(
+                        next_engine,
+                        model_profile=active_profile,
+                        checkpoint_sha256=verified_checkpoint_sha,
+                        config_sha256=active_config_sha,
+                    )
                     _vietocr_engine = next_engine
                     _vietocr_active_checkpoint_sha = active_sha
                     _vietocr_active_profile = active_profile
@@ -488,7 +627,15 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                 except Exception as exc:
                     _vietocr_initialization_status = "not_initialized"
                     _vietocr_initialization_error = type(exc).__name__
+                    load_fallback_reason = "model_initialization_failed"
                     logger.warning("VietOCR initialization failed: %s", type(exc).__name__)
+
+        _scan_runtime_context.provenance = _scan_vietocr_snapshot(
+            _vietocr_engine,
+            requested_profile=requested_profile,
+            requested_sha=requested_sha,
+            fallback_reason=load_fallback_reason,
+        )
 
     if _paddle_engine is None:
         raise OcrEngineUnavailable(
