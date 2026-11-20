@@ -1,0 +1,74 @@
+import groovy.json.JsonOutput
+import java.net.URI
+
+plugins {
+    id 'com.android.application'
+}
+
+// A public HTTPS Next.js origin is part of the APK configuration, not a secret.
+// Never replace this with the FastAPI URL or a static export fixture.
+def siteUrl = providers.gradleProperty('vireadUrl')
+    .orElse(providers.environmentVariable('VIREAD_FRONTEND_URL'))
+    .getOrElse('')
+    .trim()
+
+android {
+    namespace 'vn.viread.android'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'vn.viread.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'FRONTEND_URL', JsonOutput.toJson(siteUrl)
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.register('verifyVireadFrontend') {
+    group = 'verification'
+    description = 'Refuse builds without a configured public HTTPS Next.js origin.'
+    doLast {
+        if (!siteUrl) {
+            throw new GradleException('VIREAD_FRONTEND_URL is required (public HTTPS Next.js frontend). No placeholder APK will be built.')
+        }
+        URI uri
+        try {
+            uri = new URI(siteUrl)
+        } catch (Exception ignored) {
+            throw new GradleException('VIREAD_FRONTEND_URL is not a valid URL.')
+        }
+        def host = uri.host?.toLowerCase(java.util.Locale.ROOT)
+        if (uri.scheme != 'https' || !host || uri.rawUserInfo != null ||
+                uri.rawQuery != null || uri.rawFragment != null ||
+                !(uri.rawPath == '' || uri.rawPath == '/') ||
+                !(uri.port == -1 || uri.port == 443) ||
+                host == 'localhost' || host.endsWith('.local') ||
+                host.endsWith('.invalid') || host.matches(/[0-9.]+/) ||
+                host.contains(':') || !host.contains('.')) {
+            throw new GradleException('VIREAD_FRONTEND_URL must be a public HTTPS origin without a path, credentials, query or fragment.')
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn tasks.named('verifyVireadFrontend')
+}

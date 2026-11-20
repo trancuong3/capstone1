@@ -1,0 +1,72 @@
+name: ViRead Android
+on:
+  push:
+    branches: [feat/android-apk-build]
+    paths: ["android/**", ".github/workflows/android-apk.yml", "frontend/**"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android-apk.yml", "frontend/**"]
+  workflow_dispatch:
+    inputs:
+      frontend_url:
+        description: "Deployed public HTTPS Next.js origin (e.g. https://viread.example.com)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  android-validation:
+    name: Native Android JVM tests, compile and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Run JVM tests, compile Android, and lint
+        working-directory: android
+        env:
+          # Only compiled/tested; no APK is produced or uploaded with this test origin.
+          VIREAD_FRONTEND_URL: https://example.org
+        run: gradle --no-daemon :app:testDebugUnitTest :app:compileDebugJavaWithJavac :app:lintDebug
+
+  android-apk:
+    name: Verified server-backed debug APK
+    needs: android-validation
+    if: ${{ vars.VIREAD_FRONTEND_URL != '' || (github.event_name == 'workflow_dispatch' && inputs.frontend_url != '') }}
+    runs-on: ubuntu-latest
+    env:
+      VIREAD_FRONTEND_URL: ${{ (github.event_name == 'workflow_dispatch' && inputs.frontend_url != '') && inputs.frontend_url || vars.VIREAD_FRONTEND_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Refuse absent, fake, or inaccessible frontend
+        run: python android/scripts/verify_frontend.py
+      - name: Build unsigned-for-release debug APK
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Verify generated APK exists
+        run: test -s android/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: viread-android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

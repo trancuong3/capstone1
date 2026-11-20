@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="offline_message">Không kết nối được ViRead. Hãy kiểm tra mạng và thử lại.</string>
+</resources>
