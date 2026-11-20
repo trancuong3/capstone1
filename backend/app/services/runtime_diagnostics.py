@@ -7,6 +7,8 @@ No secret, model path or command line appears in the returned evidence.
 from __future__ import annotations
 
 import importlib.util
+import httpx
+from urllib.parse import quote
 import os
 import shutil
 import subprocess
@@ -119,6 +121,53 @@ def collect_ocr_health() -> list[dict[str, str]]:
                               "_vietocr_initialization_status", "VietOCR")
     tesseract, vietnamese, _, _ = _tesseract_health()
     return [paddle, viet, tesseract, vietnamese]
+
+
+async def probe_storage_health() -> dict[str, str]:
+    """A read-only HEAD of the configured bucket; no object listing or downloads."""
+    if not (SUPABASE_URL and SUPABASE_STORAGE_BUCKET and SUPABASE_ADMIN_KEY):
+        return _health_item(
+            "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+            "Thiếu cấu hình kết nối Supabase Storage.",
+        )
+    try:
+        url = (
+            f"{SUPABASE_URL.rstrip('/')}/storage/v1/bucket/"
+            f"{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
+        )
+        headers = {
+            "apikey": SUPABASE_ADMIN_KEY,
+            "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
+        }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(2.5, connect=1.5),
+            follow_redirects=False, trust_env=False,
+        ) as client:
+            response = await client.head(url, headers=headers)
+        if response.status_code == 200:
+            return _health_item(
+                "storage", "Supabase Storage", "HEALTHY", "healthy",
+                "Storage phản hồi kiểm tra bucket (không đọc file).",
+            )
+        if response.status_code in {401, 403}:
+            return _health_item(
+                "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+                "Storage từ chối quyền kiểm tra bucket.",
+            )
+        if response.status_code == 404:
+            return _health_item(
+                "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+                "Không tìm thấy bucket Storage đã cấu hình.",
+            )
+        return _health_item(
+            "storage", "Supabase Storage", "DEGRADED", "unknown",
+            "Storage chưa phản hồi trạng thái bucket hợp lệ.",
+        )
+    except (httpx.HTTPError, TimeoutError, ValueError, OSError):
+        return _health_item(
+            "storage", "Supabase Storage", "DEGRADED", "unknown",
+            "Chưa xác minh được kết nối Storage; vui lòng thử lại.",
+        )
 
 
 _WORKER_LABELS = {
