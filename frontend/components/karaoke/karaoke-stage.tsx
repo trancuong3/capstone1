@@ -44,12 +44,22 @@ export function KaraokeStage({
   const expandButton = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generation = useRef(0);
+  const preparingMic = useRef(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [started, setStarted] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [practiceId, setPracticeId] = useState<string | null>(null);
   const [repeat, setRepeat] = useState(false);
-  const scoring = useKaraokeScoring(source.lyrics);
+  const [scoredMode, setScoredMode] = useState(false);
+  const [headphones, setHeadphones] = useState(false);
+  const [practiceReturnMs, setPracticeReturnMs] = useState(0);
+  const scoring = useKaraokeScoring(source.lyrics, player.getCurrentMs);
+  const {
+    resume: resumeMic,
+    pause: pauseMic,
+    finish: finishMic,
+    seekBoundary,
+  } = scoring;
   const lines = source.lyrics.lines;
   const activeIndex = activeLyricIndex(lines, player.currentMs);
   const activeLine = lines[activeIndex];
@@ -92,55 +102,110 @@ export function KaraokeStage({
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
     setCountdown(null);
+    if (preparingMic.current) {
+      preparingMic.current = false;
+      if (practiceId) scoring.endPractice();
+      else scoring.reset();
+    }
   }
-  function prepare(start: number, end?: number, loop = false) {
+  function prepare(
+    start: number,
+    end?: number,
+    loop = false,
+    requestMic = false,
+    practiceLineId?: string,
+  ) {
     cancelPreparation();
     player.pause();
     player.seek(start);
     const ticket = generation.current;
-    setCountdown(3);
     function tick(value: number) {
       if (ticket !== generation.current) return;
       if (value === 0) {
+        preparingMic.current = false;
         timer.current = null;
         setCountdown(null);
         setStarted(true);
-        // Start scoring recognition when playback begins (non-practice only).
-        if (!practiceId && scoring.enabled) scoring.startListening();
         void player.play(start, end, loop);
       } else {
         setCountdown(value);
         timer.current = setTimeout(() => tick(value - 1), 1000);
       }
     }
-    timer.current = setTimeout(() => tick(2), 1000);
+    if (requestMic) {
+      // Permission must originate from the start/replay gesture, before counting in.
+      preparingMic.current = true;
+      void scoring.arm(practiceLineId).then((granted) => {
+        if (ticket !== generation.current) return;
+        if (granted) tick(3);
+        else preparingMic.current = false;
+      });
+    } else tick(3);
   }
   function restartSong() {
     scoring.reset();
     setPracticeId(null);
     setRepeat(false);
-    prepare(0);
+    setStarted(false);
+    prepare(0, undefined, false, scoredMode);
   }
 
-  // Auto-score when song ends.
-  const prevEndedRef = useRef(false);
+  // Native playback (including buffering) determines when sung words are eligible.
   useEffect(() => {
+    if (!scoredMode) return;
     if (
-      ended &&
-      !prevEndedRef.current &&
-      scoring.enabled &&
-      scoring.listening
-    ) {
-      scoring.stopAndScore();
+      (player.ended && !practiceId) ||
+      (practiceId && (player.segmentFinished || player.ended))
+    )
+      finishMic();
+    else if (player.playing && !player.waiting && !player.error) resumeMic();
+    else pauseMic();
+  }, [
+    scoredMode,
+    practiceId,
+    player.ended,
+    player.segmentFinished,
+    player.playing,
+    player.waiting,
+    player.error,
+    finishMic,
+    resumeMic,
+    pauseMic,
+  ]);
+  const previousPass = useRef(player.loopPass);
+  useEffect(() => {
+    if (previousPass.current !== player.loopPass && practiceId)
+      seekBoundary(true);
+    previousPass.current = player.loopPass;
+  }, [practiceId, player.loopPass, seekBoundary]);
+  const { setMuted } = player;
+  useEffect(() => {
+    if (!scoredMode || !headphones) return;
+    const devices = navigator.mediaDevices;
+    function recheckOutput() {
+      setMuted(true);
+      setHeadphones(false);
     }
-    prevEndedRef.current = ended;
-  }, [ended, scoring]);
+    devices?.addEventListener?.("devicechange", recheckOutput);
+    return () => devices?.removeEventListener?.("devicechange", recheckOutput);
+  }, [scoredMode, headphones, setMuted]);
+
+  function selectMode(scored: boolean) {
+    if (scored === scoredMode) return;
+    cancelPreparation();
+    scoring.reset();
+    setHeadphones(false);
+    player.setMuted(scored);
+    setScoredMode(scored);
+  }
   function togglePlay() {
-    if (countdown !== null) {
+    if (countdown !== null || scoring.status === "arming") {
       cancelPreparation();
+      if (practiceId && scoredMode) leavePractice();
       return;
     }
     if (player.playing) {
+      pauseMic();
       player.pause();
       return;
     }
@@ -148,8 +213,13 @@ export function KaraokeStage({
       restartSong();
       return;
     }
-    if (!started && player.currentMs === 0) {
-      prepare(0);
+    if (
+      !practiceLine &&
+      (!started ||
+        (scoredMode &&
+          ["idle", "scored", "insufficient"].includes(scoring.status)))
+    ) {
+      prepare(player.getCurrentMs(), undefined, false, scoredMode);
       return;
     }
     if (
@@ -157,6 +227,15 @@ export function KaraokeStage({
       practiceLine?.start_ms !== undefined &&
       practiceLine.end_ms !== null
     ) {
+      if (
+        scoredMode &&
+        ["idle", "scored", "insufficient", "unavailable"].includes(
+          scoring.status,
+        )
+      ) {
+        practice(practiceLine);
+        return;
+      }
       const current = player.getCurrentMs();
       void player.play(
         current >= practiceLine.start_ms && current < practiceLine.end_ms
@@ -170,9 +249,26 @@ export function KaraokeStage({
     setStarted(true);
   }
   function practice(line = targetLine) {
-    if (!line || line.start_ms === null || line.end_ms === null) return;
+    if (
+      !line ||
+      line.start_ms === null ||
+      line.end_ms === null ||
+      scoring.status === "finishing"
+    )
+      return;
+    if (!practiceId)
+      setPracticeReturnMs(ended ? source.duration_ms : player.getCurrentMs());
+    pauseMic();
     setPracticeId(line.id);
-    prepare(line.start_ms, line.end_ms, repeat);
+    prepare(line.start_ms, line.end_ms, repeat, scoredMode, line.id);
+  }
+  function leavePractice() {
+    cancelPreparation();
+    player.pause();
+    scoring.endPractice();
+    player.seek(practiceReturnMs);
+    setPracticeId(null);
+    setRepeat(false);
   }
   async function toggleExpanded() {
     if (document.fullscreenElement === root.current) {
@@ -231,6 +327,9 @@ export function KaraokeStage({
             : "Cùng nghe đoạn nhạc cuối nhé";
   const displayed =
     countdown !== null ? (practiceLine ?? lines[0]) : activeLine;
+  const finalScore =
+    scoring.score ??
+    (scoring.status === "insufficient" ? scoring.liveScore : null);
   return (
     <section
       ref={root}
@@ -254,25 +353,6 @@ export function KaraokeStage({
           </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          {scoring.supported && (
-            <button
-              type="button"
-              className={`inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control px-4 py-3 font-bold focus-visible:outline-3 focus-visible:outline-primary sm:w-auto ${
-                scoring.enabled
-                  ? "bg-primary text-white"
-                  : "bg-sky text-primary"
-              }`}
-              aria-pressed={scoring.enabled}
-              onClick={scoring.toggle}
-            >
-              {scoring.enabled ? (
-                <Mic aria-hidden className="size-5" />
-              ) : (
-                <MicOff aria-hidden className="size-5" />
-              )}
-              Chấm điểm
-            </button>
-          )}
           <button
             ref={expandButton}
             type="button"
@@ -289,10 +369,73 @@ export function KaraokeStage({
           </button>
         </div>
       </div>
+      <div
+        role="group"
+        aria-label="Chế độ hát"
+        className="flex flex-wrap gap-2"
+      >
+        <Button
+          className="sm:w-auto"
+          variant={scoredMode ? "secondary" : "primary"}
+          aria-pressed={!scoredMode}
+          onClick={() => selectMode(false)}
+        >
+          <MicOff aria-hidden className="size-5" />
+          Hát tự do
+        </Button>
+        <Button
+          className="sm:w-auto"
+          variant={scoredMode ? "primary" : "secondary"}
+          aria-pressed={scoredMode}
+          disabled={!scoring.supported || (started && !ended && !scoredMode)}
+          onClick={() => selectMode(true)}
+        >
+          <Mic aria-hidden className="size-5" />
+          Hát có chấm điểm
+        </Button>
+      </div>
+      {scoredMode && (
+        <label className="flex min-h-12 items-center gap-3 rounded-control bg-sky p-3">
+          <input
+            type="checkbox"
+            checked={headphones}
+            onChange={(event) => {
+              const checked = event.currentTarget.checked;
+              player.setMuted(!checked);
+              setHeadphones(checked);
+            }}
+          />
+          <span>
+            Mình đang đeo tai nghe · Bật nhạc đệm
+            <small className="block">
+              Khi dùng loa, bé hát theo lời chạy để micro chỉ nghe tiếng của bé.
+            </small>
+          </span>
+        </label>
+      )}
+      {!scoring.supported ? (
+        <p className="text-sm text-muted">
+          Trình duyệt này hỗ trợ hát tự do. Để chấm điểm, ba mẹ hãy mở bằng
+          trình duyệt có nhận dạng giọng nói.
+        </p>
+      ) : scoring.error ? (
+        <StatusMessage tone="warning">{scoring.error}</StatusMessage>
+      ) : scoredMode && !started && countdown === null ? (
+        <p role="status" className="text-sm text-muted">
+          {scoring.status === "arming"
+            ? "Đang chờ quyền micro. Ba mẹ giúp bé chọn Cho phép nhé."
+            : "Khi bé bắt đầu hát, hãy cho phép dùng micro. Trình duyệt có thể gửi âm thanh đến dịch vụ nhận dạng giọng nói."}
+        </p>
+      ) : null}
       {ended ? (
         <div className={`${styles.lyrics} rounded-card bg-white/80`}>
-          {scoring.score ? (
-            <KaraokeScoreCard score={scoring.score} />
+          {finalScore ? (
+            <KaraokeScoreCard
+              score={finalScore}
+              onPractice={(id) =>
+                practice(lines.find((line) => line.id === id))
+              }
+            />
           ) : (
             <Star
               aria-hidden
@@ -302,11 +445,13 @@ export function KaraokeStage({
           <h2 className="text-heading font-extrabold">
             {childAlias} đã hát xong rồi!
           </h2>
-          <p className="text-muted">
-            {scoring.score
-              ? `Bé hát đúng ${scoring.score.matchedWords}/${scoring.score.totalWords} từ. Giỏi lắm!`
-              : "Cảm ơn bé đã mang tiếng hát đến hôm nay."}
-          </p>
+          {!finalScore && (
+            <p role="status" className="text-muted">
+              {scoring.status === "finishing"
+                ? "Đang nghe nốt câu cuối…"
+                : "Cảm ơn bé đã mang tiếng hát đến hôm nay."}
+            </p>
+          )}
           <div className="flex flex-wrap justify-center gap-3 px-4">
             <Button
               className={`${styles.action} sm:w-auto`}
@@ -347,10 +492,17 @@ export function KaraokeStage({
               {displayed ? (
                 countdown !== null ? (
                   displayed.text
-                ) : displayed.syllables?.length ? (
+                ) : displayed.syllables?.length || scoredMode ? (
                   <SyllableLyrics
                     line={displayed}
                     currentMs={player.currentMs}
+                    evidence={
+                      scoredMode
+                        ? scoring.liveScore?.lineScores.find(
+                            (l) => l.lineId === displayed.id,
+                          )
+                        : undefined
+                    }
                   />
                 ) : (
                   displayed.text
@@ -370,6 +522,22 @@ export function KaraokeStage({
                   : "Bé sẵn sàng hát cùng mình nhé"}
             </p>
           </div>
+          {practiceLine && scoring.status === "finishing" && (
+            <p role="status">Đang nghe nốt câu cuối…</p>
+          )}
+          {practiceLine && scoring.score && (
+            <KaraokeScoreCard score={scoring.score} />
+          )}
+          {practiceLine && scoring.status === "insufficient" && (
+            <p role="status">Mình chưa nghe rõ. Bé thử lại nhé!</p>
+          )}
+          {practiceLine && scoredMode && (
+            <Button variant="quiet" onClick={leavePractice}>
+              {scoring.songScore || practiceReturnMs >= source.duration_ms
+                ? "Về kết quả bài hát"
+                : "Về lượt hát cả bài"}
+            </Button>
+          )}
           <div className="flex flex-wrap justify-center gap-3">
             <Button
               className={`${styles.action} sm:min-w-56 sm:w-auto`}
@@ -381,7 +549,7 @@ export function KaraokeStage({
               ) : (
                 <Play aria-hidden className="size-6" />
               )}
-              {countdown !== null
+              {countdown !== null || scoring.status === "arming"
                 ? "Hủy chuẩn bị"
                 : player.playing
                   ? "Tạm dừng"
@@ -405,6 +573,12 @@ export function KaraokeStage({
                 variant="secondary"
                 className={`${styles.action} sm:w-auto`}
                 aria-pressed={repeat}
+                disabled={
+                  scoredMode &&
+                  (countdown !== null ||
+                    scoring.status === "arming" ||
+                    scoring.status === "finishing")
+                }
                 onClick={() => {
                   cancelPreparation();
                   const enabled = !repeat;
@@ -455,9 +629,14 @@ export function KaraokeStage({
           disabled={!player.ready}
           onChange={(event) => {
             cancelPreparation();
+            if (practiceId && scoredMode) {
+              player.pause();
+              scoring.endPractice();
+            }
             setPracticeId(null);
             setRepeat(false);
             player.seek(Number(event.target.value));
+            scoring.seekBoundary();
           }}
           className="min-h-12 w-full accent-primary"
         />
@@ -498,12 +677,7 @@ export function KaraokeStage({
           <Button
             variant="secondary"
             className="mt-3 sm:w-auto"
-            onClick={() => {
-              cancelPreparation();
-              player.pause();
-              setPracticeId(null);
-              setRepeat(false);
-            }}
+            onClick={leavePractice}
           >
             Trở về hát cả bài
           </Button>
@@ -559,8 +733,8 @@ export function KaraokeStage({
             )}
           </div>
           <p className="text-sm text-muted">
-            {scoring.enabled
-              ? "Bé hát theo lời trên màn hình. Trình duyệt đang lắng nghe để chấm điểm đúng lời. Phím cách để phát hoặc tạm dừng."
+            {scoredMode
+              ? "Phím cách để phát hoặc tạm dừng bài hát."
               : "Nhạc phát khi bé bấm nút. Bé hát vui cùng lời trên màn hình; không thu âm. Phím cách để phát hoặc tạm dừng khi vùng hát có focus."}
           </p>
         </div>
