@@ -80,5 +80,9 @@ frontend/.next/
 tessdata/
 **/tessdata/
 
-# Local Graphify generated state
+# Graphify is a *local generated* AST/index/cache, never committed source.
+# Keep .graphifyignore, .codex/skills/graphify/SKILL.md, AGENTS.md,
+# .agent-library/, .agents/, .codex/ and skills-lock.json tracked.
+# This ignore rule only affects untracked files; previously tracked cache was
+# removed from the Git index in chore/repository-cleanup-docs.
 graphify-out/

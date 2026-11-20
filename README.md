@@ -1,8 +1,16 @@
-# ReadAlong Vision
+# ViRead — ReadAlong Vision
 
-ReadAlong Vision là dự án hỗ trợ ba mẹ đồng hành cùng bé trong quá trình đọc sách. Repository hiện chứa frontend responsive bằng Next.js/TypeScript và backend bước đầu bằng FastAPI.
+ViRead là dự án đồng hành cùng bé đọc sách, gồm frontend **Next.js 16 / React 19 / TypeScript**, backend **FastAPI / SQLAlchemy / PostgreSQL**, Supabase Auth & Storage, pipeline OCR (PaddleOCR, VietOCR, Tesseract), luồng đọc, báo cáo và khu vực quản trị.
 
-> Trạng thái hiện tại: đăng ký, đăng nhập, khôi phục mật khẩu và phân quyền route Parent/Admin đã dùng Supabase Auth. Backend đã có Profile CRUD bước đầu, nhưng frontend vẫn dùng typed mock services cho một số dữ liệu nghiệp vụ và các endpoint chưa được bảo vệ bằng Supabase access token/quyền sở hữu. Scan OCR không gọi model AI sửa. Chỉ nút “AI sửa” mới dùng fallback tuần tự gemini-3.5-flash-lite → gemini-3.1-flash-lite → qwen/qwen3.8-27b → Ollama; cloud chỉ được gọi server-side khi được cấu hình.
+**Phạm vi của README:** mô tả mã nguồn trên nhánh `main` được kiểm tra ngày 20/11/2026; mã nguồn có route/test **không đồng nghĩa** mọi chức năng đã triển khai hoặc được nghiệm thu trên production. Các dịch vụ AI, OCR, email, STT/TTS và worker cần credential, model, phần cứng và/hoặc cấu hình riêng; môi trường demo và fixture test không phải bằng chứng production.
+
+- **Repository:** [trancuong3/capstone1](https://github.com/trancuong3/capstone1) — **public**, nhưng chưa có `LICENSE` được chủ sở hữu công bố.
+- **Auth:** Supabase Auth với route guard Parent/Admin; FastAPI kiểm tra Supabase bearer token và quyền sở hữu trên các API riêng tư. Không dùng metadata role do client tự khai.
+- **Nghiệp vụ:** nhiều luồng frontend đã dùng typed service gọi FastAPI thật (hồ sơ, phiên đọc, báo cáo, đọc hiểu); vẫn tồn tại mock/fixture dùng cho test và một số UI state. Kiểm tra từng adapter trước khi coi là persisted.
+- **OCR/AI:** Scan và chỉnh sửa AI là hai luồng khác nhau. Scan không tự gọi AI sửa văn bản; nút Admin “AI sửa” sử dụng provider đã cấu hình với fallback, không cam kết provider nào luôn sẵn sàng.
+
+Xem [hướng dẫn đóng góp](CONTRIBUTING.md) và [tài liệu triển khai Render/Supabase](docs/RENDER_SUPABASE_DEPLOYMENT.md).
+
 
 ## Bắt đầu nhanh
 
@@ -13,7 +21,7 @@ git clone https://github.com/trancuong3/capstone1.git
 cd capstone1
 ```
 
-Vì repository đang ở chế độ private, tài khoản GitHub của bạn phải được chủ repository mời làm collaborator.
+Repository hiện **public** nên có thể clone để xem mã nguồn. Để push branch hoặc cập nhật PR vẫn cần quyền tương ứng. Chưa có LICENSE: không mặc nhiên có quyền tái sử dụng/phân phối mã nguồn.
 
 ### 2. Cài đặt công cụ và dependencies (Windows)
 
@@ -62,36 +70,39 @@ Luồng hiện dùng PKCE phía trình duyệt; hãy mở email xác nhận/khô
 
 Route Parent và Admin được bảo vệ phía server. Ứng dụng xác minh session bằng `getClaims()` rồi đọc role từ `public.profiles`; không dùng role từ metadata do trình duyệt gửi lên. `/admin/login` dùng Supabase thật, còn `/admin/login?state=default` chỉ là fixture development/test.
 
-## Chức năng hiện có
+## Chức năng có trong codebase
 
-- Đăng nhập, đăng ký và khôi phục mật khẩu.
-- Quản lý hồ sơ ba mẹ và hồ sơ bé.
-- Tìm kiếm, lọc và xem chi tiết sách.
-- Trình diễn các trạng thái của buổi đọc tương tác.
-- Lịch sử đọc, báo cáo tiến bộ và từ cần luyện.
-- Quản trị sách, trang sách, OCR revision, audit log và health.
-- Scan OCR chỉ dùng các engine OCR của hệ thống; AI chỉ chạy khi Admin bấm nút “AI sửa”. Nút này dùng gemini-3.5-flash-lite → gemini-3.1-flash-lite → qwen/qwen3.8-27b, Ollama chỉ là dự phòng cuối; tác vụ dài có tiến độ, có thể hủy và chỉ áp dụng sau khi Admin rà soát.
-- Responsive tại desktop, tablet và mobile bằng cùng một cây component.
+- **Auth & hồ sơ:** đăng ký, đăng nhập, khôi phục mật khẩu với Supabase; profile Parent/Admin, hồ sơ bé, avatar và thông tin liên hệ qua backend.
+- **Thư viện và đọc:** danh mục sách, chi tiết/trang sách, phạm vi đọc, phiên đọc gắn revision trang, hỗ trợ tương tác và các endpoint về lịch sử đọc.
+- **Báo cáo:** tiến bộ, lịch sử phiên, từ cần luyện và bài tập/AI Tutor theo các typed API. Số liệu không đủ evidence phải giữ trạng thái không xác định, không tự suy diễn lỗi của bé.
+- **Quản trị OCR:** tạo/sửa sách, upload/trích xuất/reprocess, OCR revision, verify, audit và health; có worker/flow quản lý model/training trong code.
+- **Các luồng khác:** karaoke, voice, picture description, trò chơi và worker nhắc đọc (tính khả dụng phụ thuộc cấu hình riêng).
+- **Frontend responsive:** chung codebase cho desktop/tablet/mobile; mock/fixture phục vụ test vẫn tồn tại nhưng không đại diện trạng thái dữ liệu production.
+
+**Giới hạn:** sự hiện diện của route/test không đảm bảo tất cả tích hợp thiết bị, model, provider, realtime hay luồng worker chạy được trong mọi môi trường. Xem tests/CI và cấu hình dịch vụ cho từng phần; không khẳng định đã hoàn thành AI training chỉ dựa vào tên flow.
 
 ## Cấu trúc repository
 
 ```text
-readalong-vision/
-├── .github/              # Mẫu pull request và thiết lập GitHub
-├── backend/              # FastAPI, SQLAlchemy models và API nghiệp vụ
-├── frontend/             # Ứng dụng Next.js
-│   ├── app/              # Routes và layouts
-│   ├── components/       # Screens và UI components
-│   ├── lib/api/          # Typed service interfaces
-│   ├── lib/mock/         # Mock implementations và fixtures
-│   ├── public/           # Asset tĩnh
-│   └── tests/            # Unit, component và E2E tests
-├── supabase/
-│   └── migrations/       # Thay đổi schema Supabase được quản lý bằng Git
-├── .gitattributes        # Quy tắc line ending
-├── .gitignore            # File không được đưa lên Git
-└── CONTRIBUTING.md       # Quy tắc làm việc nhóm
+capstone1/
+├── AGENTS.md                 # Hướng dẫn agent gốc (giữ nguyên)
+├── .agent-library/           # Skill nội bộ và skill được khóa
+├── .agents/                  # Skill gateways / router
+├── .codex/                   # Cấu hình và skill cho Codex/Graphify
+├── skills-lock.json          # Lock các skill đồng bộ
+├── backend/                  # FastAPI, SQLAlchemy, OCR, workers, API tests
+│   └── AGENTS.md             # Invariants backend
+├── frontend/                 # Next.js, Supabase Auth, components, tests
+│   └── AGENTS.md             # Invariants frontend
+├── supabase/migrations/      # Lịch sử schema/migrations; không tự áp production
+├── .github/workflows/       # Backend, frontend, OCR, E2E và các gate khác
+├── docs/                    # Báo cáo kỹ thuật, staging, deployment
+├── scripts/validate_agent_config.py
+├── .graphifyignore           # Loại trừ agent và cache khỏi Graphify indexing
+└── .gitignore               # Bỏ qua graphify-out/ (trạng thái Graphify local)
 ```
+
+`graphify-out/` được Graphify tạo lại theo mã nguồn hiện hành và **không được Git theo dõi**. Có thể dùng `python -m graphify update .` nếu cần xây lại knowledge graph; không commit AST cache/index. Lệnh/query, điều kiện rebuild và guard xem tại [skill Graphify](.codex/skills/graphify/SKILL.md). Điều này **không xóa hoặc thay thế** AGENTS, các gateway hay skill lock.
 
 ## Tài liệu
 
@@ -102,22 +113,26 @@ readalong-vision/
 
 Blueprint và Coding Handoff là tài liệu bàn giao nằm ngoài repository. Thành viên cần nhận chúng qua kênh nội bộ nếu công việc yêu cầu đối chiếu contract.
 
-## Supabase migrations
+## Supabase migrations và Auth foreign key
 
-Migration Auth phụ huynh được lưu tại `supabase/migrations/20260928144208_phase4_auth_profiles.sql`. Migration tạo signup trigger, role mặc định `parent`, quyền theo cột và RLS policy cho `profiles`.
+Migration lịch sử `supabase/migrations/20260928144208_phase4_auth_profiles.sql` **từng** thêm khóa ngoại `profiles.id → auth.users.id` với `NOT VALID` để hỗ trợ profile legacy vào thời điểm đó. Đây là bối cảnh của migration, **không phải trạng thái hiện tại**.
 
-Khóa ngoại `profiles.id → auth.users.id` đang ở trạng thái `NOT VALID` có chủ ý vì database còn các profile legacy được `childprofiles` tham chiếu nhưng chưa có bản ghi `auth.users` tương ứng. Database team phải di chuyển hoặc loại bỏ dữ liệu legacy trước khi chạy `VALIDATE CONSTRAINT`; không xóa các profile này riêng lẻ.
+**Đã kiểm tra trực tiếp metadata Supabase production ngày 20/11/2026 (SELECT catalog, không truy vấn dữ liệu người dùng):** `public.profiles` có constraint `profiles_id_auth_users_fkey`, `convalidated = true`, `FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE`. Không cần chạy `VALIDATE CONSTRAINT` theo hướng dẫn README cũ; không thực hiện xóa/migrate profile production từ README.
 
-## Backend Profile API
+Các bảng nghiệp vụ `books`, `childprofiles`, `readingsessions`, `progressreports` và `profiles` đang bật RLS (theo catalog). RLS enabled không tự chứng minh mọi policy/ACL đã đúng: chỉ triển khai migration sau khi review, test trên database cách ly và được phê duyệt. `supabase/migrations/` là lịch sử thay đổi, không phải lệnh áp toàn bộ thủ công lên production.
 
-FastAPI hiện có các endpoint CRUD bước đầu cho hồ sơ phụ huynh và hồ sơ bé:
+## Backend Profile API và quyền truy cập
 
-- `GET/POST /profiles`
-- `GET/PUT/DELETE /profiles/{profile_id}`
-- `GET/POST /profiles/children`
-- `GET/PUT/DELETE /profiles/children/{child_id}`
+FastAPI entrypoint là `backend/app/sever.py` (`app.sever:app`, không phải `server.py`). `backend/app/api/router.py` liên kết các router profiles, books, reading, reports/system, comprehension, AI Tutor, OCR Admin, voice và các module bổ sung.
 
-Frontend mặc định vẫn dùng mock services cho dữ liệu Profile/Child. Khi `NEXT_PUBLIC_API_URL` được cấu hình, adapter có thể gọi các endpoint FastAPI này. Các endpoint chưa xác minh Supabase access token, role và quyền sở hữu hồ sơ, nên chưa được xem là API đã bảo vệ hoàn chỉnh.
+Các endpoint hồ sơ quan trọng gồm:
+
+- `GET /profiles/me` — hồ sơ của người đăng nhập; `PATCH /profiles/me/contact-phone`; `POST/DELETE /profiles/me/avatar`.
+- `GET/POST /profiles/children`; `GET/PUT/DELETE /profiles/children/{child_id}`; upload/remove ảnh bé.
+- `GET/POST /profiles`, `GET/PUT/DELETE /profiles/{profile_id}` — legacy CRUD, cần kiểm tra role/ownership khi gọi.
+- `/profiles/admin/parents` — quản lý phụ huynh chỉ dành cho Admin.
+
+Frontend `frontend/lib/api/profile-service.ts` **đang sử dụng Supabase access token** để gọi `/profiles/me` và cập nhật thông tin qua API. `frontend/lib/api/report-service.ts` cũng gọi backend `/system/progress/{child_id}`, không phải fixture đơn thuần. Không sử dụng mock Auth `?state=...` làm token/role thực.
 
 ## Kế hoạch đọc và email nhắc đọc
 
@@ -155,32 +170,31 @@ Có thể chạy toàn bộ Playwright bằng:
 npm run test:e2e
 ```
 
-## Cách làm việc nhóm
+## Quy trình đóng góp
 
-- `main`: phiên bản ổn định, không push trực tiếp.
-- `develop`: nhánh tích hợp cho công việc đang phát triển.
-- `feature/<ten-ngan>`: tính năng hoặc màn hình mới.
-- `fix/<ten-ngan>`: sửa lỗi.
-- Mỗi thay đổi được đưa vào bằng pull request và cần mô tả phạm vi cùng kết quả test.
-
-Xem quy trình đầy đủ trong [CONTRIBUTING.md](CONTRIBUTING.md).
+- `main` là nhánh mặc định; workflow GitHub Actions chạy khi PR vào `main`.
+- Tạo nhánh `feature/`, `fix/`, `docs/` hoặc `chore/` từ `origin/main`, rồi mở PR vào `main`.
+- Không giả định có `develop`: kiểm tra remote refs trước khi sử dụng.
+- **Không push trực tiếp vào `main`** là quy ước nhóm. GitHub đã từng báo `protected=false`; chỉ Ruleset/Branch protection do chủ repo kích hoạt mới bảo đảm chặn merge/push bỏ qua CI. Không coi quy ước là cơ chế kỹ thuật đã được bật.
+- Trước khi review: `python scripts/validate_agent_config.py`, backend tests/Real OCR gate thích hợp và `frontend` lint/typecheck/test/build/Playwright; kiểm tra kết quả CI trên commit PR cuối.
+- Đọc [CONTRIBUTING.md](CONTRIBUTING.md) để bảo vệ code local/stash và các cấu hình agent.
 
 ## Bảo mật và dữ liệu
 
-- Không commit `.env`, access token, API key, cookie, private key hoặc dữ liệu người dùng thật.
-- Không dùng tài khoản demo cho backend hoặc môi trường production.
-- Không chia sẻ Figma access token, Supabase service key hoặc credential qua GitHub.
-- Không commit `.env.local`; frontend chỉ dùng URL dự án và publishable key.
-- Các dữ liệu sách, hồ sơ bé, báo cáo và audit log hiện vẫn là fixture mock.
+- Không commit `.env`, JWT, API key, cookie, service-role key, signed URL, private key hoặc dữ liệu bé thật.
+- Browser chỉ nhận Supabase URL và publishable key; các khóa Admin/Storage, database password và Gemini/Groq keys là server-only.
+- Quyền Parent/Admin, ownership trẻ em và API workers được kiểm tra **ở server**; kiểm tra frontend route không thể thay thế authorization.
+- Fixture/test data dùng để chạy CI và demo **không phải dữ liệu production**. Không tự truy cập hoặc làm sạch database production chỉ vì có cảnh báo.
+- Graphify cache khác với `.agent-library/`, `.agents/`, `.codex/`, `AGENTS.md`: chỉ cache tự sinh bị bỏ theo dõi.
 
-## Phạm vi chưa triển khai
+## Các giới hạn / việc cần xác minh
 
-- Hoàn thiện, bảo vệ và kết nối backend API dữ liệu nghiệp vụ; Profile CRUD mới ở mức khởi đầu. Route guard phía server và cookie refresh proxy đã được triển khai cho luồng Auth frontend.
-- Hoàn tất di chuyển profile legacy và validate khóa ngoại Auth; storage và các bảng nghiệp vụ thật vẫn chưa được tích hợp vào frontend.
-- Camera/microphone processing và realtime WebSocket.
-- STT, TTS, scoring, page matching hoàn chỉnh và các tính năng AI khác ngoài sửa OCR cục bộ cho Admin.
-- Persistence giữa các lần tải lại trang.
+- Tính khả dụng thực tế của các model VietOCR, provider AI và thiết bị phụ thuộc môi trường, hạn mức và kiểm thử staging; không tự gán profile đang active với checkpoint đã thực sự inference.
+- Một số nội dung vẫn phục vụ demo/mock UI hoặc cần kiểm chứng với dữ liệu staging trước khi đưa vào production.
+- Các worker độc lập cần được khởi chạy và cấu hình riêng, không suy ra chỉ từ việc tồn tại module Python.
+- Các PR chưa merge không được xem là tính năng đã có trong `main`.
+- Trạng thái CI, Supabase permissions và branch protection cần xác minh mới tại thời điểm triển khai.
 
 ## Quyền sử dụng
 
-Repository chưa công bố License. Vì repository đang private, source code và tài liệu chỉ được sử dụng trong phạm vi nhóm dự án cho đến khi chủ dự án chọn giấy phép phù hợp.
+Repository đang **public** nhưng không có file `LICENSE` tại gốc ở thời điểm kiểm tra. Việc công khai mã nguồn trên GitHub không tự cấp giấy phép sao chép, sửa đổi hoặc phân phối theo mô hình open source. Chủ repository cần lựa chọn giấy phép phù hợp với đồ án và thành phần phụ thuộc; PR dọn dẹp tài liệu **không tự tạo hoặc chọn LICENSE**.
