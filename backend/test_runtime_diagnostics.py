@@ -6,7 +6,7 @@ import subprocess
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -140,6 +140,52 @@ class RuntimeConfigurationDiagnosticsTests(unittest.TestCase):
         self.assertEqual(by_id["admin_ai_workflow"]["status"], "UNAVAILABLE")
         self.assertEqual(by_id["local_trainer_process"]["detail_status"], "disabled")
         self.assertNotIn("secret-db-credential", repr(states))
+
+
+class StorageHealthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_storage_config_fails_without_network(self):
+        with (
+            patch.object(runtime_diagnostics, "SUPABASE_STORAGE_BUCKET", ""),
+            patch.object(runtime_diagnostics.httpx, "AsyncClient") as client,
+        ):
+            result = await runtime_diagnostics.probe_storage_health()
+        client.assert_not_called()
+        self.assertEqual(result["status"], "UNAVAILABLE")
+        self.assertNotIn("private", repr(result))
+
+    async def test_storage_head_success_and_access_denied_without_exposing_key(self):
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        with (
+            patch.object(runtime_diagnostics, "SUPABASE_URL", "https://example.supabase.co"),
+            patch.object(runtime_diagnostics, "SUPABASE_STORAGE_BUCKET", "secret-bucket"),
+            patch.object(runtime_diagnostics, "SUPABASE_ADMIN_KEY", "secret-admin-key"),
+            patch.object(runtime_diagnostics.httpx, "AsyncClient", return_value=client),
+        ):
+            client.head.return_value = MagicMock(status_code=200)
+            ready = await runtime_diagnostics.probe_storage_health()
+            client.head.return_value = MagicMock(status_code=403)
+            denied = await runtime_diagnostics.probe_storage_health()
+        self.assertEqual(ready["status"], "HEALTHY")
+        self.assertEqual(denied["status"], "UNAVAILABLE")
+        self.assertNotIn("secret-bucket", repr(ready) + repr(denied))
+        self.assertNotIn("secret-admin-key", repr(ready) + repr(denied))
+        self.assertEqual(client.head.await_count, 2)
+
+    async def test_storage_timeout_never_claims_success(self):
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.head.side_effect = runtime_diagnostics.httpx.ReadTimeout("secret HTTP failure")
+        with (
+            patch.object(runtime_diagnostics, "SUPABASE_URL", "https://example.supabase.co"),
+            patch.object(runtime_diagnostics, "SUPABASE_STORAGE_BUCKET", "bucket"),
+            patch.object(runtime_diagnostics, "SUPABASE_ADMIN_KEY", "private-key"),
+            patch.object(runtime_diagnostics.httpx, "AsyncClient", return_value=client),
+        ):
+            result = await runtime_diagnostics.probe_storage_health()
+        self.assertEqual(result["detail_status"], "unknown")
+        self.assertNotIn("private-key", repr(result))
+        self.assertNotIn("secret HTTP failure", repr(result))
 
 
 if __name__ == "__main__":
