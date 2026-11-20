@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 if (-not $env:VIREAD_FRONTEND_URL) {
   throw "Set VIREAD_FRONTEND_URL to a deployed public HTTPS Next.js origin; refusing placeholder APK."
 }
+python (Join-Path $PSScriptRoot "verify_frontend.py")
+if ($LASTEXITCODE -ne 0) { throw "HTTPS Next.js frontend verification failed; no APK created." }
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Push-Location $root
 try {

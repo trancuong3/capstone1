@@ -72,3 +72,40 @@ tasks.register('verifyVireadFrontend') {
 tasks.named('preBuild') {
     dependsOn tasks.named('verifyVireadFrontend')
 }
+
+/*
+ * Never package a placeholder page even when Gradle is invoked directly.
+ * Unit tests/lint may use a compile-only fixture URL; assemble must reach Next.js.
+ */
+tasks.register('verifyLiveFrontend') {
+    group = 'verification'
+    dependsOn tasks.named('verifyVireadFrontend')
+    doLast {
+        try {
+            def connection = (java.net.HttpURLConnection) new URL(siteUrl).openConnection()
+            connection.connectTimeout = 18000
+            connection.readTimeout = 18000
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty('User-Agent', 'ViRead-Android-Build/1.0')
+            if (connection.responseCode != 200 ||
+                    !(connection.contentType ?: '').toLowerCase(java.util.Locale.ROOT).contains('text/html')) {
+                throw new GradleException('The HTTPS frontend did not return an HTML document with HTTP 200.')
+            }
+            def html = connection.inputStream.withCloseable {
+                new String(it.readNBytes(300000), java.nio.charset.StandardCharsets.UTF_8)
+            }
+            if (!html.toLowerCase(java.util.Locale.ROOT).contains('<html') ||
+                    !html.contains('/_next/')) {
+                throw new GradleException('The HTTPS origin is not serving an actual Next.js page.')
+            }
+        } catch (GradleException e) {
+            throw e
+        } catch (Exception e) {
+            throw new GradleException('Could not validate the HTTPS Next.js frontend; no APK packaged.', e)
+        }
+    }
+}
+
+tasks.matching { it.name == 'assembleDebug' || it.name == 'assembleRelease' }.configureEach {
+    dependsOn tasks.named('verifyLiveFrontend')
+}
