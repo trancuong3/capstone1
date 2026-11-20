@@ -29,7 +29,7 @@ The two proposed B-tree indexes cover **existing foreign-key leading columns** (
 - `supabase/migrations/20261120140000_reading_query_indexes_cleanup.sql`
 - Dedicated manual rollback: `supabase/rollbacks/20261120140000_reading_query_indexes_cleanup_rollback.sql`
 - Both run in short transactions with 3-second lock timeout and 30-second statement timeout. No `DROP ... CASCADE`, no table/data removal and no changed constraints, RLS, triggers or secrets.
-- Preflight verifies redundant-index equivalence and rejects definition drift; reapply is idempotent.
+- Preflight verifies redundant-index equivalence and rejects definition drift; reapply is idempotent. The manual rollback also refuses unexpected index definitions and is tested twice to ensure repeatability.
 - Creation uses normal `CREATE INDEX` on the currently small tables rather than `CONCURRENTLY`: schedule in low traffic and abort if lock cannot be acquired. PostgreSQL `CREATE INDEX CONCURRENTLY` cannot run inside an explicit transaction.
 - Review exact production catalog, dependencies, workloads and timing again immediately before any authorized rollout; run production deploy only by an explicitly approved operator in a separate task.
 - The Supabase CLI is not available in the ChatGPT execution environment; the migration filename was prepared following this repository's existing timestamp ordering. Before live rollout, use the repository's installed Supabase CLI to validate `supabase migration list --local` and pending migrations.

@@ -14,6 +14,38 @@ begin
      or to_regclass('public.idx_pagerevisions_page_created_id') is null then
     raise exception 'reading_index_rollback: prerequisite tables or retained index missing';
   end if;
+
+  -- Do not destroy a different index that reused a proposed name.
+  if pg_get_indexdef(
+       to_regclass('public.idx_pagerevisions_page_created_id')
+     ) is distinct from
+       'CREATE INDEX idx_pagerevisions_page_created_id ON public.pagerevisions USING btree (pageid, createdat DESC, id DESC)' then
+    raise exception 'reading_index_rollback: retained index definition changed';
+  end if;
+
+  if to_regclass('public.idx_pagerevisions_page_latest') is not null
+     and pg_get_indexdef(
+       to_regclass('public.idx_pagerevisions_page_latest')
+     ) is distinct from
+       'CREATE INDEX idx_pagerevisions_page_latest ON public.pagerevisions USING btree (pageid, createdat DESC, id DESC)' then
+    raise exception 'reading_index_rollback: legacy index definition changed';
+  end if;
+
+  if to_regclass('public.idx_readingevents_session_start_id') is not null
+     and pg_get_indexdef(
+       to_regclass('public.idx_readingevents_session_start_id')
+     ) is distinct from
+       'CREATE INDEX idx_readingevents_session_start_id ON public.readingevents USING btree (sessionid, startms, id)' then
+    raise exception 'reading_index_rollback: readingevents index definition changed';
+  end if;
+
+  if to_regclass('public.idx_readingsessions_child_started_id') is not null
+     and pg_get_indexdef(
+       to_regclass('public.idx_readingsessions_child_started_id')
+     ) is distinct from
+       'CREATE INDEX idx_readingsessions_child_started_id ON public.readingsessions USING btree (childid, startedat DESC, id DESC)' then
+    raise exception 'reading_index_rollback: readingsessions index definition changed';
+  end if;
 end;
 $preflight$;
 

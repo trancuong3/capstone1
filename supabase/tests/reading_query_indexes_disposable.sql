@@ -144,7 +144,8 @@ select phase, query_name,
 from performance_index_plans
 order by query_name, phase;
 
--- Exercise exact manual rollback and verify its catalog effects.
+-- Exercise exact manual rollback TWICE and verify its catalog effects.
+\ir ../rollbacks/20261120140000_reading_query_indexes_cleanup_rollback.sql
 \ir ../rollbacks/20261120140000_reading_query_indexes_cleanup_rollback.sql
 
 do $rollback_check$
