@@ -202,6 +202,45 @@ begin
 end;
 $rls_check$;
 
+-- A newly created, explicitly unpolicied table must remain default-deny
+-- even if legacy ACLs mistakenly grant table SELECT/INSERT to browser roles.
+insert into public.security_hardening_new_table(id) values(1);
+grant select, insert on public.security_hardening_new_table to anon, authenticated;
+
+set role anon;
+do $anon_deny$
+declare visible_count integer;
+begin
+  select count(*) into visible_count from public.security_hardening_new_table;
+  if visible_count <> 0 then
+    raise exception 'Unpolicied table leaked rows to anon';
+  end if;
+  begin
+    insert into public.security_hardening_new_table(id) values(2);
+    raise exception 'Anon inserted into unpolicied table';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$anon_deny$;
+reset role;
+
+set role authenticated;
+do $auth_deny$
+declare visible_count integer;
+begin
+  select count(*) into visible_count from public.security_hardening_new_table;
+  if visible_count <> 0 then
+    raise exception 'Unpolicied table leaked rows to authenticated';
+  end if;
+  begin
+    insert into public.security_hardening_new_table(id) values(3);
+    raise exception 'Authenticated inserted into unpolicied table';
+  exception when insufficient_privilege then null;
+  end;
+end;
+$auth_deny$;
+reset role;
+
 -- The real update policies must isolate parents by ID while preserving
 -- harmless edits to the logged-in parent's own profile.
 insert into public.profiles(id,role,displayname)
