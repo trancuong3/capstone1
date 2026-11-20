@@ -1,126 +1,117 @@
-# Đóng góp cho ReadAlong Vision
+# Đóng góp cho ViRead / ReadAlong Vision
 
-Tài liệu này thống nhất cách các thành viên cài đặt, tạo branch, kiểm tra và gửi thay đổi.
+Tài liệu này mô tả quy trình hiện được sử dụng trong
+[trancuong3/capstone1](https://github.com/trancuong3/capstone1).
+Repository **public** tại thời điểm kiểm tra 20/11/2026; xem
+[README](README.md) để biết cách cài đặt. Public không có nghĩa là mã nguồn
+đã được cấp một giấy phép OSS: chủ repository chưa chọn `LICENSE`.
 
 ## Chuẩn bị môi trường
 
-- Node.js `>= 22.13.0`.
-- npm 10 trở lên.
-- Git và tài khoản GitHub đã được mời vào repository private.
+- Git và tài khoản GitHub có quyền push branch / tạo PR khi cần đóng góp.
+- Windows: Python 3.12 x64, Node.js >=22.13, npm 10+; xem `requirements.ps1`.
+- Cấu hình `backend/.env` và `frontend/.env.local` từ các file
+  `.env.example` tương ứng cho các luồng dùng API thật.
+- Cần PostgreSQL/Supabase dev riêng, **không dùng credential production**.
+- Frontend Next.js: `cd frontend; npm ci`.
+- Backend FastAPI: `cd backend`, tạo virtualenv và cài
+  `backend/requirements.txt`; entrypoint là `app.sever:app`.
+
+## Nhánh và bảo vệ dữ liệu chưa commit
+
+Nhánh mặc định và đích của GitHub Actions pull requests là **`main`**.
+Không giả định có nhánh `develop`: kiểm tra refs hiện tại trước khi dùng.
 
 ```powershell
-git clone https://github.com/linhjunior205/readalong-vision.git
-cd readalong-vision/frontend
+git status --short
+git stash list
+git fetch origin
+git switch -c feature/ten-ngan origin/main
+# Hoặc dùng fix/, docs/, chore/, test/
+```
+
+- Không reset hard, clean, stash pop, force push hoặc làm mất code local.
+- Commit nhỏ, đúng phạm vi; mở PR vào `main`, không tự merge.
+- Khi sửa cùng khu vực với PR còn mở, đối chiếu diff và tránh overwrite.
+- PR bảo mật hoặc thay đổi cấu hình agent cần review riêng.
+- Quy tắc bảo vệ nhánh cần được quản trị viên kích hoạt trong GitHub Settings;
+  việc có CI không tự động ngăn direct push nếu repository chưa có Ruleset.
+
+## Coding-agent / Graphify
+
+Giữ nguyên: `AGENTS.md`, `backend/AGENTS.md`,
+`frontend/AGENTS.md`, `.agents/`, `.agent-library/`,
+`.codex/`, `skills-lock.json`, `.graphifyignore`.
+
+Các output trong `graphify-out/` là AST/index/cache tự sinh, không phải
+source-of-truth và được `.gitignore` bỏ qua. Khi thay đổi mã nguồn lớn,
+người dùng Graphify tạo lại graph **ở máy của mình** theo hướng dẫn trong
+`.codex/skills/graphify/SKILL.md`; không commit cache.
+
+Không buộc xây graph cho một lookup nhỏ; dùng exact search khi biết symbol.
+Khi thay đổi agent/skill/config hoặc vệ sinh repository, chạy:
+
+```powershell
+python scripts/validate_agent_config.py
+```
+
+Validator kiểm tra skill lock, các gateway, scoped AGENTS và việc không còn
+file `graphify-out/` bị Git theo dõi.
+
+## Kiểm thử trước khi mở PR
+
+```powershell
+cd frontend
 npm ci
-```
-
-Không cần tạo `.env` để chạy frontend mock hiện tại.
-
-## Quy trình branch
-
-Không làm việc trực tiếp trên `main`.
-
-1. Đồng bộ nhánh tích hợp:
-
-   ```powershell
-   git switch develop
-   git pull origin develop
-   ```
-
-2. Tạo branch mới:
-
-   ```powershell
-   git switch -c feature/ten-ngan-gon
-   ```
-
-3. Dùng một trong các tiền tố:
-
-   - `feature/`: chức năng hoặc màn hình.
-   - `fix/`: sửa lỗi.
-   - `test/`: bổ sung test.
-   - `docs/`: thay đổi tài liệu.
-   - `chore/`: cấu hình hoặc bảo trì.
-
-4. Push branch và mở pull request vào `develop`.
-5. Khi cần phát hành, mở pull request từ `develop` vào `main`.
-
-## Quy ước commit
-
-Commit nên nhỏ, tập trung và có mô tả rõ ràng. Khuyến nghị:
-
-```text
-feat: add child selector
-fix: prevent duplicate reading submission
-test: cover book unavailable state
-docs: clarify local setup
-chore: update lint configuration
-```
-
-Không đưa nhiều thay đổi không liên quan vào cùng một commit.
-
-## Kiểm tra bắt buộc
-
-Từ thư mục `frontend`:
-
-```powershell
-npm run format:check
-npm run lint
-npm run typecheck
-npm test
+npm run verify
 npm run build
-```
-
-Chạy thêm Playwright nếu thay đổi route, navigation hoặc hành vi UI:
-
-```powershell
 npm run test:e2e
 ```
 
-Nếu có command không chạy được, ghi rõ command và lỗi thực tế trong pull request. Không đánh dấu PASS khi chưa chạy.
+Backend (sau khi cài requirements và cấu hình môi trường test riêng):
 
-## Quy tắc frontend
+```powershell
+cd backend
+python scripts/run_ci_tests.py
+```
 
-- Dùng TypeScript nghiêm ngặt; không dùng `any` hoặc `@ts-ignore`.
-- Screen gọi typed service interface; không import fixture trực tiếp vào component.
-- Không đặt toàn bộ UI hoặc mock logic trong `page.tsx`.
-- Tái sử dụng design token và common component hiện có.
-- Dùng cùng component tree cho desktop và mobile; không tạo app mobile riêng chỉ để responsive.
-- Giữ keyboard navigation, focus-visible, label, heading và dialog behavior.
-- Cleanup subscription và bỏ qua kết quả async đến muộn sau unmount.
+CI trên GitHub sử dụng PostgreSQL cô lập và kiểm tra strict real OCR bằng
+`backend/scripts/run_real_ocr_gate.py`. Chạy gate OCR chỉ khi đã cài đầy đủ
+runtime và các fixture; không tự tạo bằng chứng PASS khi môi trường thiếu.
+Các workflow hiện có trong `.github/workflows/` là bằng chứng cụ thể của
+bước test và các version đang dùng. Chạy lại các gate phù hợp sau mỗi sửa.
 
-## Contract và safety
+Không hạ assertion, cho qua lỗi bằng `continue-on-error` hoặc thêm skip
+vô điều kiện để ép CI xanh. Nếu không chạy được, ghi rõ command, lỗi và phần
+chưa kiểm chứng trong PR.
 
-- Blueprint là nguồn contract và hành vi.
-- Figma là nguồn giao diện trực quan.
-- Không tự đổi DTO, status, error code hoặc authorization behavior.
-- Chỉ hiển thị sách phù hợp điều kiện `ACTIVE + VERIFIED` cho phụ huynh.
-- ID không thuộc tài khoản hiện tại phải trả safe not-found, không làm lộ dữ liệu.
-- Recovery không được tiết lộ email có tồn tại hay không.
-- Không đưa expected answer vào question payload/UI trước khi trả lời.
-- Giữ nguyên invariant: **No valid evidence → no child-error inference.**
+## Frontend / Backend invariants
 
-## Bảo mật
+- Giao diện: TypeScript, typed API services, trạng thái loading/error/empty,
+  accessible focus/labels và hỗ trợ responsive.
+- Đọc hướng dẫn scoped tại `backend/AGENTS.md` hoặc
+  `frontend/AGENTS.md` trước khi sửa subtree tương ứng.
+- Với FastAPI, bảo vệ bearer token và quyền chủ sở hữu ở backend/repository;
+  không dựa riêng vào frontend route guard.
+- Client không được tự đặt `role`, trạng thái xác minh, điểm số hoặc ID thuộc
+  người dùng khác để thay đổi dữ liệu tin cậy.
+- Không kết luận bé đọc sai khi không có bằng chứng hợp lệ.
+- Không thay đổi ABI pin OCR, checkpoint production, RLS hay schema production
+  trong PR chỉ sửa tài liệu.
 
-Trước khi commit, kiểm tra không có:
+## Bảo mật / quyền riêng tư
 
-- `.env` hoặc credential thật.
-- API key, access token, cookie hoặc private key.
-- Database URL hoặc Supabase service key.
-- Dữ liệu người dùng thật.
-- Đường dẫn tuyệt đối chỉ đúng trên máy cá nhân.
-- `node_modules`, `.next`, test result, artifact hoặc log.
+Không commit `.env`, private keys, Supabase secret/service-role key,
+token, cookie, dữ liệu bé thật, signed URLs hoặc ảnh người dùng.
+Không đưa những nội dung này vào log, screenshot hay PR description.
 
-Nếu một secret đã xuất hiện trong lịch sử Git, báo ngay cho chủ dự án và thu hồi/rotate secret. Chỉ xóa secret ở commit mới không loại nó khỏi lịch sử.
+Nếu secret đã xuất hiện trong history: báo chủ dự án để rotate/revoke, không
+lầm tưởng rằng xóa file ở commit mới sẽ xóa secret khỏi lịch sử Git.
 
-## Nội dung pull request
+## Nội dung Pull Request
 
-Pull request cần ghi:
+Mỗi PR cần nêu: mục đích, file tác động, thay đổi contract (nếu có),
+các test PASS/FAIL kèm CI link, giới hạn đã biết, ảnh chụp khi UI thay đổi,
+rollback khi cần và xác nhận không sửa production/không xóa code local.
 
-- Mục đích thay đổi.
-- Route/component/service bị ảnh hưởng.
-- UI state đã thêm hoặc sửa.
-- Ảnh chụp desktop/mobile nếu giao diện thay đổi đáng kể.
-- Command kiểm tra và kết quả thực tế.
-- Giới hạn hoặc việc còn lại.
-
-Không merge khi còn lỗi lint, typecheck, test hoặc build thuộc phạm vi thay đổi.
+Giữ PR ở trạng thái Draft nếu đang điều tra, chưa review hoặc thiếu gate.
