@@ -83,8 +83,11 @@ export function CameraPreview({
   }, []);
 
   useEffect(() => {
-    if (!enableScanner) return;
-    cameraSuspendedRef.current = false;
+    if (!enableScanner) {
+      cameraSuspendedRef.current = false;
+      return;
+    }
+    if (cameraSuspendedRef.current) return;
     let active = true;
     cameraEffectCountRef.current += 1;
 
