@@ -23,12 +23,3 @@ jobs:
         run: python3 -B scripts/validate_agent_config.py
       - name: Verify Git tracks only reproducible source and preserves agent config
         run: python3 -B scripts/verify_repository_hygiene.py
-
-      # Temporary diagnostic: only modifies ephemeral CI checkout; remove
-      # immediately after applying the resulting Prettier diff to docs.
-      - name: Display Prettier correction for frontend README
-        working-directory: frontend
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npx prettier README.md --write
-          git diff -- README.md
