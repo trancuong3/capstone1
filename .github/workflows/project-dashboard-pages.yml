@@ -47,7 +47,7 @@ jobs:
           PY
           node --check /tmp/viread-project-dashboard.js
           node --check project-dashboard/roadmap-core.js
-          node --test project-dashboard/roadmap-core.test.cjs
+          node --test project-dashboard/roadmap-core.test.cjs project-dashboard/dashboard-smoke.test.cjs
 
   deploy:
     name: Deploy GitHub Pages
