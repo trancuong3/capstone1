@@ -195,6 +195,17 @@ class AdminCatalogTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Isolate Admin Health from real Supabase in unit tests.
+        storage_probe = AsyncMock(return_value={
+            "id": "storage", "label": "Supabase Storage",
+            "status": "HEALTHY", "detail_status": "healthy",
+            "safe_message": "Test bucket responded.",
+        })
+        patcher = patch("app.api.routes.system.probe_storage_health", new=storage_probe)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_non_admin_profiles_are_denied(self):
         for role in ("parent", None, "ADMIN"):
             repo = MagicMock(role=AsyncMock(return_value=role))
@@ -273,7 +284,7 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
             [item.id for item in result.services],
             [
                 "api", "database", "local_ocr", "tts", "stt",
-                "paddleocr", "vietocr", "tesseract", "tesseract_vie",
+                "storage", "paddleocr", "vietocr", "tesseract", "tesseract_vie",
             ],
         )
         local_probe.assert_awaited_once()
