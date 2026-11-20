@@ -24,7 +24,7 @@ function boot(options={}) {
   const nodes=new Map(), handlers=new Map(), store=new Map(Object.entries(options.storage||{}));
   function getElementById(id){
     if (!nodes.has(id)) nodes.set(id,{
-      value:"",textContent:"",innerHTML:"",style:{},disabled:false,className:"",
+      value:(id==="taskCategoryFilter"||id==="taskStatusFilter")?"all":"",textContent:"",innerHTML:"",style:{},disabled:false,className:"",
       classList:{add(){},remove(){}},
       addEventListener(type,handler){handlers.set(id+":"+type,handler);}
     });
