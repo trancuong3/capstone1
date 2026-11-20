@@ -41,6 +41,7 @@ import {
   tokenizePageText,
 } from "@/lib/ocr/sync-page-text-words";
 import { adjudicateWord } from "@/lib/ocr/word-adjudication";
+import { safeOcrRuntimeProvenance } from "@/lib/ocr/runtime-provenance";
 import type {
   AdminBookDTO,
   AdminOcrReviewStatus,
@@ -2116,6 +2117,7 @@ export function AdminOcrReviewScreen({
   if (!book || !image || !history || !detail)
     return <AdminLoading label="Đang tải ảnh và revision…" />;
 
+  const runtimeEvidence = safeOcrRuntimeProvenance(detail.ocr_metadata);
   const pagePath = `/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}`;
   function viewHref(view: "review" | "words" | "history") {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
@@ -2269,6 +2271,53 @@ export function AdminOcrReviewScreen({
             verificationStatus={detail.verification_status}
             words={words}
           />
+          <section
+            aria-label="Chẩn đoán checkpoint VietOCR runtime"
+            className="mt-4 rounded-control border border-border bg-canvas p-4"
+          >
+            <h2 className="font-extrabold text-ink">
+              Admin OCR Diagnostics · runtime checkpoint
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              Bằng chứng ghi tại lượt Scan từ Predictor thực sự đã nạp; không
+              lấy SHA từ lựa chọn model trên Supabase.
+            </p>
+            <dl className="mt-3 grid gap-2 text-sm">
+              <div>
+                <dt className="font-semibold">Model thực tế</dt>
+                <dd>{runtimeEvidence.modelProfile}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Checkpoint SHA256 đã xác minh</dt>
+                <dd className="break-all font-mono text-xs">
+                  {runtimeEvidence.checkpointSha256 ??
+                    "Không có bằng chứng checkpoint được dùng"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Trạng thái nạp / inference</dt>
+                <dd>
+                  {runtimeEvidence.modelLoadStatus}
+                  {" · "}
+                  {runtimeEvidence.modelInferenceStatus}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold">Fallback</dt>
+                <dd>{runtimeEvidence.fallbackReason ?? "Không ghi nhận"}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">VietOCR package</dt>
+                <dd>{runtimeEvidence.engineVersion ?? "Chưa xác định"}</dd>
+              </div>
+            </dl>
+            {!runtimeEvidence.verified ? (
+              <p className="mt-2 text-xs text-muted">
+                Scan này chưa chứng minh checkpoint VietOCR được nạp. Không suy
+                diễn từ profile đang active hoặc revision cũ.
+              </p>
+            ) : null}
+          </section>
           <section className="mt-4 rounded-control border border-border bg-canvas p-4">
             <h2 className="font-extrabold text-ink">OCR gốc (bất biến)</h2>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-ink">
