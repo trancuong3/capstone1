@@ -98,6 +98,14 @@ class FakeDb:
             raise AssertionError(f"No child owner predicate in query for {model_name}")
         return found[-1]
 
+    def assert_only_role_authorization_queries(self):
+        """Require active role verification without touching the target resource."""
+        if not self.statements:
+            raise AssertionError("Expected a database-backed role verification")
+        for sql in self.statements:
+            if not ("profiles.role" in sql and "profiles.active" in sql):
+                raise AssertionError("Unexpected business database query before validation")
+
 
 class ProviderError(Exception):
     status = 401
@@ -296,9 +304,9 @@ class ApiAuthorizationTests(unittest.TestCase):
         response = self.request("POST", "/system/reports", payload)
         self.assertEqual(response.status_code, 422)
         self.db.add.assert_not_called()
-        self.db.scalar.assert_not_awaited()
+        self.db.assert_only_role_authorization_queries()
 
-    def test_report_period_validation_precedes_db_access(self):
+    def test_report_period_validation_precedes_resource_queries(self):
         for start, end in (("2026-01-08", "2026-01-07"),
                            ("2026-12-01", "2026-12-07"),
                            ("2024-01-01", "2026-01-07")):
@@ -306,7 +314,7 @@ class ApiAuthorizationTests(unittest.TestCase):
                 payload = {**REPORT, "PeriodStart": start, "PeriodEnd": end}
                 self.assertEqual(self.request("POST", "/system/reports", payload).status_code, 422)
         self.db.add.assert_not_called()
-        self.db.scalar.assert_not_awaited()
+        self.db.assert_only_role_authorization_queries()
 
     def test_report_without_finished_sessions_is_409_not_fabricated_zero(self):
         self.db.sessions = []
@@ -329,12 +337,12 @@ class ApiAuthorizationTests(unittest.TestCase):
         self.db.add.assert_not_called()
         self.assertFalse(any("readingsessions.startedat" in sql for sql in self.db.statements))
 
-    def test_blank_or_oversized_answer_rejected_before_db(self):
+    def test_blank_or_oversized_answer_rejected_before_resource_queries(self):
         for answer in (" ", "x" * 201):
             with self.subTest(size=len(answer)):
                 body = {**ANSWER, "Answer": answer}
                 self.assertEqual(self.request("POST", "/comprehension/answers", body).status_code, 422)
-        self.db.scalar.assert_not_awaited()
+        self.db.assert_only_role_authorization_queries()
 
 
 if __name__ == "__main__":
